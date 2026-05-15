@@ -19,6 +19,7 @@ const DRAWER_WIDTH = 220;
 
 // Simple flat items (no sub-items)
 const SIMPLE_WORKSPACE_ITEMS = [
+  { path: "agent-workbench/cat-1778680935037-0.17766261899752378/问答库", label: "人机协同工作台", icon: <AutoAwesome sx={{ fontSize: 16 }} />, enabled: true },
   { path: "unstructured",  label: "非结构化切片构建", icon: <ContentCut sx={{ fontSize: 16 }} />, enabled: true },
   { path: "quality-check", label: "知识质检（敬请期待）", icon: <CheckCircle sx={{ fontSize: 16 }} />, enabled: false },
   { path: "packages",      label: "知识包管理",       icon: <Inventory sx={{ fontSize: 16 }} />, enabled: true },

@@ -366,6 +366,15 @@ export function ProjectSolutionEditor() {
     return exists ? form.parentId : "";
   }, [form.parentId, availableParents]);
 
+  const openWorkbench = (cat: ProjectCategory) => {
+    const formType = cat.formTypes[0];
+    if (!formType) {
+      toast.error("请先为末级类目配置知识形态");
+      return;
+    }
+    navigate(`/ops/project/${project.id}/agent-workbench/${encodeURIComponent(cat.id)}/${encodeURIComponent(formType)}`);
+  };
+
   // ─── Render node ────────────────────────────────────────────────────────────
 
   const renderNode = (cat: ProjectCategory, depth: number) => {
@@ -446,6 +455,29 @@ export function ProjectSolutionEditor() {
                   <Box sx={{ mt: 0.5, display: "flex", alignItems: "center", gap: 0.5 }}>
                     <WarningAmber sx={{ fontSize: 13, color: "#f59e0b" }} />
                     <Typography sx={{ fontSize: "11px", color: "#92400e" }}>末级类目尚未指定知识形态</Typography>
+                  </Box>
+                )}
+                {leaf && hasTypes && (
+                  <Box sx={{ mt: 1 }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<AutoAwesome sx={{ fontSize: 15 }} />}
+                      onClick={() => openWorkbench(cat)}
+                      sx={{
+                        height: 28,
+                        borderRadius: "6px",
+                        borderColor: "#c4b5fd",
+                        color: "#6b21a8",
+                        bgcolor: "#faf5ff",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        textTransform: "none",
+                        "&:hover": { borderColor: "#8b5cf6", bgcolor: "#f3e8ff" },
+                      }}
+                    >
+                      查看方案
+                    </Button>
                   </Box>
                 )}
               </Box>

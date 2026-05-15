@@ -20,6 +20,7 @@ import { StylePreview } from "./components/StylePreview";
 // Ops pages
 import { ProjectManagement } from "./pages/ProjectManagement";
 import { ProjectWorkspace } from "./pages/ProjectWorkspace";
+import { AgentWorkbench } from "./pages/AgentWorkbench";
 import { ProjectSolutionEditor } from "./pages/ProjectSolutionEditor";
 import { ProjectSolutionViewer } from "./pages/ProjectSolutionViewer";
 import { FileUploadPage } from "./pages/FileUploadPage";
@@ -81,6 +82,7 @@ export const router = createBrowserRouter([
         Component: ProjectWorkspace,
         children: [
           { index: true,                   Component: ProjectSolutionEditor },
+          { path: "agent-workbench/:categoryId/:formType", Component: AgentWorkbench },
           // 原始材料接入与标准化处理 - 文件上传
           { path: "materials/upload",      Component: FileUploadPage },
           // Redirect /materials to /materials/upload (via FileUploadPage)
