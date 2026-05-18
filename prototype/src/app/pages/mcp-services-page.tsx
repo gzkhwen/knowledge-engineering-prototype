@@ -35,6 +35,7 @@ export function McpServicesPage() {
   const [editing, setEditing] = useState<ServiceRow | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [keyService, setKeyService] = useState<ServiceRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ServiceRow | null>(null);
 
   const filteredRows = useMemo(
     () => rows.filter((item) => [item.name, item.endpoint, item.authTarget, item.status].some((value) => value.includes(keyword))),
@@ -47,7 +48,7 @@ export function McpServicesPage() {
         const matchKeyword = !toolKeyword || tool.name.includes(toolKeyword) || tool.connector.includes(toolKeyword);
         const matchConnector = toolConnector === "全部连接器" || tool.connector === toolConnector;
         const matchCategory = toolCategory === "全部分类" || tool.category === toolCategory;
-        return matchKeyword && matchConnector && matchCategory;
+        return tool.status === "已发布" && matchKeyword && matchConnector && matchCategory;
       }),
     [toolCategory, toolConnector, toolKeyword],
   );
@@ -76,9 +77,9 @@ export function McpServicesPage() {
 
   const saveService = () => {
     const name = form.name.trim() || "未命名 MCP 服务";
-    const endpoint = form.endpoint.trim() || `https://mcp.internal/toolhub/${Date.now().toString().slice(-5)}`;
+    const endpoint = editing?.endpoint ?? `https://mcp.internal/toolhub/${Date.now().toString().slice(-5)}`;
     if (editing) {
-      setRows((current) => current.map((row) => (row.id === editing.id ? { ...row, ...form, name, endpoint } : row)));
+      setRows((current) => current.map((row) => (row.id === editing.id ? { ...row, ...form, name, endpoint, status: row.status } : row)));
       toast.success("MCP 服务已更新");
     } else {
       setRows((current) => [
@@ -107,9 +108,17 @@ export function McpServicesPage() {
     }));
   };
 
-  const deleteService = (id: string) => {
-    setRows((current) => current.filter((row) => row.id !== id));
+  const deleteService = () => {
+    if (!deleteTarget) return;
+    setRows((current) => current.filter((row) => row.id !== deleteTarget.id));
+    setDeleteTarget(null);
     toast.success("MCP 服务已删除");
+  };
+
+  const toggleServiceStatus = (service: ServiceRow) => {
+    const nextStatus = service.status === "运行中" ? "停用" : "运行中";
+    setRows((current) => current.map((row) => (row.id === service.id ? { ...row, status: nextStatus } : row)));
+    toast.success(`服务已${nextStatus === "运行中" ? "启用" : "停用"}`);
   };
 
   return (
@@ -133,15 +142,13 @@ export function McpServicesPage() {
           </div>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
-          <table className="w-full min-w-[1040px] text-left text-sm">
+          <table className="w-full min-w-[900px] text-left text-sm">
             <thead className="border-y border-slate-200 bg-slate-50 text-xs text-slate-500">
               <tr>
                 <th className="px-4 py-3 font-medium">服务名称</th>
                 <th className="px-4 py-3 font-medium">状态</th>
                 <th className="px-4 py-3 font-medium">Endpoint</th>
-                <th className="px-4 py-3 font-medium">授权对象</th>
                 <th className="px-4 py-3 font-medium">工具数</th>
-                <th className="px-4 py-3 font-medium">API Keys</th>
                 <th className="px-4 py-3 font-medium">今日调用</th>
                 <th className="px-4 py-3 font-medium">操作</th>
               </tr>
@@ -154,27 +161,28 @@ export function McpServicesPage() {
                     <div className="mt-1 max-w-xs text-xs text-slate-500">{service.description || "-"}</div>
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={service.status} /></td>
-                  <td className="px-4 py-3 text-slate-500">{service.endpoint}</td>
-                  <td className="px-4 py-3">{service.authTarget}</td>
-                  <td className="px-4 py-3">{service.tools.length}</td>
-                  <td className="px-4 py-3">
-                    <button className="font-medium underline-offset-4 hover:underline" onClick={() => setKeyService(service)}>
-                      {service.apiKeys} 个
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">{service.callsToday}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-1">
+                  <td className="px-4 py-3 text-slate-500">
+                    <div className="flex items-center gap-2">
+                      <span>{service.endpoint}</span>
                       <Button variant="ghost" size="icon" onClick={() => navigator.clipboard.writeText(service.endpoint).then(() => toast.success("Endpoint 已复制"))}>
                         <Copy className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => toast.info("服务状态已切换")}>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">{service.tools.length}</td>
+                  <td className="px-4 py-3">{service.callsToday}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => setKeyService(service)}>
+                        <KeyRound className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => toggleServiceStatus(service)}>
                         <Power className="h-4 w-4" />
                       </Button>
                       <Button variant="ghost" size="icon" onClick={() => startEdit(service)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => deleteService(service.id)}>
+                      <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(service)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
@@ -206,16 +214,6 @@ export function McpServicesPage() {
               <FormField label="授权对象">
                 <Input value={form.authTarget} onChange={(event) => setForm({ ...form, authTarget: event.target.value })} />
               </FormField>
-              <FormField label="Endpoint">
-                <Input value={form.endpoint} onChange={(event) => setForm({ ...form, endpoint: event.target.value })} />
-              </FormField>
-              <FormField label="服务状态">
-                <select className="h-9 rounded-md border border-slate-200 px-3 text-sm" value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}>
-                  <option>运行中</option>
-                  <option>停用</option>
-                  <option>异常</option>
-                </select>
-              </FormField>
             </div>
             <FormField label="服务描述">
               <Textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} />
@@ -238,10 +236,9 @@ export function McpServicesPage() {
               </div>
               <div className="max-h-72 overflow-auto divide-y divide-slate-100">
                 {toolOptions.map((tool) => {
-                  const disabled = tool.status !== "已发布";
                   return (
-                    <label key={tool.id} className={`grid gap-2 p-3 text-sm md:grid-cols-[24px_1fr_120px_160px] ${disabled ? "bg-slate-50 text-slate-400" : ""}`}>
-                      <input type="checkbox" disabled={disabled} checked={form.tools.includes(tool.name)} onChange={() => toggleTool(tool.name)} />
+                    <label key={tool.id} className="grid gap-2 p-3 text-sm md:grid-cols-[24px_1fr_120px_160px]">
+                      <input type="checkbox" checked={form.tools.includes(tool.name)} onChange={() => toggleTool(tool.name)} />
                       <span className="font-medium">{tool.name}</span>
                       <StatusBadge status={tool.status} />
                       <span>{tool.connector}</span>
@@ -250,6 +247,25 @@ export function McpServicesPage() {
                 })}
               </div>
             </div>
+          </div>
+        </Dialog>
+      ) : null}
+
+      {deleteTarget ? (
+        <Dialog
+          title="确认删除 MCP 服务"
+          width="md"
+          onClose={() => setDeleteTarget(null)}
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setDeleteTarget(null)}>取消</Button>
+              <Button variant="destructive" onClick={deleteService}>确认删除</Button>
+            </>
+          }
+        >
+          <div className="space-y-3 text-sm text-slate-700">
+            <p>删除后，已授权 Agent 将无法继续通过该 MCP 服务调用挂载工具。</p>
+            <div className="rounded-lg border border-slate-200 p-3 font-medium text-slate-950">{deleteTarget.name}</div>
           </div>
         </Dialog>
       ) : null}

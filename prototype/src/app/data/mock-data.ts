@@ -112,6 +112,14 @@ export const tools = [
   },
 ];
 
+export const toolCategories = [
+  { id: "all", name: "全部工具" },
+  { id: "project", name: "项目上下文" },
+  { id: "solution", name: "方案生成" },
+  { id: "material", name: "素材检索" },
+  { id: "verify", name: "结果校验" },
+];
+
 export const mcpServices = [
   {
     id: "svc-knowledge",

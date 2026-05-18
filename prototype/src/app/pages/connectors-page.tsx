@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Pencil, Plus, Search, TestTube2, Trash2 } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Search, TestTube2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { connectors } from "../data/mock-data";
 import { Button } from "../../components/ui/button";
@@ -34,7 +34,7 @@ export function ConnectorsPage() {
   const [form, setForm] = useState(newConnector);
 
   const filtered = useMemo(
-    () => rows.filter((connector) => [connector.name, connector.type, connector.status, connector.baseUrl].some((item) => item.includes(keyword))),
+    () => rows.filter((connector) => [connector.name, connector.type, connector.status].some((item) => item.includes(keyword))),
     [rows, keyword],
   );
 
@@ -55,7 +55,8 @@ export function ConnectorsPage() {
       ...form,
       name: form.name.trim() || "未命名连接器",
       baseUrl: form.baseUrl.trim() || "https://api.example.internal",
-      endpoints: form.endpoints.length ? form.endpoints : ["GET /health", "POST /example/search"],
+      status: editing?.status ?? "正常",
+      endpoints: form.type === "OpenAPI" ? ["GET /projects/{id}", "POST /solutions/generate", "GET /templates"] : form.endpoints,
       lastChecked: form.lastChecked === "未检测" ? "刚刚" : form.lastChecked,
     };
     if (editing) {
@@ -71,6 +72,61 @@ export function ConnectorsPage() {
   const deleteConnector = (id: string) => {
     setRows((current) => current.filter((row) => row.id !== id));
     toast.success("连接器已删除");
+  };
+
+  const checkAll = () => {
+    setRows((current) =>
+      current.map((row, index) => ({
+        ...row,
+        status: index === current.length - 1 ? "异常" : "正常",
+        lastChecked: "刚刚",
+      })),
+    );
+    toast.success("已完成全部连接器检查");
+  };
+
+  const renderTypeFields = () => {
+    if (form.type === "OpenAPI") {
+      return (
+        <div className="grid gap-4 md:grid-cols-2">
+          <FormField label="Base URL">
+            <Input value={form.baseUrl} onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} />
+          </FormField>
+          <FormField label="OpenAPI Spec URL">
+            <Input value={form.specUrl} onChange={(event) => setForm({ ...form, specUrl: event.target.value })} />
+          </FormField>
+        </div>
+      );
+    }
+    if (form.type === "REST API") {
+      return (
+        <div className="grid gap-4 md:grid-cols-2">
+          <FormField label="Base URL">
+            <Input value={form.baseUrl} onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} />
+          </FormField>
+          <FormField label="Health Check Path">
+            <Input value={form.health} onChange={(event) => setForm({ ...form, health: event.target.value })} />
+          </FormField>
+        </div>
+      );
+    }
+    return (
+      <div className="grid gap-4 md:grid-cols-3">
+        <FormField label="Base URL">
+          <Input value={form.baseUrl} onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} />
+        </FormField>
+        <FormField label="请求方法">
+          <select className="h-9 rounded-md border border-slate-200 px-3 text-sm">
+            <option>GET</option>
+            <option>POST</option>
+            <option>PUT</option>
+          </select>
+        </FormField>
+        <FormField label="请求路径">
+          <Input defaultValue="/custom/action" />
+        </FormField>
+      </div>
+    );
   };
 
   const renderAuthFields = () => {
@@ -101,10 +157,16 @@ export function ConnectorsPage() {
       <PageHeader
         title="连接器"
         actions={
-          <Button onClick={startCreate}>
-            <Plus className="h-4 w-4" />
-            新建连接器
-          </Button>
+          <>
+            <Button variant="outline" onClick={checkAll}>
+              <RefreshCw className="h-4 w-4" />
+              检查全部连接器
+            </Button>
+            <Button onClick={startCreate}>
+              <Plus className="h-4 w-4" />
+              新建连接器
+            </Button>
+          </>
         }
       />
 
@@ -113,19 +175,16 @@ export function ConnectorsPage() {
           <CardTitle>连接器列表</CardTitle>
           <div className="relative w-full max-w-xs">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <Input className="pl-9" placeholder="搜索连接器、类型、状态、地址" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+            <Input className="pl-9" placeholder="搜索连接器、类型、状态" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
           </div>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
-          <table className="w-full min-w-[1000px] text-left text-sm">
+          <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="border-y border-slate-200 bg-slate-50 text-xs text-slate-500">
               <tr>
                 <th className="px-4 py-3 font-medium">连接器名称</th>
                 <th className="px-4 py-3 font-medium">类型</th>
                 <th className="px-4 py-3 font-medium">状态</th>
-                <th className="px-4 py-3 font-medium">Base URL</th>
-                <th className="px-4 py-3 font-medium">OpenAPI Spec URL</th>
-                <th className="px-4 py-3 font-medium">Authentication</th>
                 <th className="px-4 py-3 font-medium">关联工具</th>
                 <th className="px-4 py-3 font-medium">操作</th>
               </tr>
@@ -139,9 +198,6 @@ export function ConnectorsPage() {
                   </td>
                   <td className="px-4 py-3">{connector.type}</td>
                   <td className="px-4 py-3"><StatusBadge status={connector.status} /></td>
-                  <td className="px-4 py-3 text-slate-500">{connector.baseUrl}</td>
-                  <td className="px-4 py-3 text-slate-500">{connector.specUrl || "-"}</td>
-                  <td className="px-4 py-3">{connector.auth}</td>
                   <td className="px-4 py-3">{connector.toolCount}</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1">
@@ -190,18 +246,9 @@ export function ConnectorsPage() {
                   <option>自定义 HTTP</option>
                 </select>
               </FormField>
-              <FormField label="Base URL">
-                <Input value={form.baseUrl} onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} />
-              </FormField>
-              <FormField label="OpenAPI Spec URL">
-                <Input value={form.specUrl} onChange={(event) => setForm({ ...form, specUrl: event.target.value })} />
-              </FormField>
-              <FormField label="Health Check Path">
-                <Input value={form.health} onChange={(event) => setForm({ ...form, health: event.target.value })} />
-              </FormField>
-              <FormField label="负责人">
-                <Input value={form.owner} onChange={(event) => setForm({ ...form, owner: event.target.value })} />
-              </FormField>
+            </section>
+            {renderTypeFields()}
+            <section className="grid gap-4 md:grid-cols-2">
               <FormField label="Authentication">
                 <select className="h-9 rounded-md border border-slate-200 px-3 text-sm" value={form.auth} onChange={(event) => setForm({ ...form, auth: event.target.value })}>
                   <option>Bearer Token</option>
@@ -210,22 +257,21 @@ export function ConnectorsPage() {
                   <option>None</option>
                 </select>
               </FormField>
-              <FormField label="状态">
-                <select className="h-9 rounded-md border border-slate-200 px-3 text-sm" value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}>
-                  <option>正常</option>
-                  <option>异常</option>
-                </select>
+              <FormField label="负责人">
+                <Input value={form.owner} onChange={(event) => setForm({ ...form, owner: event.target.value })} />
               </FormField>
             </section>
             {renderAuthFields()}
-            <section className="rounded-lg border border-slate-200">
-              <div className="border-b border-slate-200 p-3 text-sm font-semibold">接口清单预览</div>
-              <div className="divide-y divide-slate-100">
-                {(form.endpoints.length ? form.endpoints : ["GET /health", "POST /example/search"]).map((endpoint) => (
-                  <div key={endpoint} className="px-3 py-2 text-sm">{endpoint}</div>
-                ))}
-              </div>
-            </section>
+            {form.type === "OpenAPI" ? (
+              <section className="rounded-lg border border-slate-200">
+                <div className="border-b border-slate-200 p-3 text-sm font-semibold">接口清单</div>
+                <div className="divide-y divide-slate-100">
+                  {(form.endpoints.length ? form.endpoints : ["保存或测试连接后自动获取"]).map((endpoint) => (
+                    <div key={endpoint} className="px-3 py-2 text-sm">{endpoint}</div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
           </div>
         </Dialog>
       ) : null}

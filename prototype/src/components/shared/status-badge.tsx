@@ -3,11 +3,11 @@ import type { Status } from "../../app/data/mock-data";
 
 export function StatusBadge({ status }: { status: Status | string }) {
   const variant =
-    status === "运行中" || status === "已发布" || status === "正常"
+    status === "运行中" || status === "启用" || status === "已发布" || status === "正常"
       ? "success"
-      : status === "停用" || status === "草稿"
+      : status === "停用" || status === "草稿" || status === "待发布"
         ? "warning"
-        : status === "异常" || status === "失败"
+        : status === "异常" || status === "失败" || status === "已停用"
           ? "danger"
           : "secondary";
 
