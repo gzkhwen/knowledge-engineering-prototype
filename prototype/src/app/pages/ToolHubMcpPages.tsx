@@ -462,23 +462,42 @@ export function ToolHubMcpServicesPage() {
             <TextField label="服务名称" size="small" required value={serviceDraft.name} onChange={(event) => setServiceDraft((prev) => ({ ...prev, name: event.target.value }))} />
             <TextField label="授权对象" size="small" value={serviceDraft.authTarget} onChange={(event) => setServiceDraft((prev) => ({ ...prev, authTarget: event.target.value }))} />
           </Box>
-          <TextField label="服务描述" size="small" multiline rows={2} value={serviceDraft.description} onChange={(event) => setServiceDraft((prev) => ({ ...prev, description: event.target.value }))} />
-          <TextField label="Instructions" size="small" multiline rows={3} value={serviceDraft.instructions} onChange={(event) => setServiceDraft((prev) => ({ ...prev, instructions: event.target.value }))} />
+          <TextField
+            label="服务描述"
+            size="small"
+            multiline
+            rows={2}
+            value={serviceDraft.description}
+            onChange={(event) => setServiceDraft((prev) => ({ ...prev, description: event.target.value }))}
+            helperText="给运营和研发查看的服务说明，用于识别这个 MCP 服务的用途和适用范围。"
+          />
+          <TextField
+            label="服务指令"
+            size="small"
+            multiline
+            rows={3}
+            value={serviceDraft.instructions}
+            onChange={(event) => setServiceDraft((prev) => ({ ...prev, instructions: event.target.value }))}
+            helperText="发送给接入该 MCP 服务的 Agent，用于说明工具调用规则、业务约束和安全边界。"
+          />
           <Paper sx={{ border: "1px solid #e5e7eb", borderRadius: "8px", boxShadow: "none", overflow: "hidden" }}>
-            <Box sx={{ display: "flex", gap: 1, p: 1.5, borderBottom: "1px solid #eef2f7", flexWrap: "wrap" }}>
-              <TextField size="small" placeholder="搜索工具名称 / 连接器" value={toolQuery} onChange={(event) => setToolQuery(event.target.value)} sx={{ width: 220 }} />
-              <FormControl size="small" sx={{ minWidth: 150 }}>
-                <Select value={toolCategory} onChange={(event) => setToolCategory(event.target.value)} displayEmpty>
-                  <MenuItem value="all">全部分类</MenuItem>
-                  {categories.map((category) => <MenuItem key={category} value={category}>{category}</MenuItem>)}
-                </Select>
-              </FormControl>
-              <FormControl size="small" sx={{ minWidth: 170 }}>
-                <Select value={toolConnector} onChange={(event) => setToolConnector(event.target.value)} displayEmpty>
-                  <MenuItem value="all">全部连接器</MenuItem>
-                  {connectors.map((connector) => <MenuItem key={connector} value={connector}>{connector}</MenuItem>)}
-                </Select>
-              </FormControl>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, p: 1.5, borderBottom: "1px solid #eef2f7", flexWrap: "wrap" }}>
+              <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>服务可用工具</Typography>
+              <Box sx={{ display: "flex", gap: 1, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
+                <TextField size="small" placeholder="搜索工具名称 / 连接器" value={toolQuery} onChange={(event) => setToolQuery(event.target.value)} sx={{ width: 220 }} />
+                <FormControl size="small" sx={{ minWidth: 150 }}>
+                  <Select value={toolCategory} onChange={(event) => setToolCategory(event.target.value)} displayEmpty>
+                    <MenuItem value="all">全部分类</MenuItem>
+                    {categories.map((category) => <MenuItem key={category} value={category}>{category}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ minWidth: 170 }}>
+                  <Select value={toolConnector} onChange={(event) => setToolConnector(event.target.value)} displayEmpty>
+                    <MenuItem value="all">全部连接器</MenuItem>
+                    {connectors.map((connector) => <MenuItem key={connector} value={connector}>{connector}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Box>
             </Box>
             <TableContainer sx={{ maxHeight: 300 }}>
               <Table size="small" stickyHeader>
