@@ -1,6 +1,8 @@
-# 工具Hub 1.0 原型仓库
+# 知识工程产品原型仓库
 
-本仓库用于维护工具Hub 1.0 的 React/Vite 原型源码，并通过 GitHub Actions 发布到 GitHub Pages。
+本仓库用于维护知识工程项目的产品原型，并通过 GitHub Actions 发布到 GitHub Pages。
+
+当前原型基于历史旧版知识工程原型维护，Tool Hub 一期作为知识工程定制模块补充在其中。后续原型默认在 `prototype/` 下生成，技术栈采用 React/Vite/TypeScript。
 
 ## 本地预览
 
