@@ -56,7 +56,6 @@ import {
   FactCheck,
   History,
   Hub,
-  InfoOutlined,
   MoreHoriz,
   RocketLaunch,
   Search,
@@ -129,6 +128,10 @@ interface ToolVersion {
   gitlabVisibility?: string;
   maintainTeam?: string;
   executionAccessMode?: ExecutionAccessMode;
+  connectorId?: string;
+  connectorName?: string;
+  connectorBaseUrlSnapshot?: string;
+  connectorAuthType?: string;
   serviceEnvironment?: string;
   httpContentType?: string;
   httpAuthConfig?: string;
@@ -215,6 +218,13 @@ type LegacyProgressStatusSource = "工具包主动上报" | "日志关键字识�
 type RunRecordType = "调试运行" | "Agent调用" | "Flow调用";
 type RunRecordEndpoint = "管理端" | "运营端";
 type RunResultStatus = "成功" | "失败" | "运行中";
+
+const TOOL_VERSION_CONNECTORS = [
+  { id: "conn-rag", name: "RAG 算法服务", baseUrl: "http://rag-server-dev3-admin.maip.test", authType: "Bearer Token", status: "正常" },
+  { id: "conn-knowledge", name: "知识工程核心 API", baseUrl: "https://api.knowledge.internal/v1", authType: "Bearer Token", status: "正常" },
+  { id: "conn-material", name: "原始素材服务", baseUrl: "https://material.internal/api", authType: "API Key", status: "正常" },
+  { id: "conn-check", name: "构建结果校验服务", baseUrl: "https://verify.internal/api", authType: "Basic Auth", status: "异常" },
+];
 
 interface ToolParam {
   id: string;
@@ -473,7 +483,7 @@ const RUNTIME_MODE_OPTIONS: Array<{ key: RuntimeMode; label: string }> = [
   { key: "script", label: "函数入口运行" },
 ];
 const EXECUTION_ACCESS_OPTIONS: Array<{ key: ExecutionAccessMode; label: string; desc: string }> = [
-  { key: "external_http", label: "工具 API 接入", desc: "工具需提前完成部署，并按工具Hub接口规范封装标准 API。" },
+  { key: "external_http", label: "连接器调用", desc: "通过已配置连接器调用外部 API，并由 ToolHub 统一转换为 MCP 工具。" },
 ];
 const REPO_VISIBILITY_OPTIONS: RepoVisibility[] = ["Public", "Internal", "Private"];
 const VERSION_REF_TYPE_OPTIONS: VersionRefType[] = ["Branch", "Tag", "Commit"];
@@ -482,7 +492,7 @@ const MODEL_RESOURCE_SOURCE_OPTIONS: Array<{ key: ModelResourceSource; label: st
   { key: "gitlab", label: "GitLab 仓库" },
   { key: "deployed", label: "已部署模型目录" },
 ];
-const VERSION_STEPS = ["基本信息", "工具 API 接入", "接口参数配置"];
+const VERSION_STEPS = ["基本信息", "调用配置", "接口参数配置"];
 const PROGRESS_RULE_MATCH_MODE_OPTIONS: ProgressRuleMatchMode[] = ["status", "event_code", "node_key", "result.code"];
 const SYSTEM_EVENT_OPTIONS = [
   "任务创建",
@@ -1240,6 +1250,10 @@ function normalizeVersion(version: ToolVersion, toolName: string, toolCode?: str
     gitlabVisibility: version.gitlabVisibility ?? "Public",
     maintainTeam: version.maintainTeam ?? "",
     executionAccessMode: version.executionAccessMode ?? "toolhub_managed",
+    connectorId: version.connectorId ?? (version.httpServiceAddress === RAGFLOW_API_BASE ? "conn-rag" : "conn-knowledge"),
+    connectorName: version.connectorName ?? (version.httpServiceAddress === RAGFLOW_API_BASE ? "RAG 算法服务" : "知识工程核心 API"),
+    connectorBaseUrlSnapshot: version.connectorBaseUrlSnapshot ?? version.httpServiceAddress ?? "",
+    connectorAuthType: version.connectorAuthType ?? "Bearer Token",
     serviceEnvironment: version.serviceEnvironment ?? "dev3",
     httpContentType: version.httpContentType ?? "application/json",
     httpAuthConfig: version.httpAuthConfig ?? "",
@@ -1311,9 +1325,61 @@ function getVersionPackageInfo(version: ToolVersion) {
 }
 
 function getVersionRequestAddress(version: ToolVersion) {
-  const base = (version.httpServiceAddress || "").replace(/\/+$/, "");
+  const base = (version.connectorBaseUrlSnapshot || version.httpServiceAddress || "").replace(/\/+$/, "");
   const path = version.httpPath ? `/${version.httpPath.replace(/^\/+/, "")}` : "";
   return base || path ? `${base}${path}` : "-";
+}
+
+function getVersionConnector(version: ToolVersion) {
+  return TOOL_VERSION_CONNECTORS.find((connector) => connector.id === version.connectorId)
+    ?? TOOL_VERSION_CONNECTORS.find((connector) => connector.name === version.connectorName)
+    ?? TOOL_VERSION_CONNECTORS.find((connector) => connector.baseUrl === version.httpServiceAddress)
+    ?? TOOL_VERSION_CONNECTORS[0];
+}
+
+function getVersionConnectorName(version: ToolVersion) {
+  return version.connectorName || getVersionConnector(version)?.name || "-";
+}
+
+const MCP_SERVICE_VERSION_BINDINGS = [
+  {
+    serviceName: "知识工程 Agent MCP",
+    status: "运行中",
+    versionCodes: [
+      "rag_document_parser_v1_3_0",
+      "rag_chunk_splitter_v1_3_0",
+      "rag_summary_v1_3_0",
+      "rag_qa_extractor_v1_2_0",
+    ],
+  },
+  {
+    serviceName: "知识工程测试 MCP",
+    status: "停用",
+    versionCodes: [
+      "rag_document_parser_v1_2_0",
+      "rag_reprocess_v1_3_0",
+    ],
+  },
+];
+
+function getRunningMcpServiceNames(version: ToolVersion) {
+  const versionCode = version.versionCode;
+  if (!versionCode || version.status !== "published") return [];
+  return MCP_SERVICE_VERSION_BINDINGS
+    .filter((service) => service.status === "运行中" && service.versionCodes.includes(versionCode))
+    .map((service) => service.serviceName);
+}
+
+function getVersionMcpServiceRefs(version: ToolVersion) {
+  return getRunningMcpServiceNames(version).length;
+}
+
+function isVersionUsedByRunningMcpService(version: ToolVersion) {
+  return getVersionMcpServiceRefs(version) > 0;
+}
+
+function getVersionLiteflowRefs(version: ToolVersion) {
+  return version.activePlanRefs ?? 0;
 }
 
 function getStandardInputName(item: RawInputParam) {
@@ -1567,6 +1633,10 @@ function createVersionDraft(tool: ToolItem | null) {
     versionName: "",
     versionDesc: "",
     executionAccessMode: "external_http" as ExecutionAccessMode,
+    connectorId: "conn-rag",
+    connectorName: "RAG 算法服务",
+    connectorBaseUrlSnapshot: RAGFLOW_API_BASE,
+    connectorAuthType: "Bearer Token",
     serviceEnvironment: "dev3",
     httpContentType: "application/json",
     httpAuthConfig: "",
@@ -1662,7 +1732,7 @@ function createVersionDraft(tool: ToolItem | null) {
     supportKnowledgeTypes: [] as string[],
     callLimitNote: "",
     recommendHint: false,
-    callRule: "按工具 API 接入配置和接口参数配置调用工具",
+    callRule: "按版本调用配置和接口参数配置调用工具",
     inputMaterialTypes: ["文件"] as string[],
     supportSample: true,
     supportBatch: false,
@@ -1710,6 +1780,10 @@ function createVersionDraftFromVersion(tool: ToolItem | null, version: ToolVersi
     versionName: versionName === "-" ? "" : versionName,
     versionDesc: normalized.versionDesc ?? "",
     executionAccessMode: "external_http" as ExecutionAccessMode,
+    connectorId: normalized.connectorId ?? base.connectorId,
+    connectorName: normalized.connectorName ?? base.connectorName,
+    connectorBaseUrlSnapshot: normalized.connectorBaseUrlSnapshot ?? normalized.httpServiceAddress ?? base.connectorBaseUrlSnapshot,
+    connectorAuthType: normalized.connectorAuthType ?? base.connectorAuthType,
     serviceEnvironment: normalized.serviceEnvironment ?? base.serviceEnvironment,
     httpContentType: normalized.httpContentType ?? base.httpContentType,
     httpAuthConfig: normalized.httpAuthConfig ?? base.httpAuthConfig,
@@ -2312,6 +2386,10 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     packageVersion: version,
     packageDesc: "存量组件 API 标准接入配置",
     executionAccessMode: "external_http",
+    connectorId: "conn-rag",
+    connectorName: "RAG 算法服务",
+    connectorBaseUrlSnapshot: RAGFLOW_API_BASE,
+    connectorAuthType: "Bearer Token",
     serviceEnvironment: "dev3",
     httpContentType: "application/json",
     httpAuthConfig: "内部服务鉴权，由网关或环境配置提供",
@@ -2345,7 +2423,7 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     activePlanRefs: isPublished ? index % 4 : 0,
     inactivePlanRefs: isPublished ? (index + 1) % 3 : 0,
     linkedPlanRefs: isPublished ? (index % 4) + ((index + 1) % 3) : 0,
-    activePlanUsages: isPublished ? [`知识库构建流程 / ${component.name} 默认方案 / 生效`] : [],
+    activePlanUsages: isPublished ? [`知识库构建 Liteflow / ${component.name} 默认节点 / 生效`] : [],
     runCount,
     failureCount,
     lastRunAt: `2026-05-13 ${String(10 + (index % 8)).padStart(2, "0")}:${String(20 + (index * 5) % 40).padStart(2, "0")}:00`,
@@ -2604,7 +2682,7 @@ export function ToolHubPage() {
   ), [selectedCategory, visibleTools]);
 
   const filtered = useMemo(() => toolsInCategory.filter((tool) => {
-    if (query && !`${tool.name}${tool.toolCode}`.toLowerCase().includes(query.toLowerCase())) return false;
+    if (query && !tool.name.toLowerCase().includes(query.toLowerCase())) return false;
     if (status !== "all" && tool.status !== status) return false;
     return true;
   }), [toolsInCategory, query, status]);
@@ -2617,7 +2695,7 @@ export function ToolHubPage() {
     total: toolsInCategory.length,
     enabled: toolsInCategory.filter((tool) => tool.status === "enabled").length,
     publishedVersions: toolsInCategory.reduce((sum, tool) => sum + tool.versions.filter((version) => version.status === "published").length, 0),
-    activeVersions: toolsInCategory.reduce((sum, tool) => sum + tool.versions.filter((version) => (version.activePlanRefs ?? 0) > 0).length, 0),
+    activeVersions: toolsInCategory.reduce((sum, tool) => sum + tool.versions.filter(isVersionUsedByRunningMcpService).length, 0),
   }), [toolsInCategory]);
 
   const categoryCounts = useMemo(() => {
@@ -2896,9 +2974,6 @@ export function ToolHubPage() {
       <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 2 }}>
           <Typography sx={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>工具库</Typography>
-          <Button variant="contained" startIcon={<Add sx={{ fontSize: 14 }} />} onClick={openCreateTool} sx={{ bgcolor: BLUE, borderRadius: "8px", textTransform: "none", fontSize: "13px", px: 2, boxShadow: "none", "&:hover": { bgcolor: "#2563eb", boxShadow: "none" } }}>
-            新建工具
-          </Button>
         </Box>
 
         <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: 1.5, mb: 2 }}>
@@ -2920,14 +2995,20 @@ export function ToolHubPage() {
           ))}
         </Box>
 
-        <Box sx={{ display: "flex", gap: 1.5, mb: 1.5, flexWrap: "wrap", alignItems: "center" }}>
-          <Box sx={{ flex: "0 0 240px" }}>
+        <Box sx={{ display: "flex", gap: 1.5, mb: 1.5, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+          <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center" }}>
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <Select value={status} onChange={(event) => { setStatus(event.target.value); setToolPage(0); }} sx={{ borderRadius: "8px", fontSize: "13px", bgcolor: "#fff", "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}>
+                <MenuItem value="all" sx={{ fontSize: "13px" }}>全部状态</MenuItem>
+                <MenuItem value="enabled" sx={{ fontSize: "13px" }}>启用</MenuItem>
+                <MenuItem value="disabled" sx={{ fontSize: "13px" }}>停用</MenuItem>
+              </Select>
+            </FormControl>
             <TextField
               size="small"
-              placeholder="工具名称 / 工具ID"
+              placeholder="搜索工具名称"
               value={query}
               onChange={(event) => { setQuery(event.target.value); setToolPage(0); }}
-              fullWidth
               InputProps={{
                 startAdornment: <InputAdornment position="start"><Search sx={{ fontSize: 18, color: "#9ca3af" }} /></InputAdornment>,
                 endAdornment: query ? (
@@ -2936,19 +3017,15 @@ export function ToolHubPage() {
                   </InputAdornment>
                 ) : null,
               }}
-              sx={{ width: 240, "& .MuiOutlinedInput-root": { borderRadius: "6px", bgcolor: "#fff" } }}
+              sx={{ width: 260, "& .MuiOutlinedInput-root": { borderRadius: "8px", bgcolor: "#fff", fontSize: "13px" }, "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}
             />
           </Box>
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <Select value={status} onChange={(event) => { setStatus(event.target.value); setToolPage(0); }} sx={{ borderRadius: "8px", fontSize: "13px", bgcolor: "#fff", "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}>
-              <MenuItem value="all" sx={{ fontSize: "13px" }}>全部状态</MenuItem>
-              <MenuItem value="enabled" sx={{ fontSize: "13px" }}>启用</MenuItem>
-              <MenuItem value="disabled" sx={{ fontSize: "13px" }}>停用</MenuItem>
-            </Select>
-          </FormControl>
+          <Button variant="contained" startIcon={<Add sx={{ fontSize: 16 }} />} onClick={openCreateTool} sx={{ bgcolor: BLUE, textTransform: "none", borderRadius: "6px", boxShadow: "none" }}>
+            新建工具
+          </Button>
         </Box>
 
-        <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", overflow: "hidden", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", overflow: "hidden", flex: 1, display: "flex", flexDirection: "column", minHeight: 0, width: "100%", maxWidth: "100%" }}>
           {filtered.length === 0 ? (
             <Box sx={{ py: 10, textAlign: "center" }}>
               <Category sx={{ fontSize: 40, color: "#e8eaed", mb: 1 }} />
@@ -2956,12 +3033,20 @@ export function ToolHubPage() {
             </Box>
           ) : (
             <>
-              <TableContainer sx={{ flex: 1, overflow: "auto" }}>
-                <Table size="small" stickyHeader>
+              <TableContainer sx={{ flex: 1, width: "100%", maxWidth: "100%", overflowX: "auto", overflowY: "auto", display: "block", WebkitOverflowScrolling: "touch", "&::-webkit-scrollbar": { height: 12 }, "&::-webkit-scrollbar-track": { bgcolor: "#f1f5f9" }, "&::-webkit-scrollbar-thumb": { bgcolor: "#cbd5e1", borderRadius: 999, border: "3px solid #f1f5f9" }, "&::-webkit-scrollbar-thumb:hover": { bgcolor: "#94a3b8" } }}>
+                <Table size="small" stickyHeader sx={{ minWidth: 980, tableLayout: "fixed" }}>
                   <TableHead>
                     <TableRow sx={{ bgcolor: "#f8f9fb" }}>
-                      {["工具名称", "工具ID", "分类", "状态", "最新版本", "推荐版本", "最近调用", "创建人", "创建时间", "操作"].map((head) => (
-                        <TableCell key={head} sx={{ fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap", bgcolor: "#f8f9fb" }}>
+                      {[
+                        ["工具名称", "220px"],
+                        ["分类", "120px"],
+                        ["工具状态", "100px"],
+                        ["已发布版本数", "120px"],
+                        ["推荐版本", "120px"],
+                        ["最近调用", "160px"],
+                        ["操作", "220px"],
+                      ].map(([head, width]) => (
+                        <TableCell key={head} sx={{ width, fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, bgcolor: "#f8f9fb", borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap" }}>
                           {head}
                         </TableCell>
                       ))}
@@ -2970,27 +3055,25 @@ export function ToolHubPage() {
                   <TableBody>
                     {pagedTools.map((tool, index) => {
                       const recommended = tool.versions.find((version) => version.recommended);
+                      const publishedCount = tool.versions.filter((version) => version.status === "published").length;
                       return (
                         <TableRow key={tool.id} sx={{ bgcolor: (toolPage * toolRowsPerPage + index) % 2 === 0 ? "#fff" : "#fafafa", "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
-                          <TableCell sx={{ py: 1.5, maxWidth: 220 }}>
+                          <TableCell sx={{ py: 1.5, minWidth: 0 }}>
                             <Typography component="button" onClick={() => navigate(`/admin/tool-hub/${tool.id}?tab=versions`)} sx={{ border: "none", p: 0, m: 0, bgcolor: "transparent", fontSize: "13px", color: "#111827", fontWeight: 500, cursor: "pointer", textAlign: "left", "&:hover": { color: BLUE, textDecoration: "underline" } }}>{tool.name}</Typography>
                           </TableCell>
-                          <TableCell sx={{ fontSize: "12px", color: "#475569", fontFamily: "monospace", whiteSpace: "nowrap" }}>{tool.toolCode}</TableCell>
-                          <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{tool.category}</TableCell>
-                          <TableCell><StatusChip status={tool.status} /></TableCell>
-                          <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{tool.latestVersion}</TableCell>
-                          <TableCell>
+                          <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151" }}>{tool.category}</TableCell>
+                          <TableCell sx={{ py: 1.5 }}><StatusChip status={tool.status} /></TableCell>
+                          <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151" }}>{publishedCount}</TableCell>
+                          <TableCell sx={{ py: 1.5 }}>
                             {recommended ? (
                               <Chip label={recommended.version} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: "#eff6ff", color: "#1d4ed8", border: "none" }} />
                             ) : (
                               <Typography sx={{ fontSize: "12px", color: "#9ca3af" }}>未设置</Typography>
                             )}
                           </TableCell>
-                          <TableCell sx={{ fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>{tool.lastCalledAt}</TableCell>
-                          <TableCell sx={{ fontSize: "12px", color: "#374151", whiteSpace: "nowrap" }}>{tool.createdBy}</TableCell>
-                          <TableCell sx={{ fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>{tool.createdAt}</TableCell>
-                          <TableCell>
-                            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                          <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>{tool.lastCalledAt}</TableCell>
+                          <TableCell sx={{ py: 1.5 }}>
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
                               <Switch size="small" checked={tool.status === "enabled"} onChange={() => toggleToolStatus(tool.id)} />
                               <Typography component="button" onClick={() => navigate(`/admin/tool-hub/${tool.id}?tab=versions`)} sx={{ border: "none", p: 0, m: 0, bgcolor: "transparent", color: BLUE, fontSize: "12px", cursor: "pointer" }}>
                                 详情
@@ -3148,7 +3231,7 @@ export function ToolHubPage() {
         </DialogTitle>
         <DialogContent sx={{ px: 3, py: 3 }}>
           <Typography sx={{ fontSize: "14px", color: "#374151", lineHeight: 1.7 }}>
-            删除后，该工具不再出现在工具库列表，也不可被 Agent 查询、调用或用于新方案；历史版本、调用运行记录和方案引用信息仍保留用于追溯，确定继续？
+            删除后，该工具不再出现在工具库列表，也不可被 Agent 查询、调用或用于新 Liteflow；历史版本、调用记录和引用信息仍保留用于追溯，确定继续？
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pt: 0, pb: 2.5, gap: 1 }}>
@@ -3842,8 +3925,8 @@ export function ToolHubDetailPage() {
     }
 
     if (step === 1) {
-      if (!versionDraft.httpServiceAddress.trim()) {
-          toast.error("请填写 API 根地址");
+      if (!versionDraft.connectorId) {
+        toast.error("请选择连接器");
         return false;
       }
       if (!versionDraft.httpPath.trim()) {
@@ -4549,7 +4632,8 @@ export function ToolHubDetailPage() {
     if (!validateStep(0) || !validateStep(1) || !validateStep(2, "submit")) return;
     const baseVersion = editingVersion;
 
-    const packageSummary = `工具API=${versionDraft.httpServiceAddress || "未配置"}${versionDraft.httpPath || ""}`;
+    const selectedConnector = TOOL_VERSION_CONNECTORS.find((connector) => connector.id === versionDraft.connectorId) ?? TOOL_VERSION_CONNECTORS[0];
+    const packageSummary = `连接器=${selectedConnector.name}；调用路径=${versionDraft.httpPath || ""}`;
     const runtimeSummary = `标准接口=${versionDraft.httpMethod} ${versionDraft.httpPath || "/"}；${versionDraft.asyncMode || "同步/异步均支持"}`;
     const versionNameSummary = versionDraft.versionName.trim() ? `版本名称=${versionDraft.versionName.trim()}` : `版本号=${versionDraft.version.trim()}`;
     const versionCode = baseVersion?.versionCode ?? ensureUniqueVersionCode(buildVersionCode(tool.toolCode, versionDraft.version.trim()), tool.versions, baseVersion?.id);
@@ -4581,7 +4665,7 @@ export function ToolHubDetailPage() {
       supportKnowledgeTypes: versionDraft.supportKnowledgeTypes,
       callLimitNote: versionDraft.callLimitNote,
       recommendHint: versionDraft.recommendHint,
-      callRule: versionDraft.callRule || "按工具 API 接入配置和接口参数配置调用工具",
+      callRule: versionDraft.callRule || "按版本调用配置和接口参数配置调用工具",
       inputMaterialTypes: versionDraft.inputMaterialTypes,
       supportSample: versionDraft.supportSample,
       supportBatch: versionDraft.supportBatch,
@@ -4611,9 +4695,13 @@ export function ToolHubDetailPage() {
       sampleMaterial: versionDraft.sampleMaterial,
       maintainer: versionDraft.maintainer,
       executionAccessMode: "external_http",
+      connectorId: selectedConnector.id,
+      connectorName: selectedConnector.name,
+      connectorBaseUrlSnapshot: selectedConnector.baseUrl,
+      connectorAuthType: selectedConnector.authType,
       serviceEnvironment: versionDraft.serviceEnvironment,
       httpContentType: versionDraft.httpContentType,
-      httpAuthConfig: versionDraft.httpAuthConfig,
+      httpAuthConfig: `沿用连接器鉴权：${selectedConnector.authType}`,
       asyncMode: versionDraft.asyncMode,
       callbackPolicy: versionDraft.callbackPolicy,
       callbackUrl: versionDraft.callbackUrl,
@@ -4653,7 +4741,7 @@ export function ToolHubDetailPage() {
       runtimeCommand: versionDraft.runtimeCommand,
       runtimeTimeout: versionDraft.runtimeTimeout,
       httpStartCommand: versionDraft.httpStartCommand,
-      httpServiceAddress: versionDraft.httpServiceAddress,
+      httpServiceAddress: selectedConnector.baseUrl,
       httpPort: versionDraft.httpPort,
       httpHealthcheck: versionDraft.httpHealthcheck,
       httpPath: versionDraft.httpPath,
@@ -4769,7 +4857,7 @@ export function ToolHubDetailPage() {
     };
 
     const stopVersion = () => {
-      if ((version.activePlanRefs ?? 0) > 0) {
+      if (isVersionUsedByRunningMcpService(version)) {
         setBlockedStopVersionId(version.id);
         return;
       }
@@ -5199,10 +5287,12 @@ export function ToolHubDetailPage() {
                           {[
                             ["版本号", "96px"],
                             ["状态", "82px"],
-                            ["请求地址", "170px"],
-                            ["关联处理方案", "102px"],
-                            ["运行总次数", "84px"],
-                            ["最近运行", "122px"],
+                            ["连接器", "128px"],
+                            ["调用路径", "160px"],
+                            ["MCP服务引用", "104px"],
+                            ["Liteflow引用", "104px"],
+                            ["最近调试", "122px"],
+                            ["最近调用", "122px"],
                             ["创建人", "84px"],
                             ["操作", "240px"],
                           ].map(([head, width]) => (
@@ -5214,7 +5304,6 @@ export function ToolHubDetailPage() {
                       </TableHead>
                       <TableBody>
                         {pagedVersions.map((version, index) => {
-                          const planRefInfo = getVersionPlanRefInfo(version);
                           const requestAddress = getVersionRequestAddress(version);
                           return (
                             <TableRow key={version.id} sx={{ bgcolor: (versionPage * versionRowsPerPage + index) % 2 === 0 ? "#fff" : "#fafafa", "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
@@ -5232,29 +5321,23 @@ export function ToolHubDetailPage() {
                                 </Box>
                               </TableCell>
                               <TableCell sx={{ py: 1.5, minWidth: 0 }}>
-                                <Typography sx={{ fontSize: "12px", color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={requestAddress}>
-                                  {requestAddress}
+                                <Typography sx={{ fontSize: "12px", color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={getVersionConnectorName(version)}>
+                                  {getVersionConnectorName(version)}
                                 </Typography>
                               </TableCell>
-                              <TableCell sx={{ py: 1.5, whiteSpace: "nowrap", textAlign: "left", pl: 2 }}>
-                                <Tooltip
-                                  arrow
-                                  placement="top"
-                                  title={
-                                    <Box sx={{ fontSize: "12px", lineHeight: 1.8 }}>
-                                      <Box>方案版本总数：{planRefInfo.total}</Box>
-                                      <Box>生效中方案版本数：{planRefInfo.active}</Box>
-                                    </Box>
-                                  }
-                                >
-                                  <Box sx={{ display: "flex", justifyContent: "flex-start", alignItems: "center", gap: 0.5, width: "100%", color: "#374151", cursor: "default" }}>
-                                    <Typography component="span" sx={{ fontSize: "12px", fontWeight: 600 }}>{planRefInfo.total}</Typography>
-                                    <InfoOutlined sx={{ fontSize: 15, color: "#94a3b8" }} />
-                                  </Box>
-                                </Tooltip>
+                              <TableCell sx={{ py: 1.5, minWidth: 0 }}>
+                                <Typography sx={{ fontSize: "12px", color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "monospace" }} title={requestAddress}>
+                                  {version.httpMethod || "POST"} {version.httpPath || "-"}
+                                </Typography>
                               </TableCell>
                               <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151", whiteSpace: "nowrap" }}>
-                                {version.runCount ?? 0}
+                                {getVersionMcpServiceRefs(version)}
+                              </TableCell>
+                              <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151", whiteSpace: "nowrap" }}>
+                                {getVersionLiteflowRefs(version)}
+                              </TableCell>
+                              <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>
+                                {version.lastDebug || "-"}
                               </TableCell>
                               <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>
                                 {version.lastRunAt || "-"}
@@ -5357,10 +5440,10 @@ export function ToolHubDetailPage() {
         </DialogTitle>
         <DialogContent sx={{ px: 3, py: 3 }}>
           <Alert severity="warning" sx={{ borderRadius: "8px", mb: 2 }}>
-            当前工具版本正在被生效方案版本使用，请先调整相关方案后再停用。
+            当前工具版本正在被运行中的 MCP 服务使用，请先调整相关绑定后再停用。
           </Alert>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            {(blockedStopVersion?.activePlanUsages?.length ? blockedStopVersion.activePlanUsages : ["风控文档审核项目 / 保险合同构建方案 v3.2 / 生效"]).map((usage) => (
+            {(blockedStopVersion ? getRunningMcpServiceNames(blockedStopVersion) : []).map((usage) => (
               <Box key={usage} sx={{ p: 1.25, borderRadius: "8px", border: "1px solid #e5e7eb", bgcolor: "#f9fafb" }}>
                 <Typography sx={{ fontSize: "13px", color: "#374151" }}>{usage}</Typography>
               </Box>
@@ -5454,18 +5537,42 @@ export function ToolHubDetailPage() {
           {wizardStep === 1 && (
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5 }}>
-                工具需提前完成部署，并按工具Hub标准接口封装 API；工具Hub 负责统一调用、MCP/API 转化、运行记录和进度监测。
+                工具版本绑定连接器并配置具体调用路径；版本发布后会冻结连接器快照，新版本发布不会影响旧版本绑定。
               </Alert>
 
                   <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
                     <Box sx={{ mb: 2 }}>
                       <Box>
-                        <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>API 信息</Typography>
-                        <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>按工具Hub标准接口完成封装后，在这里登记调用地址与鉴权配置。</Typography>
+                        <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>调用配置</Typography>
+                        <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>选择已配置连接器，再设置当前版本使用的接口路径、请求方式和调用策略。</Typography>
                       </Box>
                     </Box>
                     <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
-                      <TextField label="API 根地址" size="small" required value={versionDraft.httpServiceAddress} onChange={(event) => updateDraft({ httpServiceAddress: event.target.value })} helperText="如 http://tool-service.example" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
+                      <TextField
+                        select
+                        label="连接器"
+                        size="small"
+                        required
+                        value={versionDraft.connectorId}
+                        onChange={(event) => {
+                          const connector = TOOL_VERSION_CONNECTORS.find((item) => item.id === event.target.value);
+                          updateDraft({
+                            connectorId: event.target.value,
+                            connectorName: connector?.name ?? "",
+                            connectorBaseUrlSnapshot: connector?.baseUrl ?? "",
+                            connectorAuthType: connector?.authType ?? "",
+                            httpServiceAddress: connector?.baseUrl ?? "",
+                            httpAuthConfig: connector ? `沿用连接器鉴权：${connector.authType}` : "",
+                          });
+                        }}
+                        helperText="连接器维护 Base URL、鉴权和健康状态。"
+                        sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}
+                      >
+                        {TOOL_VERSION_CONNECTORS.map((connector) => (
+                          <MenuItem key={connector.id} value={connector.id} sx={{ fontSize: "14px" }}>{connector.name}</MenuItem>
+                        ))}
+                      </TextField>
+                      <TextField label="Base URL 快照" size="small" value={versionDraft.connectorBaseUrlSnapshot || versionDraft.httpServiceAddress} disabled helperText="发布时随版本冻结，后续连接器变更不自动影响旧版本。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px", fontFamily: "monospace" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
                       <TextField label="工具调用接口路径" size="small" required value={versionDraft.httpPath} onChange={(event) => updateDraft({ httpPath: event.target.value })} helperText="如 /toolhub/v1/run" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
                       <TextField select label="请求方式" size="small" required value={versionDraft.httpMethod} onChange={(event) => updateDraft({ httpMethod: event.target.value })} sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}>
                         {["POST", "GET"].map((item) => <MenuItem key={item} value={item} sx={{ fontSize: "14px" }}>{item}</MenuItem>)}
@@ -5473,7 +5580,7 @@ export function ToolHubDetailPage() {
                       <TextField select label="Content-Type" size="small" required value={versionDraft.httpContentType} onChange={(event) => updateDraft({ httpContentType: event.target.value })} helperText="默认 application/json。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}>
                         {CONTENT_TYPE_OPTIONS.map((item) => <MenuItem key={item} value={item} sx={{ fontSize: "14px" }}>{item}</MenuItem>)}
                       </TextField>
-                      <TextField label="鉴权配置" size="small" value={versionDraft.httpAuthConfig} onChange={(event) => updateDraft({ httpAuthConfig: event.target.value })} helperText="无鉴权可不填；可填写 Header、Token 或密钥引用。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
+                      <TextField label="鉴权方式" size="small" value={versionDraft.connectorAuthType || "沿用连接器鉴权"} disabled helperText="版本不单独维护密钥，统一沿用连接器鉴权。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
                       <TextField label="调用超时" size="small" required value={versionDraft.httpTimeout} onChange={(event) => updateDraft({ httpTimeout: event.target.value })} helperText="单位：秒；超时后由 ToolHub 标记为失败或转入异步跟踪。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
                       <TextField label="健康检查地址" size="small" value={versionDraft.httpHealthcheck} onChange={(event) => updateDraft({ httpHealthcheck: event.target.value })} helperText="如 /health；用于运行监测，可为空。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
                     </Box>
@@ -5721,7 +5828,7 @@ export function ToolHubDetailPage() {
         onClose={() => setVersionDetailOpen(false)}
         ModalProps={{ sx: { zIndex: SECONDARY_DRAWER_Z_INDEX } }}
         slotProps={{ backdrop: { sx: { position: "fixed", inset: 0, zIndex: SECONDARY_DRAWER_Z_INDEX, bgcolor: "rgba(17, 24, 39, 0.48)" } } }}
-        PaperProps={{ sx: { width: 1040, maxWidth: "92vw", p: 3, bgcolor: "#f8fafc", zIndex: SECONDARY_DRAWER_Z_INDEX + 1 } }}
+        PaperProps={{ sx: { width: 1040, maxWidth: "92vw", p: 0, bgcolor: "#f8fafc", zIndex: SECONDARY_DRAWER_Z_INDEX + 1 } }}
       >
         {selectedVersion && (() => {
 	          const versionName = selectedVersion.deliveryName || selectedVersion.configFields.find((field) => field.name === "版本名称")?.value || "-";
@@ -5741,8 +5848,8 @@ export function ToolHubDetailPage() {
           );
 
           return (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+              <Box sx={{ p: 2.5, bgcolor: "#fff", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2 }}>
                 <Box>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
                     <Typography sx={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>{selectedVersion.version}</Typography>
@@ -5756,6 +5863,7 @@ export function ToolHubDetailPage() {
                 </IconButton>
               </Box>
 
+              <Box sx={{ p: 2.5, overflow: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
               {detailBlock("基本信息", [
                 ["版本ID", (
                   <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
@@ -5771,6 +5879,20 @@ export function ToolHubDetailPage() {
                 ["版本描述", selectedVersion.versionDesc || selectedVersion.summary],
                 ["创建人", selectedVersion.createdBy || "-"],
                 ["创建时间", selectedVersion.createdAt || "-"],
+              ])}
+
+              {detailBlock("调用配置", [
+                ["连接器", getVersionConnectorName(selectedVersion)],
+                ["Base URL 快照", selectedVersion.connectorBaseUrlSnapshot || selectedVersion.httpServiceAddress || "-"],
+                ["接口路径", selectedVersion.httpPath || "-"],
+                ["请求方式", selectedVersion.httpMethod || "-"],
+                ["鉴权方式", selectedVersion.connectorAuthType || "沿用连接器鉴权"],
+                ["超时时间", `${selectedVersion.httpTimeout || "-"} 秒`],
+              ])}
+
+              {detailBlock("引用关系", [
+                ["MCP 服务引用", `${getVersionMcpServiceRefs(selectedVersion)} 个`],
+                ["Liteflow 引用", `${getVersionLiteflowRefs(selectedVersion)} 个`],
               ])}
 
               <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
@@ -5825,6 +5947,7 @@ export function ToolHubDetailPage() {
 	                  </TableBody>
 	                </Table>
 	              </Paper>
+              </Box>
             </Box>
           );
         })()}

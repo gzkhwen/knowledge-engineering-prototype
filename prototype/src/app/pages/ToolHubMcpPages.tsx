@@ -63,8 +63,23 @@ type ToolOption = {
   id: string;
   name: string;
   category: string;
+  status: "启用" | "停用";
+  versions: ToolVersionOption[];
+};
+
+type ToolVersionOption = {
+  id: string;
+  version: string;
+  status: "已发布" | "待发布" | "待调试" | "已停用";
   connector: string;
-  status: "已发布" | "待发布" | "草稿" | "已停用";
+  method: string;
+  requestPath: string;
+  recommended?: boolean;
+};
+
+type ServiceToolBinding = {
+  toolId: string;
+  versionId: string;
 };
 
 type McpService = {
@@ -75,7 +90,7 @@ type McpService = {
   authTarget: string;
   status: ServiceStatus;
   endpoint: string;
-  tools: string[];
+  tools: ServiceToolBinding[];
   callsToday: number;
   apiKeys: ServiceApiKey[];
 };
@@ -101,10 +116,45 @@ type Connector = {
 };
 
 const initialTools: ToolOption[] = [
-  { id: "tool-context", name: "查询项目上下文", category: "项目上下文", connector: "知识工程核心 API", status: "已发布" },
-  { id: "tool-solution", name: "生成处理方案", category: "方案生成", connector: "知识工程核心 API", status: "已发布" },
-  { id: "tool-material", name: "检索原始素材", category: "素材检索", connector: "原始素材服务", status: "草稿" },
-  { id: "tool-verify", name: "校验构建结果", category: "结果校验", connector: "构建结果校验服务", status: "已停用" },
+  {
+    id: "tool-context",
+    name: "查询项目上下文",
+    category: "项目上下文",
+    status: "启用",
+    versions: [
+      { id: "context-v1", version: "v1.0.0", status: "已发布", connector: "知识工程核心 API", method: "GET", requestPath: "/projects/{id}/context", recommended: false },
+      { id: "context-v2", version: "v2.0.0", status: "已发布", connector: "知识工程核心 API", method: "POST", requestPath: "/projects/context/query", recommended: true },
+      { id: "context-v21", version: "v2.1.0-beta", status: "待调试", connector: "知识工程核心 API", method: "POST", requestPath: "/projects/context/search" },
+    ],
+  },
+  {
+    id: "tool-solution",
+    name: "生成处理方案",
+    category: "方案生成",
+    status: "启用",
+    versions: [
+      { id: "solution-v1", version: "v1.0.0", status: "已发布", connector: "知识工程核心 API", method: "POST", requestPath: "/solutions/generate", recommended: true },
+      { id: "solution-v2", version: "v2.0.0", status: "待发布", connector: "知识工程核心 API", method: "POST", requestPath: "/solutions/generate-v2" },
+    ],
+  },
+  {
+    id: "tool-material",
+    name: "检索原始素材",
+    category: "素材检索",
+    status: "启用",
+    versions: [
+      { id: "material-v1", version: "v1.0.0", status: "已发布", connector: "原始素材服务", method: "GET", requestPath: "/materials/search", recommended: true },
+    ],
+  },
+  {
+    id: "tool-verify",
+    name: "校验构建结果",
+    category: "结果校验",
+    status: "停用",
+    versions: [
+      { id: "verify-v1", version: "v1.0.0", status: "已停用", connector: "构建结果校验服务", method: "POST", requestPath: "/verify/document" },
+    ],
+  },
 ];
 
 const initialServices: McpService[] = [
@@ -116,7 +166,10 @@ const initialServices: McpService[] = [
     authTarget: "knowledge-agent-prod",
     status: "运行中",
     endpoint: "https://mcp.internal/toolhub/knowledge-agent",
-    tools: ["查询项目上下文", "生成处理方案"],
+    tools: [
+      { toolId: "tool-context", versionId: "context-v2" },
+      { toolId: "tool-solution", versionId: "solution-v1" },
+    ],
     callsToday: 286,
     apiKeys: [
       { id: "key-live-agent", label: "知识工程 Agent 生产环境", key: "th_live_1_****************", status: "启用", createdAt: "2026-05-18 10:12", lastUsedAt: "2026-05-18 18:24" },
@@ -131,7 +184,9 @@ const initialServices: McpService[] = [
     authTarget: "knowledge-agent-staging",
     status: "停用",
     endpoint: "https://mcp.internal/toolhub/knowledge-staging",
-    tools: ["查询项目上下文"],
+    tools: [
+      { toolId: "tool-context", versionId: "context-v1" },
+    ],
     callsToday: 0,
     apiKeys: [
       { id: "key-test-agent", label: "测试环境", key: "th_test_1_****************", status: "启用", createdAt: "2026-05-16 14:05", lastUsedAt: "-" },
@@ -209,10 +264,11 @@ function connectorStatusColor(status: ConnectorStatus) {
   return { bg: "#fef2f2", color: "#b91c1c" };
 }
 
-function toolStatusColor(status: ToolOption["status"]) {
+function toolStatusColor(status: ToolOption["status"] | ToolVersionOption["status"]) {
   if (status === "已发布") return { bg: "#dcfce7", color: "#166534" };
   if (status === "待发布") return { bg: "#fff7ed", color: "#c2410c" };
-  if (status === "草稿") return { bg: "#f3f4f6", color: "#4b5563" };
+  if (status === "待调试") return { bg: "#e0f2fe", color: "#0369a1" };
+  if (status === "启用") return { bg: "#dcfce7", color: "#166534" };
   return { bg: "#f3f4f6", color: "#6b7280" };
 }
 
@@ -221,7 +277,7 @@ function StatusChip({ status, type = "service" }: { status: string; type?: "serv
     type === "connector"
       ? connectorStatusColor(status as ConnectorStatus)
       : type === "tool"
-        ? toolStatusColor(status as ToolOption["status"])
+        ? toolStatusColor(status as ToolOption["status"] | ToolVersionOption["status"])
         : serviceStatusColor(status as ServiceStatus);
   return (
     <Chip
@@ -262,6 +318,21 @@ const emptyService: Omit<McpService, "id" | "endpoint" | "status" | "callsToday"
   tools: [],
 };
 
+function getPublishedVersions(tool: ToolOption) {
+  return tool.versions.filter((version) => version.status === "已发布");
+}
+
+function getDefaultPublishedVersion(tool: ToolOption) {
+  const published = getPublishedVersions(tool);
+  return published.find((version) => version.recommended) ?? published[0] ?? null;
+}
+
+function resolveBinding(binding: ServiceToolBinding) {
+  const tool = initialTools.find((item) => item.id === binding.toolId) ?? null;
+  const version = tool?.versions.find((item) => item.id === binding.versionId) ?? null;
+  return { tool, version };
+}
+
 export function ToolHubMcpServicesPage() {
   const [services, setServices] = useState<McpService[]>(initialServices);
   const [query, setQuery] = useState("");
@@ -280,9 +351,9 @@ export function ToolHubMcpServicesPage() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(20);
 
-  const publishedTools = useMemo(() => initialTools.filter((tool) => tool.status === "已发布"), []);
-  const categories = useMemo(() => Array.from(new Set(publishedTools.map((tool) => tool.category))), [publishedTools]);
-  const connectors = useMemo(() => Array.from(new Set(publishedTools.map((tool) => tool.connector))), [publishedTools]);
+  const bindableTools = useMemo(() => initialTools.filter((tool) => tool.status === "启用" && getPublishedVersions(tool).length > 0), []);
+  const categories = useMemo(() => Array.from(new Set(bindableTools.map((tool) => tool.category))), [bindableTools]);
+  const connectors = useMemo(() => Array.from(new Set(bindableTools.flatMap((tool) => getPublishedVersions(tool).map((version) => version.connector)))), [bindableTools]);
 
   const visibleServices = useMemo(() => (
     services.filter((service) => `${service.name}${service.endpoint}`.toLowerCase().includes(query.toLowerCase()))
@@ -297,17 +368,20 @@ export function ToolHubMcpServicesPage() {
   ), [services, detailServiceId]);
 
   const detailTools = useMemo(() => (
-    detailService ? initialTools.filter((tool) => detailService.tools.includes(tool.name)) : []
+    detailService
+      ? detailService.tools.map((binding) => ({ binding, ...resolveBinding(binding) })).filter((item) => item.tool && item.version)
+      : []
   ), [detailService]);
 
   const visibleTools = useMemo(() => (
-    publishedTools.filter((tool) => {
-      if (toolQuery && !`${tool.name}${tool.connector}`.toLowerCase().includes(toolQuery.toLowerCase())) return false;
+    bindableTools.filter((tool) => {
+      const publishedVersions = getPublishedVersions(tool);
+      if (toolQuery && !tool.name.toLowerCase().includes(toolQuery.toLowerCase())) return false;
       if (toolCategory !== "all" && tool.category !== toolCategory) return false;
-      if (toolConnector !== "all" && tool.connector !== toolConnector) return false;
+      if (toolConnector !== "all" && !publishedVersions.some((version) => version.connector === toolConnector)) return false;
       return true;
     })
-  ), [publishedTools, toolCategory, toolConnector, toolQuery]);
+  ), [bindableTools, toolCategory, toolConnector, toolQuery]);
 
   const openCreate = () => {
     setEditingService(null);
@@ -320,6 +394,7 @@ export function ToolHubMcpServicesPage() {
       name: service.name,
       description: service.description,
       instructions: service.instructions,
+      authTarget: service.authTarget,
       tools: service.tools,
     });
   };
@@ -361,10 +436,24 @@ export function ToolHubMcpServicesPage() {
     closeEditor();
   };
 
-  const toggleTool = (toolName: string) => {
+  const toggleTool = (toolId: string) => {
+    const target = initialTools.find((tool) => tool.id === toolId);
+    const defaultVersion = target ? getDefaultPublishedVersion(target) : null;
+    if (!target || !defaultVersion) return;
     setServiceDraft((prev) => ({
       ...prev,
-      tools: prev.tools.includes(toolName) ? prev.tools.filter((item) => item !== toolName) : [...prev.tools, toolName],
+      tools: prev.tools.some((item) => item.toolId === toolId)
+        ? prev.tools.filter((item) => item.toolId !== toolId)
+        : [...prev.tools, { toolId, versionId: defaultVersion.id }],
+    }));
+  };
+
+  const changeToolVersion = (toolId: string, versionId: string) => {
+    setServiceDraft((prev) => ({
+      ...prev,
+      tools: prev.tools.some((item) => item.toolId === toolId)
+        ? prev.tools.map((item) => (item.toolId === toolId ? { ...item, versionId } : item))
+        : [...prev.tools, { toolId, versionId }],
     }));
   };
 
@@ -562,9 +651,9 @@ export function ToolHubMcpServicesPage() {
           />
           <Paper sx={{ border: "1px solid #e5e7eb", borderRadius: "8px", boxShadow: "none", overflow: "hidden" }}>
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, p: 1.5, borderBottom: "1px solid #eef2f7", flexWrap: "wrap" }}>
-              <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>服务可用工具</Typography>
+              <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>绑定服务可用工具</Typography>
               <Box sx={{ display: "flex", gap: 1, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
-                <TextField size="small" placeholder="搜索工具名称 / 连接器" value={toolQuery} onChange={(event) => setToolQuery(event.target.value)} sx={{ width: 220 }} />
+                <TextField size="small" placeholder="搜索工具名称" value={toolQuery} onChange={(event) => setToolQuery(event.target.value)} sx={{ width: 220 }} />
                 <FormControl size="small" sx={{ minWidth: 150 }}>
                   <Select value={toolCategory} onChange={(event) => setToolCategory(event.target.value)} displayEmpty>
                     <MenuItem value="all">全部分类</MenuItem>
@@ -583,21 +672,44 @@ export function ToolHubMcpServicesPage() {
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                    {["选择", "工具名称", "分类", "连接器", "状态"].map((head) => (
+                    {["选择", "工具名称", "分类", "工具版本", "连接器", "调用路径"].map((head) => (
                       <TableCell key={head} sx={{ fontSize: "12px", fontWeight: 600, color: "#6b7280", bgcolor: "#f8f9fb" }}>{head}</TableCell>
                     ))}
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {visibleTools.map((tool) => (
-                    <TableRow key={tool.id}>
-                      <TableCell><input type="checkbox" checked={serviceDraft.tools.includes(tool.name)} onChange={() => toggleTool(tool.name)} /></TableCell>
-                      <TableCell sx={{ fontSize: "13px", fontWeight: 500 }}>{tool.name}</TableCell>
-                      <TableCell sx={{ fontSize: "12px" }}>{tool.category}</TableCell>
-                      <TableCell sx={{ fontSize: "12px" }}>{tool.connector}</TableCell>
-                      <TableCell><StatusChip status={tool.status} type="tool" /></TableCell>
-                    </TableRow>
-                  ))}
+                  {visibleTools.map((tool) => {
+                    const publishedVersions = getPublishedVersions(tool);
+                    const selectedBinding = serviceDraft.tools.find((item) => item.toolId === tool.id);
+                    const selectedVersion = publishedVersions.find((version) => version.id === selectedBinding?.versionId) ?? getDefaultPublishedVersion(tool);
+                    const checked = Boolean(selectedBinding);
+                    return (
+                      <TableRow key={tool.id}>
+                        <TableCell><input type="checkbox" checked={checked} onChange={() => toggleTool(tool.id)} /></TableCell>
+                        <TableCell sx={{ fontSize: "13px", fontWeight: 500 }}>{tool.name}</TableCell>
+                        <TableCell sx={{ fontSize: "12px" }}>{tool.category}</TableCell>
+                        <TableCell sx={{ minWidth: 140 }}>
+                          <Select
+                            size="small"
+                            value={selectedVersion?.id ?? ""}
+                            disabled={!checked}
+                            onChange={(event) => changeToolVersion(tool.id, event.target.value)}
+                            sx={{ height: 30, minWidth: 132, fontSize: "12px" }}
+                          >
+                            {publishedVersions.map((version) => (
+                              <MenuItem key={version.id} value={version.id} sx={{ fontSize: "12px" }}>
+                                {version.version}{version.recommended ? "（推荐）" : ""}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </TableCell>
+                        <TableCell sx={{ fontSize: "12px" }}>{selectedVersion?.connector ?? "-"}</TableCell>
+                        <TableCell sx={{ fontSize: "12px", fontFamily: "monospace", wordBreak: "break-all" }}>
+                          {selectedVersion ? `${selectedVersion.method} ${selectedVersion.requestPath}` : "-"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -697,7 +809,7 @@ export function ToolHubMcpServicesPage() {
                   <Table size="small">
                     <TableHead>
                       <TableRow sx={{ bgcolor: "#f8f9fb" }}>
-                        {["工具名称", "分类", "连接器", "状态"].map((head) => (
+                        {["工具名称", "分类", "工具版本", "版本状态", "连接器", "调用路径"].map((head) => (
                           <TableCell key={head} sx={detailTableHeadCellSx}>{head}</TableCell>
                         ))}
                       </TableRow>
@@ -705,15 +817,19 @@ export function ToolHubMcpServicesPage() {
                     <TableBody>
                       {detailTools.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={4} sx={{ py: 5, textAlign: "center", color: "#94a3b8", fontSize: "13px", borderBottom: "1px solid #f5f5f5" }}>暂无已绑定工具</TableCell>
+                          <TableCell colSpan={6} sx={{ py: 5, textAlign: "center", color: "#94a3b8", fontSize: "13px", borderBottom: "1px solid #f5f5f5" }}>暂无已绑定工具</TableCell>
                         </TableRow>
-                      ) : detailTools.map((tool, index) => (
-                        <TableRow key={tool.id} sx={detailTableRowSx(index)}>
-                          <TableCell sx={{ ...detailTableTextCellSx, color: "#111827", fontWeight: 600 }}>{tool.name}</TableCell>
-                          <TableCell sx={detailTableTextCellSx}>{tool.category}</TableCell>
-                          <TableCell sx={detailTableTextCellSx}>{tool.connector}</TableCell>
-                          <TableCell sx={{ py: 1.5 }}><StatusChip status={tool.status} type="tool" /></TableCell>
-                        </TableRow>
+                      ) : detailTools.map(({ binding, tool, version }, index) => (
+                        tool && version ? (
+                          <TableRow key={`${binding.toolId}-${binding.versionId}`} sx={detailTableRowSx(index)}>
+                            <TableCell sx={{ ...detailTableTextCellSx, color: "#111827", fontWeight: 600 }}>{tool.name}</TableCell>
+                            <TableCell sx={detailTableTextCellSx}>{tool.category}</TableCell>
+                            <TableCell sx={detailTableTextCellSx}>{version.version}{version.recommended ? "（推荐）" : ""}</TableCell>
+                            <TableCell sx={{ py: 1.5 }}><StatusChip status={version.status} type="tool" /></TableCell>
+                            <TableCell sx={detailTableTextCellSx}>{version.connector}</TableCell>
+                            <TableCell sx={{ ...detailTableTextCellSx, fontFamily: "monospace", wordBreak: "break-all" }}>{version.method} {version.requestPath}</TableCell>
+                          </TableRow>
+                        ) : null
                       ))}
                     </TableBody>
                   </Table>
