@@ -10,7 +10,6 @@ export function SettingsPage() {
     <div className="space-y-5">
       <PageHeader
         title="系统设置"
-        description="一期只展示访问密钥、角色权限和环境配置入口，用于说明 Tool Hub 的治理边界。"
       />
       <section className="grid gap-4 lg:grid-cols-3">
         <Card>

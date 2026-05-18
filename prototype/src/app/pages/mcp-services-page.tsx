@@ -1,27 +1,123 @@
-import { useState } from "react";
-import { Copy, Plus, Power, Server } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Copy, KeyRound, Pencil, Plus, Power, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { mcpServices, logs } from "../data/mock-data";
+import { connectors, mcpServices, tools } from "../data/mock-data";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
-import { DetailPanel } from "../../components/shared/detail-panel";
-import { FieldRow } from "../../components/shared/field-row";
+import { Textarea } from "../../components/ui/textarea";
+import { Dialog } from "../../components/shared/dialog";
+import { FormField } from "../../components/shared/form-field";
 import { PageHeader } from "../../components/shared/page-header";
 import { StatusBadge } from "../../components/shared/status-badge";
 
+type ServiceRow = (typeof mcpServices)[number];
+
+const emptyForm = {
+  name: "",
+  description: "",
+  instructions: "",
+  authTarget: "知识工程 Agent",
+  status: "停用",
+  endpoint: "",
+  tools: [] as string[],
+  keyStatus: "未创建",
+  apiKeys: 0,
+};
+
 export function McpServicesPage() {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const selected = mcpServices.find((service) => service.id === selectedId);
+  const [rows, setRows] = useState<ServiceRow[]>(mcpServices);
+  const [keyword, setKeyword] = useState("");
+  const [toolKeyword, setToolKeyword] = useState("");
+  const [toolConnector, setToolConnector] = useState("全部连接器");
+  const [toolCategory, setToolCategory] = useState("全部分类");
+  const [dialogMode, setDialogMode] = useState<"create" | "edit" | null>(null);
+  const [editing, setEditing] = useState<ServiceRow | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [keyService, setKeyService] = useState<ServiceRow | null>(null);
+
+  const filteredRows = useMemo(
+    () => rows.filter((item) => [item.name, item.endpoint, item.authTarget, item.status].some((value) => value.includes(keyword))),
+    [rows, keyword],
+  );
+
+  const toolOptions = useMemo(
+    () =>
+      tools.filter((tool) => {
+        const matchKeyword = !toolKeyword || tool.name.includes(toolKeyword) || tool.connector.includes(toolKeyword);
+        const matchConnector = toolConnector === "全部连接器" || tool.connector === toolConnector;
+        const matchCategory = toolCategory === "全部分类" || tool.category === toolCategory;
+        return matchKeyword && matchConnector && matchCategory;
+      }),
+    [toolCategory, toolConnector, toolKeyword],
+  );
+
+  const startCreate = () => {
+    setEditing(null);
+    setForm(emptyForm);
+    setDialogMode("create");
+  };
+
+  const startEdit = (row: ServiceRow) => {
+    setEditing(row);
+    setForm({
+      name: row.name,
+      description: row.description,
+      instructions: row.instructions,
+      authTarget: row.authTarget,
+      status: row.status,
+      endpoint: row.endpoint,
+      tools: row.tools,
+      keyStatus: row.keyStatus,
+      apiKeys: row.apiKeys,
+    });
+    setDialogMode("edit");
+  };
+
+  const saveService = () => {
+    const name = form.name.trim() || "未命名 MCP 服务";
+    const endpoint = form.endpoint.trim() || `https://mcp.internal/toolhub/${Date.now().toString().slice(-5)}`;
+    if (editing) {
+      setRows((current) => current.map((row) => (row.id === editing.id ? { ...row, ...form, name, endpoint } : row)));
+      toast.success("MCP 服务已更新");
+    } else {
+      setRows((current) => [
+        {
+          id: `svc-${Date.now()}`,
+          ...form,
+          name,
+          endpoint,
+          callsToday: 0,
+          lastCall: "未调用",
+        },
+        ...current,
+      ]);
+      toast.success("MCP 服务已创建");
+    }
+    setEditing(null);
+    setDialogMode(null);
+  };
+
+  const toggleTool = (toolName: string) => {
+    setForm((current) => ({
+      ...current,
+      tools: current.tools.includes(toolName)
+        ? current.tools.filter((item) => item !== toolName)
+        : [...current.tools, toolName],
+    }));
+  };
+
+  const deleteService = (id: string) => {
+    setRows((current) => current.filter((row) => row.id !== id));
+    toast.success("MCP 服务已删除");
+  };
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="MCP 服务"
-        description="管理对 Agent 暴露的 MCP Endpoint。一个 MCP 服务可以挂载多个已发布工具，并配置授权对象、访问凭证和运行状态。"
         actions={
-          <Button onClick={() => setCreating(true)}>
+          <Button onClick={startCreate}>
             <Plus className="h-4 w-4" />
             新建 MCP 服务
           </Button>
@@ -31,10 +127,13 @@ export function McpServicesPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>服务列表</CardTitle>
-          <Input className="max-w-xs" placeholder="搜索服务名称或 Endpoint" />
+          <div className="relative w-full max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Input className="pl-9" placeholder="搜索服务、Endpoint、授权对象" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
-          <table className="w-full min-w-[920px] text-left text-sm">
+          <table className="w-full min-w-[1040px] text-left text-sm">
             <thead className="border-y border-slate-200 bg-slate-50 text-xs text-slate-500">
               <tr>
                 <th className="px-4 py-3 font-medium">服务名称</th>
@@ -42,27 +141,41 @@ export function McpServicesPage() {
                 <th className="px-4 py-3 font-medium">Endpoint</th>
                 <th className="px-4 py-3 font-medium">授权对象</th>
                 <th className="px-4 py-3 font-medium">工具数</th>
+                <th className="px-4 py-3 font-medium">API Keys</th>
                 <th className="px-4 py-3 font-medium">今日调用</th>
                 <th className="px-4 py-3 font-medium">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {mcpServices.map((service) => (
+              {filteredRows.map((service) => (
                 <tr key={service.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium">{service.name}</td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{service.name}</div>
+                    <div className="mt-1 max-w-xs text-xs text-slate-500">{service.description || "-"}</div>
+                  </td>
                   <td className="px-4 py-3"><StatusBadge status={service.status} /></td>
                   <td className="px-4 py-3 text-slate-500">{service.endpoint}</td>
                   <td className="px-4 py-3">{service.authTarget}</td>
                   <td className="px-4 py-3">{service.tools.length}</td>
+                  <td className="px-4 py-3">
+                    <button className="font-medium underline-offset-4 hover:underline" onClick={() => setKeyService(service)}>
+                      {service.apiKeys} 个
+                    </button>
+                  </td>
                   <td className="px-4 py-3">{service.callsToday}</td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => setSelectedId(service.id)}>查看</Button>
-                      <Button variant="ghost" size="icon" onClick={() => toast.success("Endpoint 已复制")}>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => navigator.clipboard.writeText(service.endpoint).then(() => toast.success("Endpoint 已复制"))}>
                         <Copy className="h-4 w-4" />
                       </Button>
                       <Button variant="ghost" size="icon" onClick={() => toast.info("服务状态已切换")}>
                         <Power className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => startEdit(service)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => deleteService(service.id)}>
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </td>
@@ -73,64 +186,94 @@ export function McpServicesPage() {
         </CardContent>
       </Card>
 
-      {selected ? (
-      <DetailPanel title={selected.name} subtitle="MCP 服务详情" onClose={() => setSelectedId(null)}>
-        <div className="space-y-5">
-          <section>
-            <h3 className="text-sm font-semibold">基础信息</h3>
-            <div className="mt-2 rounded-lg border border-slate-200 p-3">
-              <FieldRow label="服务状态" value={<StatusBadge status={selected.status} />} />
-              <FieldRow label="Endpoint" value={selected.endpoint} />
-              <FieldRow label="授权对象" value={selected.authTarget} />
-              <FieldRow label="访问密钥" value={selected.keyStatus} />
-              <FieldRow label="最近调用" value={selected.lastCall} />
+      {dialogMode ? (
+        <Dialog
+          title={dialogMode === "edit" ? "编辑 MCP 服务" : "新建 MCP 服务"}
+          width="2xl"
+          onClose={() => setDialogMode(null)}
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setDialogMode(null)}>取消</Button>
+              <Button onClick={saveService}>保存</Button>
+            </>
+          }
+        >
+          <div className="grid gap-5">
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField label="服务名称">
+                <Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+              </FormField>
+              <FormField label="授权对象">
+                <Input value={form.authTarget} onChange={(event) => setForm({ ...form, authTarget: event.target.value })} />
+              </FormField>
+              <FormField label="Endpoint">
+                <Input value={form.endpoint} onChange={(event) => setForm({ ...form, endpoint: event.target.value })} />
+              </FormField>
+              <FormField label="服务状态">
+                <select className="h-9 rounded-md border border-slate-200 px-3 text-sm" value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}>
+                  <option>运行中</option>
+                  <option>停用</option>
+                  <option>异常</option>
+                </select>
+              </FormField>
             </div>
-          </section>
-          <section>
-            <h3 className="text-sm font-semibold">已挂载工具</h3>
-            <div className="mt-2 space-y-2">
-              {selected.tools.map((tool) => (
-                <div key={tool} className="rounded-lg border border-slate-200 p-3 text-sm">{tool}</div>
-              ))}
-            </div>
-          </section>
-          <section>
-            <h3 className="text-sm font-semibold">最近日志</h3>
-            <div className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {logs.filter((log) => log.service === selected.name).map((log) => (
-                <div key={log.id} className="p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{log.tool}</span>
-                    <StatusBadge status={log.status} />
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">{log.time} / {log.duration}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-      </DetailPanel>
-      ) : null}
+            <FormField label="服务描述">
+              <Textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} />
+            </FormField>
+            <FormField label="Instructions">
+              <Textarea value={form.instructions} onChange={(event) => setForm({ ...form, instructions: event.target.value })} />
+            </FormField>
 
-      {creating ? (
-        <DetailPanel title="新建 MCP 服务" subtitle="一期默认授权知识工程 Agent" onClose={() => setCreating(false)}>
-          <div className="space-y-4">
-            <Input placeholder="服务名称，例如 知识工程 Agent MCP" />
-            <Input value="知识工程 Agent" readOnly />
-            <div className="rounded-lg border border-slate-200 p-3">
-              <div className="text-sm font-medium">选择挂载工具</div>
-              <div className="mt-3 space-y-2 text-sm">
-                <label className="flex items-center gap-2"><input type="checkbox" defaultChecked /> 查询项目上下文</label>
-                <label className="flex items-center gap-2"><input type="checkbox" defaultChecked /> 生成处理方案</label>
-                <label className="flex items-center gap-2"><input type="checkbox" /> 检索原始素材</label>
+            <div className="rounded-lg border border-slate-200">
+              <div className="grid gap-3 border-b border-slate-200 p-3 md:grid-cols-[1fr_180px_160px]">
+                <Input placeholder="搜索工具名称或连接器" value={toolKeyword} onChange={(event) => setToolKeyword(event.target.value)} />
+                <select className="h-9 rounded-md border border-slate-200 px-3 text-sm" value={toolConnector} onChange={(event) => setToolConnector(event.target.value)}>
+                  <option>全部连接器</option>
+                  {connectors.map((connector) => <option key={connector.id}>{connector.name}</option>)}
+                </select>
+                <select className="h-9 rounded-md border border-slate-200 px-3 text-sm" value={toolCategory} onChange={(event) => setToolCategory(event.target.value)}>
+                  <option>全部分类</option>
+                  {[...new Set(tools.map((tool) => tool.category))].map((category) => <option key={category}>{category}</option>)}
+                </select>
+              </div>
+              <div className="max-h-72 overflow-auto divide-y divide-slate-100">
+                {toolOptions.map((tool) => {
+                  const disabled = tool.status !== "已发布";
+                  return (
+                    <label key={tool.id} className={`grid gap-2 p-3 text-sm md:grid-cols-[24px_1fr_120px_160px] ${disabled ? "bg-slate-50 text-slate-400" : ""}`}>
+                      <input type="checkbox" disabled={disabled} checked={form.tools.includes(tool.name)} onChange={() => toggleTool(tool.name)} />
+                      <span className="font-medium">{tool.name}</span>
+                      <StatusBadge status={tool.status} />
+                      <span>{tool.connector}</span>
+                    </label>
+                  );
+                })}
               </div>
             </div>
-            <Button onClick={() => { setCreating(false); toast.success("MCP 服务草稿已创建"); }}>
-              <Server className="h-4 w-4" />
-              生成服务草稿
-            </Button>
           </div>
-        </DetailPanel>
+        </Dialog>
+      ) : null}
+
+      {keyService ? (
+        <Dialog
+          title="API Keys"
+          width="md"
+          onClose={() => setKeyService(null)}
+          footer={<Button onClick={() => toast.success("已生成新的 API Key")}>生成新 Key</Button>}
+        >
+          <div className="space-y-3 text-sm">
+            <div className="rounded-lg border border-slate-200 p-3">
+              <div className="flex items-center gap-2 font-medium"><KeyRound className="h-4 w-4" /> {keyService.name}</div>
+              <div className="mt-2 text-slate-500">当前密钥状态：{keyService.keyStatus}</div>
+            </div>
+            {Array.from({ length: Math.max(keyService.apiKeys, 1) }).map((_, index) => (
+              <div key={index} className="flex items-center justify-between rounded-lg border border-slate-200 p-3">
+                <span>th_live_{index + 1}_****************</span>
+                <Button variant="outline" size="sm" onClick={() => toast.info("Key 已停用")}>停用</Button>
+              </div>
+            ))}
+          </div>
+        </Dialog>
       ) : null}
     </div>
   );

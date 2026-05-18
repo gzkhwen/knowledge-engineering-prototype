@@ -21,7 +21,6 @@ export function LogsPage() {
     <div className="space-y-5">
       <PageHeader
         title="调用日志"
-        description="记录 Agent 通过 MCP 服务调用工具的全过程。日志必须绑定当时的工具版本，便于回放、排障和审计。"
       />
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">

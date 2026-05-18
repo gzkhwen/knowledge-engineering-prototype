@@ -55,12 +55,9 @@ export function AppShell() {
           })}
         </nav>
         <div className="absolute bottom-0 left-0 right-0 border-t border-slate-200 p-4">
-          <div className="rounded-lg bg-slate-50 p-3">
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
-              <Activity className="h-3.5 w-3.5 text-emerald-600" />
-              知识工程 Agent
-            </div>
-            <p className="mt-1 text-xs leading-5 text-slate-500">当前一期默认授权对象，可在 MCP 服务中查看绑定状态。</p>
+          <div className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 text-xs font-medium text-slate-700">
+            <Activity className="h-3.5 w-3.5 text-emerald-600" />
+            knowledge-agent-prod
           </div>
         </div>
       </aside>

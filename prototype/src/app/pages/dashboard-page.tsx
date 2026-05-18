@@ -16,7 +16,6 @@ export function DashboardPage() {
     <div className="space-y-5">
       <PageHeader
         title="工作台"
-        description="查看 Tool Hub 当前服务、工具、连接器和调用状态，帮助确认知识工程 Agent 可用的 MCP 能力是否稳定。"
       />
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -45,15 +44,14 @@ export function DashboardPage() {
           <CardContent>
             <div className="grid gap-3 md:grid-cols-4">
               {[
-                ["连接器", "管理外部 API、鉴权、健康检查", connectors.length],
-                ["工具库", "包装为 Agent 可调用工具契约", tools.length],
-                ["MCP 服务", "将工具挂载为统一 Endpoint", mcpServices.length],
-                ["调用日志", "记录每次调用和版本快照", logs.length],
-              ].map(([title, desc, count]) => (
+                ["连接器", connectors.length],
+                ["工具库", tools.length],
+                ["MCP 服务", mcpServices.length],
+                ["调用日志", logs.length],
+              ].map(([title, count]) => (
                 <div key={title} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                   <div className="text-sm font-semibold text-slate-950">{title}</div>
                   <div className="mt-1 text-2xl font-semibold">{count}</div>
-                  <p className="mt-2 text-xs leading-5 text-slate-500">{desc}</p>
                 </div>
               ))}
             </div>
@@ -69,14 +67,14 @@ export function DashboardPage() {
               <AlertTriangle className="mt-0.5 h-4 w-4 text-red-600" />
               <div>
                 <div className="text-sm font-medium text-red-900">构建结果校验服务异常</div>
-                <p className="mt-1 text-xs leading-5 text-red-700">关联旧版工具验证 MCP，最近一次调用返回 504。</p>
+                <p className="mt-1 text-xs leading-5 text-red-700">最近一次调用返回 504。</p>
               </div>
             </div>
             <div className="flex gap-3 rounded-lg border border-amber-100 bg-amber-50 p-3">
               <Timer className="mt-0.5 h-4 w-4 text-amber-600" />
               <div>
                 <div className="text-sm font-medium text-amber-900">知识工程测试 MCP 密钥待轮换</div>
-                <p className="mt-1 text-xs leading-5 text-amber-700">服务当前停用，不影响生产 Agent。</p>
+                <p className="mt-1 text-xs leading-5 text-amber-700">服务当前停用。</p>
               </div>
             </div>
           </CardContent>
