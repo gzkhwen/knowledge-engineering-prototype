@@ -8,7 +8,6 @@ import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { Dialog } from "../../components/shared/dialog";
 import { FormField } from "../../components/shared/form-field";
-import { PageHeader } from "../../components/shared/page-header";
 import { StatusBadge } from "../../components/shared/status-badge";
 
 type ServiceRow = (typeof mcpServices)[number];
@@ -123,22 +122,18 @@ export function McpServicesPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="MCP 服务"
-        actions={
-          <Button onClick={startCreate}>
-            <Plus className="h-4 w-4" />
-            新建 MCP 服务
-          </Button>
-        }
-      />
-
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>服务列表</CardTitle>
-          <div className="relative w-full max-w-xs">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <Input className="pl-9" placeholder="搜索服务、Endpoint、授权对象" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+          <div className="flex w-full max-w-xl items-center justify-end gap-2">
+            <div className="relative w-full max-w-xs">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <Input className="pl-9" placeholder="搜索服务、Endpoint、授权对象" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+            </div>
+            <Button onClick={startCreate}>
+              <Plus className="h-4 w-4" />
+              新建 MCP 服务
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">

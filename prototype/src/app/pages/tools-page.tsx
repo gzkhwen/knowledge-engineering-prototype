@@ -8,7 +8,6 @@ import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { Dialog } from "../../components/shared/dialog";
 import { FormField } from "../../components/shared/form-field";
-import { PageHeader } from "../../components/shared/page-header";
 import { StatusBadge } from "../../components/shared/status-badge";
 
 type ToolRow = (typeof tools)[number];
@@ -46,9 +45,14 @@ const versionRows = [
 
 export function ToolsPage() {
   const [rows, setRows] = useState<ToolRow[]>(tools);
+  const [categories, setCategories] = useState(toolCategories);
   const [keyword, setKeyword] = useState("");
   const [activeCategory, setActiveCategory] = useState("全部工具");
   const [dialogMode, setDialogMode] = useState<"create" | "edit" | null>(null);
+  const [categoryDialogMode, setCategoryDialogMode] = useState<"create" | "edit" | null>(null);
+  const [editingCategory, setEditingCategory] = useState<{ id: string; name: string } | null>(null);
+  const [categoryName, setCategoryName] = useState("");
+  const [deleteCategoryTarget, setDeleteCategoryTarget] = useState<{ id: string; name: string } | null>(null);
   const [editing, setEditing] = useState<ToolRow | null>(null);
   const [form, setForm] = useState(newToolForm);
   const [inputRows, setInputRows] = useState(defaultInputs);
@@ -67,12 +71,53 @@ export function ToolsPage() {
 
   const categoryCounts = useMemo(
     () =>
-      toolCategories.map((category) => ({
+      categories.map((category) => ({
         ...category,
         count: category.name === "全部工具" ? rows.length : rows.filter((tool) => tool.category === category.name).length,
       })),
-    [rows],
+    [categories, rows],
   );
+
+  const startCreateCategory = () => {
+    setEditingCategory(null);
+    setCategoryName("");
+    setCategoryDialogMode("create");
+  };
+
+  const startEditCategory = (category: { id: string; name: string }) => {
+    if (category.name === "全部工具") return;
+    setEditingCategory(category);
+    setCategoryName(category.name);
+    setCategoryDialogMode("edit");
+  };
+
+  const saveCategory = () => {
+    const name = categoryName.trim() || "未命名分类";
+    if (categoryDialogMode === "edit" && editingCategory) {
+      setCategories((current) => current.map((item) => (item.id === editingCategory.id ? { ...item, name } : item)));
+      setRows((current) => current.map((tool) => (tool.category === editingCategory.name ? { ...tool, category: name } : tool)));
+      if (activeCategory === editingCategory.name) setActiveCategory(name);
+      toast.success("分类已更新");
+    } else {
+      setCategories((current) => [{ id: `cat-${Date.now()}`, name }, ...current.filter((item) => item.name !== "全部工具")]);
+      setActiveCategory(name);
+      toast.success("分类已创建");
+    }
+    setCategoryDialogMode(null);
+  };
+
+  const deleteCategory = () => {
+    if (!deleteCategoryTarget) return;
+    const fallback = "未分类";
+    setCategories((current) => {
+      const next = current.filter((item) => item.id !== deleteCategoryTarget.id);
+      return next.some((item) => item.name === fallback) ? next : [...next, { id: "uncategorized", name: fallback }];
+    });
+    setRows((current) => current.map((tool) => (tool.category === deleteCategoryTarget.name ? { ...tool, category: fallback } : tool)));
+    if (activeCategory === deleteCategoryTarget.name) setActiveCategory(fallback);
+    setDeleteCategoryTarget(null);
+    toast.success("分类已删除");
+  };
 
   const startCreate = () => {
     setEditing(null);
@@ -130,31 +175,36 @@ export function ToolsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="工具库"
-        actions={
-          <Button onClick={startCreate}>
-            <Plus className="h-4 w-4" />
-            新建工具
-          </Button>
-        }
-      />
-
       <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>分类管理</CardTitle>
+            <Button variant="outline" size="sm" onClick={startCreateCategory}>
+              <Plus className="h-4 w-4" />
+              新增
+            </Button>
           </CardHeader>
           <CardContent className="space-y-1">
             {categoryCounts.map((category) => (
-              <button
-                key={category.id}
-                className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm ${activeCategory === category.name ? "bg-slate-950 text-white" : "hover:bg-slate-100"}`}
-                onClick={() => setActiveCategory(category.name)}
-              >
-                <span>{category.name}</span>
-                <span className={activeCategory === category.name ? "text-white" : "text-slate-500"}>{category.count}</span>
-              </button>
+              <div key={category.id} className={`group flex items-center gap-1 rounded-md ${activeCategory === category.name ? "bg-slate-950 text-white" : "hover:bg-slate-100"}`}>
+                <button
+                  className="flex min-w-0 flex-1 items-center justify-between px-3 py-2 text-left text-sm"
+                  onClick={() => setActiveCategory(category.name)}
+                >
+                  <span className="truncate">{category.name}</span>
+                  <span className={activeCategory === category.name ? "text-white" : "text-slate-500"}>{category.count}</span>
+                </button>
+                {category.name !== "全部工具" ? (
+                  <div className="flex pr-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <Button variant="ghost" size="icon" onClick={() => startEditCategory(category)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" onClick={() => setDeleteCategoryTarget(category)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             ))}
           </CardContent>
         </Card>
@@ -162,9 +212,15 @@ export function ToolsPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>工具列表</CardTitle>
-            <div className="relative w-full max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <Input className="pl-9" placeholder="搜索工具、连接器、状态" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+            <div className="flex w-full max-w-xl items-center justify-end gap-2">
+              <div className="relative w-full max-w-xs">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                <Input className="pl-9" placeholder="搜索工具、连接器、状态" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+              </div>
+              <Button onClick={startCreate}>
+                <Plus className="h-4 w-4" />
+                新建工具
+              </Button>
             </div>
           </CardHeader>
           <CardContent className="overflow-x-auto p-0">
@@ -315,6 +371,43 @@ export function ToolsPage() {
                 </table>
               </div>
             </section>
+          </div>
+        </Dialog>
+      ) : null}
+
+      {categoryDialogMode ? (
+        <Dialog
+          title={categoryDialogMode === "create" ? "新增分类" : "编辑分类"}
+          width="md"
+          onClose={() => setCategoryDialogMode(null)}
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setCategoryDialogMode(null)}>取消</Button>
+              <Button onClick={saveCategory}>保存</Button>
+            </>
+          }
+        >
+          <FormField label="分类名称">
+            <Input value={categoryName} onChange={(event) => setCategoryName(event.target.value)} />
+          </FormField>
+        </Dialog>
+      ) : null}
+
+      {deleteCategoryTarget ? (
+        <Dialog
+          title="确认删除分类"
+          width="md"
+          onClose={() => setDeleteCategoryTarget(null)}
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setDeleteCategoryTarget(null)}>取消</Button>
+              <Button variant="destructive" onClick={deleteCategory}>确认删除</Button>
+            </>
+          }
+        >
+          <div className="space-y-3 text-sm text-slate-700">
+            <p>删除分类后，该分类下工具会移动到“未分类”。</p>
+            <div className="rounded-lg border border-slate-200 p-3 font-medium text-slate-950">{deleteCategoryTarget.name}</div>
           </div>
         </Dialog>
       ) : null}

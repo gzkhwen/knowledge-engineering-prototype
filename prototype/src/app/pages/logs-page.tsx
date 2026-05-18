@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Input } from "../../components/ui/input";
 import { DetailPanel } from "../../components/shared/detail-panel";
 import { FieldRow } from "../../components/shared/field-row";
-import { PageHeader } from "../../components/shared/page-header";
 import { StatusBadge } from "../../components/shared/status-badge";
 
 export function LogsPage() {
@@ -19,9 +18,6 @@ export function LogsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="调用日志"
-      />
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>日志列表</CardTitle>

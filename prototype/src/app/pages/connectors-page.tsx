@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Input } from "../../components/ui/input";
 import { Dialog } from "../../components/shared/dialog";
 import { FormField } from "../../components/shared/form-field";
-import { PageHeader } from "../../components/shared/page-header";
 import { StatusBadge } from "../../components/shared/status-badge";
 
 type ConnectorRow = (typeof connectors)[number];
@@ -154,10 +153,14 @@ export function ConnectorsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="连接器"
-        actions={
-          <>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>连接器列表</CardTitle>
+          <div className="flex w-full max-w-2xl items-center justify-end gap-2">
+            <div className="relative w-full max-w-xs">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <Input className="pl-9" placeholder="搜索连接器、类型、状态" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
+            </div>
             <Button variant="outline" onClick={checkAll}>
               <RefreshCw className="h-4 w-4" />
               检查全部连接器
@@ -166,16 +169,6 @@ export function ConnectorsPage() {
               <Plus className="h-4 w-4" />
               新建连接器
             </Button>
-          </>
-        }
-      />
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>连接器列表</CardTitle>
-          <div className="relative w-full max-w-xs">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <Input className="pl-9" placeholder="搜索连接器、类型、状态" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
           </div>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
