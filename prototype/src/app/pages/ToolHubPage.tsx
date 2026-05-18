@@ -70,8 +70,6 @@ import { toast } from "sonner";
 type ToolStatus = "enabled" | "disabled";
 type VersionStatus = "wait_debug" | "pending" | "published" | "stopped";
 type CategoryEditorMode = "create" | "edit";
-type VersionDetailTab = "config" | "mcp" | "api" | "ui" | "flow";
-
 interface ToolVersion {
   id: string;
   versionCode?: string;
@@ -484,7 +482,7 @@ const MODEL_RESOURCE_SOURCE_OPTIONS: Array<{ key: ModelResourceSource; label: st
   { key: "gitlab", label: "GitLab 仓库" },
   { key: "deployed", label: "已部署模型目录" },
 ];
-const VERSION_STEPS = ["基本信息", "工具 API 接入", "接口参数配置", "操作交互设置", "处理流程设置"];
+const VERSION_STEPS = ["基本信息", "工具 API 接入", "接口参数配置"];
 const PROGRESS_RULE_MATCH_MODE_OPTIONS: ProgressRuleMatchMode[] = ["status", "event_code", "node_key", "result.code"];
 const SYSTEM_EVENT_OPTIONS = [
   "任务创建",
@@ -3478,7 +3476,6 @@ export function ToolHubDetailPage() {
   const [selectedCategory, setSelectedCategory] = useState(loadSelectedCategory);
   const [versionCreateOpen, setVersionCreateOpen] = useState(false);
   const [versionDetailOpen, setVersionDetailOpen] = useState(false);
-  const [versionDetailTab, setVersionDetailTab] = useState<VersionDetailTab>("config");
   const [debugDrawerOpen, setDebugDrawerOpen] = useState(false);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [editingVersionId, setEditingVersionId] = useState<string | null>(null);
@@ -3631,7 +3628,6 @@ export function ToolHubDetailPage() {
 
   const openVersionDetail = (versionId: string) => {
     setSelectedVersionId(versionId);
-    setVersionDetailTab("config");
     setVersionDetailOpen(true);
   };
 
@@ -3807,86 +3803,6 @@ export function ToolHubDetailPage() {
         if (!item.description.trim()) {
           toast.error("字段说明不能为空");
           return false;
-        }
-      }
-    }
-
-    if (step === 3) {
-      const mappedParams = versionDraft.rawInputParams.filter((item) => item.handlingMode === "mapped");
-      if (mappedParams.length > 0 && versionDraft.operationDisplay.editableFields.length === 0) {
-        toast.error("请补全工具 UI 设置");
-        return false;
-      }
-      const missingUiConfig = versionDraft.operationDisplay.editableFields.some((field) => !field.uiComponent);
-      if (missingUiConfig) {
-        toast.error("请为标准参数选择展示方式");
-        return false;
-      }
-      for (const field of versionDraft.operationDisplay.editableFields) {
-        if (!field.displayName.trim()) {
-          toast.error("请填写参数显示名称");
-          return false;
-        }
-        if (!field.uiComponent || !SELECTABLE_UI_COMPONENTS.includes(field.uiComponent)) continue;
-        const optionItems = getUiOptions(field);
-        if (optionItems.length === 0) {
-          toast.error(`${field.displayName} 至少需要配置一个选项`);
-          return false;
-        }
-        const optionValues = new Set<string>();
-        for (const option of optionItems) {
-          if (!option.label.trim() || !option.value.trim()) {
-            toast.error(`${field.displayName} 的选项展示名称和选项提交值不能为空`);
-            return false;
-          }
-          if (optionValues.has(option.value.trim())) {
-            toast.error(`${field.displayName} 的选项提交值不能重复`);
-            return false;
-          }
-          optionValues.add(option.value.trim());
-        }
-      }
-    }
-
-    if (step === 4 && mode === "submit") {
-      if (versionDraft.progressNodes.length === 0) {
-        toast.error("请至少配置一个流程节点");
-        return false;
-      }
-      const nodeKeys = new Set<string>();
-      for (const node of versionDraft.progressNodes) {
-        if (!node.name.trim()) {
-          toast.error("请填写节点名称");
-          return false;
-        }
-        if (nodeKeys.has(node.key.trim())) {
-          toast.error("节点标识不能重复");
-          return false;
-        }
-        nodeKeys.add(node.key.trim());
-        if (node.statuses.length === 0) {
-          toast.error(`${node.name} 至少需要配置一个状态`);
-          return false;
-        }
-        const statusNames = new Set<string>();
-        for (const status of node.statuses) {
-          if (!status.name.trim()) {
-            toast.error(`${node.name} 存在未命名状态`);
-            return false;
-          }
-          if (statusNames.has(status.name.trim())) {
-            toast.error(`${node.name} 的状态名称不能重复`);
-            return false;
-          }
-          statusNames.add(status.name.trim());
-	          if (!getProgressStatusMatchMode(status)) {
-	            toast.error(`请选择 ${node.name} - ${status.name} 的 API 字段`);
-	            return false;
-	          }
-          if (!status.rule.trim()) {
-            toast.error(`请填写 ${node.name} - ${status.name} 的匹配值`);
-            return false;
-          }
         }
       }
     }
@@ -4503,7 +4419,7 @@ export function ToolHubDetailPage() {
 
   const createVersion = () => {
     if (!tool) return;
-    if (!validateStep(0) || !validateStep(1) || !validateStep(2, "submit") || !validateStep(3, "submit") || !validateStep(4, "submit")) return;
+    if (!validateStep(0) || !validateStep(1) || !validateStep(2, "submit")) return;
     const baseVersion = editingVersion;
 
     const packageSummary = `工具API=${versionDraft.httpServiceAddress || "未配置"}${versionDraft.httpPath || ""}`;
@@ -5374,17 +5290,6 @@ export function ToolHubDetailPage() {
               </Step>
             ))}
           </Stepper>
-                  {wizardStep === 3 && (
-                    <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5, mb: 2 }}>
-                      定义工具交互UI，所有需要向用户提供交互的地方都使用此配置。
-                    </Alert>
-                  )}
-                  {wizardStep === 4 && (
-                    <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5, mb: 2 }}>
-                      定义工具处理流程，Agent和业务系统可查询流程链路和进展。
-                    </Alert>
-                  )}
-
           {wizardStep === 0 && (
             <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
               <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827", mb: 2 }}>基本信息</Typography>
@@ -5670,394 +5575,6 @@ export function ToolHubDetailPage() {
             </Box>
           )}
 
-          {wizardStep === 3 && (
-            <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(320px, 1fr)", gap: 2, alignItems: "start" }}>
-              <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-                <Box sx={{ mb: 2 }}>
-	                  <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>操作交互设置</Typography>
-	                  <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
-	                    按照标准参数设置面向用户的操作交互。
-	                  </Typography>
-                </Box>
-
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  {versionDraft.operationDisplay.editableFields.length === 0 && (
-                    <Box sx={{ p: 3, border: "1px dashed #cbd5e1", borderRadius: "8px", bgcolor: "#f8fafc", textAlign: "center" }}>
-                      <Typography sx={{ fontSize: "13px", color: "#64748b" }}>第三步暂无可配置的标准入参</Typography>
-                    </Box>
-                  )}
-
-                  {versionDraft.operationDisplay.editableFields.map((field, index) => {
-                    const rawInput = versionDraft.rawInputParams.find((item) => item.handlingMode === "mapped" && item.mappedParamName === field.sourceField);
-                    const fieldUiComponent = normalizeToolUiComponent(field.uiComponent) || inferToolUiComponent({
-                      id: field.id,
-                      paramName: field.displayName,
-                      paramDesc: field.description,
-                      paramType: "文本",
-                      groupName: field.groupName,
-                      defaultValue: "",
-                      required: field.required,
-                      editableInOperation: field.editable,
-                      validationRule: "",
-                      displayCondition: "",
-                    });
-                    const fieldOptions = getUiOptions(field);
-                    return (
-                      <Paper
-                        key={field.id}
-                        draggable
-                        onDragStart={() => setDraggingUiFieldIndex(index)}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={() => {
-                          if (draggingUiFieldIndex !== null) moveUiField(draggingUiFieldIndex, index);
-                          setDraggingUiFieldIndex(null);
-                        }}
-                        onDragEnd={() => setDraggingUiFieldIndex(null)}
-                        sx={{
-                          p: 1.5,
-                          borderRadius: "8px",
-                          border: draggingUiFieldIndex === index ? `1px solid ${BLUE}` : "1px solid #e5e7eb",
-                          boxShadow: "none",
-                          bgcolor: "#fff",
-                          cursor: "grab",
-                        }}
-                      >
-                        <Box sx={{ display: "grid", gridTemplateColumns: "24px minmax(0, 1.15fr) 88px minmax(0, 1fr) 142px", gap: 1.25, alignItems: "center" }}>
-                          <Tooltip title="拖动调整字段顺序" placement="top">
-                            <Box
-                              sx={{
-                                width: 24,
-                                height: 32,
-                                borderRadius: "6px",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                color: "#94a3b8",
-                                cursor: "grab",
-                                "&:hover": { bgcolor: "#f1f5f9", color: "#64748b" },
-                              }}
-                            >
-                              <MoreHoriz sx={{ fontSize: 18, transform: "rotate(90deg)" }} />
-                            </Box>
-                          </Tooltip>
-                          <Box sx={{ minWidth: 0 }}>
-                            <Typography sx={{ fontSize: "11px", color: "#94a3b8", mb: 0.25 }}>参数名称</Typography>
-                            <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{field.sourceField}</Typography>
-                          </Box>
-                          <Box sx={{ minWidth: 0 }}>
-                            <Typography sx={{ fontSize: "11px", color: "#94a3b8", mb: 0.25 }}>参数类型</Typography>
-                            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, minWidth: 0 }}>
-                              <Typography sx={{ fontSize: "13px", color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rawInput?.inputType || "-"}</Typography>
-                              <Chip
-                                label={field.required ? "必填" : "选填"}
-                                size="small"
-                                sx={{ height: 18, fontSize: "10px", bgcolor: field.required ? "#fef2f2" : "#f1f5f9", color: field.required ? "#dc2626" : "#64748b", "& .MuiChip-label": { px: 0.5 } }}
-                              />
-                            </Box>
-                          </Box>
-                          <TextField
-                            required
-                            fullWidth
-                            size="small"
-                            label="显示名称"
-                            value={field.displayName}
-                            onChange={(event) => updateUiFieldDisplayName(field.id, event.target.value)}
-                            sx={{ minWidth: 0, "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "13px" }, "& .MuiInputLabel-root": { fontSize: "13px" } }}
-                          />
-                          <TextField
-                            select
-                            fullWidth
-                            size="small"
-                            label="配置操作"
-                            value={fieldUiComponent}
-                            onChange={(event) => updateUiFieldComponent(field.id, event.target.value as ToolUiComponent)}
-                            sx={{ minWidth: 0, "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "13px" }, "& .MuiInputLabel-root": { fontSize: "13px" } }}
-                          >
-                            {TOOL_UI_COMPONENT_OPTIONS.map((item) => (
-                              <MenuItem key={item} value={item} sx={{ fontSize: "13px" }}>{item}</MenuItem>
-                            ))}
-                          </TextField>
-                        </Box>
-                        {SELECTABLE_UI_COMPONENTS.includes(fieldUiComponent) && (
-                          <Box sx={{ mt: 1.5, pt: 1.5, borderTop: "1px dashed #e5e7eb" }}>
-                            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-                              <Box>
-                                <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>选项配置表</Typography>
-                                <Typography sx={{ fontSize: "11px", color: "#94a3b8", mt: 0.25 }}>选项展示名称给运营端看，选项提交值保存为标准参数值。</Typography>
-                              </Box>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                startIcon={<Add sx={{ fontSize: 14 }} />}
-                                onClick={() => addUiFieldOption(field.id)}
-                                sx={{ borderRadius: "6px", textTransform: "none", fontSize: "12px" }}
-                              >
-                                添加选项
-                              </Button>
-                            </Box>
-                            <TableContainer sx={{ border: "1px solid #e5e7eb", borderRadius: "8px", overflow: "hidden" }}>
-                              <Table size="small">
-	                                <TableHead>
-	                                  <TableRow sx={{ bgcolor: "#f8fafc" }}>
-	                                    {["选项展示名称", "选项提交值", "操作"].map((head) => (
-	                                      <TableCell key={head} sx={{ fontSize: "11px", color: "#64748b", fontWeight: 600, py: 0.75 }}>{head}</TableCell>
-	                                    ))}
-	                                  </TableRow>
-	                                </TableHead>
-	                                <TableBody>
-	                                  {fieldOptions.map((option) => (
-	                                      <TableRow key={option.id}>
-	                                        <TableCell sx={{ width: "38%", py: 0.75 }}>
-	                                          <TextField
-	                                            size="small"
-	                                            value={option.label}
-                                            onChange={(event) => updateUiFieldOption(field.id, option.id, { label: event.target.value })}
-                                            sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
-	                                          />
-	                                        </TableCell>
-	                                        <TableCell sx={{ py: 0.75 }}>
-	                                          <TextField
-	                                            size="small"
-	                                            value={option.value}
-                                            onChange={(event) => updateUiFieldOption(field.id, option.id, { value: event.target.value })}
-	                                            sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px", fontFamily: "monospace" } }}
-	                                          />
-	                                        </TableCell>
-	                                        <TableCell sx={{ width: 64, py: 0.75 }}>
-	                                          <IconButton size="small" onClick={() => deleteUiFieldOption(field.id, option.id)} disabled={fieldOptions.length <= 1}>
-	                                            <Delete sx={{ fontSize: 16 }} />
-                                          </IconButton>
-	                                        </TableCell>
-	                                      </TableRow>
-	                                  ))}
-	                                </TableBody>
-                              </Table>
-                            </TableContainer>
-                          </Box>
-                        )}
-                      </Paper>
-                    );
-                  })}
-                </Box>
-              </Paper>
-
-              <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)", position: "sticky", top: 0 }}>
-                <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827", mb: 0.5 }}>效果预览</Typography>
-                <Typography sx={{ fontSize: "12px", color: "#6b7280", mb: 2 }}>用户在界面上使用时，交互操作如下方预览所示。</Typography>
-                {renderOperationCard({
-                  fields: versionDraft.operationDisplay.editableFields,
-                  versionLabel: versionDraft.version,
-                  values: operationPreviewValues,
-                  onValueChange: (fieldId, value) => setOperationPreviewValues((prev) => ({ ...prev, [fieldId]: value })),
-                  emptyText: "当前没有展示字段",
-                })}
-              </Paper>
-            </Box>
-          )}
-
-          {wizardStep === 4 && (
-            <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(320px, 1fr)", gap: 2, alignItems: "start" }}>
-              <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2 }}>
-                  <Box>
-	                    <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>流程节点</Typography>
-	                    <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
-	                      定义关键的流程节点，用于使用者获取和查看任务处理进度。
-	                    </Typography>
-                  </Box>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<Add sx={{ fontSize: 14 }} />}
-                    onClick={addProgressNode}
-                    sx={{ borderRadius: "6px", textTransform: "none", fontSize: "12px", flexShrink: 0 }}
-                  >
-                    添加节点
-                  </Button>
-                </Box>
-
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  {versionDraft.progressNodes.length === 0 && (
-                    <Box sx={{ p: 3, border: "1px dashed #cbd5e1", borderRadius: "8px", bgcolor: "#f8fafc", textAlign: "center" }}>
-	                      <Typography sx={{ fontSize: "13px", color: "#64748b" }}>暂无流程节点</Typography>
-                    </Box>
-                  )}
-                  {versionDraft.progressNodes.map((node, index) => (
-                      <Paper
-                        key={node.id}
-                        draggable
-                        onDragStart={() => setDraggingProgressNodeIndex(index)}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={() => {
-                          if (draggingProgressNodeIndex !== null) moveProgressNode(draggingProgressNodeIndex, index);
-                          setDraggingProgressNodeIndex(null);
-                        }}
-                        onDragEnd={() => setDraggingProgressNodeIndex(null)}
-                        sx={{
-                          p: 1.5,
-                          borderRadius: "8px",
-                          border: draggingProgressNodeIndex === index ? `1px solid ${BLUE}` : "1px solid #e5e7eb",
-                          boxShadow: "none",
-                          bgcolor: "#fff",
-                          cursor: "grab",
-                        }}
-                      >
-                        <Box sx={{ display: "grid", gridTemplateColumns: "24px minmax(0, 1fr) 36px", gap: 1.5, alignItems: "center" }}>
-                          <Tooltip title="拖动调整节点顺序" placement="top">
-                            <Box
-                              sx={{
-                                width: 24,
-                                height: 32,
-                                borderRadius: "6px",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                color: "#94a3b8",
-                                cursor: "grab",
-                                "&:hover": { bgcolor: "#f1f5f9", color: "#64748b" },
-                              }}
-                            >
-                              <MoreHoriz sx={{ fontSize: 18, transform: "rotate(90deg)" }} />
-                            </Box>
-                          </Tooltip>
-
-                          <Box sx={{ minWidth: 0 }}>
-                            <Box>
-                              <Typography sx={{ fontSize: "11px", color: "#94a3b8", mb: 0.25 }}>处理节点</Typography>
-                              <TextField
-                                size="small"
-                                required
-                                value={node.name}
-                                onChange={(event) => updateProgressNode(node.id, { name: event.target.value })}
-                                sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "13px" } }}
-                              />
-                            </Box>
-                          </Box>
-
-                          {versionDraft.progressNodes.length > 1 ? (
-                            <Tooltip title="删除节点" placement="top">
-                              <IconButton
-                                size="small"
-                                onClick={() => deleteProgressNode(node.id)}
-                                sx={{
-                                  width: 32,
-                                  height: 32,
-                                  color: "#94a3b8",
-                                  "&:hover": { color: "#ef4444", bgcolor: "#fef2f2" },
-                                }}
-                              >
-                                <Delete sx={{ fontSize: 16 }} />
-                              </IconButton>
-                            </Tooltip>
-                          ) : <Box sx={{ width: 32, height: 32 }} />}
-                        </Box>
-
-                        <Box sx={{ mt: 1.5, pt: 1.5, borderTop: "1px dashed #e5e7eb" }}>
-                            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-                              <Box>
-                                <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>状态配置表</Typography>
-                                <Typography sx={{ fontSize: "11px", color: "#94a3b8", mt: 0.25 }}>按工具 API 回调或响应中的结构化字段匹配节点状态。</Typography>
-                              </Box>
-                              <Button size="small" variant="outlined" startIcon={<Add sx={{ fontSize: 14 }} />} onClick={() => addProgressStatus(node.id)} sx={{ borderRadius: "6px", textTransform: "none", fontSize: "12px", flexShrink: 0 }}>
-                                添加状态
-                              </Button>
-                            </Box>
-	                            <TableContainer sx={{ border: "1px solid #e5e7eb", borderRadius: "8px", overflow: "hidden" }}>
-	                              <Table size="small">
-	                                <TableHead>
-	                                  <TableRow sx={{ bgcolor: "#f8fafc" }}>
-	                                    {["状态名称", "API字段", "匹配值", "操作"].map((head) => (
-	                                      <TableCell key={head} sx={{ fontSize: "11px", color: "#64748b", fontWeight: 600, py: 0.75 }}>{head}</TableCell>
-	                                    ))}
-	                                  </TableRow>
-                                </TableHead>
-	                                <TableBody>
-	                                  {node.statuses.map((status) => (
-	                                    (() => {
-	                                      const matchMode = getProgressStatusMatchMode(status);
-	                                      return (
-	                                        <TableRow key={status.id}>
-	                                          <TableCell sx={{ width: "22%", py: 0.75 }}>
-	                                            <TextField
-	                                              size="small"
-	                                              value={status.name}
-	                                              onChange={(event) => updateProgressStatus(node.id, status.id, { name: event.target.value })}
-	                                              sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
-	                                            />
-	                                          </TableCell>
-	                                          <TableCell sx={{ width: "24%", py: 0.75 }}>
-	                                              <TextField
-	                                                select
-	                                                size="small"
-	                                                value={matchMode}
-	                                                onChange={(event) => updateProgressStatus(node.id, status.id, { matchMode: event.target.value as ProgressRuleMatchMode })}
-	                                                sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
-	                                              >
-	                                                {PROGRESS_RULE_MATCH_MODE_OPTIONS.map((item) => (
-	                                                  <MenuItem key={item} value={item} sx={{ fontSize: "13px" }}>{item}</MenuItem>
-	                                                ))}
-	                                              </TextField>
-	                                          </TableCell>
-	                                          <TableCell sx={{ py: 0.75 }}>
-	                                              <TextField
-	                                                size="small"
-	                                                value={getProgressStatusRule(status)}
-	                                                onChange={(event) => updateProgressStatus(node.id, status.id, { rule: event.target.value })}
-	                                                sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px", fontFamily: "monospace" } }}
-	                                              />
-	                                          </TableCell>
-	                                          <TableCell sx={{ width: 56, py: 0.75 }}>
-	                                            {node.statuses.length > 1 && (
-	                                              <IconButton size="small" onClick={() => deleteProgressStatus(node.id, status.id)}>
-	                                                <Delete sx={{ fontSize: 16 }} />
-	                                              </IconButton>
-	                                            )}
-	                                          </TableCell>
-	                                        </TableRow>
-	                                      );
-	                                    })()
-	                                  ))}
-                                </TableBody>
-                              </Table>
-                            </TableContainer>
-                          </Box>
-                      </Paper>
-                  ))}
-                </Box>
-              </Paper>
-
-	              <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)", position: "sticky", top: 0 }}>
-	                <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827", mb: 0.5 }}>效果预览</Typography>
-		                <Typography sx={{ fontSize: "12px", color: "#6b7280", mb: 2 }}>当前版本处理流程进度预览。</Typography>
-	                <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-	                  {versionDraft.progressNodes.map((node, index) => {
-	                    const state = index === 0 ? "success" : "pending";
-	                    const statusConfig = state === "pending" ? null : node.statuses.find((status) => status.key === state);
-		                    const chipLabel = state === "pending" ? "待执行" : statusConfig?.name || "成功";
-		                    return (
-		                      <Box key={node.id} sx={{ position: "relative" }}>
-		                        <Box sx={{ display: "grid", gridTemplateColumns: "32px minmax(0, 1fr)", gap: 1.5, alignItems: "center", p: 1.5, border: "1px solid #e5e7eb", borderRadius: "10px", bgcolor: "#fff" }}>
-		                          <Box sx={{ width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 700, color: state === "pending" ? "#64748b" : "#fff", bgcolor: state === "success" ? "#22c55e" : "#cbd5e1" }}>
-		                            {index + 1}
-		                          </Box>
-		                          <Box sx={{ minWidth: 0 }}>
-		                            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
-	                              <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827", lineHeight: 1.5, wordBreak: "break-word" }}>{node.name}</Typography>
-	                              <Chip
-	                                label={chipLabel}
-	                                size="small"
-	                                sx={{ height: 22, fontSize: "11px", bgcolor: state === "success" ? "#dcfce7" : "#f1f5f9", color: state === "success" ? "#166534" : "#64748b", flexShrink: 0 }}
-	                              />
-	                            </Box>
-	                          </Box>
-	                        </Box>
-	                      </Box>
-	                    );
-	                  })}
-	                </Box>
-	              </Paper>
-            </Box>
-          )}
 
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2, borderTop: "1px solid #e5e7eb", justifyContent: "flex-end", gap: 1 }}>
@@ -6080,99 +5597,8 @@ export function ToolHubDetailPage() {
         PaperProps={{ sx: { width: 860, p: 3, bgcolor: "#f8fafc", zIndex: SECONDARY_DRAWER_Z_INDEX + 1 } }}
       >
         {selectedVersion && (() => {
-	          const runtimeInfo = getVersionRuntimeInfo(selectedVersion);
 	          const versionName = selectedVersion.deliveryName || selectedVersion.configFields.find((field) => field.name === "版本名称")?.value || "-";
 	          const versionCode = selectedVersion.versionCode || buildVersionCode(tool.toolCode, selectedVersion.version);
-	          const operationFields = selectedVersion.operationDisplay?.editableFields ?? [];
-	          const progressNodes = (selectedVersion.progressNodes ?? []).slice().sort((a, b) => a.order - b.order);
-            const generatedAt = selectedVersion.updatedAt || selectedVersion.createdAt || "2026-05-15 10:30:00";
-            const inputSchema = buildVersionInputSchema(selectedVersion);
-            const outputSchema = buildVersionOutputSchema(selectedVersion);
-            const inputExample = buildVersionInputExample(selectedVersion);
-            const outputExample = buildVersionOutputExample(selectedVersion);
-            const uiSchema = buildVersionUiSchema(selectedVersion);
-            const flowSchema = buildVersionFlowSchema(selectedVersion);
-            const mcpToolDefinition = {
-              name: tool.toolCode,
-              title: tool.name,
-              description: selectedVersion.versionDesc || tool.capabilitySummary,
-              inputSchema: {
-                ...inputSchema,
-                properties: {
-                  toolhub_version_id: {
-                    type: "string",
-                    description: "可选。指定调用某个工具版本；不传时默认使用当前推荐版本。",
-                    default: versionCode,
-                  },
-                  ...inputSchema.properties,
-                },
-              },
-              outputSchema,
-              annotations: {
-                title: tool.name,
-                "toolhub/tool_id": tool.toolCode,
-                "toolhub/version_id": versionCode,
-                "toolhub/generated_at": generatedAt,
-              },
-            };
-            const mcpCallExample = {
-              jsonrpc: "2.0",
-              id: "call-001",
-              method: "tools/call",
-              params: {
-                name: tool.toolCode,
-                arguments: {
-                  toolhub_version_id: versionCode,
-                  ...inputExample,
-                },
-              },
-            };
-            const apiRequestExample = {
-              tool_id: tool.toolCode,
-              version_id: versionCode,
-              request_id: "REQ-20260515-0001",
-              input: inputExample,
-              callback_url: selectedVersion.asyncMode === "同步调用" ? undefined : "https://biz.example.com/toolhub/callback",
-            };
-            const apiResponseExample = {
-              run_id: "RUN-20260515-0001",
-              tool_id: tool.toolCode,
-              version_id: versionCode,
-              status: "success",
-              result: outputExample,
-              trace: {
-                record_url: `/admin/tool-hub/run-records?run_id=RUN-20260515-0001`,
-                generated_from: "当前版本最新配置",
-              },
-            };
-            const apiErrorExample = {
-              run_id: "RUN-20260515-0002",
-              status: "failed",
-              error: {
-                code: "TOOL_EXECUTION_FAILED",
-                message: "工具执行失败，请查看运行记录和流程节点日志",
-              },
-            };
-            const flowDefinitionRequest = {
-              method: "GET",
-              url: `/api/toolhub/v1/tools/${tool.toolCode}/versions/${versionCode}/process-flow`,
-            };
-            const taskProgressRequest = {
-              method: "GET",
-              url: "/api/toolhub/v1/runs/RUN-20260515-0001/progress",
-            };
-            const taskProgressResponse = {
-              run_id: "RUN-20260515-0001",
-              status: "running",
-              current_node: flowSchema.nodes[1]?.nodeId || flowSchema.nodes[0]?.nodeId || "node_1",
-              nodes: flowSchema.nodes.map((node, index) => ({
-                nodeId: node.nodeId,
-                nodeName: node.nodeName,
-                status: index === 0 ? "success" : index === 1 ? "running" : "pending",
-                message: index === 1 ? "当前节点处理中" : index === 0 ? "节点已完成" : "等待执行",
-                updatedAt: index <= 1 ? generatedAt : undefined,
-              })),
-            };
 	          const detailBlock = (title: string, rows: Array<[string, ReactNode]>) => (
             <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
               <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827", mb: 1.25 }}>{title}</Typography>
@@ -6186,42 +5612,6 @@ export function ToolHubDetailPage() {
               </Box>
             </Paper>
           );
-            const codePreview = (title: string, content: unknown, copyLabel: string) => {
-              const text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
-              return (
-                <Paper sx={{ borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff", overflow: "hidden" }}>
-                  <Box sx={{ px: 1.5, py: 1, borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
-                    <Typography sx={{ fontSize: "12px", fontWeight: 700, color: "#111827" }}>{title}</Typography>
-                    <Button
-                      size="small"
-                      variant="text"
-                      startIcon={<ContentCopy sx={{ fontSize: 14 }} />}
-                      onClick={() => copyText(text, copyLabel)}
-                      sx={{ minWidth: 0, textTransform: "none", fontSize: "12px", color: BLUE, borderRadius: "6px" }}
-                    >
-                      复制
-                    </Button>
-                  </Box>
-                  <Box
-                    component="pre"
-                    sx={{
-                      m: 0,
-                      p: 1.5,
-                      bgcolor: "#0f172a",
-                      color: "#e2e8f0",
-                      fontSize: "11px",
-                      lineHeight: 1.65,
-                      overflowX: "auto",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                      fontFamily: "Menlo, Monaco, Consolas, monospace",
-                    }}
-                  >
-                    {text}
-                  </Box>
-                </Paper>
-              );
-            };
 
           return (
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -6239,26 +5629,6 @@ export function ToolHubDetailPage() {
                 </IconButton>
               </Box>
 
-              <Tabs
-                value={versionDetailTab}
-                onChange={(_, value) => setVersionDetailTab(value as VersionDetailTab)}
-                sx={{
-                  minHeight: 36,
-                  borderBottom: "1px solid #e5e7eb",
-                  "& .MuiTab-root": { minHeight: 36, px: 1.5, textTransform: "none", fontSize: "13px", color: "#64748b" },
-                  "& .Mui-selected": { color: BLUE, fontWeight: 700 },
-                  "& .MuiTabs-indicator": { bgcolor: BLUE },
-                }}
-              >
-                <Tab value="config" label="版本配置" />
-                <Tab value="mcp" label="MCP 调用" />
-                <Tab value="api" label="工具执行 API" />
-                <Tab value="flow" label="标准流程 Schema" />
-                <Tab value="ui" label="标准交互 Schema" />
-              </Tabs>
-
-              {versionDetailTab === "config" && (
-                <>
               {detailBlock("基本信息", [
                 ["版本ID", (
                   <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
@@ -6274,45 +5644,6 @@ export function ToolHubDetailPage() {
                 ["版本描述", selectedVersion.versionDesc || selectedVersion.summary],
                 ["创建人", selectedVersion.createdBy || "-"],
                 ["创建时间", selectedVersion.createdAt || "-"],
-              ])}
-
-              {selectedVersion.executionAccessMode === "external_http" ? detailBlock("API信息", [
-                ["API 根地址", selectedVersion.httpServiceAddress],
-                ["接口路径", `${selectedVersion.httpMethod || "POST"} ${selectedVersion.httpPath || "-"}`],
-                ["Content-Type", selectedVersion.httpContentType],
-                ["鉴权配置", selectedVersion.httpAuthConfig || "未配置"],
-              ]) : detailBlock("API信息", [
-                ["上传文件包", selectedVersion.packageFile || selectedVersion.packageName],
-              ])}
-
-              {selectedVersion.executionAccessMode !== "external_http" && detailBlock("部署配置", [
-                ["部署目录", selectedVersion.deploymentWorkdir || "ToolHub 自动分配版本目录"],
-                ["部署命令", selectedVersion.deploymentCommand],
-                ["环境变量", selectedVersion.deploymentEnv],
-                ["部署超时", selectedVersion.deploymentTimeout ? `${selectedVersion.deploymentTimeout} 秒` : undefined],
-              ])}
-
-              {selectedVersion.executionAccessMode === "external_http" ? detailBlock("异步与结果文件", [
-                ["调用模式", selectedVersion.asyncMode],
-                ["回调地址策略", selectedVersion.callbackPolicy],
-                ["固定回调地址", selectedVersion.callbackUrl],
-                ["任务标识字段", selectedVersion.asyncTaskIdField],
-                ["进度状态字段", selectedVersion.progressStatusField],
-                ["结果文件策略", selectedVersion.resultPathStrategy],
-                ["结果文件字段", selectedVersion.resultFileField],
-                ["单次调用超时", selectedVersion.httpTimeout ? `${selectedVersion.httpTimeout} 秒` : undefined],
-              ]) : detailBlock("运行配置", selectedVersion.runtimeMode === "script" ? [
-                ["运行方式", runtimeInfo.mode],
-                ["运行目录", selectedVersion.runtimeWorkdir],
-                ["入口文件", selectedVersion.scriptEntryFile],
-                ["入口函数", selectedVersion.scriptEntryFunction],
-                ["单次运行超时", selectedVersion.scriptTimeout],
-              ] : [
-                ["运行方式", runtimeInfo.mode],
-                ["运行目录", selectedVersion.runtimeWorkdir],
-                ["执行命令", selectedVersion.runtimeCommand],
-                ["单次运行超时", selectedVersion.runtimeTimeout],
-                ["环境变量", selectedVersion.runtimeEnv],
               ])}
 
               <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
@@ -6367,135 +5698,7 @@ export function ToolHubDetailPage() {
 	                  </TableBody>
 	                </Table>
 	              </Paper>
-
-                </>
-              )}
-
-              {versionDetailTab === "mcp" && (
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-	                  <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5 }}>
-	                    基于版本最新的配置，按MCP Tools规范生成的调用规则。
-	                  </Alert>
-	                  {detailBlock("接入摘要", [
-	                    ["MCP Server", "https://toolhub.example.com/mcp"],
-	                    ["Tool name", tool.toolCode],
-	                    ["工具ID", tool.toolCode],
-	                    ["版本ID", versionCode],
-	                    ["生成时间", generatedAt],
-	                    ["调用状态", selectedVersion.status === "published" ? "已发布，可正式调用" : selectedVersion.status === "stopped" ? "已停用，仅可查看追溯" : "预览规则，发布后生效"],
-	                  ])}
-                  {codePreview("tools/list 工具定义", mcpToolDefinition, "MCP 工具定义")}
-                  {codePreview("tools/call 调用示例", mcpCallExample, "MCP 调用示例")}
-                  {codePreview("structuredContent 返回 Schema", outputSchema, "MCP 返回 Schema")}
-                </Box>
-              )}
-
-              {versionDetailTab === "api" && (
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-	                  <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5 }}>
-	                    使用版本最新的配置生成的API调用规则。
-	                  </Alert>
-                  {detailBlock("接口摘要", [
-                    ["请求方式", "POST"],
-                    ["执行入口", `/api/toolhub/v1/tools/${tool.toolCode}/versions/${versionCode}/run`],
-                    ["工具ID", tool.toolCode],
-	                    ["版本ID", versionCode],
-	                    ["鉴权说明", "沿用 ToolHub 开放平台鉴权，按调用方应用授权控制"],
-	                    ["调用模式", selectedVersion.asyncMode],
-	                    ["调用状态", selectedVersion.status === "published" ? "已发布，可正式调用" : selectedVersion.status === "stopped" ? "已停用，不可新调用" : "预览规则，发布后生效"],
-	                  ])}
-                  {codePreview("请求示例", apiRequestExample, "工具执行 API 请求示例")}
-                  {codePreview("成功返回示例", apiResponseExample, "工具执行 API 成功返回示例")}
-                  {codePreview("失败返回示例", apiErrorExample, "工具执行 API 失败返回示例")}
-                </Box>
-              )}
-
-              {versionDetailTab === "ui" && (
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-	                  <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5 }}>
-	                    当前版本最新的交互设置，可用于渲染用户操作界面。
-	                  </Alert>
-	                  {detailBlock("Schema 摘要", [
-	                    ["Schema ID", `${versionCode}:operation_ui`],
-	                    ["生成时间", generatedAt],
-	                  ])}
-                  <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
-                    <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827", mb: 1.25 }}>字段清单</Typography>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          {["字段名", "显示名称", "组件", "类型", "必填", "选项/默认值"].map((head) => (
-                            <TableCell key={head} sx={{ fontSize: "12px", color: "#6b7280", fontWeight: 600, bgcolor: "#f9fafb" }}>{head}</TableCell>
-                          ))}
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {uiSchema.fields.map((field) => (
-                          <TableRow key={field.field}>
-                            <TableCell sx={{ fontSize: "12px", color: "#111827", fontFamily: "monospace", wordBreak: "break-all" }}>{field.field}</TableCell>
-                            <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{field.label}</TableCell>
-                            <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{field.component}</TableCell>
-                            <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{field.type}</TableCell>
-                            <TableCell sx={{ fontSize: "12px", color: field.required ? "#ef4444" : "#64748b" }}>{field.required ? "是" : "否"}</TableCell>
-                            <TableCell sx={{ fontSize: "12px", color: "#374151", wordBreak: "break-all" }}>
-                              {field.options?.length ? field.options.map((option) => `${option.label}=${option.value}`).join("；") : String(field.defaultValue || "-")}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-	                  </Paper>
-	                  {codePreview("UI Schema", uiSchema, "交互 UI Schema")}
-	                </Box>
-	              )}
-
-              {versionDetailTab === "flow" && (
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-	                  <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5 }}>
-	                    当前版本最新的标准处理流程，支持查询流程配置和执行进度。
-	                  </Alert>
-	                  {detailBlock("流程摘要", [
-	                    ["流程ID", `${versionCode}:process_flow`],
-	                    ["生成时间", generatedAt],
-	                  ])}
-		                  <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
-                    <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827", mb: 1.25 }}>流程节点</Typography>
-                    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                      {flowSchema.nodes.map((node, index) => (
-                        <Box key={node.nodeId} sx={{ p: 1.25, borderRadius: "8px", border: "1px solid #eef2f7", bgcolor: "#f8fafc" }}>
-	                          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 1, flexWrap: "wrap" }}>
-	                            <Typography sx={{ fontSize: "12px", fontWeight: 700, color: "#111827" }}>{index + 1}. {node.nodeName}</Typography>
-	                          </Box>
-                          <Table size="small">
-                            <TableHead>
-                              <TableRow>
-                                {["状态", "API字段", "匹配值", "提示文案"].map((head) => (
-                                  <TableCell key={head} sx={{ fontSize: "11px", color: "#64748b", fontWeight: 600, bgcolor: "#fff" }}>{head}</TableCell>
-                                ))}
-                              </TableRow>
-                            </TableHead>
-                            <TableBody>
-                              {node.statuses.map((status) => (
-                                <TableRow key={status.statusKey}>
-                                  <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{status.statusName}</TableCell>
-                                  <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{status.apiField}</TableCell>
-                                  <TableCell sx={{ fontSize: "12px", color: "#374151", wordBreak: "break-all" }}>{status.matchValue}</TableCell>
-                                  <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{status.message}</TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </Box>
-                      ))}
-                    </Box>
-		                  </Paper>
-	                  {codePreview("查询流程定义 API", flowDefinitionRequest, "查询流程定义 API 示例")}
-		                  {codePreview("处理流程 Schema", flowSchema, "处理流程 Schema")}
-	                  {codePreview("查询任务进展 API", taskProgressRequest, "查询任务进展 API 示例")}
-                  {codePreview("任务进展返回示例", taskProgressResponse, "任务进展返回示例")}
-                </Box>
-              )}
-		            </Box>
+            </Box>
           );
         })()}
       </Drawer>
