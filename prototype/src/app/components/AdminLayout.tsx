@@ -23,7 +23,7 @@ const menuItems = [
       { path: "/admin/tool-hub/mcp-services", label: "MCP 服务" },
       { path: "/admin/tool-hub", label: "工具库" },
       { path: "/admin/tool-hub/connectors", label: "连接器" },
-      { path: "/admin/tool-hub/run-records", label: "运行记录" },
+      { path: "/admin/tool-hub/run-records", label: "调用记录" },
     ],
   },
 ];

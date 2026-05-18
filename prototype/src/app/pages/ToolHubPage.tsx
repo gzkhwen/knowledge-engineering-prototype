@@ -3166,10 +3166,10 @@ export function ToolHubPage() {
 
 export function ToolHubRunRecordsPage() {
   const [tools] = useState<ToolItem[]>(loadTools);
+  const [serviceFilter, setServiceFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [toolFilter, setToolFilter] = useState("all");
-  const [versionFilter, setVersionFilter] = useState("all");
-  const [resultFilter, setResultFilter] = useState<RunResultStatus | "all">("all");
+  const [selectedRecordKey, setSelectedRecordKey] = useState<string | null>(null);
   const [recordPage, setRecordPage] = useState(0);
   const [recordRowsPerPage, setRecordRowsPerPage] = useState(20);
 
@@ -3187,40 +3187,24 @@ export function ToolHubRunRecordsPage() {
       .sort((a, b) => (b.record.startedAt || b.record.executedAt).localeCompare(a.record.startedAt || a.record.executedAt));
   }, [tools]);
 
-  const categoryOptions = useMemo(() => (
-    Array.from(new Set(records.map(({ tool }) => tool.category)))
-  ), [records]);
-
   const toolOptions = useMemo(() => {
-    const scopedTools = records
+    return records
       .map(({ tool }) => tool)
       .filter((tool, index, list) => list.findIndex((item) => item.id === tool.id) === index)
       .filter((tool) => categoryFilter === "all" || tool.category === categoryFilter);
-    return scopedTools;
   }, [records, categoryFilter]);
 
-  const versionOptions = useMemo(() => {
-    if (toolFilter !== "all") {
-      const selectedTool = tools.find((tool) => !tool.deleted && tool.id === toolFilter);
-      return selectedTool?.versions.map((version) => version.version) ?? [];
-    }
-    const scopedVersions = tools
-      .filter((tool) => !tool.deleted)
-      .filter((tool) => categoryFilter === "all" || tool.category === categoryFilter)
-      .flatMap((tool) => tool.versions.map((version) => version.version));
-    return Array.from(new Set(scopedVersions));
-  }, [tools, categoryFilter, toolFilter]);
+  const categoryOptions = useMemo(() => Array.from(new Set(records.map(({ tool }) => tool.category))), [records]);
+  const serviceOptions = useMemo(() => Array.from(new Set(records.map(({ record }) => getMcpServiceName(record)))), [records]);
 
   const scopedRecords = useMemo(() => (
     records
+      .filter(({ record }) => serviceFilter === "all" || getMcpServiceName(record) === serviceFilter)
       .filter(({ tool }) => categoryFilter === "all" || tool.category === categoryFilter)
       .filter(({ tool }) => toolFilter === "all" || tool.id === toolFilter)
-      .filter(({ record }) => versionFilter === "all" || record.version === versionFilter)
-  ), [records, categoryFilter, toolFilter, versionFilter]);
+  ), [records, serviceFilter, categoryFilter, toolFilter]);
 
-  const filteredRecords = useMemo(() => (
-    scopedRecords.filter(({ record }) => resultFilter === "all" || record.result === resultFilter)
-  ), [scopedRecords, resultFilter]);
+  const filteredRecords = scopedRecords;
 
   const stats = useMemo(() => ({
     total: scopedRecords.length,
@@ -3233,6 +3217,10 @@ export function ToolHubRunRecordsPage() {
     filteredRecords.slice(recordPage * recordRowsPerPage, recordPage * recordRowsPerPage + recordRowsPerPage)
   ), [filteredRecords, recordPage, recordRowsPerPage]);
 
+  const selectedRecord = useMemo(() => (
+    records.find(({ tool, record }) => `${tool.id}-${record.id}` === selectedRecordKey) ?? null
+  ), [records, selectedRecordKey]);
+
   const getRunRecordStartTime = (record: ToolRunRecord) => record.startedAt || record.executedAt;
   const getRunRecordEndTime = (record: ToolRunRecord) => record.finishedAt || (record.result === "运行中" ? "" : record.executedAt);
   const getRunRecordRequestAddress = (record: ToolRunRecord, version: ToolVersion | null) => {
@@ -3242,19 +3230,110 @@ export function ToolHubRunRecordsPage() {
     }
     return version ? getVersionRequestAddress(version) : "未记录请求地址";
   };
-  const getRunRecordFlowTrace = (record: ToolRunRecord, version: ToolVersion | null, toolName: string) => {
-    if (record.flowTrace) return record.flowTrace;
-    const nodes = (version?.progressNodes ?? createDefaultProgressNodes(toolName)).slice().sort((a, b) => a.order - b.order);
-    return nodes.map((node, index) => {
-      const nodeStatus = record.result === "成功"
-        ? "成功"
-        : record.result === "失败"
-          ? index === 0 ? "成功" : index === 1 ? "失败" : "待执行"
-          : index === 0 ? "成功" : index === 1 ? "处理中" : "待执行";
-      const time = nodeStatus === "待执行" ? "-" : index === 0 ? getRunRecordStartTime(record) : getRunRecordEndTime(record) || "进行中";
-      return `${node.order}.${node.name}=${nodeStatus}(${time})`;
-    }).join("；") || record.result;
-  };
+  function getDuration(record: ToolRunRecord) {
+    if (record.result === "运行中") return "进行中";
+    const start = new Date(getRunRecordStartTime(record).replace(" ", "T")).getTime();
+    const endValue = getRunRecordEndTime(record);
+    const end = endValue ? new Date(endValue.replace(" ", "T")).getTime() : NaN;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "-";
+    const seconds = Math.max(1, Math.round((end - start) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  }
+  function getMcpServiceName(record: ToolRunRecord) {
+    return record.type === "调试运行" ? "工具调试 MCP" : "知识工程 Agent MCP";
+  }
+  function getConnectorName(tool: ToolItem) {
+    if (tool.category === "解析处理") return "文档解析 API";
+    if (tool.category === "智能生成") return "知识生成 API";
+    if (tool.category === "质量评估") return "质量评估 API";
+    if (tool.category === "索引构建") return "索引构建 API";
+    return "知识工程核心 API";
+  }
+  function formatTime(date: Date) {
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+  function shiftTime(value: string, seconds: number) {
+    const date = new Date(value.replace(" ", "T"));
+    if (Number.isNaN(date.getTime())) return value;
+    date.setSeconds(date.getSeconds() + seconds);
+    return formatTime(date);
+  }
+  const CALLER_NODE_NAME = "调用方";
+  const TOOL_EXECUTOR_NODE_NAME = "Tool Hub 工具执行层";
+  function getApiNodeName(record: ToolRunRecord, version: ToolVersion | null) {
+    const address = getRunRecordRequestAddress(record, version);
+    try {
+      const url = new URL(address);
+      return `${url.hostname}${url.pathname}`;
+    } catch {
+      return address || "底层 API";
+    }
+  }
+  function getApiPath(value: string) {
+    try {
+      return new URL(value).pathname;
+    } catch {
+      return value || "/";
+    }
+  }
+  function getApiBaseUrl(value: string) {
+    try {
+      const url = new URL(value);
+      return `${url.protocol}//${url.host}`;
+    } catch {
+      return value || "-";
+    }
+  }
+  function compactJson(value: unknown) {
+    return JSON.stringify(value);
+  }
+  function buildCallResponseInfo(item: { tool: ToolItem; version: ToolVersion | null; record: ToolRunRecord }) {
+    const startAt = getRunRecordStartTime(item.record);
+    const finishedAt = getRunRecordEndTime(item.record);
+    const requestAddress = getRunRecordRequestAddress(item.record, item.version);
+    const mcpRequest = compactJson({
+      jsonrpc: "2.0",
+      method: "tools/call",
+      id: item.record.id,
+      params: {
+        name: item.tool.toolCode,
+        arguments: {
+          version: item.record.version,
+          trace_id: item.record.id,
+          request_payload: item.record.input,
+        },
+      },
+    });
+    const apiRequest = `${compactJson({
+      method: "POST",
+      url: requestAddress,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer ****",
+      },
+    })}\n${item.record.input}`;
+    const apiResponse = finishedAt
+      ? item.record.output
+      : compactJson({ status: "running", message: "底层 API 已接收请求，正在处理" });
+    const mcpResponse = finishedAt
+      ? compactJson({
+          jsonrpc: "2.0",
+          id: item.record.id,
+          result: {
+            content: [{ type: "json", text: item.record.output }],
+            isError: item.record.result === "失败",
+          },
+        })
+      : compactJson({ jsonrpc: "2.0", id: item.record.id, status: "pending", message: "等待底层 API 返回结果" });
+    return [
+      { title: "MCP 服务接收到的请求", time: startAt, content: mcpRequest },
+      { title: "底层 API 收到的请求内容", time: shiftTime(startAt, 2), content: apiRequest },
+      { title: "底层 API 响应结果", time: finishedAt ? shiftTime(finishedAt, -2) : "进行中", content: apiResponse },
+      { title: "MCP 服务响应结果", time: finishedAt || "待返回", content: mcpResponse },
+    ];
+  }
   const ellipsisCell = (value: string, empty = "-", title?: string) => (
     <Tooltip title={title || value || empty} arrow placement="top">
       <Typography sx={{ fontSize: "12px", color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default" }}>
@@ -3262,19 +3341,62 @@ export function ToolHubRunRecordsPage() {
       </Typography>
     </Tooltip>
   );
+  const detailSection = (title: string, children: ReactNode) => (
+    <Paper sx={{ p: 2, border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none" }}>
+      <Typography sx={{ fontSize: "15px", fontWeight: 700, color: "#111827", mb: 1.5 }}>{title}</Typography>
+      {children}
+    </Paper>
+  );
+  const flowDiagram = (items: string[]) => (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", mb: 1.5 }}>
+      {items.map((item, index) => (
+        <Fragment key={`${item}-${index}`}>
+          <Chip label={item} size="small" sx={{ height: 26, fontSize: "12px", bgcolor: "#f1f5f9", color: "#334155" }} />
+          {index < items.length - 1 ? <Typography sx={{ fontSize: "13px", color: "#94a3b8" }}>→</Typography> : null}
+        </Fragment>
+      ))}
+    </Box>
+  );
+  const payloadCard = (item: { title: string; time: string; content: string }) => (
+    <Paper key={item.title} sx={{ p: 1.5, border: "1px solid #eef2f7", borderRadius: "8px", boxShadow: "none", bgcolor: "#fff" }}>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, mb: 1 }}>
+        <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>{item.title}</Typography>
+        <Typography sx={{ fontSize: "12px", color: "#94a3b8", flexShrink: 0 }}>{item.time}</Typography>
+      </Box>
+      <Box
+        component="pre"
+        sx={{
+          m: 0,
+          p: 1.25,
+          minHeight: 96,
+          bgcolor: "#0f172a",
+          border: "1px solid #1e293b",
+          borderRadius: "6px",
+          color: "#dbeafe",
+          fontSize: "12px",
+          lineHeight: 1.6,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+          fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+        }}
+      >
+        {item.content}
+      </Box>
+    </Paper>
+  );
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, maxWidth: "100%" }}>
       <Box>
         <Typography variant="h4" sx={{ fontSize: "22px", fontWeight: 700, color: "#111827" }}>
-          运行记录
+          调用记录
         </Typography>
       </Box>
 
       <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: 1.5 }}>
         {[
-          { label: "运行总次数", value: stats.total, icon: <History />, color: "#334155" },
-          { label: "运行中", value: stats.running, icon: <RocketLaunch />, color: "#1d4ed8" },
+          { label: "调用总次数", value: stats.total, icon: <History />, color: "#334155" },
+          { label: "调用中", value: stats.running, icon: <RocketLaunch />, color: "#1d4ed8" },
           { label: "成功", value: stats.success, icon: <CheckCircle />, color: "#15803d" },
           { label: "失败", value: stats.failed, icon: <FactCheck />, color: "#b91c1c" },
         ].map((item) => (
@@ -3291,19 +3413,32 @@ export function ToolHubRunRecordsPage() {
       </Box>
 
       <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center" }}>
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <Select
+            value={serviceFilter}
+            onChange={(event) => {
+              setServiceFilter(event.target.value);
+              setRecordPage(0);
+            }}
+            sx={{ borderRadius: "8px", fontSize: "13px", bgcolor: "#fff", "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}
+          >
+            <MenuItem value="all" sx={{ fontSize: "13px" }}>全部 MCP 服务</MenuItem>
+            {serviceOptions.map((service) => (
+              <MenuItem key={service} value={service} sx={{ fontSize: "13px" }}>{service}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <FormControl size="small" sx={{ minWidth: 150 }}>
           <Select
             value={categoryFilter}
             onChange={(event) => {
               setCategoryFilter(event.target.value);
               setToolFilter("all");
-              setVersionFilter("all");
-              setResultFilter("all");
               setRecordPage(0);
             }}
             sx={{ borderRadius: "8px", fontSize: "13px", bgcolor: "#fff", "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}
           >
-            <MenuItem value="all" sx={{ fontSize: "13px" }}>全部分类</MenuItem>
+            <MenuItem value="all" sx={{ fontSize: "13px" }}>全部工具分类</MenuItem>
             {categoryOptions.map((category) => (
               <MenuItem key={category} value={category} sx={{ fontSize: "13px" }}>{category}</MenuItem>
             ))}
@@ -3314,8 +3449,6 @@ export function ToolHubRunRecordsPage() {
             value={toolFilter}
             onChange={(event) => {
               setToolFilter(event.target.value);
-              setVersionFilter("all");
-              setResultFilter("all");
               setRecordPage(0);
             }}
             sx={{ borderRadius: "8px", fontSize: "13px", bgcolor: "#fff", "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}
@@ -3326,66 +3459,28 @@ export function ToolHubRunRecordsPage() {
             ))}
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ minWidth: 150 }}>
-          <Select
-            value={versionFilter}
-            onChange={(event) => {
-              setVersionFilter(event.target.value);
-              setResultFilter("all");
-              setRecordPage(0);
-            }}
-            sx={{ borderRadius: "8px", fontSize: "13px", bgcolor: "#fff", "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}
-          >
-            <MenuItem value="all" sx={{ fontSize: "13px" }}>全部版本</MenuItem>
-            {versionOptions.map((version) => (
-              <MenuItem key={version} value={version} sx={{ fontSize: "13px" }}>{version}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 150 }}>
-          <Select
-            value={resultFilter}
-            onChange={(event) => {
-              setResultFilter(event.target.value as RunResultStatus | "all");
-              setRecordPage(0);
-            }}
-            sx={{ borderRadius: "8px", fontSize: "13px", bgcolor: "#fff", "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}
-          >
-            <MenuItem value="all" sx={{ fontSize: "13px" }}>全部状态</MenuItem>
-            <MenuItem value="运行中" sx={{ fontSize: "13px" }}>运行中</MenuItem>
-            <MenuItem value="成功" sx={{ fontSize: "13px" }}>成功</MenuItem>
-            <MenuItem value="失败" sx={{ fontSize: "13px" }}>失败</MenuItem>
-          </Select>
-        </FormControl>
       </Box>
 
       <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", overflow: "hidden", width: "100%", maxWidth: "100%" }}>
         {filteredRecords.length === 0 ? (
           <Box sx={{ py: 10, textAlign: "center" }}>
             <History sx={{ fontSize: 42, color: "#e8eaed", mb: 1 }} />
-            <Typography sx={{ fontSize: "14px", color: "#9ca3af" }}>当前筛选条件下暂无运行记录</Typography>
+            <Typography sx={{ fontSize: "14px", color: "#9ca3af" }}>当前筛选条件下暂无调用记录</Typography>
           </Box>
         ) : (
           <Box>
             <TableContainer sx={{ width: "100%", maxWidth: "100%", overflowX: "auto", overflowY: "hidden", display: "block", WebkitOverflowScrolling: "touch", "&::-webkit-scrollbar": { height: 12 }, "&::-webkit-scrollbar-track": { bgcolor: "#f1f5f9" }, "&::-webkit-scrollbar-thumb": { bgcolor: "#cbd5e1", borderRadius: 999, border: "3px solid #f1f5f9" }, "&::-webkit-scrollbar-thumb:hover": { bgcolor: "#94a3b8" } }}>
-              <Table size="small" stickyHeader sx={{ minWidth: 2840, tableLayout: "fixed" }}>
+              <Table size="small" stickyHeader sx={{ minWidth: 980, tableLayout: "fixed" }}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: "#f8f9fb" }}>
                     {[
-                      ["类型", "96px"],
-                      ["触发者", "180px"],
-                      ["业务系统", "130px"],
-                      ["分类", "120px"],
-                      ["工具", "180px"],
-                      ["版本", "90px"],
-                      ["运行结果", "100px"],
-                      ["开始运行", "160px"],
-                      ["结束运行", "160px"],
-                      ["请求地址", "300px"],
-                      ["请求配置", "360px"],
-                      ["输入", "320px"],
-                      ["返回结果", "340px"],
-                      ["流程跟踪", "320px"],
+                      ["调用时间", "160px"],
+                      ["MCP 服务", "170px"],
+                      ["工具名称", "190px"],
+                      ["版本", "100px"],
+                      ["调用状态", "100px"],
+                      ["耗时", "90px"],
+                      ["操作", "90px"],
                     ].map(([head, width]) => (
                       <TableCell key={head} sx={{ width, fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, bgcolor: "#f8f9fb", borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap" }}>
                         {head}
@@ -3396,22 +3491,13 @@ export function ToolHubRunRecordsPage() {
                 <TableBody>
                   {pagedRecords.map(({ tool, version, record }, index) => {
                     const resultStyle = getRunResultStyle(record.result);
-                    const businessSystemTip = record.projectSpace
-                      ? `${record.endpoint}；项目空间=${record.projectSpace}`
-                      : record.endpoint;
                     return (
                       <TableRow key={`${tool.id}-${record.id}`} sx={{ bgcolor: (recordPage * recordRowsPerPage + index) % 2 === 0 ? "#fff" : "#fafafa", "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
-                        <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#111827", fontWeight: 600, whiteSpace: "nowrap" }}>
-                          {record.type}
+                        <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>
+                          {getRunRecordStartTime(record)}
                         </TableCell>
                         <TableCell sx={{ py: 1.5, minWidth: 0 }}>
-                          {ellipsisCell(record.trigger)}
-                        </TableCell>
-                        <TableCell sx={{ py: 1.5, minWidth: 0 }}>
-                          {ellipsisCell(record.endpoint, "-", businessSystemTip)}
-                        </TableCell>
-                        <TableCell sx={{ py: 1.5, minWidth: 0 }}>
-                          {ellipsisCell(tool.category)}
+                          {ellipsisCell(getMcpServiceName(record))}
                         </TableCell>
                         <TableCell sx={{ py: 1.5, minWidth: 0 }}>
                           {ellipsisCell(tool.name)}
@@ -3422,26 +3508,13 @@ export function ToolHubRunRecordsPage() {
                         <TableCell sx={{ py: 1.5 }}>
                           <Chip label={record.result} size="small" sx={{ maxWidth: "100%", height: 22, fontSize: "11px", bgcolor: resultStyle.bg, color: resultStyle.color, "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }} />
                         </TableCell>
-                        <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>
-                          {getRunRecordStartTime(record)}
+                        <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151", whiteSpace: "nowrap" }}>
+                          {getDuration(record)}
                         </TableCell>
-                        <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>
-                          {getRunRecordEndTime(record) || "-"}
-                        </TableCell>
-                        <TableCell sx={{ py: 1.5, minWidth: 0 }}>
-                          {ellipsisCell(getRunRecordRequestAddress(record, version))}
-                        </TableCell>
-                        <TableCell sx={{ py: 1.5, minWidth: 0 }}>
-                          {ellipsisCell(record.config)}
-                        </TableCell>
-                        <TableCell sx={{ py: 1.5, minWidth: 0 }}>
-                          {ellipsisCell(record.input)}
-                        </TableCell>
-                        <TableCell sx={{ py: 1.5, minWidth: 0 }}>
-                          {ellipsisCell(record.output)}
-                        </TableCell>
-                        <TableCell sx={{ py: 1.5, minWidth: 0 }}>
-                          {ellipsisCell(getRunRecordFlowTrace(record, version, tool.name))}
+                        <TableCell sx={{ py: 1.5 }}>
+                          <Button size="small" variant="text" onClick={() => setSelectedRecordKey(`${tool.id}-${record.id}`)} sx={{ minWidth: 0, px: 1, fontSize: "12px" }}>
+                            详情
+                          </Button>
                         </TableCell>
                       </TableRow>
                     );
@@ -3464,6 +3537,60 @@ export function ToolHubRunRecordsPage() {
           </Box>
         )}
       </Paper>
+
+      <Drawer
+        anchor="right"
+        open={Boolean(selectedRecord)}
+        onClose={() => setSelectedRecordKey(null)}
+        PaperProps={{ sx: { width: 960, maxWidth: "92vw", p: 0, bgcolor: "#f8fafc", zIndex: 1900 } }}
+        sx={{ zIndex: 1900 }}
+      >
+        {selectedRecord ? (
+          <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+            <Box sx={{ p: 2.5, bgcolor: "#fff", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 2 }}>
+              <Box>
+                <Typography sx={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>调用详情</Typography>
+              </Box>
+              <IconButton size="small" onClick={() => setSelectedRecordKey(null)}><Close fontSize="small" /></IconButton>
+            </Box>
+            <Box sx={{ p: 2.5, overflow: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+              {detailSection("基本信息", (
+                <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1.5 }}>
+                  {[
+                    ["Trace ID", selectedRecord.record.id],
+                    ["调用时间", getRunRecordStartTime(selectedRecord.record)],
+                    ["MCP 服务", getMcpServiceName(selectedRecord.record)],
+                    ["工具名称", selectedRecord.tool.name],
+                    ["工具版本", selectedRecord.record.version],
+                    ["连接器", getConnectorName(selectedRecord.tool)],
+                    ["调用状态", selectedRecord.record.result],
+                    ["耗时", getDuration(selectedRecord.record)],
+                  ].map(([label, value]) => (
+                    <Box key={label} sx={{ display: "grid", gridTemplateColumns: "88px minmax(0, 1fr)", alignItems: "start", gap: 1 }}>
+                      <Typography sx={{ fontSize: "12px", color: "#94a3b8", lineHeight: "20px" }}>{label}</Typography>
+                      <Typography sx={{ fontSize: "13px", color: "#111827", fontWeight: 500, lineHeight: "20px", wordBreak: "break-all" }}>{value}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              ))}
+
+              {detailSection("调用响应信息", (
+                <Box>
+                  {flowDiagram([
+                    CALLER_NODE_NAME,
+                    getMcpServiceName(selectedRecord.record),
+                    TOOL_EXECUTOR_NODE_NAME,
+                    getApiNodeName(selectedRecord.record, selectedRecord.version),
+                  ])}
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                    {buildCallResponseInfo(selectedRecord).map(payloadCard)}
+                  </Box>
+                </Box>
+              ))}
+            </Box>
+          </Box>
+        ) : null}
+      </Drawer>
     </Box>
   );
 }
@@ -5594,7 +5721,7 @@ export function ToolHubDetailPage() {
         onClose={() => setVersionDetailOpen(false)}
         ModalProps={{ sx: { zIndex: SECONDARY_DRAWER_Z_INDEX } }}
         slotProps={{ backdrop: { sx: { position: "fixed", inset: 0, zIndex: SECONDARY_DRAWER_Z_INDEX, bgcolor: "rgba(17, 24, 39, 0.48)" } } }}
-        PaperProps={{ sx: { width: 860, p: 3, bgcolor: "#f8fafc", zIndex: SECONDARY_DRAWER_Z_INDEX + 1 } }}
+        PaperProps={{ sx: { width: 1040, maxWidth: "92vw", p: 3, bgcolor: "#f8fafc", zIndex: SECONDARY_DRAWER_Z_INDEX + 1 } }}
       >
         {selectedVersion && (() => {
 	          const versionName = selectedVersion.deliveryName || selectedVersion.configFields.find((field) => field.name === "版本名称")?.value || "-";
@@ -5709,7 +5836,7 @@ export function ToolHubDetailPage() {
         onClose={() => setDebugDrawerOpen(false)}
         ModalProps={{ sx: { zIndex: SECONDARY_DRAWER_Z_INDEX } }}
         slotProps={{ backdrop: { sx: { position: "fixed", inset: 0, zIndex: SECONDARY_DRAWER_Z_INDEX, bgcolor: "rgba(17, 24, 39, 0.48)" } } }}
-        PaperProps={{ sx: { width: 720, p: 3, bgcolor: "#f8fafc", zIndex: SECONDARY_DRAWER_Z_INDEX + 1 } }}
+        PaperProps={{ sx: { width: 960, maxWidth: "92vw", p: 3, bgcolor: "#f8fafc", zIndex: SECONDARY_DRAWER_Z_INDEX + 1 } }}
       >
         {debugVersion && (
           <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
