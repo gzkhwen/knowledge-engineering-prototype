@@ -9,29 +9,32 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Drawer,
   FormControl,
   IconButton,
   InputAdornment,
   MenuItem,
   Paper,
   Select,
-  Switch,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
+  Tabs,
   TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
 import {
   Add,
+  Close,
   ContentCopy,
   Delete,
   Edit,
-  Key,
   Refresh,
   Search,
   Science,
@@ -237,7 +240,10 @@ export function ToolHubMcpServicesPage() {
   const [editingService, setEditingService] = useState<McpService | null>(null);
   const [serviceDraft, setServiceDraft] = useState(emptyService);
   const [deleteTarget, setDeleteTarget] = useState<McpService | null>(null);
-  const [keyTarget, setKeyTarget] = useState<McpService | null>(null);
+  const [detailServiceId, setDetailServiceId] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<"basic" | "apikey">("basic");
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(20);
 
   const publishedTools = useMemo(() => initialTools.filter((tool) => tool.status === "已发布"), []);
   const categories = useMemo(() => Array.from(new Set(publishedTools.map((tool) => tool.category))), [publishedTools]);
@@ -246,6 +252,14 @@ export function ToolHubMcpServicesPage() {
   const visibleServices = useMemo(() => (
     services.filter((service) => `${service.name}${service.endpoint}`.toLowerCase().includes(query.toLowerCase()))
   ), [services, query]);
+
+  const pagedServices = useMemo(() => (
+    visibleServices.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+  ), [visibleServices, page, rowsPerPage]);
+
+  const detailService = useMemo(() => (
+    services.find((service) => service.id === detailServiceId) ?? null
+  ), [services, detailServiceId]);
 
   const visibleTools = useMemo(() => (
     publishedTools.filter((tool) => {
@@ -270,6 +284,11 @@ export function ToolHubMcpServicesPage() {
       authTarget: service.authTarget,
       tools: service.tools,
     });
+  };
+
+  const openDetail = (service: McpService) => {
+    setDetailServiceId(service.id);
+    setDetailTab("basic");
   };
 
   const closeEditor = () => {
@@ -311,10 +330,21 @@ export function ToolHubMcpServicesPage() {
     }));
   };
 
-  const toggleServiceStatus = (service: McpService) => {
-    const nextStatus: ServiceStatus = service.status === "运行中" ? "停用" : "运行中";
-    setServices((prev) => prev.map((item) => (item.id === service.id ? { ...item, status: nextStatus } : item)));
-    toast.success(`服务已${nextStatus === "运行中" ? "启用" : "停用"}`);
+  const generateApiKey = () => {
+    if (!detailService) return;
+    const nextKey = `th_${detailService.status === "运行中" ? "live" : "test"}_${Date.now().toString().slice(-6)}_****************`;
+    setServices((prev) => prev.map((service) => (
+      service.id === detailService.id ? { ...service, apiKeys: [nextKey, ...service.apiKeys] } : service
+    )));
+    toast.success("已生成新的 API Key");
+  };
+
+  const disableApiKey = (key: string) => {
+    if (!detailService) return;
+    setServices((prev) => prev.map((service) => (
+      service.id === detailService.id ? { ...service, apiKeys: service.apiKeys.filter((item) => item !== key) } : service
+    )));
+    toast.success("API Key 已停用");
   };
 
   const confirmDelete = () => {
@@ -325,64 +355,105 @@ export function ToolHubMcpServicesPage() {
   };
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-      <PageCard>
-        <ToolbarRow title="MCP 服务">
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, maxWidth: "100%" }}>
+      <Box>
+        <Typography variant="h4" sx={{ fontSize: "22px", fontWeight: 700, color: "#111827" }}>
+          MCP 服务
+        </Typography>
+      </Box>
+
+      <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center" }}>
           <TextField
             size="small"
             placeholder="搜索服务名称 / Endpoint"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(0);
+            }}
             InputProps={{ startAdornment: <InputAdornment position="start"><Search sx={{ fontSize: 18, color: "#9ca3af" }} /></InputAdornment> }}
-            sx={{ width: 260, "& .MuiOutlinedInput-root": { borderRadius: "6px", bgcolor: "#fff" } }}
+            sx={{ width: 300, "& .MuiOutlinedInput-root": { borderRadius: "8px", bgcolor: "#fff", fontSize: "13px" }, "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}
           />
           <Button variant="contained" startIcon={<Add sx={{ fontSize: 16 }} />} onClick={openCreate} sx={{ bgcolor: BLUE, textTransform: "none", borderRadius: "6px", boxShadow: "none" }}>
             新建 MCP 服务
           </Button>
-        </ToolbarRow>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ bgcolor: "#f8f9fb" }}>
-                {["名称", "状态", "Endpoint", "工具数", "今日调用", "操作"].map((head) => (
-                  <TableCell key={head} sx={{ fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, borderBottom: "1px solid #f0f0f0" }}>{head}</TableCell>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {visibleServices.map((service) => (
-                <TableRow key={service.id} sx={{ "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
-                  <TableCell sx={{ py: 1.5 }}>
-                    <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>{service.name}</Typography>
-                    <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.5 }}>{service.description || "-"}</Typography>
-                  </TableCell>
-                  <TableCell><StatusChip status={service.status} /></TableCell>
-                  <TableCell sx={{ minWidth: 320 }}>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      <Typography sx={{ fontSize: "12px", color: "#475569", fontFamily: "monospace" }}>{service.endpoint}</Typography>
-                      <Tooltip title="复制 Endpoint" arrow>
-                        <IconButton size="small" onClick={() => navigator.clipboard.writeText(service.endpoint).then(() => toast.success("Endpoint 已复制"))}>
-                          <ContentCopy sx={{ fontSize: 15 }} />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </TableCell>
-                  <TableCell sx={{ fontSize: "13px", color: "#374151" }}>{service.tools.length}</TableCell>
-                  <TableCell sx={{ fontSize: "13px", color: "#374151" }}>{service.callsToday}</TableCell>
-                  <TableCell>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                      <Tooltip title="API Keys" arrow><IconButton size="small" onClick={() => setKeyTarget(service)}><Key sx={{ fontSize: 17, color: BLUE }} /></IconButton></Tooltip>
-                      <Switch size="small" checked={service.status === "运行中"} onChange={() => toggleServiceStatus(service)} />
-                      <Typography component="button" onClick={() => openEdit(service)} sx={{ border: "none", p: 0, bgcolor: "transparent", color: BLUE, fontSize: "12px", cursor: "pointer" }}>编辑</Typography>
-                      <Typography component="button" onClick={() => setDeleteTarget(service)} sx={{ border: "none", p: 0, bgcolor: "transparent", color: "#ef4444", fontSize: "12px", cursor: "pointer" }}>删除</Typography>
-                    </Box>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </PageCard>
+      </Box>
+
+      <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", overflow: "hidden", width: "100%", maxWidth: "100%" }}>
+        {visibleServices.length === 0 ? (
+          <Box sx={{ py: 10, textAlign: "center" }}>
+            <Typography sx={{ fontSize: "14px", color: "#9ca3af" }}>当前筛选条件下暂无 MCP 服务</Typography>
+          </Box>
+        ) : (
+          <Box>
+            <TableContainer sx={{ width: "100%", maxWidth: "100%", overflowX: "auto", overflowY: "hidden", display: "block", WebkitOverflowScrolling: "touch", "&::-webkit-scrollbar": { height: 12 }, "&::-webkit-scrollbar-track": { bgcolor: "#f1f5f9" }, "&::-webkit-scrollbar-thumb": { bgcolor: "#cbd5e1", borderRadius: 999, border: "3px solid #f1f5f9" }, "&::-webkit-scrollbar-thumb:hover": { bgcolor: "#94a3b8" } }}>
+              <Table size="small" stickyHeader sx={{ minWidth: 1080, tableLayout: "fixed" }}>
+                <TableHead>
+                  <TableRow sx={{ bgcolor: "#f8f9fb" }}>
+                    {[
+                      ["名称", "220px"],
+                      ["状态", "120px"],
+                      ["Endpoint", "420px"],
+                      ["工具数", "100px"],
+                      ["今日调用", "110px"],
+                      ["操作", "160px"],
+                    ].map(([head, width]) => (
+                      <TableCell key={head} sx={{ width, fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, bgcolor: "#f8f9fb", borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap" }}>
+                        {head}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {pagedServices.map((service, index) => (
+                    <TableRow key={service.id} sx={{ bgcolor: (page * rowsPerPage + index) % 2 === 0 ? "#fff" : "#fafafa", "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
+                      <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#111827", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {service.name}
+                      </TableCell>
+                      <TableCell sx={{ py: 1.5 }}><StatusChip status={service.status} /></TableCell>
+                      <TableCell sx={{ py: 1.5, minWidth: 0 }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0 }}>
+                          <Tooltip title={service.endpoint} arrow placement="top">
+                            <Typography sx={{ fontSize: "12px", color: "#475569", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{service.endpoint}</Typography>
+                          </Tooltip>
+                          <Tooltip title="复制 Endpoint" arrow>
+                            <IconButton size="small" onClick={() => navigator.clipboard.writeText(service.endpoint).then(() => toast.success("Endpoint 已复制"))}>
+                              <ContentCopy sx={{ fontSize: 15 }} />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </TableCell>
+                      <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151" }}>{service.tools.length}</TableCell>
+                      <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151" }}>{service.callsToday}</TableCell>
+                      <TableCell sx={{ py: 1.5 }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                          <Typography component="button" onClick={() => openDetail(service)} sx={{ border: "none", p: 0, bgcolor: "transparent", color: BLUE, fontSize: "12px", cursor: "pointer" }}>详情</Typography>
+                          <Typography component="button" onClick={() => openEdit(service)} sx={{ border: "none", p: 0, bgcolor: "transparent", color: BLUE, fontSize: "12px", cursor: "pointer" }}>编辑</Typography>
+                          {service.status !== "运行中" && (
+                            <Typography component="button" onClick={() => setDeleteTarget(service)} sx={{ border: "none", p: 0, bgcolor: "transparent", color: "#ef4444", fontSize: "12px", cursor: "pointer" }}>删除</Typography>
+                          )}
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <TablePagination
+              component="div"
+              count={visibleServices.length}
+              page={page}
+              onPageChange={(_, nextPage) => setPage(nextPage)}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }}
+              rowsPerPageOptions={[20, 50, 100]}
+              labelRowsPerPage="每页条数"
+              labelDisplayedRows={({ from, to, count }) => `${from}-${to} / 共 ${count} 条`}
+              sx={{ borderTop: "1px solid #eef2f7", "& .MuiTablePagination-toolbar": { minHeight: 48 }, "& p": { fontSize: "12px", color: "#64748b" } }}
+            />
+          </Box>
+        )}
+      </Paper>
 
       <Dialog open={Boolean(editingService) || serviceDraft !== emptyService} onClose={closeEditor} fullWidth maxWidth="md" PaperProps={{ sx: { borderRadius: "12px" } }}>
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 700 }}>{editingService ? "编辑 MCP 服务" : "新建 MCP 服务"}</DialogTitle>
@@ -439,20 +510,108 @@ export function ToolHubMcpServicesPage() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(keyTarget)} onClose={() => setKeyTarget(null)} fullWidth maxWidth="sm" PaperProps={{ sx: { borderRadius: "12px" } }}>
-        <DialogTitle sx={{ fontSize: "16px", fontWeight: 700 }}>API Keys</DialogTitle>
-        <DialogContent sx={{ pt: "12px !important" }}>
-          {(keyTarget?.apiKeys.length ? keyTarget.apiKeys : ["暂无 API Key"]).map((key) => (
-            <Box key={key} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid #eef2f7", borderRadius: "8px", p: 1.5, mb: 1 }}>
-              <Typography sx={{ fontSize: "13px", fontFamily: "monospace", color: "#374151" }}>{key}</Typography>
-              {key !== "暂无 API Key" && <Button size="small" sx={{ textTransform: "none", color: "#ef4444" }}>停用</Button>}
+      <Drawer
+        anchor="right"
+        open={Boolean(detailService)}
+        onClose={() => setDetailServiceId(null)}
+        PaperProps={{ sx: { width: 720, p: 3, bgcolor: "#f8fafc" } }}
+      >
+        {detailService && (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 2 }}>
+              <Box>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
+                  <Typography sx={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>{detailService.name}</Typography>
+                  <StatusChip status={detailService.status} />
+                </Box>
+                <Typography sx={{ fontSize: "12px", color: "#64748b" }}>{detailService.description || "暂无服务描述"}</Typography>
+              </Box>
+              <IconButton size="small" onClick={() => setDetailServiceId(null)}>
+                <Close sx={{ fontSize: 18, color: "#94a3b8" }} />
+              </IconButton>
             </Box>
-          ))}
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => toast.success("已生成新的 API Key")} variant="contained" sx={{ bgcolor: BLUE, textTransform: "none", boxShadow: "none" }}>生成新 Key</Button>
-        </DialogActions>
-      </Dialog>
+
+            <Tabs
+              value={detailTab}
+              onChange={(_, value) => setDetailTab(value)}
+              sx={{
+                minHeight: 36,
+                borderBottom: "1px solid #e5e7eb",
+                "& .MuiTab-root": { minHeight: 36, px: 1.5, textTransform: "none", fontSize: "13px", color: "#64748b" },
+                "& .Mui-selected": { color: BLUE, fontWeight: 700 },
+                "& .MuiTabs-indicator": { bgcolor: BLUE },
+              }}
+            >
+              <Tab value="basic" label="基本信息" />
+              <Tab value="apikey" label="API Key" />
+            </Tabs>
+
+            {detailTab === "basic" && (
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
+                  <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827", mb: 1.25 }}>服务信息</Typography>
+                  <Box sx={{ display: "grid", gridTemplateColumns: "120px minmax(0, 1fr)", rowGap: 0.9, columnGap: 1.5 }}>
+                    {[
+                      ["服务名称", detailService.name],
+                      ["服务描述", detailService.description || "-"],
+                      ["服务状态", detailService.status],
+                      ["授权对象", detailService.authTarget],
+                      ["Endpoint", detailService.endpoint],
+                      ["今日调用", `${detailService.callsToday}`],
+                      ["工具数量", `${detailService.tools.length}`],
+                    ].map(([label, value]) => (
+                      <Box key={label} sx={{ display: "contents" }}>
+                        <Typography sx={{ fontSize: "12px", color: "#64748b", lineHeight: 1.7 }}>{label}</Typography>
+                        <Typography sx={{ fontSize: "12px", color: "#111827", lineHeight: 1.7, wordBreak: "break-all" }}>{value}</Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                </Paper>
+
+                <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
+                  <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827", mb: 1.25 }}>Instructions</Typography>
+                  <Typography sx={{ fontSize: "12px", color: "#374151", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{detailService.instructions || "-"}</Typography>
+                </Paper>
+
+                <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
+                  <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827", mb: 1.25 }}>已分配工具</Typography>
+                  <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap" }}>
+                    {detailService.tools.length ? detailService.tools.map((tool) => (
+                      <Chip key={tool} label={tool} size="small" sx={{ height: 24, fontSize: "12px", bgcolor: "#eff6ff", color: "#1d4ed8" }} />
+                    )) : (
+                      <Typography sx={{ fontSize: "12px", color: "#94a3b8" }}>暂无已分配工具</Typography>
+                    )}
+                  </Box>
+                </Paper>
+              </Box>
+            )}
+
+            {detailTab === "apikey" && (
+              <Paper sx={{ borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff", overflow: "hidden" }}>
+                <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", px: 2, py: 1.5, borderBottom: "1px solid #eef2f7" }}>
+                  <Box>
+                    <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>API Key 管理</Typography>
+                    <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.25 }}>用于调用当前 MCP 服务的鉴权密钥。</Typography>
+                  </Box>
+                  <Button onClick={generateApiKey} variant="contained" size="small" sx={{ bgcolor: BLUE, textTransform: "none", boxShadow: "none" }}>生成新 Key</Button>
+                </Box>
+                <Box sx={{ p: 2 }}>
+                  {detailService.apiKeys.length === 0 ? (
+                    <Box sx={{ py: 5, textAlign: "center", border: "1px dashed #cbd5e1", borderRadius: "8px", bgcolor: "#f8fafc" }}>
+                      <Typography sx={{ fontSize: "13px", color: "#94a3b8" }}>暂无 API Key</Typography>
+                    </Box>
+                  ) : detailService.apiKeys.map((key) => (
+                    <Box key={key} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, border: "1px solid #eef2f7", borderRadius: "8px", p: 1.5, mb: 1 }}>
+                      <Typography sx={{ fontSize: "13px", fontFamily: "monospace", color: "#374151", wordBreak: "break-all" }}>{key}</Typography>
+                      <Button size="small" onClick={() => disableApiKey(key)} sx={{ textTransform: "none", color: "#ef4444", flexShrink: 0 }}>停用</Button>
+                    </Box>
+                  ))}
+                </Box>
+              </Paper>
+            )}
+          </Box>
+        )}
+      </Drawer>
 
       <Dialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} fullWidth maxWidth="xs" PaperProps={{ sx: { borderRadius: "12px" } }}>
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 700 }}>确认删除 MCP 服务？</DialogTitle>
