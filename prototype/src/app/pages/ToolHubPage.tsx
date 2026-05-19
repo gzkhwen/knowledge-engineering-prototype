@@ -57,7 +57,6 @@ import {
   RocketLaunch,
   Search,
   Close,
-  ContentCopy,
   WarningAmber,
 } from "@mui/icons-material";
 import { Fragment, type ReactNode } from "react";
@@ -71,7 +70,6 @@ interface ToolVersion {
   versionCode?: string;
   version: string;
   status: VersionStatus;
-  recommended: boolean;
   lastDebug: string;
   configFields: VersionConfigField[];
   summary: string;
@@ -80,7 +78,6 @@ interface ToolVersion {
   supportFileTypes?: string[];
   supportKnowledgeTypes?: string[];
   callLimitNote?: string;
-  recommendHint?: boolean;
   callRule?: string;
   inputMaterialTypes?: string[];
   supportSample?: boolean;
@@ -394,6 +391,8 @@ const TOOL_STORAGE_KEY = "toolHub_tools_v10";
 const CATEGORY_STORAGE_KEY = "toolHub_categories_v2";
 const CATEGORY_SELECTION_STORAGE_KEY = "toolHub_selected_category_v1";
 const TOOL_CODE_PATTERN = /^[a-z][a-z0-9_]*$/;
+const scrollableDialogPaperSx = { borderRadius: "12px", maxHeight: "calc(100vh - 48px)", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" };
+const scrollableDialogContentSx = { overflowY: "auto" };
 const dialogGlobalStyles = (
   <GlobalStyles
     styles={{
@@ -1201,7 +1200,6 @@ function normalizeVersion(version: ToolVersion, toolName: string, toolCode?: str
     supportFileTypes: version.supportFileTypes ?? ["PDF", "Word"],
     supportKnowledgeTypes: version.supportKnowledgeTypes ?? ["QA", "文本切片"],
     callLimitNote: version.callLimitNote ?? "默认单文件 20MB 内，建议在 2 分钟内完成",
-    recommendHint: version.recommendHint ?? version.recommended,
     callRule: version.callRule ?? "由 Agent 或业务系统按接口参数配置发起调用",
     inputMaterialTypes: version.inputMaterialTypes ?? ["文件"],
     supportSample: version.supportSample ?? true,
@@ -1735,7 +1733,6 @@ function createVersionDraft(tool: ToolItem | null) {
     supportFileTypes: [] as string[],
     supportKnowledgeTypes: [] as string[],
     callLimitNote: "",
-    recommendHint: false,
     callRule: "按版本调用配置和接口参数配置调用工具",
     inputMaterialTypes: ["文件"] as string[],
     supportSample: true,
@@ -1854,7 +1851,6 @@ function createVersionDraftFromVersion(tool: ToolItem | null, version: ToolVersi
     supportFileTypes: normalized.supportFileTypes ?? [],
     supportKnowledgeTypes: normalized.supportKnowledgeTypes ?? [],
     callLimitNote: normalized.callLimitNote ?? "",
-    recommendHint: normalized.recommendHint ?? false,
     callRule: normalized.callRule ?? "",
     inputMaterialTypes: normalized.inputMaterialTypes ?? ["文件"],
     supportSample: normalized.supportSample ?? true,
@@ -2338,13 +2334,13 @@ function createRagflowProgressNodes(componentName: string): ProgressNodeConfig[]
   });
 }
 
-function createRagflowVersion(component: RagflowComponentSpec, version: string, status: VersionStatus, index: number, recommended = false): ToolVersion {
+function createRagflowVersion(component: RagflowComponentSpec, version: string, status: VersionStatus, index: number): ToolVersion {
   const rawInputParams = component.inputs.map(createRagflowRawInput);
   const rawResultFields = component.outputs.map(createRagflowRawResult);
   const params = buildVersionParamsFromRawInputs(rawInputParams);
   const resultConfig = buildResultConfigFromRawResults(rawResultFields, component.name, version);
   const operationDisplay = createRagflowOperationDisplay(params, resultConfig, rawResultFields);
-  const runCount = Math.max(0, 180 - index * 13 + (recommended ? 24 : 0));
+  const runCount = Math.max(0, 180 - index * 13);
   const failureCount = index % 4;
   const isPublished = status === "published";
 
@@ -2353,7 +2349,6 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     versionCode: buildVersionCode(component.toolCode, version),
     version,
     status,
-    recommended,
     lastDebug: status === "wait_debug" ? "" : `2026-05-13 ${String(9 + (index % 9)).padStart(2, "0")}:${String(10 + (index * 7) % 50).padStart(2, "0")}:00`,
     configFields: params.map((param) => ({ name: param.paramName, type: param.paramType, value: param.defaultValue, editable: param.editableInOperation })),
     summary: `${component.endpoint}；入参 ${rawInputParams.length} 个；返回 ${rawResultFields.length} 个`,
@@ -2362,7 +2357,6 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     supportFileTypes: component.category === "文档解析" ? ["PDF", "Word", "HTML", "URL"] : [],
     supportKnowledgeTypes: component.category === "文档解析" ? ["文本切片", "QA"] : component.category === "质量评估" ? ["QA"] : ["文本切片"],
     callLimitNote: "按工具 API 超时和队列能力控制；大文件或批量 chunk 建议异步回调。",
-    recommendHint: recommended,
     callRule: "ToolHub 按 API 信息登记的根地址、路径、鉴权和 Content-Type 调用工具。",
     inputMaterialTypes: component.inputs.some((item) => item.type === "文件" || item.name.includes("file")) ? ["文件"] : component.inputs.some((item) => item.type === "URL") ? ["URL"] : ["文本"],
     supportSample: true,
@@ -2438,13 +2432,12 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
 
 function createRagflowTool(component: RagflowComponentSpec, index: number): ToolItem {
   const versions = [
-    createRagflowVersion(component, "v1.3.0", "published", index, true),
-    createRagflowVersion(component, "v1.4.0-alpha", "wait_debug", index + 11, false),
-    createRagflowVersion(component, "v1.2.1", "pending", index + 22, false),
-    createRagflowVersion(component, "v1.2.0", "published", index + 33, false),
-    createRagflowVersion(component, "v1.1.0", "stopped", index + 44, false),
+    createRagflowVersion(component, "v1.3.0", "published", index),
+    createRagflowVersion(component, "v1.4.0-alpha", "wait_debug", index + 11),
+    createRagflowVersion(component, "v1.2.1", "pending", index + 22),
+    createRagflowVersion(component, "v1.2.0", "published", index + 33),
+    createRagflowVersion(component, "v1.1.0", "stopped", index + 44),
   ];
-  const recommended = versions.find((version) => version.recommended);
   const latest = versions[0];
   const runCount = versions.reduce((sum, version) => sum + (version.runCount ?? 0), 0);
   const failureCount = versions.reduce((sum, version) => sum + (version.failureCount ?? 0), 0);
@@ -2796,7 +2789,6 @@ export function ToolHubPage() {
         versionCode: buildVersionCode(generatedToolCode, "v1.0.0"),
         version: "v1.0.0",
         status: "wait_debug" as VersionStatus,
-        recommended: false,
         lastDebug: "未调试",
         configFields: defaultFields,
         summary: buildVersionSummary(defaultFields),
@@ -3046,7 +3038,6 @@ export function ToolHubPage() {
                         ["分类", "120px"],
                         ["工具状态", "100px"],
                         ["已发布版本数", "120px"],
-                        ["推荐版本", "120px"],
                         ["最近调用", "160px"],
                         ["操作", "220px"],
                       ].map(([head, width]) => (
@@ -3058,7 +3049,6 @@ export function ToolHubPage() {
                   </TableHead>
                   <TableBody>
                     {pagedTools.map((tool, index) => {
-                      const recommended = tool.versions.find((version) => version.recommended);
                       const publishedCount = tool.versions.filter((version) => version.status === "published").length;
                       return (
                         <TableRow key={tool.id} sx={{ bgcolor: (toolPage * toolRowsPerPage + index) % 2 === 0 ? "#fff" : "#fafafa", "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
@@ -3068,13 +3058,6 @@ export function ToolHubPage() {
                           <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151" }}>{tool.category}</TableCell>
                           <TableCell sx={{ py: 1.5 }}><StatusChip status={tool.status} /></TableCell>
                           <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151" }}>{publishedCount}</TableCell>
-                          <TableCell sx={{ py: 1.5 }}>
-                            {recommended ? (
-                              <Chip label={recommended.version} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: "#eff6ff", color: "#1d4ed8", border: "none" }} />
-                            ) : (
-                              <Typography sx={{ fontSize: "12px", color: "#9ca3af" }}>未设置</Typography>
-                            )}
-                          </TableCell>
                           <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>{tool.lastCalledAt}</TableCell>
                           <TableCell sx={{ py: 1.5 }}>
                             <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
@@ -3142,12 +3125,12 @@ export function ToolHubPage() {
         onClose={() => { setAddOpen(false); resetAddTool(); }}
         fullWidth
         maxWidth="sm"
-        PaperProps={{ sx: { borderRadius: "12px", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" } }}
+        PaperProps={{ sx: scrollableDialogPaperSx }}
       >
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 600, color: "#111827", px: 3, py: 2.5, borderBottom: "1px solid #e5e7eb" }}>
           {editingToolId ? "编辑工具" : "新建工具"}
         </DialogTitle>
-        <DialogContent sx={{ px: 3, pt: 3, pb: 3 }}>
+        <DialogContent sx={{ px: 3, pt: 3, pb: 3, ...scrollableDialogContentSx }}>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
             {!editingToolId && (
               <Alert severity="info" sx={{ mb: 0.5, borderRadius: "8px", fontSize: "12px", color: "#1e40af", bgcolor: "#dbeafe", border: "1px solid #bfdbfe" }}>
@@ -3765,22 +3748,6 @@ export function ToolHubDetailPage() {
     ];
   }, [categories, tools]);
 
-  const setRecommended = (versionId: string) => {
-    if (!tool) return;
-    setTools((prev) => prev.map((item) => (
-      item.id !== tool.id
-        ? item
-        : {
-            ...item,
-            versions: item.versions.map((version) => ({
-              ...version,
-              recommended: version.id === versionId,
-            })),
-          }
-    )));
-    toast.success("推荐版本已更新");
-  };
-
   const resetVersionDraft = () => {
     setVersionDraft(createVersionDraft(tool));
     setOperationPreviewValues({});
@@ -3839,17 +3806,6 @@ export function ToolHubDetailPage() {
     setSelectedVersionId(versionId);
     setVersionDetailOpen(true);
   };
-
-  const copyText = async (text: string, label: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success(`${label}已复制`);
-    } catch {
-      toast.error(`复制失败，请手动复制${label}`);
-    }
-  };
-
-  const copyVersionCode = (versionCode: string) => copyText(versionCode, "版本ID");
 
   const openDebugDrawer = (versionId: string) => {
     const version = tool?.versions.find((item) => item.id === versionId);
@@ -4581,7 +4537,6 @@ export function ToolHubDetailPage() {
       versionCode,
       version: versionDraft.version.trim(),
       status: nextVersionStatus,
-      recommended: baseVersion?.recommended ?? false,
       lastDebug: baseVersion?.lastDebug ?? "",
       configFields,
       summary: [versionNameSummary, packageSummary, runtimeSummary].join("；"),
@@ -4590,7 +4545,6 @@ export function ToolHubDetailPage() {
       supportFileTypes: versionDraft.supportFileTypes,
       supportKnowledgeTypes: versionDraft.supportKnowledgeTypes,
       callLimitNote: versionDraft.callLimitNote,
-      recommendHint: versionDraft.recommendHint,
       callRule: versionDraft.callRule || "按版本调用配置和接口参数配置调用工具",
       inputMaterialTypes: versionDraft.inputMaterialTypes,
       supportSample: versionDraft.supportSample,
@@ -4804,10 +4758,6 @@ export function ToolHubDetailPage() {
       items.push({ label: "编辑", onClick: editToDraft });
       items.push({ label: "调试", onClick: () => openDebugDrawer(version.id) });
       items.push({ label: "发布", onClick: publishVersion });
-    }
-
-    if (version.status === "published" && !version.recommended) {
-      items.push({ label: "推荐", onClick: () => setRecommended(version.id) });
     }
 
     if (version.status === "published") {
@@ -5138,17 +5088,15 @@ export function ToolHubDetailPage() {
                 <Typography sx={{ fontSize: "17px", fontWeight: 700, color: "#111827" }}>{tool.name}</Typography>
                 <StatusChip status={tool.status} />
               </Box>
-              <Typography sx={{ fontSize: "13px", color: "#6b7280", mb: 1 }}>{tool.capabilitySummary || tool.description}</Typography>
               <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
                 {[
                   { label: "工具ID", value: tool.toolCode },
-                  { label: "工具分类", value: tool.category },
-                  { label: "能力摘要", value: tool.capabilitySummary || tool.description },
-                  { label: "详细描述", value: tool.detailedDescription || "待补充工具能力边界。" },
+                  { label: "创建人", value: tool.createdBy },
+                  { label: "创建时间", value: tool.createdAt },
                 ].map((item) => (
-                  <Box key={item.label} sx={{ minWidth: 0, maxWidth: item.label === "详细描述" ? 420 : 220 }}>
+                  <Box key={item.label} sx={{ minWidth: 0, maxWidth: 220 }}>
                     <Typography sx={{ fontSize: "11px", color: "#9ca3af" }}>{item.label}</Typography>
-                    <Typography sx={{ fontSize: "12px", color: "#374151", fontWeight: item.label === "工具分类" || item.label === "工具ID" ? 500 : 400, lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: item.label === "工具ID" ? "monospace" : "inherit" }} title={item.value}>{item.value}</Typography>
+                    <Typography sx={{ fontSize: "12px", color: "#374151", fontWeight: item.label === "工具ID" ? 500 : 400, lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: item.label === "工具ID" ? "monospace" : "inherit" }} title={item.value}>{item.value}</Typography>
                   </Box>
                 ))}
               </Box>
@@ -5230,9 +5178,6 @@ export function ToolHubDetailPage() {
                               <TableCell sx={{ py: 1.5, whiteSpace: "nowrap" }}>
                                 <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
                                   <Typography component="button" onClick={() => openVersionDetail(version.id)} sx={{ border: "none", p: 0, m: 0, bgcolor: "transparent", fontSize: "13px", color: "#111827", fontWeight: 500, cursor: "pointer", "&:hover": { color: BLUE, textDecoration: "underline" } }}>{version.version}</Typography>
-                                  {version.recommended && (
-                                    <Chip label="推荐" size="small" sx={{ height: 20, fontSize: "10px", bgcolor: "#eff6ff", color: "#1d4ed8", "& .MuiChip-label": { px: 0.75 } }} />
-                                  )}
                                 </Box>
                               </TableCell>
                               <TableCell sx={{ py: 1.5, textAlign: "left", pl: 2 }}>
@@ -5400,12 +5345,12 @@ export function ToolHubDetailPage() {
         onClose={() => (versionDraft.dirty ? setConfirmCloseOpen(true) : closeVersionEditor())}
         fullWidth
         maxWidth="lg"
-        PaperProps={{ sx: { bgcolor: "#ffffff", borderRadius: "12px", overflow: "hidden", maxWidth: 960, boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" } }}
+        PaperProps={{ sx: { ...scrollableDialogPaperSx, bgcolor: "#ffffff", overflow: "hidden", maxWidth: 960 } }}
       >
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 600, color: "#111827", px: 3, py: 2.5, borderBottom: "1px solid #e5e7eb", bgcolor: "#ffffff" }}>
           {editingVersionId ? "编辑工具版本" : "新增工具版本"}
         </DialogTitle>
-        <DialogContent sx={{ px: 3, pt: 3, pb: 3, bgcolor: "#ffffff" }}>
+        <DialogContent sx={{ px: 3, pt: 3, pb: 3, bgcolor: "#ffffff", ...scrollableDialogContentSx }}>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
               <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827", mb: 2 }}>基本信息</Typography>
@@ -5624,32 +5569,22 @@ export function ToolHubDetailPage() {
             <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
               <Box sx={{ p: 2.5, bgcolor: "#fff", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2 }}>
                 <Box>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
-                    <Typography sx={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>{selectedVersion.version}</Typography>
-                    <VersionChip status={selectedVersion.status} />
-                    {selectedVersion.recommended && <Chip label="推荐版本" size="small" sx={{ height: 22, fontSize: "11px", bgcolor: "#eff6ff", color: "#1d4ed8" }} />}
-                  </Box>
-                  <Typography sx={{ fontSize: "12px", color: "#64748b" }}>{selectedVersion.versionDesc || selectedVersion.summary}</Typography>
-                </Box>
+	                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
+	                    <Typography sx={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>{selectedVersion.version}</Typography>
+	                    <VersionChip status={selectedVersion.status} />
+	                  </Box>
+	                </Box>
                 <IconButton size="small" onClick={() => setVersionDetailOpen(false)}>
                   <Close sx={{ fontSize: 18, color: "#94a3b8" }} />
                 </IconButton>
               </Box>
 
-              <Box sx={{ p: 2.5, overflow: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
-              {detailBlock("基本信息", [
-                ["版本ID", (
-                  <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
-                    <Box component="span" sx={{ fontFamily: "monospace", color: "#1e3a8a", fontWeight: 600 }}>{versionCode}</Box>
-                    <IconButton size="small" onClick={() => copyVersionCode(versionCode)} sx={{ p: 0.25, color: BLUE }}>
-                      <ContentCopy sx={{ fontSize: 14 }} />
-                    </IconButton>
-                  </Box>
-                )],
-                ["版本名称", versionName],
-                ["版本状态", VERSION_STATUS[selectedVersion.status].label],
-                ["推荐版本", selectedVersion.recommended ? "是" : "否"],
-                ["版本描述", selectedVersion.versionDesc || selectedVersion.summary],
+	              <Box sx={{ p: 2.5, overflow: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+	              {detailBlock("基本信息", [
+	                ["版本ID", <Box component="span" sx={{ fontFamily: "monospace", color: "#1e3a8a", fontWeight: 600 }}>{versionCode}</Box>],
+	                ["版本名称", versionName],
+	                ["版本状态", VERSION_STATUS[selectedVersion.status].label],
+	                ["版本描述", selectedVersion.versionDesc || selectedVersion.summary],
                 ["创建人", selectedVersion.createdBy || "-"],
                 ["创建时间", selectedVersion.createdAt || "-"],
               ])}
@@ -5761,35 +5696,39 @@ export function ToolHubDetailPage() {
                 emptyText: "当前版本没有配置可调试的操作字段",
               })}
 
-              <Paper sx={{ p: 2, borderRadius: "10px", border: "1px solid #e5e7eb", boxShadow: "none" }}>
-                {debugLoading && <LinearProgress sx={{ mb: 1.5 }} />}
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
-                  <Typography sx={{ fontSize: "14px", fontWeight: 700 }}>调试结果</Typography>
-                  <Chip label={debugDraft.debugStatus === "not_started" ? "未调试" : debugDraft.debugStatus === "running" ? "运行中" : debugDraft.debugStatus === "success" ? "成功" : "失败"} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: debugDraft.debugStatus === "success" ? "#dcfce7" : debugDraft.debugStatus === "failed" ? "#fef2f2" : debugDraft.debugStatus === "running" ? "#dbeafe" : "#f3f4f6", color: debugDraft.debugStatus === "success" ? "#166534" : debugDraft.debugStatus === "failed" ? "#b91c1c" : debugDraft.debugStatus === "running" ? "#1d4ed8" : "#6b7280" }} />
-                </Box>
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  {debugResultRows.map(([label, value]) => (
-                    <Box key={label} sx={{ display: "grid", gridTemplateColumns: "110px minmax(0, 1fr)", gap: 1.5, p: 1.25, borderRadius: "8px", bgcolor: "#f8fafc" }}>
-                      <Typography sx={{ fontSize: "12px", color: "#64748b" }}>{label}</Typography>
-                      <Typography sx={{ fontSize: "12px", color: "#111827", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{value}</Typography>
+              {debugDraft.debugStatus !== "not_started" && (
+                <>
+                  <Paper sx={{ p: 2, borderRadius: "10px", border: "1px solid #e5e7eb", boxShadow: "none" }}>
+                    {debugLoading && <LinearProgress sx={{ mb: 1.5 }} />}
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
+                      <Typography sx={{ fontSize: "14px", fontWeight: 700 }}>调试结果</Typography>
+                      <Chip label={debugDraft.debugStatus === "running" ? "运行中" : debugDraft.debugStatus === "success" ? "成功" : "失败"} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: debugDraft.debugStatus === "success" ? "#dcfce7" : debugDraft.debugStatus === "failed" ? "#fef2f2" : "#dbeafe", color: debugDraft.debugStatus === "success" ? "#166534" : debugDraft.debugStatus === "failed" ? "#b91c1c" : "#1d4ed8" }} />
                     </Box>
-                  ))}
-                </Box>
-              </Paper>
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                      {debugResultRows.map(([label, value]) => (
+                        <Box key={label} sx={{ display: "grid", gridTemplateColumns: "110px minmax(0, 1fr)", gap: 1.5, p: 1.25, borderRadius: "8px", bgcolor: "#f8fafc" }}>
+                          <Typography sx={{ fontSize: "12px", color: "#64748b" }}>{label}</Typography>
+                          <Typography sx={{ fontSize: "12px", color: "#111827", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{value}</Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  </Paper>
 
-              <Paper sx={{ p: 2, borderRadius: "10px", border: "1px solid #e5e7eb", boxShadow: "none" }}>
-                <Typography sx={{ fontSize: "14px", fontWeight: 700, mb: 1.5 }}>调用详情</Typography>
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-                  {debugCallDetails.map(([title, value]) => (
-                    <Box key={title}>
-                      <Typography sx={{ fontSize: "12px", color: "#64748b", mb: 0.75 }}>{title}</Typography>
-                      <Box component="pre" sx={{ m: 0, p: 1.5, borderRadius: "8px", bgcolor: "#0f172a", color: "#e2e8f0", fontSize: "11px", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                        {JSON.stringify(value, null, 2)}
-                      </Box>
+                  <Paper sx={{ p: 2, borderRadius: "10px", border: "1px solid #e5e7eb", boxShadow: "none" }}>
+                    <Typography sx={{ fontSize: "14px", fontWeight: 700, mb: 1.5 }}>调用详情</Typography>
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                      {debugCallDetails.map(([title, value]) => (
+                        <Box key={title}>
+                          <Typography sx={{ fontSize: "12px", color: "#64748b", mb: 0.75 }}>{title}</Typography>
+                          <Box component="pre" sx={{ m: 0, p: 1.5, borderRadius: "8px", bgcolor: "#0f172a", color: "#e2e8f0", fontSize: "11px", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                            {JSON.stringify(value, null, 2)}
+                          </Box>
+                        </Box>
+                      ))}
                     </Box>
-                  ))}
-                </Box>
-              </Paper>
+                  </Paper>
+                </>
+              )}
             </Box>
 
             <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, pt: 2 }}>
@@ -5800,11 +5739,11 @@ export function ToolHubDetailPage() {
         )}
       </Drawer>
 
-      <Dialog open={paramEditorOpen} onClose={() => setParamEditorOpen(false)} fullWidth maxWidth="md">
+      <Dialog open={paramEditorOpen} onClose={() => setParamEditorOpen(false)} fullWidth maxWidth="md" PaperProps={{ sx: scrollableDialogPaperSx }}>
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 700, px: 3, pt: 2.5, pb: 2 }}>
           {editingParamIndex === null ? "新增标准入参" : "编辑标准入参"}
         </DialogTitle>
-        <DialogContent sx={{ px: 3, pb: 2.5 }}>
+        <DialogContent sx={{ px: 3, pb: 2.5, ...scrollableDialogContentSx }}>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
             <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
               <TextField
@@ -5879,11 +5818,11 @@ export function ToolHubDetailPage() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={resultEditorOpen} onClose={() => setResultEditorOpen(false)} fullWidth maxWidth="md">
+      <Dialog open={resultEditorOpen} onClose={() => setResultEditorOpen(false)} fullWidth maxWidth="md" PaperProps={{ sx: scrollableDialogPaperSx }}>
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 700, px: 3, pt: 2.5, pb: 2 }}>
           {editingResultIndex === null ? "新增标准返回" : "编辑标准返回"}
         </DialogTitle>
-        <DialogContent sx={{ px: 3, pb: 2.5 }}>
+        <DialogContent sx={{ px: 3, pb: 2.5, ...scrollableDialogContentSx }}>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
             <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
               <TextField

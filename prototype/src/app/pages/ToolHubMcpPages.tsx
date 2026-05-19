@@ -43,6 +43,8 @@ import { toast } from "sonner";
 const BLUE = "#3b82f6";
 const DETAIL_DRAWER_Z_INDEX = 1800;
 const DETAIL_DIALOG_Z_INDEX = DETAIL_DRAWER_Z_INDEX + 10;
+const scrollableDialogPaperSx = { borderRadius: "12px", maxHeight: "calc(100vh - 48px)" };
+const scrollableDialogContentSx = { display: "flex", flexDirection: "column", gap: 2, pt: "12px !important", overflowY: "auto" };
 
 type ServiceStatus = "运行中" | "停用" | "异常";
 type ConnectorStatus = "正常" | "异常" | "未检测";
@@ -74,7 +76,6 @@ type ToolVersionOption = {
   connector: string;
   method: string;
   requestPath: string;
-  recommended?: boolean;
 };
 
 type ServiceToolBinding = {
@@ -122,8 +123,8 @@ const initialTools: ToolOption[] = [
     category: "项目上下文",
     status: "启用",
     versions: [
-      { id: "context-v1", version: "v1.0.0", status: "已发布", connector: "知识工程核心 API", method: "GET", requestPath: "/projects/{id}/context", recommended: false },
-      { id: "context-v2", version: "v2.0.0", status: "已发布", connector: "知识工程核心 API", method: "POST", requestPath: "/projects/context/query", recommended: true },
+      { id: "context-v1", version: "v1.0.0", status: "已发布", connector: "知识工程核心 API", method: "GET", requestPath: "/projects/{id}/context" },
+      { id: "context-v2", version: "v2.0.0", status: "已发布", connector: "知识工程核心 API", method: "POST", requestPath: "/projects/context/query" },
       { id: "context-v21", version: "v2.1.0-beta", status: "待调试", connector: "知识工程核心 API", method: "POST", requestPath: "/projects/context/search" },
     ],
   },
@@ -133,7 +134,7 @@ const initialTools: ToolOption[] = [
     category: "方案生成",
     status: "启用",
     versions: [
-      { id: "solution-v1", version: "v1.0.0", status: "已发布", connector: "知识工程核心 API", method: "POST", requestPath: "/solutions/generate", recommended: true },
+      { id: "solution-v1", version: "v1.0.0", status: "已发布", connector: "知识工程核心 API", method: "POST", requestPath: "/solutions/generate" },
       { id: "solution-v2", version: "v2.0.0", status: "待发布", connector: "知识工程核心 API", method: "POST", requestPath: "/solutions/generate-v2" },
     ],
   },
@@ -143,7 +144,7 @@ const initialTools: ToolOption[] = [
     category: "素材检索",
     status: "启用",
     versions: [
-      { id: "material-v1", version: "v1.0.0", status: "已发布", connector: "原始素材服务", method: "GET", requestPath: "/materials/search", recommended: true },
+      { id: "material-v1", version: "v1.0.0", status: "已发布", connector: "原始素材服务", method: "GET", requestPath: "/materials/search" },
     ],
   },
   {
@@ -324,7 +325,7 @@ function getPublishedVersions(tool: ToolOption) {
 
 function getDefaultPublishedVersion(tool: ToolOption) {
   const published = getPublishedVersions(tool);
-  return published.find((version) => version.recommended) ?? published[0] ?? null;
+  return published[0] ?? null;
 }
 
 function resolveBinding(binding: ServiceToolBinding) {
@@ -627,9 +628,9 @@ export function ToolHubMcpServicesPage() {
         )}
       </Paper>
 
-      <Dialog open={Boolean(editingService) || serviceDraft !== emptyService} onClose={closeEditor} fullWidth maxWidth="md" PaperProps={{ sx: { borderRadius: "12px" } }}>
+      <Dialog open={Boolean(editingService) || serviceDraft !== emptyService} onClose={closeEditor} fullWidth maxWidth="md" PaperProps={{ sx: scrollableDialogPaperSx }}>
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 700 }}>{editingService ? "编辑 MCP 服务" : "新建 MCP 服务"}</DialogTitle>
-        <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: "12px !important" }}>
+        <DialogContent sx={scrollableDialogContentSx}>
           <TextField label="服务名称" size="small" required value={serviceDraft.name} onChange={(event) => setServiceDraft((prev) => ({ ...prev, name: event.target.value }))} />
           <TextField
             label="服务描述"
@@ -698,7 +699,7 @@ export function ToolHubMcpServicesPage() {
                           >
                             {publishedVersions.map((version) => (
                               <MenuItem key={version.id} value={version.id} sx={{ fontSize: "12px" }}>
-                                {version.version}{version.recommended ? "（推荐）" : ""}
+                                {version.version}
                               </MenuItem>
                             ))}
                           </Select>
@@ -824,7 +825,7 @@ export function ToolHubMcpServicesPage() {
                           <TableRow key={`${binding.toolId}-${binding.versionId}`} sx={detailTableRowSx(index)}>
                             <TableCell sx={{ ...detailTableTextCellSx, color: "#111827", fontWeight: 600 }}>{tool.name}</TableCell>
                             <TableCell sx={detailTableTextCellSx}>{tool.category}</TableCell>
-                            <TableCell sx={detailTableTextCellSx}>{version.version}{version.recommended ? "（推荐）" : ""}</TableCell>
+                            <TableCell sx={detailTableTextCellSx}>{version.version}</TableCell>
                             <TableCell sx={{ py: 1.5 }}><StatusChip status={version.status} type="tool" /></TableCell>
                             <TableCell sx={detailTableTextCellSx}>{version.connector}</TableCell>
                             <TableCell sx={{ ...detailTableTextCellSx, fontFamily: "monospace", wordBreak: "break-all" }}>{version.method} {version.requestPath}</TableCell>
@@ -1299,9 +1300,9 @@ export function ToolHubConnectorsPage() {
         )}
       </Paper>
 
-      <Dialog open={Boolean(editingConnector) || connectorDraft !== emptyConnector} onClose={closeEditor} fullWidth maxWidth="md" PaperProps={{ sx: { borderRadius: "12px" } }}>
+      <Dialog open={Boolean(editingConnector) || connectorDraft !== emptyConnector} onClose={closeEditor} fullWidth maxWidth="md" PaperProps={{ sx: scrollableDialogPaperSx }}>
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 700 }}>{editingConnector ? "编辑连接器" : "新建连接器"}</DialogTitle>
-        <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: "12px !important" }}>
+        <DialogContent sx={scrollableDialogContentSx}>
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
             <TextField label="连接器名称" size="small" required value={connectorDraft.name} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, name: event.target.value }))} />
             <TextField select label="连接器类型" size="small" value={connectorDraft.type} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, type: event.target.value as ConnectorType }))}>
