@@ -38,9 +38,6 @@ import {
   TextField,
   Typography,
   Tooltip,
-  Stepper,
-  Step,
-  StepLabel,
   LinearProgress,
   FormControlLabel,
   GlobalStyles,
@@ -492,7 +489,6 @@ const MODEL_RESOURCE_SOURCE_OPTIONS: Array<{ key: ModelResourceSource; label: st
   { key: "gitlab", label: "GitLab 仓库" },
   { key: "deployed", label: "已部署模型目录" },
 ];
-const VERSION_STEPS = ["基本信息", "调用配置", "接口参数配置"];
 const PROGRESS_RULE_MATCH_MODE_OPTIONS: ProgressRuleMatchMode[] = ["status", "event_code", "node_key", "result.code"];
 const SYSTEM_EVENT_OPTIONS = [
   "任务创建",
@@ -1370,12 +1366,20 @@ function getRunningMcpServiceNames(version: ToolVersion) {
     .map((service) => service.serviceName);
 }
 
+function getAssociatedMcpServiceNames(version: ToolVersion) {
+  const versionCode = version.versionCode;
+  if (!versionCode || version.status !== "published") return [];
+  return MCP_SERVICE_VERSION_BINDINGS
+    .filter((service) => service.versionCodes.includes(versionCode))
+    .map((service) => service.serviceName);
+}
+
 function getVersionMcpServiceRefs(version: ToolVersion) {
-  return getRunningMcpServiceNames(version).length;
+  return getAssociatedMcpServiceNames(version).length;
 }
 
 function isVersionUsedByRunningMcpService(version: ToolVersion) {
-  return getVersionMcpServiceRefs(version) > 0;
+  return getRunningMcpServiceNames(version).length > 0;
 }
 
 function getVersionLiteflowRefs(version: ToolVersion) {
@@ -3690,7 +3694,6 @@ export function ToolHubDetailPage() {
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [editingVersionId, setEditingVersionId] = useState<string | null>(null);
   const [debugVersionId, setDebugVersionId] = useState<string | null>(null);
-  const [wizardStep, setWizardStep] = useState(0);
   const [displayScene, setDisplayScene] = useState<"editable" | "readonly">("editable");
   const [displayPreviewTab, setDisplayPreviewTab] = useState<"editable" | "readonly">("editable");
   const [resultPreviewTab, setResultPreviewTab] = useState<"success" | "failed">("success");
@@ -3710,7 +3713,6 @@ export function ToolHubDetailPage() {
   const [draggingUiFieldIndex, setDraggingUiFieldIndex] = useState<number | null>(null);
   const [draggingProgressNodeIndex, setDraggingProgressNodeIndex] = useState<number | null>(null);
   const [debugLoading, setDebugLoading] = useState(false);
-  const [debugWorkTab, setDebugWorkTab] = useState<"progress" | "logs">("progress");
   const [versionPage, setVersionPage] = useState(0);
   const [versionRowsPerPage, setVersionRowsPerPage] = useState(20);
   const [versionStatusFilter, setVersionStatusFilter] = useState<VersionStatus | "all">("all");
@@ -3782,7 +3784,6 @@ export function ToolHubDetailPage() {
   const resetVersionDraft = () => {
     setVersionDraft(createVersionDraft(tool));
     setOperationPreviewValues({});
-    setWizardStep(0);
     setDisplayScene("editable");
     setDisplayPreviewTab("editable");
     setResultPreviewTab("success");
@@ -3810,7 +3811,6 @@ export function ToolHubDetailPage() {
     setVersionDraft(createVersionDraftFromVersion(tool, version));
     setOperationPreviewValues({});
     setEditingVersionId(versionId);
-    setWizardStep(0);
     setDisplayScene("editable");
     setDisplayPreviewTab("editable");
     setResultPreviewTab("success");
@@ -3828,7 +3828,6 @@ export function ToolHubDetailPage() {
     });
     setOperationPreviewValues({});
     setEditingVersionId(null);
-    setWizardStep(0);
     setDisplayScene("editable");
     setDisplayPreviewTab("editable");
     setResultPreviewTab("success");
@@ -3857,7 +3856,6 @@ export function ToolHubDetailPage() {
     if (!version) return;
     const operationFields = (version.operationDisplay?.editableFields ?? []).filter((field) => field.uiComponent !== "不展示");
     setDebugVersionId(versionId);
-    setDebugWorkTab("progress");
     setDebugDraft({
       sampleFile: "",
       sampleText: "",
@@ -3945,32 +3943,11 @@ export function ToolHubDetailPage() {
         toast.error("请填写调用超时");
         return false;
       }
-      const needsAsyncTracking = versionDraft.asyncMode !== "同步调用";
-      if (needsAsyncTracking && versionDraft.callbackPolicy === "使用固定回调地址" && !versionDraft.callbackUrl.trim()) {
-        toast.error("请填写固定回调地址");
-        return false;
-      }
-      if (needsAsyncTracking && !versionDraft.asyncTaskIdField.trim()) {
-        toast.error("请填写任务标识字段");
-        return false;
-      }
-      if (needsAsyncTracking && !versionDraft.progressStatusField.trim()) {
-        toast.error("请填写进度状态字段");
-        return false;
-      }
-      if (versionDraft.resultPathStrategy !== "不读取结果文件" && !versionDraft.resultFileField.trim()) {
-        toast.error("请填写结果文件字段");
-        return false;
-      }
     }
 
     if (step === 2) {
       if (versionDraft.rawInputParams.length === 0) {
         toast.error("请至少配置 1 个标准入参");
-        return false;
-      }
-      if (versionDraft.rawResultFields.length === 0) {
-        toast.error("请至少配置 1 个标准返回");
         return false;
       }
 
@@ -3989,56 +3966,9 @@ export function ToolHubDetailPage() {
           return false;
         }
       }
-
-      const resultNames = new Set<string>();
-      for (const item of versionDraft.rawResultFields) {
-        const sourceField = item.sourceField.trim();
-        if (!sourceField) {
-          toast.error("标准返回字段不能为空");
-          return false;
-        }
-        if (resultNames.has(sourceField)) {
-          toast.error("标准返回字段名称重复");
-          return false;
-        }
-        resultNames.add(sourceField);
-        if (!item.fieldType) {
-          toast.error("请选择返回字段类型");
-          return false;
-        }
-        if (!item.requiredMode) {
-          toast.error("请选择是否必返");
-          return false;
-        }
-        if (!item.description.trim()) {
-          toast.error("字段说明不能为空");
-          return false;
-        }
-      }
     }
 
     return true;
-  };
-
-  const goNext = () => {
-    if (!validateStep(wizardStep)) return;
-    if (wizardStep === 2) {
-      setVersionDraft((prev) => ({
-        ...prev,
-        ...(() => {
-          const nextParams = buildVersionParamsFromRawInputs(prev.rawInputParams);
-          const nextResultConfig = buildResultConfigFromRawResults(prev.rawResultFields, tool?.name ?? "", prev.version);
-          return {
-            params: nextParams,
-            configFields: nextParams.map((param) => ({ name: param.paramName, type: param.paramType, value: param.defaultValue, editable: param.editableInOperation })),
-            externalMappings: createDefaultExternalMappings(nextParams),
-            resultConfig: nextResultConfig,
-            operationDisplay: createDefaultOperationDisplay(nextParams, nextResultConfig, prev.rawResultFields, prev.operationDisplay),
-          };
-        })(),
-      }));
-    }
-    setWizardStep((prev) => Math.min(prev + 1, VERSION_STEPS.length - 1));
   };
 
   const applyRawInputParams = (nextRawInputs: RawInputParam[]) => {
@@ -4549,10 +4479,6 @@ export function ToolHubDetailPage() {
       toast.error("请先补全入参标准化配置");
       return;
     }
-    if (!debugVersion.resultConfig?.summary?.trim()) {
-      toast.error("请先补全结果结构配置");
-      return;
-    }
     const runId = `${tool.id}-debug-${Date.now()}`;
     const startedAt = "2026-05-13 16:18:00";
     const operationFields = (debugVersion.operationDisplay?.editableFields ?? []).filter((field) => field.uiComponent !== "不展示");
@@ -4561,9 +4487,9 @@ export function ToolHubDetailPage() {
       const normalizedValue = Array.isArray(value) ? value : typeof value === "boolean" ? value : value || "";
       return [field.sourceField, normalizedValue];
     }));
-    const debugInput = `request_body=${JSON.stringify({ ...debugInputObject, source: "管理端调试" })}`;
     const requestAddress = getVersionRequestAddress(debugVersion);
-    const requestConfig = `method=${debugVersion.httpMethod || "POST"}；url=${requestAddress}；headers.Content-Type=${debugVersion.httpContentType || "application/json"}；auth=${debugVersion.httpAuthConfig || "未配置"}；timeout=${debugVersion.httpTimeout || "120"}s；callback=${debugVersion.callbackPolicy || "ToolHub 自动生成回调地址"}；task_id_field=${debugVersion.asyncTaskIdField || "$.task_id"}；progress_field=${debugVersion.progressStatusField || "$.status"}`;
+    const debugInput = `mcp_request=${JSON.stringify({ method: "tools/call", params: { name: tool.toolCode, arguments: debugInputObject } })}`;
+    const requestConfig = `method=${debugVersion.httpMethod || "POST"}；url=${requestAddress}；headers.Content-Type=${debugVersion.httpContentType || "application/json"}；auth=沿用连接器鉴权；timeout=${debugVersion.httpTimeout || "120"}s`;
     const isPendingBeforeDebug = debugVersion.status === "pending";
 
     setDebugLoading(true);
@@ -4583,7 +4509,7 @@ export function ToolHubDetailPage() {
           packageInfo: requestAddress,
           config: requestConfig,
           input: debugInput,
-          output: `response=${JSON.stringify({ code: 0, status: "running", task_id: runId, message: "调试任务已提交，等待工具返回标准 API 输出" })}`,
+          output: `mcp_response=${JSON.stringify({ content: [{ type: "text", text: "工具调用测试运行中" }] })}`,
           flowTrace: getDebugFlowTrace("running"),
           executedAt: startedAt,
         },
@@ -4606,8 +4532,8 @@ export function ToolHubDetailPage() {
                 finishedAt: success ? "2026-05-13 16:18:10" : "2026-05-13 16:18:08",
                 flowTrace: getDebugFlowTrace(success ? "success" : "failed"),
                 output: success
-                  ? `response=${JSON.stringify({ code: 0, status: "success", message: "调试成功", result: { summary: "结果结构可正常生成", structured_result: {} } })}`
-                  : `response=${JSON.stringify({ code: 1, status: "failed", message: "样例输入与接口参数配置不匹配", error: "invalid_request_body", advice: "调整输入材料或参数配置后重新调试" })}`,
+                  ? `mcp_response=${JSON.stringify({ content: [{ type: "text", text: "调试成功，底层 API 已返回有效结果" }], structuredContent: { status: "success", summary: "底层 API 调用成功", traceId: runId } })}`
+                  : `mcp_response=${JSON.stringify({ isError: true, content: [{ type: "text", text: "样例输入与接口参数配置不匹配" }], structuredContent: { status: "failed", error: "invalid_request_body", traceId: runId } })}`,
               }
             : record
         )),
@@ -4615,11 +4541,11 @@ export function ToolHubDetailPage() {
       setDebugDraft((prev) => ({
         ...prev,
         debugStatus: success ? "success" : "failed",
-        debugResultSummary: success ? "调试成功，结果结构可正常生成" : "",
-        debugResultPreview: success ? JSON.stringify(debugVersion.resultConfig, null, 2) : "",
-        debugRawOutput: success ? "mock 原始输出：执行成功，已返回结构化结果。" : "",
-        debugErrorMessage: success ? "" : "mock 调试失败：样例输入与参数标准化配置不匹配",
-        debugAdvice: success ? "版本已自动进入待发布，可返回版本列表执行发布。" : isPendingBeforeDebug ? "本次复测失败，版本仍保持待发布；可继续调试、编辑配置或提交发布。" : "建议调整输入材料或参数配置后重新调试。",
+        debugResultSummary: success ? "调试成功，底层 API 已返回有效结果" : "",
+        debugResultPreview: success ? JSON.stringify({ status: "success", summary: "底层 API 调用成功", traceId: runId }, null, 2) : "",
+        debugRawOutput: success ? JSON.stringify({ code: 0, data: { summary: "底层 API 调用成功", items: [] } }, null, 2) : "",
+        debugErrorMessage: success ? "" : "样例输入与接口参数配置不匹配",
+        debugAdvice: success ? "版本已自动进入待发布，可返回版本列表执行发布。" : isPendingBeforeDebug ? "本次测试失败，版本仍保持待发布；可继续调整入参后重新测试。" : "建议调整调试入参或接口配置后重新测试。",
       }));
       updateVersionStatus(debugVersion.id, success || isPendingBeforeDebug ? "pending" : "wait_debug", success ? "success" : "failed");
       setDebugLoading(false);
@@ -4911,20 +4837,6 @@ export function ToolHubDetailPage() {
   };
 
   const debugProgressNodes = (debugVersion?.progressNodes ?? createDefaultProgressNodes(tool.name)).slice().sort((a, b) => a.order - b.order);
-  const getDebugNodeState = (index: number) => {
-    if (debugDraft.debugStatus === "success") return "success";
-    if (debugDraft.debugStatus === "failed") {
-      if (index < 2) return "success";
-      if (index === 2) return "failed";
-      return "pending";
-    }
-    if (debugDraft.debugStatus === "running") {
-      if (index < 2) return "success";
-      if (index === 2) return "running";
-      return "pending";
-    }
-    return "pending";
-  };
 
   const getDebugFlowTrace = (status: DebugStatus) => {
     const nodeStatusLabel: Record<"success" | "running" | "failed" | "pending", string> = {
@@ -4954,44 +4866,54 @@ export function ToolHubDetailPage() {
     return `接入方式=${packageInfo.mode}；服务器地址=${version.deployedServerAddress || "-"}；工具包目录=${version.deployedDirectory || "-"}`;
   };
 
-  const debugLogs = debugDraft.debugStatus === "not_started"
-    ? ["等待发起调试任务。"]
-    : [
-        "[16:18:00] [ToolHub] 接收管理端调试请求，生成运行记录。",
-        "[16:18:01] [ToolHub] 完成操作参数收集，生成标准化输入。",
-        "[16:18:02] [ToolHub] 按工具版本运行配置启动工具包。",
-        "[16:18:03] [工具包] 加载运行环境和模型依赖。",
-        "[16:18:04] [工具包] 原始文件接入完成，开始执行表格解析。",
-        debugDraft.debugStatus === "failed"
-          ? "[16:18:07] [工具包] 内容清洗失败：输入文件中存在无法解析的表格结构。"
-          : debugDraft.debugStatus === "running"
-            ? "[16:18:07] [工具包] 内容清洗执行中，已完成 2/4 个处理节点。"
-            : "[16:18:09] [工具包] 内容清洗完成，文本切片结果生成成功。",
-        debugDraft.debugStatus === "failed"
-          ? "[16:18:08] [ToolHub] 读取工具包错误输出，写入调试失败结果。"
-          : debugDraft.debugStatus === "running"
-            ? "[16:18:08] [ToolHub] 持续监听工具包输出，等待返回结果。"
-            : "[16:18:10] [ToolHub] 读取工具包输出，完成返回结果标准化。",
-      ];
-
   const debugResultRows = debugDraft.debugStatus === "success"
     ? [
         ["运行结果", "成功"],
-        ["结果摘要", debugDraft.debugResultSummary || "调试成功，结果结构可正常生成"],
-        ["主要结果内容", debugVersion?.resultConfig?.content || "生成标准化文本块、表格结构和元数据"],
-        ["结构化结果", debugDraft.debugResultPreview || "{}"],
+        ["结果摘要", debugDraft.debugResultSummary || "调试成功，底层 API 已返回有效结果"],
+        ["耗时", "10.2 秒"],
         ["调用记录标识", `${debugVersion?.id ?? "debug"}-latest-run`],
       ]
     : debugDraft.debugStatus === "failed"
       ? [
           ["运行结果", "失败"],
-          ["错误信息", debugDraft.debugErrorMessage || "样例输入与参数标准化配置不匹配"],
-          ["调整建议", debugDraft.debugAdvice || "建议调整输入材料或参数标准化配置后重新调试。"],
+          ["错误信息", debugDraft.debugErrorMessage || "样例输入与接口参数配置不匹配"],
+          ["调整建议", debugDraft.debugAdvice || "建议调整调试入参或接口配置后重新测试。"],
         ]
       : [
           ["运行结果", debugDraft.debugStatus === "running" ? "运行中" : "未调试"],
-          ["结果摘要", debugDraft.debugStatus === "running" ? "工具正在处理调试输入，完成后展示标准化输出。" : "发起调试后展示标准化处理返回值。"],
+          ["结果摘要", debugDraft.debugStatus === "running" ? "工具调用测试执行中，完成后展示响应结果。" : "发起测试后展示 MCP 与底层 API 的输入输出。"],
         ];
+
+  const debugArguments = Object.fromEntries(debugOperationFields.map((field) => {
+    const value = debugDraft.paramValues[field.id];
+    const normalizedValue = Array.isArray(value) ? value : typeof value === "boolean" ? value : value || "";
+    return [field.sourceField, normalizedValue];
+  }));
+  const debugApiRequest = {
+    method: debugVersion?.httpMethod || "POST",
+    url: debugVersion ? getVersionRequestAddress(debugVersion) : "-",
+    headers: {
+      "Content-Type": debugVersion?.httpContentType || "application/json",
+      Authorization: "Bearer <connector-token>",
+    },
+    body: debugArguments,
+  };
+  const debugApiResponse = debugDraft.debugStatus === "failed"
+    ? { code: 1, message: debugDraft.debugErrorMessage || "样例输入与接口参数配置不匹配", error: "invalid_request_body" }
+    : debugDraft.debugStatus === "success"
+      ? { code: 0, data: { summary: "底层 API 调用成功", items: [] } }
+      : { status: debugDraft.debugStatus === "running" ? "running" : "not_started", message: debugDraft.debugStatus === "running" ? "请求已发送，等待响应" : "尚未发起测试" };
+  const debugMcpResponse = debugDraft.debugStatus === "failed"
+    ? { isError: true, content: [{ type: "text", text: debugDraft.debugErrorMessage || "样例输入与接口参数配置不匹配" }], structuredContent: { status: "failed", error: "invalid_request_body" } }
+    : debugDraft.debugStatus === "success"
+      ? { content: [{ type: "text", text: debugDraft.debugResultSummary || "调试成功，底层 API 已返回有效结果" }], structuredContent: JSON.parse(debugDraft.debugResultPreview || "{}") }
+      : { content: [{ type: "text", text: debugDraft.debugStatus === "running" ? "工具调用测试运行中" : "尚未发起测试" }] };
+  const debugCallDetails = [
+    ["MCP 工具请求", { method: "tools/call", params: { name: tool.toolCode, arguments: debugArguments } }],
+    ["底层 API 请求", debugApiRequest],
+    ["底层 API 响应", debugApiResponse],
+    ["MCP 响应结果", debugMcpResponse],
+  ] as Array<[string, unknown]>;
 
   const getRunRecordVersion = (record: ToolRunRecord) => tool?.versions.find((version) => version.version === record.version);
   const getRunRecordStartTime = (record: ToolRunRecord) => record.startedAt || record.executedAt;
@@ -5289,11 +5211,8 @@ export function ToolHubDetailPage() {
                             ["状态", "82px"],
                             ["连接器", "128px"],
                             ["调用路径", "160px"],
-                            ["MCP服务引用", "104px"],
-                            ["Liteflow引用", "104px"],
-                            ["最近调试", "122px"],
+                            ["关联MCP服务", "120px"],
                             ["最近调用", "122px"],
-                            ["创建人", "84px"],
                             ["操作", "240px"],
                           ].map(([head, width]) => (
                             <TableCell key={head} sx={{ width, fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, bgcolor: "#f8f9fb", borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap", textAlign: "left" }}>
@@ -5305,6 +5224,7 @@ export function ToolHubDetailPage() {
                       <TableBody>
                         {pagedVersions.map((version, index) => {
                           const requestAddress = getVersionRequestAddress(version);
+                          const associatedServiceNames = getAssociatedMcpServiceNames(version);
                           return (
                             <TableRow key={version.id} sx={{ bgcolor: (versionPage * versionRowsPerPage + index) % 2 === 0 ? "#fff" : "#fafafa", "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
                               <TableCell sx={{ py: 1.5, whiteSpace: "nowrap" }}>
@@ -5330,20 +5250,13 @@ export function ToolHubDetailPage() {
                                   {version.httpMethod || "POST"} {version.httpPath || "-"}
                                 </Typography>
                               </TableCell>
-                              <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151", whiteSpace: "nowrap" }}>
-                                {getVersionMcpServiceRefs(version)}
-                              </TableCell>
-                              <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151", whiteSpace: "nowrap" }}>
-                                {getVersionLiteflowRefs(version)}
-                              </TableCell>
-                              <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>
-                                {version.lastDebug || "-"}
-                              </TableCell>
+                              <Tooltip title={associatedServiceNames.length ? associatedServiceNames.join("、") : "暂无关联 MCP 服务"} arrow placement="top">
+                                <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151", whiteSpace: "nowrap", cursor: "help" }}>
+                                  {associatedServiceNames.length}
+                                </TableCell>
+                              </Tooltip>
                               <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>
                                 {version.lastRunAt || "-"}
-                              </TableCell>
-                              <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151", whiteSpace: "nowrap" }}>
-                                {version.createdBy || "-"}
                               </TableCell>
                               <TableCell sx={{ py: 1.5 }}>
                                 <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "nowrap" }}>
@@ -5493,14 +5406,7 @@ export function ToolHubDetailPage() {
           {editingVersionId ? "编辑工具版本" : "新增工具版本"}
         </DialogTitle>
         <DialogContent sx={{ px: 3, pt: 3, pb: 3, bgcolor: "#ffffff" }}>
-          <Stepper activeStep={wizardStep} alternativeLabel sx={{ mb: 3, bgcolor: "#ffffff", border: "1px solid #e5e7eb", borderRadius: "8px", p: 2 }}>
-            {VERSION_STEPS.map((label, index) => (
-              <Step key={label} completed={wizardStep > index} onClick={() => (wizardStep > index ? setWizardStep(index) : undefined)}>
-                <StepLabel sx={{ cursor: wizardStep > index ? "pointer" : "default" }}>{label}</StepLabel>
-              </Step>
-            ))}
-          </Stepper>
-          {wizardStep === 0 && (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
               <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827", mb: 2 }}>基本信息</Typography>
               <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
@@ -5532,22 +5438,19 @@ export function ToolHubDetailPage() {
                 />
               </Box>
             </Paper>
-          )}
 
-          {wizardStep === 1 && (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5 }}>
-                工具版本绑定连接器并配置具体调用路径；版本发布后会冻结连接器快照，新版本发布不会影响旧版本绑定。
-              </Alert>
+            <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5 }}>
+              工具版本绑定连接器并配置具体调用路径；版本发布后会冻结连接器快照，新版本发布不会影响旧版本绑定。
+            </Alert>
 
-                  <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-                    <Box sx={{ mb: 2 }}>
-                      <Box>
-                        <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>调用配置</Typography>
-                        <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>选择已配置连接器，再设置当前版本使用的接口路径、请求方式和调用策略。</Typography>
-                      </Box>
-                    </Box>
-                    <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
+            <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+              <Box sx={{ mb: 2 }}>
+                <Box>
+                  <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>调用配置</Typography>
+                  <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>选择已配置连接器，再设置当前版本使用的接口路径、请求方式和超时时间。</Typography>
+                </Box>
+              </Box>
+              <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
                       <TextField
                         select
                         label="连接器"
@@ -5572,7 +5475,6 @@ export function ToolHubDetailPage() {
                           <MenuItem key={connector.id} value={connector.id} sx={{ fontSize: "14px" }}>{connector.name}</MenuItem>
                         ))}
                       </TextField>
-                      <TextField label="Base URL 快照" size="small" value={versionDraft.connectorBaseUrlSnapshot || versionDraft.httpServiceAddress} disabled helperText="发布时随版本冻结，后续连接器变更不自动影响旧版本。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px", fontFamily: "monospace" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
                       <TextField label="工具调用接口路径" size="small" required value={versionDraft.httpPath} onChange={(event) => updateDraft({ httpPath: event.target.value })} helperText="如 /toolhub/v1/run" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
                       <TextField select label="请求方式" size="small" required value={versionDraft.httpMethod} onChange={(event) => updateDraft({ httpMethod: event.target.value })} sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}>
                         {["POST", "GET"].map((item) => <MenuItem key={item} value={item} sx={{ fontSize: "14px" }}>{item}</MenuItem>)}
@@ -5580,46 +5482,13 @@ export function ToolHubDetailPage() {
                       <TextField select label="Content-Type" size="small" required value={versionDraft.httpContentType} onChange={(event) => updateDraft({ httpContentType: event.target.value })} helperText="默认 application/json。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}>
                         {CONTENT_TYPE_OPTIONS.map((item) => <MenuItem key={item} value={item} sx={{ fontSize: "14px" }}>{item}</MenuItem>)}
                       </TextField>
-                      <TextField label="鉴权方式" size="small" value={versionDraft.connectorAuthType || "沿用连接器鉴权"} disabled helperText="版本不单独维护密钥，统一沿用连接器鉴权。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
-                      <TextField label="调用超时" size="small" required value={versionDraft.httpTimeout} onChange={(event) => updateDraft({ httpTimeout: event.target.value })} helperText="单位：秒；超时后由 ToolHub 标记为失败或转入异步跟踪。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
-                      <TextField label="健康检查地址" size="small" value={versionDraft.httpHealthcheck} onChange={(event) => updateDraft({ httpHealthcheck: event.target.value })} helperText="如 /health；用于运行监测，可为空。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
-                    </Box>
-                  </Paper>
+                      <TextField label="调用超时" size="small" required value={versionDraft.httpTimeout} onChange={(event) => updateDraft({ httpTimeout: event.target.value })} helperText="单位：秒；超时后由 ToolHub 标记为失败。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
+              </Box>
+            </Paper>
 
-                  <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-                    <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827", mb: 2 }}>调用与进度回传</Typography>
-                    <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
-                      <TextField select label="调用模式" size="small" value={versionDraft.asyncMode} onChange={(event) => updateDraft({ asyncMode: event.target.value })} helperText="同步直接返回结果；异步返回任务标识后跟踪进度。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}>
-                        {["同步/异步均支持", "同步调用", "异步调用"].map((item) => <MenuItem key={item} value={item} sx={{ fontSize: "14px" }}>{item}</MenuItem>)}
-                      </TextField>
-                      {versionDraft.asyncMode !== "同步调用" && (
-                        <TextField select label="回调地址策略" size="small" value={versionDraft.callbackPolicy} onChange={(event) => updateDraft({ callbackPolicy: event.target.value as CallbackPolicy })} helperText="异步调用可通过回调或轮询跟踪进度。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}>
-                          {(["ToolHub 自动生成回调地址", "不启用回调", "使用固定回调地址"] as CallbackPolicy[]).map((item) => <MenuItem key={item} value={item} sx={{ fontSize: "14px" }}>{item}</MenuItem>)}
-                        </TextField>
-                      )}
-                      {versionDraft.asyncMode !== "同步调用" && versionDraft.callbackPolicy === "使用固定回调地址" && (
-                        <TextField label="固定回调地址" size="small" required value={versionDraft.callbackUrl} onChange={(event) => updateDraft({ callbackUrl: event.target.value })} helperText="服务异步完成后回调该地址。" sx={{ gridColumn: "1 / span 2", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
-                      )}
-                      {versionDraft.asyncMode !== "同步调用" && (
-                        <>
-                          <TextField label="任务标识字段" size="small" required value={versionDraft.asyncTaskIdField} onChange={(event) => updateDraft({ asyncTaskIdField: event.target.value })} placeholder="按接口实际返回填写，如 task_id" helperText="异步任务用于关联进度。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
-                          <TextField label="进度状态字段" size="small" required value={versionDraft.progressStatusField} onChange={(event) => updateDraft({ progressStatusField: event.target.value })} placeholder="按接口实际返回填写，如 status" helperText="异步任务用于识别运行中、成功、失败。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
-                        </>
-                      )}
-                      <TextField select label="结果文件策略" size="small" value={versionDraft.resultPathStrategy} onChange={(event) => updateDraft({ resultPathStrategy: event.target.value as ResultPathStrategy })} helperText="组件返回结果文件时，工具Hub记录或读取文件内容。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}>
-                        {(["记录结果文件地址", "读取结果文件内容", "不读取结果文件"] as ResultPathStrategy[]).map((item) => <MenuItem key={item} value={item} sx={{ fontSize: "14px" }}>{item}</MenuItem>)}
-                      </TextField>
-                      <TextField label="结果文件字段" size="small" required={versionDraft.resultPathStrategy !== "不读取结果文件"} value={versionDraft.resultFileField} onChange={(event) => updateDraft({ resultFileField: event.target.value })} placeholder="按接口实际返回填写，如 result_path" helperText="有结果文件时填写文件地址或文件 ID 字段；无结果文件可不填。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
-                    </Box>
-                  </Paper>
-            </Box>
-          )}
-
-          {wizardStep === 2 && (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5 }}>
-                工具 API 已按工具Hub协议完成标准化封装，本步骤只配置工具对 Agent、业务系统和操作界面暴露的入参与返回字段。
-              </Alert>
+            <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5 }}>
+              工具 API 已按工具Hub协议完成标准化封装，本区域只配置工具对 Agent 暴露的入参；返回 Schema 由系统自动生成或在详情页只读展示。
+            </Alert>
               <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
                   <Box>
@@ -5718,107 +5587,11 @@ export function ToolHubDetailPage() {
                 </TableContainer>
               </Paper>
 
-              <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-                  <Box>
-                    <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>标准返回</Typography>
-                    <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
-                      定义 ToolHub 对 Agent 或业务系统稳定返回的字段。
-                    </Typography>
-                  </Box>
-                  <Button onClick={addResultFieldRow} variant="outlined" startIcon={<Add sx={{ fontSize: 14 }} />} sx={{ textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, boxShadow: "none" }}>
-                    新增标准返回
-                  </Button>
-                </Box>
-
-                <TableContainer sx={{ border: "1px solid #e5e7eb", borderRadius: "8px", overflow: "hidden" }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: "#f8fafc" }}>
-                        {["返回字段", "类型", "返回要求", "字段说明", "操作"].map((head) => (
-                          <TableCell key={head} sx={{ fontSize: "11px", fontWeight: 600, color: "#64748b", py: 0.75, whiteSpace: "nowrap" }}>
-                            {head}
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {versionDraft.rawResultFields.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={5} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
-                            暂无标准返回，点击“新增标准返回”后手动配置。
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {versionDraft.rawResultFields.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell sx={{ width: "22%", py: 0.75 }}>
-                            <TextField
-                              size="small"
-                              value={item.sourceField}
-                              onChange={(event) => updateResultFieldRow(item.id, { sourceField: event.target.value })}
-                              sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
-                            />
-                          </TableCell>
-                          <TableCell sx={{ width: 120, py: 0.75 }}>
-                            <TextField
-                              select
-                              size="small"
-                              value={item.fieldType}
-                              onChange={(event) => updateResultFieldRow(item.id, { fieldType: event.target.value as RawResultFieldType })}
-                              sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
-                            >
-                              {RAW_RESULT_FIELD_TYPE_OPTIONS.map((option) => (
-                                <MenuItem key={option} value={option} sx={{ fontSize: "13px" }}>{option}</MenuItem>
-                              ))}
-                            </TextField>
-                          </TableCell>
-                          <TableCell sx={{ width: 132, py: 0.75 }}>
-                            <TextField
-                              select
-                              size="small"
-                              value={item.requiredMode}
-                              onChange={(event) => updateResultFieldRow(item.id, { requiredMode: event.target.value as ResultRequiredMode })}
-                              sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
-                            >
-                              {RESULT_REQUIRED_MODE_OPTIONS.map((option) => (
-                                <MenuItem key={option} value={option} sx={{ fontSize: "13px" }}>{option === "是" ? "成功必返" : option === "否" ? "可选" : "失败必返"}</MenuItem>
-                              ))}
-                            </TextField>
-                          </TableCell>
-                          <TableCell sx={{ py: 0.75 }}>
-                            <TextField
-                              size="small"
-                              value={item.description}
-                              onChange={(event) => updateResultFieldRow(item.id, { description: event.target.value })}
-                              sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
-                            />
-                          </TableCell>
-                          <TableCell sx={{ width: 56, py: 0.75 }}>
-                            <IconButton size="small" onClick={() => deleteResultFieldRow(item.id)}>
-                              <Delete sx={{ fontSize: 16 }} />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Paper>
-
             </Box>
-          )}
-
-
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2, borderTop: "1px solid #e5e7eb", justifyContent: "flex-end", gap: 1 }}>
           <Button onClick={() => (versionDraft.dirty ? setConfirmCloseOpen(true) : closeVersionEditor())} sx={{ textTransform: "none", color: "#64748b", borderRadius: "6px", fontSize: "13px", px: 2 }}>取消</Button>
-          <Button onClick={() => wizardStep > 0 && setWizardStep((prev) => prev - 1)} disabled={wizardStep === 0} variant="outlined" sx={{ textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, color: "#374151", borderColor: "#e5e7eb", "&:hover": { borderColor: "#d1d5db", bgcolor: "#f9fafb" } }}>上一步</Button>
-          {wizardStep < VERSION_STEPS.length - 1 ? (
-            <Button onClick={goNext} variant="contained" sx={{ bgcolor: BLUE, textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, boxShadow: "none", "&:hover": { bgcolor: "#2563eb", boxShadow: "none" } }}>下一步</Button>
-          ) : (
-            <Button onClick={createVersion} variant="contained" sx={{ bgcolor: BLUE, textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, boxShadow: "none", "&:hover": { bgcolor: "#2563eb", boxShadow: "none" } }}>{editingVersionId ? "保存版本" : "创建版本"}</Button>
-          )}
+          <Button onClick={createVersion} variant="contained" sx={{ bgcolor: BLUE, textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, boxShadow: "none", "&:hover": { bgcolor: "#2563eb", boxShadow: "none" } }}>{editingVersionId ? "保存版本" : "创建版本"}</Button>
         </DialogActions>
       </Dialog>
 
@@ -5891,14 +5664,13 @@ export function ToolHubDetailPage() {
               ])}
 
               {detailBlock("引用关系", [
-                ["MCP 服务引用", `${getVersionMcpServiceRefs(selectedVersion)} 个`],
-                ["Liteflow 引用", `${getVersionLiteflowRefs(selectedVersion)} 个`],
+                ["关联 MCP 服务", getAssociatedMcpServiceNames(selectedVersion).length > 0 ? getAssociatedMcpServiceNames(selectedVersion).join("、") : "暂无关联服务"],
               ])}
 
               <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
                 <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>标准入参</Typography>
                 <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 1.25 }}>
-                  定义 Agent 或业务系统调用 ToolHub 时需要传入的标准参数。
+                  定义 Agent 调用 ToolHub 时需要传入的标准参数。
                 </Typography>
                 <Table size="small">
                   <TableHead>
@@ -5922,31 +5694,39 @@ export function ToolHubDetailPage() {
                 </Table>
               </Paper>
 
-	              <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
-	                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>标准返回</Typography>
+              <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
+                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>返回 Schema</Typography>
                   <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 1.25 }}>
-                    定义 ToolHub 对 Agent 或业务系统稳定返回的字段。
+                    由 OpenAPI 响应结构或调试结果自动生成，仅用于查看；未识别时按原始响应返回。
                   </Typography>
-	                <Table size="small">
+                <Table size="small">
                   <TableHead>
                     <TableRow>
-                      {["返回字段", "类型", "返回要求", "字段说明"].map((head) => (
+                      {["字段路径", "类型", "生成来源", "字段说明"].map((head) => (
                         <TableCell key={head} sx={{ fontSize: "12px", color: "#6b7280", fontWeight: 600, bgcolor: "#f9fafb" }}>{head}</TableCell>
                       ))}
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {(selectedVersion.rawResultFields ?? []).map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{item.sourceField}</TableCell>
-                        <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.fieldType}</TableCell>
-                        <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.requiredMode === "是" ? "成功必返" : item.requiredMode === "否" ? "可选" : "失败必返"}</TableCell>
-                        <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.description}</TableCell>
+                    {(selectedVersion.rawResultFields ?? []).length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
+                          暂未识别返回 Schema，工具调用结果将按原始响应返回。
+                        </TableCell>
                       </TableRow>
-                    ))}
-	                  </TableBody>
-	                </Table>
-	              </Paper>
+                    ) : (
+                      (selectedVersion.rawResultFields ?? []).map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{item.sourceField}</TableCell>
+                          <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.fieldType}</TableCell>
+                          <TableCell sx={{ fontSize: "12px", color: "#374151" }}>OpenAPI 自动生成</TableCell>
+                          <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.description}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </Paper>
               </Box>
             </Box>
           );
@@ -5965,7 +5745,7 @@ export function ToolHubDetailPage() {
           <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 2 }}>
               <Box>
-                <Typography sx={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>版本调试</Typography>
+                <Typography sx={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>工具调用测试</Typography>
               </Box>
               <IconButton size="small" onClick={() => setDebugDrawerOpen(false)}>
                 <Close sx={{ fontSize: 18, color: "#94a3b8" }} />
@@ -5982,37 +5762,9 @@ export function ToolHubDetailPage() {
               })}
 
               <Paper sx={{ p: 2, borderRadius: "10px", border: "1px solid #e5e7eb", boxShadow: "none" }}>
-                <Tabs value={debugWorkTab} onChange={(_, value) => setDebugWorkTab(value)} sx={{ minHeight: 34, mb: 1.5, "& .MuiTab-root": { minHeight: 34, fontSize: "13px", textTransform: "none", px: 1.5 } }}>
-                  <Tab value="progress" label="处理进度" />
-                  <Tab value="logs" label="日志" />
-                </Tabs>
                 {debugLoading && <LinearProgress sx={{ mb: 1.5 }} />}
-                {debugWorkTab === "progress" ? (
-                  <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 1 }}>
-                    {debugProgressNodes.map((node, index) => {
-                      const state = getDebugNodeState(index);
-                      return (
-                        <Box key={node.id} sx={{ p: 1.5, borderRadius: "8px", border: "1px solid #e5e7eb", bgcolor: state === "running" ? "#eff6ff" : state === "failed" ? "#fef2f2" : state === "success" ? "#f0fdf4" : "#f8fafc", minHeight: 104 }}>
-                          <Typography sx={{ fontSize: "11px", color: "#94a3b8", mb: 0.75 }}>节点 {index + 1}</Typography>
-                          <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#111827", mb: 0.75 }}>{node.name}</Typography>
-                          <Chip label={state === "success" ? (node.statuses.find((status) => status.key === "success")?.name ?? "成功") : state === "running" ? (node.statuses.find((status) => status.key === "running")?.name ?? "处理中") : state === "failed" ? (node.statuses.find((status) => status.key === "failed")?.name ?? "失败") : "待执行"} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: state === "success" ? "#dcfce7" : state === "running" ? "#dbeafe" : state === "failed" ? "#fee2e2" : "#f1f5f9", color: state === "success" ? "#166534" : state === "running" ? "#1d4ed8" : state === "failed" ? "#b91c1c" : "#64748b" }} />
-                          <Typography sx={{ fontSize: "11px", color: "#64748b", mt: 0.75, lineHeight: 1.5 }}>{state === "pending" ? "等待执行" : (node.statuses.find((status) => status.key === state)?.message || "状态已更新")}</Typography>
-                        </Box>
-                      );
-                    })}
-                  </Box>
-                ) : (
-                  <Box sx={{ p: 1.5, borderRadius: "8px", bgcolor: "#0f172a", minHeight: 150, fontFamily: "monospace", color: "#dbeafe", fontSize: "12px", lineHeight: 1.8 }}>
-                    {debugLogs.map((line) => (
-                      <Box key={line}>{line}</Box>
-                    ))}
-                  </Box>
-                )}
-              </Paper>
-
-              <Paper sx={{ p: 2, borderRadius: "10px", border: "1px solid #e5e7eb", boxShadow: "none" }}>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
-                  <Typography sx={{ fontSize: "14px", fontWeight: 700 }}>处理结果</Typography>
+                  <Typography sx={{ fontSize: "14px", fontWeight: 700 }}>调试结果</Typography>
                   <Chip label={debugDraft.debugStatus === "not_started" ? "未调试" : debugDraft.debugStatus === "running" ? "运行中" : debugDraft.debugStatus === "success" ? "成功" : "失败"} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: debugDraft.debugStatus === "success" ? "#dcfce7" : debugDraft.debugStatus === "failed" ? "#fef2f2" : debugDraft.debugStatus === "running" ? "#dbeafe" : "#f3f4f6", color: debugDraft.debugStatus === "success" ? "#166534" : debugDraft.debugStatus === "failed" ? "#b91c1c" : debugDraft.debugStatus === "running" ? "#1d4ed8" : "#6b7280" }} />
                 </Box>
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
@@ -6024,11 +5776,25 @@ export function ToolHubDetailPage() {
                   ))}
                 </Box>
               </Paper>
+
+              <Paper sx={{ p: 2, borderRadius: "10px", border: "1px solid #e5e7eb", boxShadow: "none" }}>
+                <Typography sx={{ fontSize: "14px", fontWeight: 700, mb: 1.5 }}>调用详情</Typography>
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                  {debugCallDetails.map(([title, value]) => (
+                    <Box key={title}>
+                      <Typography sx={{ fontSize: "12px", color: "#64748b", mb: 0.75 }}>{title}</Typography>
+                      <Box component="pre" sx={{ m: 0, p: 1.5, borderRadius: "8px", bgcolor: "#0f172a", color: "#e2e8f0", fontSize: "11px", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {JSON.stringify(value, null, 2)}
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              </Paper>
             </Box>
 
             <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, pt: 2 }}>
               <Button onClick={() => setDebugDrawerOpen(false)} sx={{ textTransform: "none", color: "#64748b" }}>关闭</Button>
-              <Button onClick={startDebug} disabled={debugLoading} variant="outlined" sx={{ textTransform: "none" }}>发起调试</Button>
+              <Button onClick={startDebug} disabled={debugLoading} variant="outlined" sx={{ textTransform: "none" }}>发起测试</Button>
             </Box>
           </Box>
         )}
