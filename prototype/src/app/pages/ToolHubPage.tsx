@@ -152,6 +152,7 @@ interface ToolVersion {
   httpPath?: string;
   httpMethod?: string;
   httpTimeout?: string;
+  requestBodyTemplate?: string;
   scriptWorkdir?: string;
   scriptEntryFile?: string;
   scriptEntryFunction?: string;
@@ -389,7 +390,7 @@ interface ToolRunRecord {
 
 const BLUE = "#3b82f6";
 const SECONDARY_DRAWER_Z_INDEX = 1600;
-const TOOL_STORAGE_KEY = "toolHub_tools_v12";
+const TOOL_STORAGE_KEY = "toolHub_tools_v13";
 const CATEGORY_STORAGE_KEY = "toolHub_categories_v2";
 const CATEGORY_SELECTION_STORAGE_KEY = "toolHub_selected_category_v1";
 const TOOL_CODE_PATTERN = /^[a-z][a-z0-9_]*$/;
@@ -566,6 +567,81 @@ function getExternalHttpDefaultOutputRead() {
     resultLocation: "$.result / $.data",
     errorSource: "$.message / $.msg / $.error",
   };
+}
+
+const SYSTEM_REQUEST_BODY_VALUES = {
+  request_id: "REQ-20260519-001",
+  callback_url: "https://toolhub.internal/callback/ragflow/REQ-20260519-001",
+  timestamp: "2026-05-19T16:18:00+08:00",
+};
+
+function getDefaultRequestBodyTemplate(rawInputParams: RawInputParam[] = []) {
+  const inputPairs = rawInputParams.map((param) => {
+    const key = param.mappedParamName || param.sourceName;
+    return `    "${key}": {{input.${key}}}`;
+  });
+  return [
+    "{",
+    "  \"request_id\": {{system.request_id}},",
+    "  \"parameters\": {",
+    inputPairs.length > 0 ? inputPairs.join(",\n") : "    \"param_1\": {{input.param_1}}",
+    "  }",
+    "}",
+  ].join("\n");
+}
+
+function getRagflowRequestBodyTemplate(component: RagflowComponentSpec) {
+  const systemFields = new Set(["request_id", "callback_url", "trans_metadata", "source_metadata"]);
+  const parameterInputs = component.inputs.filter((field) => !systemFields.has(field.name));
+  const hasRequestId = component.inputs.some((field) => field.name === "request_id");
+  const hasCallback = component.inputs.some((field) => field.name === "callback_url");
+  const hasSourceMetadata = component.inputs.some((field) => field.name === "source_metadata");
+
+  const lines = ["{", `  "request_id": ${hasRequestId ? "{{input.request_id}}" : "{{system.request_id}}"},`];
+  if (hasCallback) lines.push("  \"callback_url\": {{system.callback_url}},");
+  if (hasSourceMetadata) lines.push("  \"source_metadata\": {{input.source_metadata}},");
+  lines.push("  \"parameters\": {");
+  lines.push(parameterInputs.map((field) => `    "${field.name}": {{input.${field.name}}}`).join(",\n") || "    \"param_1\": {{input.param_1}}");
+  lines.push("  }");
+  lines.push("}");
+  return lines.join("\n");
+}
+
+function coerceTemplateValue(value: unknown) {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  }
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  const numeric = Number(trimmed);
+  if (!Number.isNaN(numeric) && trimmed !== "") return numeric;
+  return value;
+}
+
+function buildRequestBodyFromTemplate(template: string | undefined, inputValues: Record<string, unknown>) {
+  const source = template?.trim() || getDefaultRequestBodyTemplate();
+  const replaceToken = (_match: string, scope: string, key: string) => {
+    const value = scope === "system"
+      ? SYSTEM_REQUEST_BODY_VALUES[key as keyof typeof SYSTEM_REQUEST_BODY_VALUES] ?? ""
+      : coerceTemplateValue(inputValues[key] ?? "");
+    return JSON.stringify(value);
+  };
+  const rendered = source
+    .replace(/"{{\s*(input|system)\.([a-zA-Z0-9_]+)\s*}}"/g, replaceToken)
+    .replace(/{{\s*(input|system)\.([a-zA-Z0-9_]+)\s*}}/g, replaceToken);
+
+  try {
+    return JSON.parse(rendered);
+  } catch {
+    return { template: source, rendered, parse_error: "请求体模板不是合法 JSON，调试时将阻止发起真实调用。" };
+  }
 }
 
 function normalizeCallbackPolicy(policy?: string): CallbackPolicy {
@@ -1276,6 +1352,7 @@ function normalizeVersion(version: ToolVersion, toolName: string, toolCode?: str
     httpPath: version.httpPath ?? "/parse",
     httpMethod: version.httpMethod ?? "POST",
     httpTimeout: version.httpTimeout ?? "120",
+    requestBodyTemplate: version.requestBodyTemplate ?? getDefaultRequestBodyTemplate(rawInputParams),
     scriptWorkdir: version.scriptWorkdir ?? `/opt/toolhub/${toolName}`,
     scriptEntryFile: version.scriptEntryFile ?? "main.py",
     scriptEntryFunction: version.scriptEntryFunction ?? "run",
@@ -1714,6 +1791,7 @@ function createVersionDraft(tool: ToolItem | null) {
     httpPath: "",
     httpMethod: "POST",
     httpTimeout: "600",
+    requestBodyTemplate: getDefaultRequestBodyTemplate(rawInputParams),
     scriptEntryFile: "",
     scriptEntryFunction: "",
     scriptTimeout: "",
@@ -1824,6 +1902,7 @@ function createVersionDraftFromVersion(tool: ToolItem | null, version: ToolVersi
     httpPath: normalized.httpPath ?? "",
     httpMethod: normalized.httpMethod ?? "POST",
     httpTimeout: normalized.httpTimeout ?? "",
+    requestBodyTemplate: normalized.requestBodyTemplate ?? getDefaultRequestBodyTemplate(normalized.rawInputParams ?? base.rawInputParams),
     scriptWorkdir: normalized.scriptWorkdir ?? "",
     scriptEntryFile: normalized.scriptEntryFile ?? "",
     scriptEntryFunction: normalized.scriptEntryFunction ?? "",
@@ -2433,6 +2512,7 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     httpPath: component.endpoint,
     httpMethod: "POST",
     httpTimeout: component.category === "智能生成" ? "600" : "180",
+    requestBodyTemplate: getRagflowRequestBodyTemplate(component),
     httpHealthcheck: "/health",
     modelResourceRequired: component.inputs.some((item) => item.name.includes("llm") || item.name.includes("embedding")) ? "yes" : "no",
     modelDependencies: component.inputs.some((item) => item.name.includes("llm"))
@@ -4479,7 +4559,8 @@ export function ToolHubDetailPage() {
       return [field.sourceField, normalizedValue];
     }));
     const requestAddress = getVersionRequestAddress(debugVersion);
-    const debugInput = `mcp_request=${JSON.stringify({ method: "tools/call", params: { name: tool.toolCode, arguments: debugInputObject } })}`;
+    const generatedRequestBody = buildRequestBodyFromTemplate(debugVersion.requestBodyTemplate, debugInputObject);
+    const debugInput = `mcp_request=${JSON.stringify({ method: "tools/call", params: { name: tool.toolCode, arguments: debugInputObject } })}；api_request_body=${JSON.stringify(generatedRequestBody)}`;
     const requestConfig = `method=${debugVersion.httpMethod || "POST"}；url=${requestAddress}；headers.Content-Type=${debugVersion.httpContentType || "application/json"}；auth=沿用连接器鉴权；timeout=${debugVersion.httpTimeout || "120"}s`;
     const isPendingBeforeDebug = debugVersion.status === "pending";
 
@@ -4662,6 +4743,7 @@ export function ToolHubDetailPage() {
       httpPath: versionDraft.httpPath,
       httpMethod: versionDraft.httpMethod,
       httpTimeout: versionDraft.httpTimeout,
+      requestBodyTemplate: versionDraft.requestBodyTemplate,
       scriptWorkdir: versionDraft.scriptWorkdir,
       scriptEntryFile: versionDraft.scriptEntryFile,
       scriptEntryFunction: versionDraft.scriptEntryFunction,
@@ -4874,6 +4956,7 @@ export function ToolHubDetailPage() {
     const normalizedValue = Array.isArray(value) ? value : typeof value === "boolean" ? value : value || "";
     return [field.sourceField, normalizedValue];
   }));
+  const debugGeneratedRequestBody = buildRequestBodyFromTemplate(debugVersion?.requestBodyTemplate, debugArguments);
   const debugApiRequest = {
     method: debugVersion?.httpMethod || "POST",
     url: debugVersion ? getVersionRequestAddress(debugVersion) : "-",
@@ -4881,7 +4964,7 @@ export function ToolHubDetailPage() {
       "Content-Type": debugVersion?.httpContentType || "application/json",
       Authorization: "Bearer <connector-token>",
     },
-    body: debugArguments,
+    body: debugGeneratedRequestBody,
   };
   const debugApiResponse = debugDraft.debugStatus === "failed"
     ? { code: 1, message: debugDraft.debugErrorMessage || "样例输入与接口参数配置不匹配", error: "invalid_request_body" }
@@ -5567,6 +5650,56 @@ export function ToolHubDetailPage() {
                 </TableContainer>
               </Paper>
 
+              <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2 }}>
+                  <Box>
+                    <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>请求体构建</Typography>
+                    <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
+                      用 JSON 模板定义底层 API 实际收到的请求体，可引用标准入参和系统变量。
+                    </Typography>
+                  </Box>
+                  <Button
+                    onClick={() => updateDraft({ requestBodyTemplate: getDefaultRequestBodyTemplate(versionDraft.rawInputParams) })}
+                    variant="outlined"
+                    sx={{ textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, flexShrink: 0 }}
+                  >
+                    生成默认模板
+                  </Button>
+                </Box>
+                <TextField
+                  value={versionDraft.requestBodyTemplate}
+                  onChange={(event) => updateDraft({ requestBodyTemplate: event.target.value })}
+                  multiline
+                  minRows={10}
+                  fullWidth
+                  placeholder={getDefaultRequestBodyTemplate(versionDraft.rawInputParams)}
+                  sx={{
+                    "& .MuiInputBase-root": {
+                      borderRadius: "8px",
+                      bgcolor: "#0f172a",
+                      color: "#e2e8f0",
+                      fontFamily: "monospace",
+                      fontSize: "12px",
+                      lineHeight: 1.7,
+                    },
+                    "& textarea": { fontFamily: "monospace" },
+                    "& .MuiOutlinedInput-notchedOutline": { borderColor: "#1e293b" },
+                  }}
+                />
+                <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 1, mt: 1.5 }}>
+                  {[
+                    ["{{input.xxx}}", "引用标准入参"],
+                    ["{{system.request_id}}", "系统生成请求 ID"],
+                    ["{{system.callback_url}}", "系统生成回调地址"],
+                  ].map(([token, desc]) => (
+                    <Box key={token} sx={{ p: 1, borderRadius: "6px", bgcolor: "#f8fafc", border: "1px solid #e5e7eb" }}>
+                      <Typography sx={{ fontSize: "11px", color: "#111827", fontFamily: "monospace" }}>{token}</Typography>
+                      <Typography sx={{ fontSize: "11px", color: "#64748b", mt: 0.25 }}>{desc}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Paper>
+
             </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2, borderTop: "1px solid #e5e7eb", justifyContent: "flex-end", gap: 1 }}>
@@ -5665,6 +5798,16 @@ export function ToolHubDetailPage() {
               </Paper>
 
               <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
+                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>请求体构建</Typography>
+                <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 1.25 }}>
+                  ToolHub 根据该模板把标准入参组装成底层 API 请求体。
+                </Typography>
+                <Box component="pre" sx={{ m: 0, p: 1.5, borderRadius: "8px", bgcolor: "#0f172a", color: "#e2e8f0", fontSize: "11px", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {selectedVersion.requestBodyTemplate || getDefaultRequestBodyTemplate(selectedVersion.rawInputParams ?? [])}
+                </Box>
+              </Paper>
+
+              <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
                 <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>返回 Schema</Typography>
                   <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 1.25 }}>
                     由 OpenAPI 响应结构或调试结果自动生成，仅用于查看；未识别时按原始响应返回。
@@ -5730,6 +5873,16 @@ export function ToolHubDetailPage() {
                 onValueChange: (fieldId, value) => setDebugDraft((prev) => ({ ...prev, paramValues: { ...prev.paramValues, [fieldId]: value } })),
                 emptyText: "当前版本没有配置可调试的操作字段",
               })}
+
+              <Paper sx={{ p: 2, borderRadius: "10px", border: "1px solid #e5e7eb", boxShadow: "none" }}>
+                <Typography sx={{ fontSize: "14px", fontWeight: 700, mb: 0.5 }}>生成的底层请求体</Typography>
+                <Typography sx={{ fontSize: "12px", color: "#64748b", mb: 1.25 }}>
+                  根据标准入参和请求体构建模板实时生成，调试时会作为底层 API 请求 Body。
+                </Typography>
+                <Box component="pre" sx={{ m: 0, p: 1.5, borderRadius: "8px", bgcolor: "#0f172a", color: "#e2e8f0", fontSize: "11px", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {JSON.stringify(debugGeneratedRequestBody, null, 2)}
+                </Box>
+              </Paper>
 
               {debugDraft.debugStatus !== "not_started" && (
                 <>
