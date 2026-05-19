@@ -387,7 +387,7 @@ interface ToolRunRecord {
 
 const BLUE = "#3b82f6";
 const SECONDARY_DRAWER_Z_INDEX = 1600;
-const TOOL_STORAGE_KEY = "toolHub_tools_v10";
+const TOOL_STORAGE_KEY = "toolHub_tools_v11";
 const CATEGORY_STORAGE_KEY = "toolHub_categories_v2";
 const CATEGORY_SELECTION_STORAGE_KEY = "toolHub_selected_category_v1";
 const TOOL_CODE_PATTERN = /^[a-z][a-z0-9_]*$/;
@@ -1297,8 +1297,8 @@ function normalizeVersion(version: ToolVersion, toolName: string, toolCode?: str
     runCount,
     failureCount,
     createdBy: version.createdBy ?? "工具维护人",
-    createdAt: version.createdAt ?? version.updatedAt ?? "2026-05-13 09:00:00",
-    updatedAt: version.updatedAt ?? "2026-05-13 16:20:00",
+    createdAt: version.createdAt ?? version.updatedAt ?? "2026-05-16 09:00:00",
+    updatedAt: version.updatedAt ?? "2026-05-19 15:30:00",
   };
 }
 
@@ -1437,9 +1437,9 @@ function getFieldSampleValue(type?: RawInputType | RawResultFieldType, fallback?
     case "数组":
       return [];
     case "文件":
-      return "s3://knowledge-prod/input/sample.pdf";
+      return "oss://knowledge-prod/input/sample.pdf";
     case "URL":
-      return "https://example.com/source";
+      return "https://help.internal/knowledge/source";
     default:
       return "示例文本";
   }
@@ -1953,7 +1953,17 @@ type RagflowComponentSpec = {
   resultExample: string;
 };
 
-const RAGFLOW_API_BASE = "http://rag-server-dev3-admin.maip.test";
+const RAGFLOW_API_BASE = "https://ragflow.internal/api";
+const MOCK_USERS = ["张三", "李四", "王五", "赵六", "陈七"];
+const MOCK_TEAMS = ["知识工程平台组", "算法平台组", "Agent 工程组"];
+
+function getMockUser(index: number) {
+  return MOCK_USERS[index % MOCK_USERS.length];
+}
+
+function getMockTeam(index: number) {
+  return MOCK_TEAMS[index % MOCK_TEAMS.length];
+}
 
 const RAGFLOW_COMPONENTS: RagflowComponentSpec[] = [
   {
@@ -1980,7 +1990,7 @@ const RAGFLOW_COMPONENTS: RagflowComponentSpec[] = [
       { name: "result", type: "数组", description: "解析后的 chunk 列表", outputMapping: "结构化结果" },
       { name: "error_pages", type: "数组", description: "解析失败页码集合", outputMapping: "错误信息" },
     ],
-    resultExample: "result=chunk 列表；result_path=s3://rag-server/api-return/parser/task/chunk.json",
+    resultExample: "result=chunk 列表；result_path=oss://knowledge-prod/rag/parser/task/chunk.json",
   },
   {
     id: "chunk-splitter",
@@ -2004,7 +2014,7 @@ const RAGFLOW_COMPONENTS: RagflowComponentSpec[] = [
       { name: "result_path", type: "文件", description: "切片结果保存路径", outputMapping: "文件或中间产物" },
       { name: "result", type: "数组", description: "切片后的 chunk 列表", outputMapping: "结构化结果" },
     ],
-    resultExample: "result=切片后 chunk 列表；result_path=s3://rag-server/api-return/splitter/task/chunk.json",
+    resultExample: "result=切片后 chunk 列表；result_path=oss://knowledge-prod/rag/splitter/task/chunk.json",
   },
   {
     id: "retrieval-reprocess",
@@ -2139,7 +2149,7 @@ const RAGFLOW_COMPONENTS: RagflowComponentSpec[] = [
       { name: "data", type: "对象", description: "返回数据对象", outputMapping: "结构化结果" },
       { name: "sub_urls", type: "数组", description: "解析出的子链接列表", outputMapping: "主要结果内容" },
     ],
-    resultExample: "data.sub_urls=['https://example.com/article1','https://example.com/article2']",
+    resultExample: "data.sub_urls=['https://help.internal/knowledge/import-guide','https://help.internal/knowledge/faq']",
   },
   {
     id: "parse-url",
@@ -2162,7 +2172,7 @@ const RAGFLOW_COMPONENTS: RagflowComponentSpec[] = [
       { name: "result_path", type: "文件", description: "结果保存路径", outputMapping: "文件或中间产物" },
       { name: "result", type: "数组", description: "网页解析 chunk 列表", outputMapping: "结构化结果" },
     ],
-    resultExample: "result_path=s3://rag-server/api-return/url_parser/task/chunk.json",
+    resultExample: "result_path=oss://knowledge-prod/rag/url_parser/task/chunk.json",
   },
   {
     id: "parse-html",
@@ -2188,13 +2198,13 @@ const RAGFLOW_COMPONENTS: RagflowComponentSpec[] = [
       { name: "result", type: "数组", description: "HTML 解析 chunk 列表", outputMapping: "结构化结果" },
       { name: "error_pages", type: "数组", description: "失败页码集合", outputMapping: "错误信息" },
     ],
-    resultExample: "result=HTML chunk 列表；result_path=s3://rag-server/api-return/html/task/chunk.json",
+    resultExample: "result=HTML chunk 列表；result_path=oss://knowledge-prod/rag/html/task/chunk.json",
   },
 ];
 
 const RAGFLOW_FIELD_META: Record<string, { label: string; uiComponent: ToolUiComponent; sample: string | string[]; options?: ToolUiOption[] }> = {
-  file_download_url: { label: "文件地址", uiComponent: "单行文本", sample: "s3://knowledge-prod/input/2026/05/合同样例.pdf" },
-  file_name: { label: "文件名称", uiComponent: "单行文本", sample: "合同样例.pdf" },
+  file_download_url: { label: "文件地址", uiComponent: "单行文本", sample: "oss://knowledge-prod/input/2026/05/产品手册.pdf" },
+  file_name: { label: "文件名称", uiComponent: "单行文本", sample: "产品手册.pdf" },
   method: {
     label: "处理方式",
     uiComponent: "单选",
@@ -2205,16 +2215,16 @@ const RAGFLOW_FIELD_META: Record<string, { label: string; uiComponent: ToolUiCom
       { id: "method-medical", label: "医保场景", value: "intelli_medical_insurance" },
     ],
   },
-  parameters: { label: "高级参数", uiComponent: "多行文本", sample: "{\"parse_table\":true,\"ocr\":true}" },
-  callback_url: { label: "回调地址", uiComponent: "单行文本", sample: "https://toolhub.example.com/callback/runs/RUN-20260515-001" },
-  source_metadata: { label: "来源元数据", uiComponent: "多行文本", sample: "{\"source\":\"运营端上传\",\"biz_id\":\"DOC-20260515-001\"}" },
-  chunks_path: { label: "切片文件地址", uiComponent: "单行文本", sample: "s3://knowledge-prod/parser/result/chunks.json" },
-  chunks: { label: "解析切片", uiComponent: "多行文本", sample: "[{\"chunk_id\":\"chunk_001\",\"content\":\"示例文本段落\"}]" },
+  parameters: { label: "高级参数", uiComponent: "多行文本", sample: "{\"parse_table\":true,\"ocr\":true,\"language\":\"zh-CN\"}" },
+  callback_url: { label: "回调地址", uiComponent: "单行文本", sample: "https://toolhub.internal/callback/runs/RUN-20260519-001" },
+  source_metadata: { label: "来源元数据", uiComponent: "多行文本", sample: "{\"source\":\"运营端上传\",\"biz_id\":\"DOC-20260519-001\",\"project_id\":\"PRJ-202605-001\"}" },
+  chunks_path: { label: "切片文件地址", uiComponent: "单行文本", sample: "oss://knowledge-prod/parser/result/PRJ-202605-001/chunks.json" },
+  chunks: { label: "解析切片", uiComponent: "多行文本", sample: "[{\"chunk_id\":\"chunk_001\",\"content\":\"知识库支持上传 PDF、Word 和网页素材。\"}]" },
   query: { label: "查询问题", uiComponent: "多行文本", sample: "知识库搭建失败时如何排查导入任务？" },
-  chunks_list: { label: "召回切片列表", uiComponent: "多行文本", sample: "[[{\"chunk_id\":\"hit_001\",\"content\":\"召回文本\"}]]" },
-  chunk_list: { label: "切片列表", uiComponent: "多行文本", sample: "[{\"chunk_id\":\"chunk_001\",\"content\":\"待处理文本\"}]" },
-  llm_parameters: { label: "模型参数", uiComponent: "多行文本", sample: "{\"llm_name\":\"qwen2-72b\",\"temperature\":0.2,\"max_tokens\":1024}" },
-  request_id: { label: "请求编号", uiComponent: "单行文本", sample: "REQ-20260515-0001" },
+  chunks_list: { label: "召回切片列表", uiComponent: "多行文本", sample: "[[{\"chunk_id\":\"hit_001\",\"content\":\"导入任务失败时，应先检查文件解析状态和回调结果。\"}]]" },
+  chunk_list: { label: "切片列表", uiComponent: "多行文本", sample: "[{\"chunk_id\":\"chunk_001\",\"content\":\"知识库构建完成后，系统会生成 QA 和摘要。\"}]" },
+  llm_parameters: { label: "模型参数", uiComponent: "多行文本", sample: "{\"llm_name\":\"qwen2-72b\",\"temperature\":0.2,\"max_tokens\":1024,\"top_p\":0.8}" },
+  request_id: { label: "请求编号", uiComponent: "单行文本", sample: "REQ-20260519-0001" },
   question: { label: "评估问题", uiComponent: "多行文本", sample: "平台如何判断文档解析任务已经完成？" },
   contexts: { label: "参考上下文", uiComponent: "多行文本", sample: "[\"任务完成后会写入标准返回结果和流程节点状态\"]" },
   answer: { label: "待评估答案", uiComponent: "多行文本", sample: "系统根据回调状态和返回码判断任务完成。" },
@@ -2249,10 +2259,10 @@ const RAGFLOW_FIELD_META: Record<string, { label: string; uiComponent: ToolUiCom
       { id: "embedding-bge-m3", label: "BGE M3", value: "bge-m3" },
     ],
   },
-  websiteRootAddress: { label: "网站根地址", uiComponent: "单行文本", sample: "https://help.example.com" },
+  websiteRootAddress: { label: "网站根地址", uiComponent: "单行文本", sample: "https://help.internal/knowledge" },
   selector: { label: "链接选择器", uiComponent: "标签输入", sample: ".article a,.doc-link" },
   limit: { label: "抓取上限", uiComponent: "数字输入", sample: "200" },
-  url: { label: "网页地址", uiComponent: "单行文本", sample: "https://help.example.com/docs/import-guide" },
+  url: { label: "网页地址", uiComponent: "单行文本", sample: "https://help.internal/knowledge/import-guide" },
 };
 
 function getRagflowFieldLabel(fieldName: string) {
@@ -2349,7 +2359,7 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     versionCode: buildVersionCode(component.toolCode, version),
     version,
     status,
-    lastDebug: status === "wait_debug" ? "" : `2026-05-13 ${String(9 + (index % 9)).padStart(2, "0")}:${String(10 + (index * 7) % 50).padStart(2, "0")}:00`,
+    lastDebug: status === "wait_debug" ? "" : `2026-05-19 ${String(9 + (index % 7)).padStart(2, "0")}:${String(10 + (index * 7) % 50).padStart(2, "0")}:00`,
     configFields: params.map((param) => ({ name: param.paramName, type: param.paramType, value: param.defaultValue, editable: param.editableInOperation })),
     summary: `${component.endpoint}；入参 ${rawInputParams.length} 个；返回 ${rawResultFields.length} 个`,
     versionDesc: `${component.name} ${version} 标准 API 接入配置`,
@@ -2378,7 +2388,7 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     usageLimit: "遵循组件服务当前限流和任务队列规则。",
     riskNote: "依赖外部组件服务可用性，接口异常会记录到运行监测。",
     sampleMaterial: component.resultExample,
-    maintainer: "工程平台组",
+    maintainer: getMockTeam(index),
     packageFile: "已部署 API 服务",
     packageName: component.toolCode,
     packageVersion: version,
@@ -2388,7 +2398,7 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     connectorName: "RAG 算法服务",
     connectorBaseUrlSnapshot: RAGFLOW_API_BASE,
     connectorAuthType: "Bearer Token",
-    serviceEnvironment: "dev3",
+    serviceEnvironment: "prod",
     httpContentType: "application/json",
     httpAuthConfig: "内部服务鉴权，由网关或环境配置提供",
     asyncMode: component.inputs.some((item) => item.name === "callback_url") ? "同步/异步均支持" : "同步调用",
@@ -2424,9 +2434,9 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     activePlanUsages: isPublished ? [`知识库构建 Liteflow / ${component.name} 默认节点 / 生效`] : [],
     runCount,
     failureCount,
-    lastRunAt: `2026-05-13 ${String(10 + (index % 8)).padStart(2, "0")}:${String(20 + (index * 5) % 40).padStart(2, "0")}:00`,
-    createdBy: "系统管理员",
-    updatedAt: "2026-05-13 18:30:00",
+    lastRunAt: `2026-05-19 ${String(10 + (index % 6)).padStart(2, "0")}:${String(20 + (index * 5) % 40).padStart(2, "0")}:00`,
+    createdBy: getMockUser(index),
+    updatedAt: "2026-05-19 15:30:00",
   };
 }
 
@@ -2448,10 +2458,10 @@ function createRagflowTool(component: RagflowComponentSpec, index: number): Tool
     name: component.name,
     category: component.category,
     sourceType: "存量 HTTP 服务",
-    owner: "工程平台组",
-    createdBy: "系统管理员",
-    createdAt: "2026-05-13 09:00:00",
-    updatedAt: "2026-05-13 18:30:00",
+    owner: getMockTeam(index),
+    createdBy: getMockUser(index),
+    createdAt: `2026-05-${String(16 + (index % 3)).padStart(2, "0")} 09:00:00`,
+    updatedAt: "2026-05-19 15:30:00",
     status: index % 6 === 2 ? "disabled" : "enabled",
     latestVersion: latest.version,
     lastCalledAt: latest.lastRunAt ?? "-",
@@ -2485,17 +2495,17 @@ function createRagflowRunRecords(): Record<string, ToolRunRecord[]> {
     const records = resultCycle.map((result, recordIndex) => {
       const hour = 9 + ((index + recordIndex) % 9);
       const minute = 8 + ((index * 7 + recordIndex * 11) % 48);
-      const startedAt = `2026-05-14 ${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
-      const finishedAt = result === "运行中" ? "" : `2026-05-14 ${String(hour).padStart(2, "0")}:${String(Math.min(59, minute + 4 + recordIndex)).padStart(2, "0")}:32`;
+      const startedAt = `2026-05-19 ${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+      const finishedAt = result === "运行中" ? "" : `2026-05-19 ${String(hour).padStart(2, "0")}:${String(Math.min(59, minute + 4 + recordIndex)).padStart(2, "0")}:32`;
       const type = typeCycle[(index + recordIndex) % typeCycle.length];
       const version = versionCycle[(index + recordIndex) % versionCycle.length];
       const taskId = `RUN-${component.toolCode.toUpperCase()}-${String(index + 1).padStart(2, "0")}${String(recordIndex + 1).padStart(2, "0")}`;
       return {
         id: `${component.id}-run-${recordIndex + 1}`,
         type,
-        trigger: type === "调试运行" ? "系统管理员" : type === "Flow调用" ? `flow-knowledge-build-${String(index + 1).padStart(3, "0")}` : `agent-knowledge-${String(index + 1).padStart(3, "0")}`,
+        trigger: type === "调试运行" ? getMockUser(index + recordIndex) : type === "Flow调用" ? `liteflow-knowledge-build-${String(index + 1).padStart(3, "0")}` : "知识工程 Agent MCP",
         endpoint: type === "调试运行" ? "管理端" : "运营端",
-        projectSpace: type === "调试运行" ? undefined : `知识库构建 / ${component.name}接入验证 / PRJ-202605-${String(index + 1).padStart(3, "0")}`,
+        projectSpace: type === "调试运行" ? undefined : `知识库构建 / ${component.name}接入验证 / PRJ-20260519-${String(index + 1).padStart(3, "0")}`,
         version,
         result,
         startedAt,
@@ -2538,9 +2548,9 @@ function loadTools(): ToolItem[] {
     const hydratedTools = parsedTools.map((tool) => ({
       sourceType: "待补充",
       owner: "未设置",
-      createdBy: "系统管理员",
-      createdAt: "2026-05-13 00:00:00",
-      updatedAt: "2026-05-13 00:00:00",
+      createdBy: "张三",
+      createdAt: "2026-05-16 09:00:00",
+      updatedAt: "2026-05-19 15:30:00",
       lastCalledAt: "-",
       callCount24h: 0,
       failureCount24h: 0,
@@ -2761,7 +2771,7 @@ export function ToolHubPage() {
             description: newTool.capabilitySummary.trim(),
             capabilitySummary: newTool.capabilitySummary.trim(),
             detailedDescription: newTool.detailedDescription.trim(),
-            updatedAt: "2026-05-14 15:00:00",
+            updatedAt: "2026-05-19 16:00:00",
           }
           : tool
       )));
@@ -2802,9 +2812,9 @@ export function ToolHubPage() {
       category: newTool.category,
       sourceType: "待补充",
       owner: "未设置",
-      createdBy: "系统管理员",
-      createdAt: "2026-05-13 15:00:00",
-      updatedAt: "2026-05-13 15:00:00",
+      createdBy: "当前用户",
+      createdAt: "2026-05-19 16:00:00",
+      updatedAt: "2026-05-19 16:00:00",
       status: "disabled",
       latestVersion: createVersion ? "v1.0.0" : "-",
       lastCalledAt: "-",
@@ -2917,7 +2927,7 @@ export function ToolHubPage() {
 
     setTools((prev) => prev.map((tool) => (
       tool.id === deleteConfirmToolId
-        ? { ...tool, deleted: true, deletedAt: "2026-05-13 16:40:00" }
+        ? { ...tool, deleted: true, deletedAt: "2026-05-19 16:40:00" }
         : tool
     )));
     setDeleteConfirmToolId(null);
@@ -3827,8 +3837,8 @@ export function ToolHubDetailPage() {
       debugStatus: version.debugStatus ?? "not_started",
       debugResultSummary: version.debugStatus === "success" ? "最近一次调试成功，版本已进入待发布。" : "",
       debugResultPreview: version.debugStatus === "success" ? JSON.stringify(version.resultConfig, null, 2) : "",
-      debugRawOutput: version.debugStatus === "success" ? "mock 原始输出：执行成功，已返回结构化结果。" : "",
-      debugErrorMessage: version.debugStatus === "failed" ? "mock 调试失败：样例输入与参数标准化配置不匹配" : "",
+      debugRawOutput: version.debugStatus === "success" ? "底层 API 返回 code=0，已生成结构化结果。" : "",
+      debugErrorMessage: version.debugStatus === "failed" ? "样例输入与参数标准化配置不匹配" : "",
       debugAdvice: version.debugStatus === "success" ? "可返回版本列表执行发布。" : version.status === "pending" && version.debugStatus === "failed" ? "本次复测失败，版本仍保持待发布；可继续调试、编辑配置或提交发布。" : "",
     });
     setDebugDrawerOpen(true);
@@ -4436,7 +4446,7 @@ export function ToolHubDetailPage() {
       return;
     }
     const runId = `${tool.id}-debug-${Date.now()}`;
-    const startedAt = "2026-05-13 16:18:00";
+    const startedAt = "2026-05-19 16:18:00";
     const operationFields = (debugVersion.operationDisplay?.editableFields ?? []).filter((field) => field.uiComponent !== "不展示");
     const debugInputObject = Object.fromEntries(operationFields.map((field) => {
       const value = debugDraft.paramValues[field.id];
@@ -4456,7 +4466,7 @@ export function ToolHubDetailPage() {
         {
           id: runId,
           type: "调试运行",
-          trigger: "当前调试用户",
+          trigger: "当前用户",
           endpoint: "管理端",
           version: debugVersion.version,
           result: "运行中",
@@ -4485,7 +4495,7 @@ export function ToolHubDetailPage() {
             ? {
                 ...record,
                 result: success ? "成功" : "失败",
-                finishedAt: success ? "2026-05-13 16:18:10" : "2026-05-13 16:18:08",
+                finishedAt: success ? "2026-05-19 16:18:10" : "2026-05-19 16:18:08",
                 flowTrace: getDebugFlowTrace(success ? "success" : "failed"),
                 output: success
                   ? `mcp_response=${JSON.stringify({ content: [{ type: "text", text: "调试成功，底层 API 已返回有效结果" }], structuredContent: { status: "success", summary: "底层 API 调用成功", traceId: runId } })}`
@@ -4642,15 +4652,15 @@ export function ToolHubDetailPage() {
       linkedPlanRefs: baseVersion?.linkedPlanRefs ?? 0,
       activePlanUsages: baseVersion?.activePlanUsages ?? [],
       createdBy: baseVersion?.createdBy ?? "工具维护人",
-      createdAt: baseVersion?.createdAt ?? "2026-05-15 10:00:00",
-      updatedAt: "2026-05-13 16:20:00",
+      createdAt: baseVersion?.createdAt ?? "2026-05-19 16:00:00",
+      updatedAt: "2026-05-19 16:20:00",
     }, tool.name);
 
     setTools((prev) => prev.map((item) => (
       item.id !== tool.id ? item : {
         ...item,
         latestVersion: baseVersion ? item.latestVersion : versionItem.version,
-        updatedAt: "2026-05-13 16:20:00",
+        updatedAt: "2026-05-19 16:20:00",
         versions: baseVersion
           ? item.versions.map((version) => (version.id === baseVersion.id ? versionItem : version))
           : [versionItem, ...item.versions],
@@ -4671,7 +4681,7 @@ export function ToolHubDetailPage() {
           ? {
               ...version,
               status: nextStatus,
-              lastDebug: nextDebugStatus ? "2026-05-13 16:10:00" : version.lastDebug,
+              lastDebug: nextDebugStatus ? "2026-05-19 16:10:00" : version.lastDebug,
               debugStatus: nextDebugStatus ?? version.debugStatus,
             }
           : version
