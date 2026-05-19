@@ -224,6 +224,7 @@ const TOOL_VERSION_CONNECTORS = [
 interface ToolParam {
   id: string;
   paramName: string;
+  displayName?: string;
   paramDesc: string;
   paramType: ParamType;
   groupName: string;
@@ -237,6 +238,7 @@ interface ToolParam {
 interface RawInputParam {
   id: string;
   sourceName: string;
+  displayName?: string;
   inputType: RawInputType;
   required: boolean;
   description: string;
@@ -571,7 +573,6 @@ function getExternalHttpDefaultOutputRead() {
 
 const SYSTEM_REQUEST_BODY_VALUES = {
   request_id: "REQ-20260519-001",
-  callback_url: "https://toolhub.internal/callback/ragflow/REQ-20260519-001",
   timestamp: "2026-05-19T16:18:00+08:00",
 };
 
@@ -593,12 +594,11 @@ function getDefaultRequestBodyTemplate(rawInputParams: RawInputParam[] = []) {
 function getRagflowRequestBodyTemplate(component: RagflowComponentSpec) {
   const systemFields = new Set(["request_id", "callback_url", "trans_metadata", "source_metadata"]);
   const parameterInputs = component.inputs.filter((field) => !systemFields.has(field.name));
-  const hasRequestId = component.inputs.some((field) => field.name === "request_id");
   const hasCallback = component.inputs.some((field) => field.name === "callback_url");
   const hasSourceMetadata = component.inputs.some((field) => field.name === "source_metadata");
 
-  const lines = ["{", `  "request_id": ${hasRequestId ? "{{input.request_id}}" : "{{system.request_id}}"},`];
-  if (hasCallback) lines.push("  \"callback_url\": {{system.callback_url}},");
+  const lines = ["{", "  \"request_id\": {{system.request_id}},"];
+  if (hasCallback) lines.push("  \"callback_url\": \"\",");
   if (hasSourceMetadata) lines.push("  \"source_metadata\": {{input.source_metadata}},");
   lines.push("  \"parameters\": {");
   lines.push(parameterInputs.map((field) => `    "${field.name}": {{input.${field.name}}}`).join(",\n") || "    \"param_1\": {{input.param_1}}");
@@ -1026,6 +1026,7 @@ function buildVersionParamsFromRawInputs(rawInputs: RawInputParam[]): ToolParam[
     .map((item, index) => ({
       id: `p-raw-${index + 1}`,
       paramName: item.mappedParamName.trim(),
+      displayName: (item.displayName || item.mappedParamDescription.split("：")[0] || item.mappedParamName || item.sourceName).trim(),
       paramDesc: item.mappedParamDescription.trim() || item.description.trim(),
       paramType: mapRawInputTypeToParamType(item.inputType),
       groupName: "接口参数",
@@ -1069,7 +1070,7 @@ function createDefaultOperationDisplay(params: ToolParam[], resultConfig: Result
       return {
         id: previousField?.id ?? `op-e-${index + 1}`,
         sourceField: param.paramName,
-        displayName: previousField?.displayName ?? param.paramName,
+        displayName: previousField?.displayName ?? param.displayName ?? param.paramName,
         description: param.paramDesc,
         required: param.required,
         editable: param.editableInOperation,
@@ -2398,6 +2399,7 @@ function createRagflowRawInput(field: RagflowFieldSpec, index: number): RawInput
   return {
     id: `raw-${field.name}-${index}`,
     sourceName: field.name,
+    displayName: getRagflowFieldLabel(field.name),
     inputType: field.type as RawInputType,
     required: Boolean(field.required),
     description: field.description,
@@ -4028,6 +4030,10 @@ export function ToolHubDetailPage() {
           toast.error("标准入参名称不能为空");
           return false;
         }
+        if (!item.displayName?.trim()) {
+          toast.error("标准入参显示名称不能为空");
+          return false;
+        }
         if (!item.inputType) {
           toast.error("请选择入参类型");
           return false;
@@ -4065,6 +4071,7 @@ export function ToolHubDetailPage() {
       {
         id: `raw-${Date.now()}`,
         sourceName: paramName,
+        displayName: "",
         inputType: "文本",
         required: false,
         description: "",
@@ -4109,6 +4116,7 @@ export function ToolHubDetailPage() {
     setParamDraft({
       id: `raw-${Date.now()}`,
       sourceName: "",
+      displayName: "",
       inputType: "文本",
       required: false,
       description: "",
@@ -4137,6 +4145,10 @@ export function ToolHubDetailPage() {
       toast.error("请填写标准入参名称");
       return;
     }
+    if (!paramDraft.displayName?.trim()) {
+      toast.error("请填写显示名称");
+      return;
+    }
     if (!paramDraft.inputType) {
       toast.error("请选择入参类型");
       return;
@@ -4150,6 +4162,7 @@ export function ToolHubDetailPage() {
       const normalizedParamDraft: RawInputParam = {
         ...paramDraft,
         sourceName: paramName,
+        displayName: paramDraft.displayName || paramName,
         passingMode: "HTTP JSON Body",
         handlingMode: "mapped",
         mappedParamName: paramName,
@@ -5557,7 +5570,7 @@ export function ToolHubDetailPage() {
                   <Box>
                     <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>标准入参</Typography>
                     <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
-                      定义 Agent 或业务系统调用 ToolHub 时需要传入的标准参数。
+                      定义Agent在调用工具时需要传入的标准参数。
                     </Typography>
                   </Box>
                   <Button onClick={addParamRow} variant="outlined" startIcon={<Add sx={{ fontSize: 14 }} />} sx={{ textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, boxShadow: "none" }}>
@@ -5569,7 +5582,7 @@ export function ToolHubDetailPage() {
                   <Table size="small">
                     <TableHead>
                       <TableRow sx={{ bgcolor: "#f8fafc" }}>
-                        {["参数名称（字段名）", "类型", "是否必填", "参数说明", "默认值/示例值", "操作"].map((head) => (
+                        {["显示名称", "参数名称（字段名）", "类型", "是否必填", "参数说明", "默认值/示例值", "操作"].map((head) => (
                           <TableCell key={head} sx={{ fontSize: "11px", fontWeight: 600, color: "#64748b", py: 0.75, whiteSpace: "nowrap" }}>
                             {head}
                           </TableCell>
@@ -5579,7 +5592,7 @@ export function ToolHubDetailPage() {
                     <TableBody>
                       {versionDraft.rawInputParams.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={6} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
+                          <TableCell colSpan={7} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
                             暂无标准入参，点击“新增标准入参”后手动配置。
                           </TableCell>
                         </TableRow>
@@ -5588,7 +5601,16 @@ export function ToolHubDetailPage() {
                         const paramName = item.mappedParamName || item.sourceName;
                         return (
                           <TableRow key={item.id}>
-                            <TableCell sx={{ width: "18%", py: 0.75 }}>
+                            <TableCell sx={{ width: "14%", py: 0.75 }}>
+                              <TextField
+                                size="small"
+                                value={item.displayName || ""}
+                                onChange={(event) => updateParamRow(item.id, { displayName: event.target.value })}
+                                placeholder="如 文件地址"
+                                sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
+                              />
+                            </TableCell>
+                            <TableCell sx={{ width: "16%", py: 0.75 }}>
                               <TextField
                                 size="small"
                                 value={paramName}
@@ -5690,7 +5712,7 @@ export function ToolHubDetailPage() {
                   {[
                     ["{{input.xxx}}", "引用标准入参"],
                     ["{{system.request_id}}", "系统生成请求 ID"],
-                    ["{{system.callback_url}}", "系统生成回调地址"],
+                    ["{{system.timestamp}}", "系统生成调用时间"],
                   ].map(([token, desc]) => (
                     <Box key={token} sx={{ p: 1, borderRadius: "6px", bgcolor: "#f8fafc", border: "1px solid #e5e7eb" }}>
                       <Typography sx={{ fontSize: "11px", color: "#111827", fontFamily: "monospace" }}>{token}</Typography>
@@ -5778,7 +5800,7 @@ export function ToolHubDetailPage() {
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      {["参数名称（字段名）", "类型", "是否必填", "参数说明", "默认值/示例值"].map((head) => (
+                      {["显示名称", "参数名称（字段名）", "类型", "是否必填", "参数说明", "默认值/示例值"].map((head) => (
                         <TableCell key={head} sx={{ fontSize: "12px", color: "#6b7280", fontWeight: 600, bgcolor: "#f9fafb" }}>{head}</TableCell>
                       ))}
                     </TableRow>
@@ -5786,6 +5808,7 @@ export function ToolHubDetailPage() {
                   <TableBody>
                     {(selectedVersion.rawInputParams ?? []).map((item) => (
                       <TableRow key={item.id}>
+                        <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{item.displayName || "-"}</TableCell>
                         <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{item.handlingMode === "mapped" ? item.mappedParamName || item.sourceName : item.sourceName}</TableCell>
                         <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.inputType}</TableCell>
                         <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.required ? "是" : "否"}</TableCell>
@@ -5934,6 +5957,15 @@ export function ToolHubDetailPage() {
         <DialogContent sx={{ px: 3, pb: 2.5, ...scrollableDialogContentSx }}>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
             <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
+              <TextField
+                label="显示名称"
+                size="small"
+                required
+                helperText="用于页面展示的中文名，例如“文件地址”。"
+                value={paramDraft.displayName || ""}
+                onChange={(event) => setParamDraft((prev) => ({ ...prev, displayName: event.target.value }))}
+                sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}
+              />
               <TextField
                 label="参数名称（字段名）"
                 size="small"
