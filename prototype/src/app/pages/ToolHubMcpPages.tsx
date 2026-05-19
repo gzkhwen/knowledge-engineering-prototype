@@ -105,8 +105,6 @@ type Connector = {
   baseUrl: string;
   specUrl: string;
   healthPath: string;
-  method: string;
-  requestPath: string;
   auth: AuthType;
   toolCount: number;
   lastChecked: string;
@@ -223,8 +221,6 @@ const initialConnectors: Connector[] = [
     baseUrl: "https://ragflow.internal/api",
     specUrl: "https://ragflow.internal/openapi.json",
     healthPath: "/health",
-    method: "GET",
-    requestPath: "",
     auth: "Bearer Token",
     toolCount: 2,
     lastChecked: "2026-05-19 15:35",
@@ -241,8 +237,6 @@ const initialConnectors: Connector[] = [
     baseUrl: "https://llm-gateway.internal/api",
     specUrl: "https://llm-gateway.internal/openapi.json",
     healthPath: "/health",
-    method: "POST",
-    requestPath: "",
     auth: "API Key",
     toolCount: 2,
     lastChecked: "2026-05-19 15:22",
@@ -259,8 +253,6 @@ const initialConnectors: Connector[] = [
     baseUrl: "https://rag-quality.internal/api",
     specUrl: "",
     healthPath: "/status",
-    method: "POST",
-    requestPath: "/rag_algorithm/ragas_evaluate",
     auth: "Basic Auth",
     toolCount: 1,
     lastChecked: "2026-05-19 14:58",
@@ -1006,8 +998,6 @@ const emptyConnector: Omit<Connector, "id" | "status" | "toolCount" | "lastCheck
   baseUrl: "",
   specUrl: "",
   healthPath: "/health",
-  method: "POST",
-  requestPath: "/custom/action",
   auth: "Bearer Token",
 };
 
@@ -1058,8 +1048,6 @@ export function ToolHubConnectorsPage() {
       baseUrl: connector.baseUrl,
       specUrl: connector.specUrl,
       healthPath: connector.healthPath,
-      method: connector.method,
-      requestPath: connector.requestPath,
       auth: connector.auth,
     });
   };
@@ -1151,10 +1139,6 @@ export function ToolHubConnectorsPage() {
     return (
       <>
         <TextField label="Base URL" size="small" value={connectorDraft.baseUrl} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, baseUrl: event.target.value }))} />
-        <TextField select label="请求方法" size="small" value={connectorDraft.method} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, method: event.target.value }))}>
-          {["GET", "POST", "PUT", "DELETE"].map((method) => <MenuItem key={method} value={method}>{method}</MenuItem>)}
-        </TextField>
-        <TextField label="请求路径" size="small" value={connectorDraft.requestPath} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, requestPath: event.target.value }))} />
         <TextField label="Health Check Path" size="small" value={connectorDraft.healthPath} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, healthPath: event.target.value }))} />
       </>
     );
@@ -1404,8 +1388,6 @@ export function ToolHubConnectorsPage() {
                   ["Base URL", detailConnector.baseUrl || "-"],
                   ["OpenAPI Spec URL", detailConnector.type === "OpenAPI" ? detailConnector.specUrl || "-" : "-"],
                   ["Health Check Path", detailConnector.healthPath || "-"],
-                  ["请求方法", detailConnector.type === "自定义 HTTP" ? detailConnector.method : "-"],
-                  ["请求路径", detailConnector.type === "自定义 HTTP" ? detailConnector.requestPath || "-" : "-"],
                 ].map(([label, value]) => (
                   <Box key={label} sx={{ display: "contents" }}>
                     <Typography sx={{ fontSize: "12px", color: "#64748b", lineHeight: 1.7 }}>{label}</Typography>
