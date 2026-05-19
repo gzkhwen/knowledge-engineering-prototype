@@ -5575,7 +5575,7 @@ export function ToolHubDetailPage() {
                             httpAuthConfig: connector ? `沿用连接器鉴权：${connector.authType}` : "",
                           });
                         }}
-                        helperText="连接器维护 Base URL、鉴权和健康状态。"
+                        helperText="连接器维护服务根地址、鉴权和健康状态。"
                         sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}
                       >
                         {TOOL_VERSION_CONNECTORS.map((connector) => (
@@ -5868,7 +5868,7 @@ export function ToolHubDetailPage() {
 
               {detailBlock("调用配置", [
                 ["连接器", getVersionConnectorName(selectedVersion)],
-                ["Base URL 快照", selectedVersion.connectorBaseUrlSnapshot || selectedVersion.httpServiceAddress || "-"],
+                ["服务根地址快照", selectedVersion.connectorBaseUrlSnapshot || selectedVersion.httpServiceAddress || "-"],
                 ["接口路径", selectedVersion.httpPath || "-"],
                 ["请求方式", selectedVersion.httpMethod || "-"],
                 ["鉴权方式", selectedVersion.connectorAuthType || "沿用连接器鉴权"],

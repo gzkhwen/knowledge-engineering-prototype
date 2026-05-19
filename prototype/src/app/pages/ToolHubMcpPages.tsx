@@ -1097,7 +1097,7 @@ export function ToolHubConnectorsPage() {
     }
     const nextStatus: ConnectorStatus = connector.id === "conn-check" ? "异常" : "正常";
     setConnectors((prev) => prev.map((item) => (
-      item.id === connector.id ? { ...item, status: nextStatus, lastChecked: "刚刚", errorMessage: nextStatus === "异常" ? "健康检查接口返回异常，请检查 Base URL、鉴权配置或服务状态。" : undefined } : item
+      item.id === connector.id ? { ...item, status: nextStatus, lastChecked: "刚刚", errorMessage: nextStatus === "异常" ? "健康检查接口返回异常，请检查服务根地址、鉴权配置或服务状态。" : undefined } : item
     )));
     if (nextStatus === "异常") {
       toast.error("连接检测失败：健康检查接口返回异常");
@@ -1155,7 +1155,7 @@ export function ToolHubConnectorsPage() {
   const renderTypeFields = () => {
     return (
       <>
-        <TextField label="Base URL" size="small" value={connectorDraft.baseUrl} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, baseUrl: event.target.value }))} />
+        <TextField label="服务根地址" size="small" value={connectorDraft.baseUrl} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, baseUrl: event.target.value }))} helperText="外部服务的根地址，具体接口路径在工具版本中配置。" />
         <TextField label="OpenAPI Spec URL" size="small" value={connectorDraft.specUrl} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, specUrl: event.target.value }))} helperText="选填；一期可手动维护工具版本。" />
         <TextField label="Health Check Path" size="small" value={connectorDraft.healthPath} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, healthPath: event.target.value }))} />
       </>
@@ -1401,7 +1401,7 @@ export function ToolHubConnectorsPage() {
               <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827", mb: 1.25 }}>连接配置</Typography>
               <Box sx={{ display: "grid", gridTemplateColumns: "120px minmax(0, 1fr)", rowGap: 0.9, columnGap: 1.5 }}>
                 {[
-                  ["Base URL", detailConnector.baseUrl || "-"],
+                  ["服务根地址", detailConnector.baseUrl || "-"],
                   ["OpenAPI Spec URL", detailConnector.specUrl || "-"],
                   ["Health Check Path", detailConnector.healthPath || "-"],
                 ].map(([label, value]) => (
