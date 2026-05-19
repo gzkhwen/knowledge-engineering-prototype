@@ -48,7 +48,7 @@ const scrollableDialogContentSx = { display: "flex", flexDirection: "column", ga
 
 type ServiceStatus = "运行中" | "停用" | "异常";
 type ConnectorStatus = "正常" | "异常" | "未检测";
-type ConnectorType = "OpenAPI" | "REST API" | "自定义 HTTP";
+type ConnectorType = "HTTP API";
 type AuthType = "Bearer Token" | "API Key" | "Basic Auth" | "None";
 type DetailTab = "basic" | "tools" | "apikey";
 
@@ -233,7 +233,7 @@ const initialConnectors: Connector[] = [
   {
     id: "conn-rag",
     name: "RAG 算法服务",
-    type: "OpenAPI",
+    type: "HTTP API",
     status: "正常",
     baseUrl: "https://ragflow.internal/api",
     specUrl: "https://ragflow.internal/openapi.json",
@@ -249,7 +249,7 @@ const initialConnectors: Connector[] = [
   {
     id: "conn-material",
     name: "模型生成服务",
-    type: "OpenAPI",
+    type: "HTTP API",
     status: "正常",
     baseUrl: "https://llm-gateway.internal/api",
     specUrl: "https://llm-gateway.internal/openapi.json",
@@ -265,7 +265,7 @@ const initialConnectors: Connector[] = [
   {
     id: "conn-check",
     name: "RAG 质量评估服务",
-    type: "自定义 HTTP",
+    type: "HTTP API",
     status: "异常",
     baseUrl: "https://rag-quality.internal/api",
     specUrl: "",
@@ -282,7 +282,7 @@ const initialConnectors: Connector[] = [
   {
     id: "conn-material",
     name: "原始素材服务",
-    type: "REST API",
+    type: "HTTP API",
     status: "未检测",
     baseUrl: "https://material.internal/api",
     specUrl: "",
@@ -1027,7 +1027,7 @@ export function ToolHubMcpServicesPage() {
 
 const emptyConnector: Omit<Connector, "id" | "status" | "toolCount" | "lastChecked" | "endpoints"> = {
   name: "",
-  type: "OpenAPI",
+  type: "HTTP API",
   baseUrl: "",
   specUrl: "",
   healthPath: "/health",
@@ -1123,7 +1123,7 @@ export function ToolHubConnectorsPage() {
       createdAt: editingConnector?.createdAt ?? "2026-05-19 16:40",
       updatedAt: editingConnector ? "2026-05-19 16:40" : "2026-05-19 16:40",
       errorMessage: editingConnector?.errorMessage,
-      endpoints: connectorDraft.type === "OpenAPI" ? ["GET /projects/{id}", "POST /solutions/generate", "GET /templates"] : [],
+      endpoints: connectorDraft.specUrl ? ["GET /rag_algorithm/function_list", "POST /rag_algorithm/parser", "POST /rag_algorithm/splitter"] : [],
     };
     if (editingConnector) {
       setConnectors((prev) => prev.map((connector) => (connector.id === editingConnector.id ? next : connector)));
@@ -1153,25 +1153,10 @@ export function ToolHubConnectorsPage() {
   };
 
   const renderTypeFields = () => {
-    if (connectorDraft.type === "OpenAPI") {
-      return (
-        <>
-          <TextField label="Base URL" size="small" value={connectorDraft.baseUrl} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, baseUrl: event.target.value }))} />
-          <TextField label="OpenAPI Spec URL" size="small" value={connectorDraft.specUrl} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, specUrl: event.target.value }))} />
-        </>
-      );
-    }
-    if (connectorDraft.type === "REST API") {
-      return (
-        <>
-          <TextField label="Base URL" size="small" value={connectorDraft.baseUrl} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, baseUrl: event.target.value }))} />
-          <TextField label="Health Check Path" size="small" value={connectorDraft.healthPath} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, healthPath: event.target.value }))} />
-        </>
-      );
-    }
     return (
       <>
         <TextField label="Base URL" size="small" value={connectorDraft.baseUrl} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, baseUrl: event.target.value }))} />
+        <TextField label="OpenAPI Spec URL" size="small" value={connectorDraft.specUrl} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, specUrl: event.target.value }))} helperText="选填；一期可手动维护工具版本。" />
         <TextField label="Health Check Path" size="small" value={connectorDraft.healthPath} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, healthPath: event.target.value }))} />
       </>
     );
@@ -1211,7 +1196,7 @@ export function ToolHubConnectorsPage() {
           <FormControl size="small" sx={{ minWidth: 130 }}>
             <Select value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); setPage(0); }} displayEmpty sx={{ borderRadius: "8px", bgcolor: "#fff", fontSize: "13px" }}>
               <MenuItem value="all">全部类型</MenuItem>
-              {["OpenAPI", "REST API", "自定义 HTTP"].map((type) => <MenuItem key={type} value={type}>{type}</MenuItem>)}
+              <MenuItem value="HTTP API">HTTP API</MenuItem>
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 120 }}>
@@ -1341,21 +1326,19 @@ export function ToolHubConnectorsPage() {
         <DialogContent sx={scrollableDialogContentSx}>
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
             <TextField label="连接器名称" size="small" required value={connectorDraft.name} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, name: event.target.value }))} />
-            <TextField select label="连接器类型" size="small" value={connectorDraft.type} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, type: event.target.value as ConnectorType }))}>
-              {["OpenAPI", "REST API", "自定义 HTTP"].map((type) => <MenuItem key={type} value={type}>{type}</MenuItem>)}
-            </TextField>
+            <TextField label="连接器类型" size="small" value="HTTP API" InputProps={{ readOnly: true }} helperText="一期统一按 HTTP API 接入，具体接口路径在工具版本中配置。" />
             {renderTypeFields()}
             <TextField select label="Authentication" size="small" value={connectorDraft.auth} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, auth: event.target.value as AuthType }))}>
               {["Bearer Token", "API Key", "Basic Auth", "None"].map((auth) => <MenuItem key={auth} value={auth}>{auth}</MenuItem>)}
             </TextField>
             {renderAuthFields()}
           </Box>
-          {connectorDraft.type === "OpenAPI" && (
+          {connectorDraft.specUrl && (
             <Paper sx={{ border: "1px solid #e5e7eb", borderRadius: "8px", boxShadow: "none", overflow: "hidden" }}>
               <Box sx={{ p: 1.5, borderBottom: "1px solid #eef2f7" }}>
                 <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>接口清单</Typography>
               </Box>
-              {(editingConnector?.endpoints.length ? editingConnector.endpoints : ["OpenAPI，保存或测试连接后自动获取接口清单"]).map((endpoint) => (
+              {(editingConnector?.endpoints.length ? editingConnector.endpoints : ["OpenAPI，保存或测试连接后可辅助获取接口清单"]).map((endpoint) => (
                 <Box key={endpoint} sx={{ px: 1.5, py: 1, borderBottom: "1px solid #f3f4f6" }}>
                   <Typography sx={{ fontSize: "12px", color: "#475569", fontFamily: endpoint.includes("/") ? "monospace" : "inherit" }}>{endpoint}</Typography>
                 </Box>
@@ -1419,7 +1402,7 @@ export function ToolHubConnectorsPage() {
               <Box sx={{ display: "grid", gridTemplateColumns: "120px minmax(0, 1fr)", rowGap: 0.9, columnGap: 1.5 }}>
                 {[
                   ["Base URL", detailConnector.baseUrl || "-"],
-                  ["OpenAPI Spec URL", detailConnector.type === "OpenAPI" ? detailConnector.specUrl || "-" : "-"],
+                  ["OpenAPI Spec URL", detailConnector.specUrl || "-"],
                   ["Health Check Path", detailConnector.healthPath || "-"],
                 ].map(([label, value]) => (
                   <Box key={label} sx={{ display: "contents" }}>
