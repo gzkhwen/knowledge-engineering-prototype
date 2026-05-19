@@ -437,6 +437,30 @@ export function ProjectSolutionEditor() {
                     })}
                   </Box>
                 )}
+                {leaf && hasTypes && (
+                  <Box sx={{ mt: 1, display: "flex", gap: 0.75, flexWrap: "wrap" }}>
+                    {cat.formTypes.map(ft => (
+                      <Button
+                        key={`${cat.id}-${ft}`}
+                        size="small"
+                        startIcon={<AutoAwesome sx={{ fontSize: "14px !important" }} />}
+                        onClick={() => navigate(`/ops/project/${project.id}/agent-workbench/${cat.id}/${encodeURIComponent(ft)}`)}
+                        sx={{
+                          height: 26,
+                          px: 1,
+                          borderRadius: "6px",
+                          textTransform: "none",
+                          fontSize: "11px",
+                          color: "#7c3aed",
+                          bgcolor: "#f5f3ff",
+                          "&:hover": { bgcolor: "#ede9fe" },
+                        }}
+                      >
+                        调整{ft}处理方案
+                      </Button>
+                    ))}
+                  </Box>
+                )}
                 {!leaf && (
                   <Typography sx={{ fontSize: "11px", color: "#9ca3af", mt: 0.5 }}>
                     中间节点，知识形态由末级子类目指定
