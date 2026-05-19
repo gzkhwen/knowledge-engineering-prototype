@@ -263,7 +263,6 @@ interface RawResultField {
   fieldType: RawResultFieldType;
   readMode: ResultReadMode | "";
   requiredMode: ResultRequiredMode | "";
-  sampleValue?: string;
   description: string;
   outputMapping: VersionOutputMapping | "";
 }
@@ -965,7 +964,6 @@ function createDefaultRawResultFields(): RawResultField[] {
       fieldType: "文本",
       readMode: "标准输出读取",
       requiredMode: "是",
-      sampleValue: "解析后的正文内容",
       description: "解析出的正文内容",
       outputMapping: "主要结果内容",
     },
@@ -976,7 +974,6 @@ function createDefaultRawResultFields(): RawResultField[] {
       fieldType: "数组",
       readMode: "返回值读取",
       requiredMode: "否",
-      sampleValue: "[{\"row\":1,\"cells\":[]}]",
       description: "识别出的表格数据",
       outputMapping: "结构化结果",
     },
@@ -987,7 +984,6 @@ function createDefaultRawResultFields(): RawResultField[] {
       fieldType: "文件",
       readMode: "输出文件读取",
       requiredMode: "否",
-      sampleValue: "s3://bucket/result.json",
       description: "工具处理后生成的结果文件",
       outputMapping: "文件或中间产物",
     },
@@ -998,7 +994,6 @@ function createDefaultRawResultFields(): RawResultField[] {
       fieldType: "数字",
       readMode: "返回值读取",
       requiredMode: "否",
-      sampleValue: "10.2",
       description: "本次处理耗时，单位秒",
       outputMapping: "耗时信息",
     },
@@ -1009,7 +1004,6 @@ function createDefaultRawResultFields(): RawResultField[] {
       fieldType: "错误信息",
       readMode: "日志关键字读取",
       requiredMode: "失败时必返",
-      sampleValue: "参数校验失败",
       description: "工具执行失败时返回的错误信息",
       outputMapping: "错误信息",
     },
@@ -1600,7 +1594,7 @@ function buildVersionInputExample(version: ToolVersion) {
 function buildVersionOutputExample(version: ToolVersion) {
   return Object.fromEntries((version.rawResultFields ?? []).map((item) => [
     item.sourceField,
-    getFieldSampleValue(item.fieldType, item.sampleValue),
+    getFieldSampleValue(item.fieldType),
   ]));
 }
 
@@ -2447,7 +2441,6 @@ function createRagflowRawResult(field: RagflowFieldSpec, index: number): RawResu
     fieldType: field.type as RawResultFieldType,
     readMode: "HTTP 响应读取",
     requiredMode: field.required ? "是" : field.outputMapping === "错误信息" ? "失败时必返" : "否",
-    sampleValue: getRagflowFieldSample(field),
     description: field.description,
     outputMapping: field.outputMapping ?? "主要结果内容",
   };
@@ -4249,7 +4242,6 @@ export function ToolHubDetailPage() {
       fieldType: "文本",
       readMode: "HTTP 响应读取",
       requiredMode: "否",
-      sampleValue: "",
       description: "",
       outputMapping: "主要结果内容",
     });
@@ -4267,7 +4259,6 @@ export function ToolHubDetailPage() {
         fieldType: "文本",
         readMode: "HTTP 响应读取",
         requiredMode: "否",
-        sampleValue: "",
         description: "",
         outputMapping: "主要结果内容",
       },
@@ -5763,7 +5754,10 @@ export function ToolHubDetailPage() {
               </Paper>
 
               <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-                <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827", mb: 2 }}>响应判断规则</Typography>
+                <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>响应状态判断</Typography>
+                <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 2 }}>
+                  工具Hub判断HTTP响应状态。
+                </Typography>
                 <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1.5 }}>
                   <TextField label="状态字段" size="small" value={versionDraft.responseStatusField} onChange={(event) => updateDraft({ responseStatusField: event.target.value })} helperText="用于判断业务状态，如 $.code。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
                   <TextField label="成功值" size="small" value={versionDraft.responseSuccessValue} onChange={(event) => updateDraft({ responseSuccessValue: event.target.value })} helperText="命中该值表示成功，如 0。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
@@ -5776,7 +5770,7 @@ export function ToolHubDetailPage() {
                   <Box>
                     <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>返回 Schema</Typography>
                     <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
-                      描述底层 API 返回字段的含义，ToolHub 只识别和记录，不做返回值转换。
+                      描述底层API返回字段的含义，工具Hub会把原始返回传给Agent，此处的描述用于Agent理解返回结果的含义。
                     </Typography>
                   </Box>
                   <Button onClick={addResultFieldRow} variant="outlined" startIcon={<Add sx={{ fontSize: 14 }} />} sx={{ textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, boxShadow: "none" }}>
@@ -5787,7 +5781,7 @@ export function ToolHubDetailPage() {
                   <Table size="small">
                     <TableHead>
                       <TableRow sx={{ bgcolor: "#f8fafc" }}>
-                        {["字段名称", "字段路径", "类型", "是否必返", "示例值", "字段说明", "操作"].map((head) => (
+                        {["字段名称", "字段路径", "类型", "是否必返", "字段说明", "操作"].map((head) => (
                           <TableCell key={head} sx={{ fontSize: "11px", fontWeight: 600, color: "#64748b", py: 0.75, whiteSpace: "nowrap" }}>{head}</TableCell>
                         ))}
                       </TableRow>
@@ -5795,7 +5789,7 @@ export function ToolHubDetailPage() {
                     <TableBody>
                       {versionDraft.rawResultFields.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={7} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
+                          <TableCell colSpan={6} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
                             暂无返回字段，点击“新增返回字段”后手动配置。
                           </TableCell>
                         </TableRow>
@@ -5806,7 +5800,6 @@ export function ToolHubDetailPage() {
                           <TableCell sx={{ width: "16%", py: 0.75 }}><TextField size="small" value={item.sourceField} onChange={(event) => updateResultFieldRow(item.id, { sourceField: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
                           <TableCell sx={{ width: 112, py: 0.75 }}><TextField select size="small" value={item.fieldType} onChange={(event) => updateResultFieldRow(item.id, { fieldType: event.target.value as RawResultFieldType })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}>{RAW_RESULT_FIELD_TYPE_OPTIONS.map((option) => <MenuItem key={option} value={option} sx={{ fontSize: "13px" }}>{option}</MenuItem>)}</TextField></TableCell>
                           <TableCell sx={{ width: 112, py: 0.75 }}><TextField select size="small" value={item.requiredMode} onChange={(event) => updateResultFieldRow(item.id, { requiredMode: event.target.value as ResultRequiredMode })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}>{RESULT_REQUIRED_MODE_OPTIONS.map((option) => <MenuItem key={option} value={option} sx={{ fontSize: "13px" }}>{option}</MenuItem>)}</TextField></TableCell>
-                          <TableCell sx={{ width: "16%", py: 0.75 }}><TextField size="small" value={item.sampleValue || ""} onChange={(event) => updateResultFieldRow(item.id, { sampleValue: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
                           <TableCell sx={{ py: 0.75 }}><TextField size="small" value={item.description} onChange={(event) => updateResultFieldRow(item.id, { description: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
                           <TableCell sx={{ width: 56, py: 0.75 }}><IconButton size="small" onClick={() => deleteResultFieldRow(item.id)}><Delete sx={{ fontSize: 16 }} /></IconButton></TableCell>
                         </TableRow>
@@ -5924,7 +5917,7 @@ export function ToolHubDetailPage() {
                 </Box>
               </Paper>
 
-              {detailBlock("响应判断规则", [
+              {detailBlock("响应状态判断", [
                 ["状态字段", selectedVersion.responseStatusField || "$.code"],
                 ["成功值", selectedVersion.responseSuccessValue || "0"],
                 ["错误信息字段", selectedVersion.responseMessageField || "$.msg"],
@@ -5933,12 +5926,12 @@ export function ToolHubDetailPage() {
               <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
                 <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>返回 Schema</Typography>
                   <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 1.25 }}>
-                    描述底层 API 返回字段的含义，ToolHub 只识别和记录，不做返回值转换。
+                    描述底层API返回字段的含义，工具Hub会把原始返回传给Agent，此处的描述用于Agent理解返回结果的含义。
                   </Typography>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      {["字段名称", "字段路径", "类型", "是否必返", "示例值", "字段说明"].map((head) => (
+                      {["字段名称", "字段路径", "类型", "是否必返", "字段说明"].map((head) => (
                         <TableCell key={head} sx={{ fontSize: "12px", color: "#6b7280", fontWeight: 600, bgcolor: "#f9fafb" }}>{head}</TableCell>
                       ))}
                     </TableRow>
@@ -5946,7 +5939,7 @@ export function ToolHubDetailPage() {
                   <TableBody>
                     {(selectedVersion.rawResultFields ?? []).length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
+                        <TableCell colSpan={5} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
                           暂未识别返回 Schema，工具调用结果将按原始响应返回。
                         </TableCell>
                       </TableRow>
@@ -5957,7 +5950,6 @@ export function ToolHubDetailPage() {
                           <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{item.sourceField}</TableCell>
                           <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.fieldType}</TableCell>
                           <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.requiredMode}</TableCell>
-                          <TableCell sx={{ fontSize: "12px", color: "#374151", wordBreak: "break-all" }}>{item.sampleValue || "-"}</TableCell>
                           <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.description}</TableCell>
                         </TableRow>
                       ))
@@ -5998,16 +5990,6 @@ export function ToolHubDetailPage() {
                 onValueChange: (fieldId, value) => setDebugDraft((prev) => ({ ...prev, paramValues: { ...prev.paramValues, [fieldId]: value } })),
                 emptyText: "当前版本没有配置可调试的操作字段",
               })}
-
-              <Paper sx={{ p: 2, borderRadius: "10px", border: "1px solid #e5e7eb", boxShadow: "none" }}>
-                <Typography sx={{ fontSize: "14px", fontWeight: 700, mb: 0.5 }}>生成的底层请求体</Typography>
-                <Typography sx={{ fontSize: "12px", color: "#64748b", mb: 1.25 }}>
-                  根据标准入参和请求体构建模板实时生成，调试时会作为底层 API 请求 Body。
-                </Typography>
-                <Box component="pre" sx={{ m: 0, p: 1.5, borderRadius: "8px", bgcolor: "#0f172a", color: "#e2e8f0", fontSize: "11px", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                  {JSON.stringify(debugGeneratedRequestBody, null, 2)}
-                </Box>
-              </Paper>
 
               {debugDraft.debugStatus !== "not_started" && (
                 <>
@@ -6195,14 +6177,6 @@ export function ToolHubDetailPage() {
                   </MenuItem>
                 ))}
               </TextField>
-              <TextField
-                label="示例值"
-                size="small"
-                helperText="用于帮助理解字段含义。"
-                value={resultDraft.sampleValue || ""}
-                onChange={(event) => setResultDraft((prev) => ({ ...prev, sampleValue: event.target.value }))}
-                sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}
-              />
               <TextField
                 label="字段说明"
                 size="small"
