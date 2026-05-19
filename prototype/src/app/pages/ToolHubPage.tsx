@@ -168,6 +168,9 @@ interface ToolVersion {
   outputStatusRule?: string;
   outputResultLocation?: string;
   outputErrorSource?: string;
+  responseStatusField?: string;
+  responseSuccessValue?: string;
+  responseMessageField?: string;
   activePlanRefs?: number;
   inactivePlanRefs?: number;
   linkedPlanRefs?: number;
@@ -255,10 +258,12 @@ interface RawInputParam {
 
 interface RawResultField {
   id: string;
+  displayName?: string;
   sourceField: string;
   fieldType: RawResultFieldType;
   readMode: ResultReadMode | "";
   requiredMode: ResultRequiredMode | "";
+  sampleValue?: string;
   description: string;
   outputMapping: VersionOutputMapping | "";
 }
@@ -392,7 +397,7 @@ interface ToolRunRecord {
 
 const BLUE = "#3b82f6";
 const SECONDARY_DRAWER_Z_INDEX = 1600;
-const TOOL_STORAGE_KEY = "toolHub_tools_v13";
+const TOOL_STORAGE_KEY = "toolHub_tools_v14";
 const CATEGORY_STORAGE_KEY = "toolHub_categories_v2";
 const CATEGORY_SELECTION_STORAGE_KEY = "toolHub_selected_category_v1";
 const TOOL_CODE_PATTERN = /^[a-z][a-z0-9_]*$/;
@@ -955,46 +960,56 @@ function createDefaultRawResultFields(): RawResultField[] {
   return [
     {
       id: "result-raw-text",
-      sourceField: "raw_text",
+      displayName: "正文内容",
+      sourceField: "$.raw_text",
       fieldType: "文本",
       readMode: "标准输出读取",
       requiredMode: "是",
+      sampleValue: "解析后的正文内容",
       description: "解析出的正文内容",
       outputMapping: "主要结果内容",
     },
     {
       id: "result-tables",
-      sourceField: "tables",
+      displayName: "表格数据",
+      sourceField: "$.tables",
       fieldType: "数组",
       readMode: "返回值读取",
       requiredMode: "否",
+      sampleValue: "[{\"row\":1,\"cells\":[]}]",
       description: "识别出的表格数据",
       outputMapping: "结构化结果",
     },
     {
       id: "result-output-file",
-      sourceField: "output_file",
+      displayName: "结果文件",
+      sourceField: "$.output_file",
       fieldType: "文件",
       readMode: "输出文件读取",
       requiredMode: "否",
+      sampleValue: "s3://bucket/result.json",
       description: "工具处理后生成的结果文件",
       outputMapping: "文件或中间产物",
     },
     {
       id: "result-duration",
-      sourceField: "duration",
+      displayName: "处理耗时",
+      sourceField: "$.duration",
       fieldType: "数字",
       readMode: "返回值读取",
       requiredMode: "否",
+      sampleValue: "10.2",
       description: "本次处理耗时，单位秒",
       outputMapping: "耗时信息",
     },
     {
       id: "result-error-msg",
-      sourceField: "error_msg",
+      displayName: "错误信息",
+      sourceField: "$.error_msg",
       fieldType: "错误信息",
       readMode: "日志关键字读取",
       requiredMode: "失败时必返",
+      sampleValue: "参数校验失败",
       description: "工具执行失败时返回的错误信息",
       outputMapping: "错误信息",
     },
@@ -1369,6 +1384,9 @@ function normalizeVersion(version: ToolVersion, toolName: string, toolCode?: str
     outputStatusRule: version.outputStatusRule ?? getDefaultOutputRead(version.runtimeMode ?? "command").statusRule,
     outputResultLocation: version.outputResultLocation ?? getDefaultOutputRead(version.runtimeMode ?? "command").resultLocation,
     outputErrorSource: version.outputErrorSource ?? getDefaultOutputRead(version.runtimeMode ?? "command").errorSource,
+    responseStatusField: version.responseStatusField ?? "$.code",
+    responseSuccessValue: version.responseSuccessValue ?? "0",
+    responseMessageField: version.responseMessageField ?? "$.msg",
     activePlanRefs: version.activePlanRefs ?? 0,
     inactivePlanRefs: version.inactivePlanRefs ?? Math.max((version.linkedPlanRefs ?? version.activePlanRefs ?? 0) - (version.activePlanRefs ?? 0), 0),
     linkedPlanRefs: version.linkedPlanRefs ?? ((version.activePlanRefs ?? 0) + (version.inactivePlanRefs ?? 0)),
@@ -1582,7 +1600,7 @@ function buildVersionInputExample(version: ToolVersion) {
 function buildVersionOutputExample(version: ToolVersion) {
   return Object.fromEntries((version.rawResultFields ?? []).map((item) => [
     item.sourceField,
-    getFieldSampleValue(item.fieldType),
+    getFieldSampleValue(item.fieldType, item.sampleValue),
   ]));
 }
 
@@ -1838,6 +1856,9 @@ function createVersionDraft(tool: ToolItem | null) {
     outputStatusRule: outputRead.statusRule,
     outputResultLocation: outputRead.resultLocation,
     outputErrorSource: outputRead.errorSource,
+    responseStatusField: "$.code",
+    responseSuccessValue: "0",
+    responseMessageField: "$.msg",
     params,
     externalMappings: createDefaultExternalMappings(params),
     resultConfig,
@@ -1957,6 +1978,9 @@ function createVersionDraftFromVersion(tool: ToolItem | null, version: ToolVersi
     outputStatusRule: normalized.outputStatusRule ?? outputRead.statusRule,
     outputResultLocation: normalized.outputResultLocation ?? outputRead.resultLocation,
     outputErrorSource: normalized.outputErrorSource ?? outputRead.errorSource,
+    responseStatusField: normalized.responseStatusField ?? base.responseStatusField,
+    responseSuccessValue: normalized.responseSuccessValue ?? base.responseSuccessValue,
+    responseMessageField: normalized.responseMessageField ?? base.responseMessageField,
     params: normalized.params ?? base.params,
     externalMappings: normalized.externalMappings ?? base.externalMappings,
     resultConfig: normalized.resultConfig ?? base.resultConfig,
@@ -2418,10 +2442,12 @@ function createRagflowRawInput(field: RagflowFieldSpec, index: number): RawInput
 function createRagflowRawResult(field: RagflowFieldSpec, index: number): RawResultField {
   return {
     id: `result-${field.name}-${index}`,
-    sourceField: field.name,
+    displayName: getRagflowFieldLabel(field.name),
+    sourceField: `$.${field.name}`,
     fieldType: field.type as RawResultFieldType,
     readMode: "HTTP 响应读取",
     requiredMode: field.required ? "是" : field.outputMapping === "错误信息" ? "失败时必返" : "否",
+    sampleValue: getRagflowFieldSample(field),
     description: field.description,
     outputMapping: field.outputMapping ?? "主要结果内容",
   };
@@ -2527,6 +2553,9 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     outputStatusRule: "code=0 表示成功；非 0 或 HTTP 异常表示失败。",
     outputResultLocation: component.outputs.some((item) => item.name === "result_path") ? "同步响应 result 或异步回调 result_path" : "同步响应 result",
     outputErrorSource: "msg / message / result.exc",
+    responseStatusField: "$.code",
+    responseSuccessValue: "0",
+    responseMessageField: "$.msg",
     activePlanRefs: isPublished ? index % 4 : 0,
     inactivePlanRefs: isPublished ? (index + 1) % 3 : 0,
     linkedPlanRefs: isPublished ? (index % 4) + ((index + 1) % 3) : 0,
@@ -4215,10 +4244,12 @@ export function ToolHubDetailPage() {
     setEditingResultIndex(null);
     setResultDraft({
       id: `result-${Date.now()}`,
+      displayName: "",
       sourceField: "",
       fieldType: "文本",
       readMode: "HTTP 响应读取",
       requiredMode: "否",
+      sampleValue: "",
       description: "",
       outputMapping: "主要结果内容",
     });
@@ -4231,10 +4262,12 @@ export function ToolHubDetailPage() {
       ...versionDraft.rawResultFields,
       {
         id: `result-${Date.now()}`,
-        sourceField: `result_${nextIndex}`,
+        displayName: `返回字段${nextIndex}`,
+        sourceField: `$.result_${nextIndex}`,
         fieldType: "文本",
         readMode: "HTTP 响应读取",
         requiredMode: "否",
+        sampleValue: "",
         description: "",
         outputMapping: "主要结果内容",
       },
@@ -4267,7 +4300,11 @@ export function ToolHubDetailPage() {
   const saveResultField = () => {
     const sourceField = resultDraft.sourceField.trim();
     if (!sourceField) {
-      toast.error("请填写标准返回字段");
+      toast.error("请填写字段路径");
+      return;
+    }
+    if (!resultDraft.displayName?.trim()) {
+      toast.error("请填写字段名称");
       return;
     }
     if (versionDraft.rawResultFields.some((item, index) => index !== editingResultIndex && item.sourceField.trim() === sourceField)) {
@@ -4693,6 +4730,9 @@ export function ToolHubDetailPage() {
       outputStatusRule: versionDraft.outputStatusRule,
       outputResultLocation: versionDraft.outputResultLocation,
       outputErrorSource: versionDraft.outputErrorSource,
+      responseStatusField: versionDraft.responseStatusField,
+      responseSuccessValue: versionDraft.responseSuccessValue,
+      responseMessageField: versionDraft.responseMessageField,
       operationDisplay: versionDraft.operationDisplay,
       progressNodes: versionDraft.progressNodes,
       debugStatus: "not_started",
@@ -5722,6 +5762,60 @@ export function ToolHubDetailPage() {
                 </Box>
               </Paper>
 
+              <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+                <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827", mb: 2 }}>响应判断规则</Typography>
+                <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1.5 }}>
+                  <TextField label="状态字段" size="small" value={versionDraft.responseStatusField} onChange={(event) => updateDraft({ responseStatusField: event.target.value })} helperText="用于判断业务状态，如 $.code。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
+                  <TextField label="成功值" size="small" value={versionDraft.responseSuccessValue} onChange={(event) => updateDraft({ responseSuccessValue: event.target.value })} helperText="命中该值表示成功，如 0。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
+                  <TextField label="错误信息字段" size="small" value={versionDraft.responseMessageField} onChange={(event) => updateDraft({ responseMessageField: event.target.value })} helperText="失败时读取提示，如 $.msg。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
+                </Box>
+              </Paper>
+
+              <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+                  <Box>
+                    <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>返回 Schema</Typography>
+                    <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
+                      描述底层 API 返回字段的含义，ToolHub 只识别和记录，不做返回值转换。
+                    </Typography>
+                  </Box>
+                  <Button onClick={addResultFieldRow} variant="outlined" startIcon={<Add sx={{ fontSize: 14 }} />} sx={{ textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, boxShadow: "none" }}>
+                    新增返回字段
+                  </Button>
+                </Box>
+                <TableContainer sx={{ border: "1px solid #e5e7eb", borderRadius: "8px", overflow: "hidden" }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: "#f8fafc" }}>
+                        {["字段名称", "字段路径", "类型", "是否必返", "示例值", "字段说明", "操作"].map((head) => (
+                          <TableCell key={head} sx={{ fontSize: "11px", fontWeight: 600, color: "#64748b", py: 0.75, whiteSpace: "nowrap" }}>{head}</TableCell>
+                        ))}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {versionDraft.rawResultFields.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={7} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
+                            暂无返回字段，点击“新增返回字段”后手动配置。
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {versionDraft.rawResultFields.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell sx={{ width: "13%", py: 0.75 }}><TextField size="small" value={item.displayName || ""} onChange={(event) => updateResultFieldRow(item.id, { displayName: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
+                          <TableCell sx={{ width: "16%", py: 0.75 }}><TextField size="small" value={item.sourceField} onChange={(event) => updateResultFieldRow(item.id, { sourceField: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
+                          <TableCell sx={{ width: 112, py: 0.75 }}><TextField select size="small" value={item.fieldType} onChange={(event) => updateResultFieldRow(item.id, { fieldType: event.target.value as RawResultFieldType })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}>{RAW_RESULT_FIELD_TYPE_OPTIONS.map((option) => <MenuItem key={option} value={option} sx={{ fontSize: "13px" }}>{option}</MenuItem>)}</TextField></TableCell>
+                          <TableCell sx={{ width: 112, py: 0.75 }}><TextField select size="small" value={item.requiredMode} onChange={(event) => updateResultFieldRow(item.id, { requiredMode: event.target.value as ResultRequiredMode })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}>{RESULT_REQUIRED_MODE_OPTIONS.map((option) => <MenuItem key={option} value={option} sx={{ fontSize: "13px" }}>{option}</MenuItem>)}</TextField></TableCell>
+                          <TableCell sx={{ width: "16%", py: 0.75 }}><TextField size="small" value={item.sampleValue || ""} onChange={(event) => updateResultFieldRow(item.id, { sampleValue: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
+                          <TableCell sx={{ py: 0.75 }}><TextField size="small" value={item.description} onChange={(event) => updateResultFieldRow(item.id, { description: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
+                          <TableCell sx={{ width: 56, py: 0.75 }}><IconButton size="small" onClick={() => deleteResultFieldRow(item.id)}><Delete sx={{ fontSize: 16 }} /></IconButton></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Paper>
+
             </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2, borderTop: "1px solid #e5e7eb", justifyContent: "flex-end", gap: 1 }}>
@@ -5830,15 +5924,21 @@ export function ToolHubDetailPage() {
                 </Box>
               </Paper>
 
+              {detailBlock("响应判断规则", [
+                ["状态字段", selectedVersion.responseStatusField || "$.code"],
+                ["成功值", selectedVersion.responseSuccessValue || "0"],
+                ["错误信息字段", selectedVersion.responseMessageField || "$.msg"],
+              ])}
+
               <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
                 <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>返回 Schema</Typography>
                   <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 1.25 }}>
-                    由 OpenAPI 响应结构或调试结果自动生成，仅用于查看；未识别时按原始响应返回。
+                    描述底层 API 返回字段的含义，ToolHub 只识别和记录，不做返回值转换。
                   </Typography>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      {["字段路径", "类型", "生成来源", "字段说明"].map((head) => (
+                      {["字段名称", "字段路径", "类型", "是否必返", "示例值", "字段说明"].map((head) => (
                         <TableCell key={head} sx={{ fontSize: "12px", color: "#6b7280", fontWeight: 600, bgcolor: "#f9fafb" }}>{head}</TableCell>
                       ))}
                     </TableRow>
@@ -5846,16 +5946,18 @@ export function ToolHubDetailPage() {
                   <TableBody>
                     {(selectedVersion.rawResultFields ?? []).length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
+                        <TableCell colSpan={6} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
                           暂未识别返回 Schema，工具调用结果将按原始响应返回。
                         </TableCell>
                       </TableRow>
                     ) : (
                       (selectedVersion.rawResultFields ?? []).map((item) => (
                         <TableRow key={item.id}>
+                          <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{item.displayName || item.outputMapping || "-"}</TableCell>
                           <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{item.sourceField}</TableCell>
                           <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.fieldType}</TableCell>
-                          <TableCell sx={{ fontSize: "12px", color: "#374151" }}>OpenAPI 自动生成</TableCell>
+                          <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.requiredMode}</TableCell>
+                          <TableCell sx={{ fontSize: "12px", color: "#374151", wordBreak: "break-all" }}>{item.sampleValue || "-"}</TableCell>
                           <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.description}</TableCell>
                         </TableRow>
                       ))
@@ -6040,16 +6142,25 @@ export function ToolHubDetailPage() {
 
       <Dialog open={resultEditorOpen} onClose={() => setResultEditorOpen(false)} fullWidth maxWidth="md" PaperProps={{ sx: scrollableDialogPaperSx }}>
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 700, px: 3, pt: 2.5, pb: 2 }}>
-          {editingResultIndex === null ? "新增标准返回" : "编辑标准返回"}
+          {editingResultIndex === null ? "新增返回字段" : "编辑返回字段"}
         </DialogTitle>
         <DialogContent sx={{ px: 3, pb: 2.5, ...scrollableDialogContentSx }}>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
             <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
               <TextField
-                label="标准返回字段"
+                label="字段名称"
                 size="small"
                 required
-                helperText="对 Agent 或业务系统稳定返回的字段名。"
+                helperText="用于页面展示的中文名，例如“任务 ID”。"
+                value={resultDraft.displayName || ""}
+                onChange={(event) => setResultDraft((prev) => ({ ...prev, displayName: event.target.value }))}
+                sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}
+              />
+              <TextField
+                label="字段路径"
+                size="small"
+                required
+                helperText="底层 API 响应中的 JSON 路径，如 $.result_path。"
                 value={resultDraft.sourceField}
                 onChange={(event) => setResultDraft((prev) => ({ ...prev, sourceField: event.target.value }))}
                 sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}
@@ -6084,6 +6195,14 @@ export function ToolHubDetailPage() {
                   </MenuItem>
                 ))}
               </TextField>
+              <TextField
+                label="示例值"
+                size="small"
+                helperText="用于帮助理解字段含义。"
+                value={resultDraft.sampleValue || ""}
+                onChange={(event) => setResultDraft((prev) => ({ ...prev, sampleValue: event.target.value }))}
+                sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }}
+              />
               <TextField
                 label="字段说明"
                 size="small"
