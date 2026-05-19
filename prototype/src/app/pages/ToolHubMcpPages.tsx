@@ -103,7 +103,6 @@ type Connector = {
   type: ConnectorType;
   status: ConnectorStatus;
   baseUrl: string;
-  specUrl: string;
   healthPath: string;
   auth: AuthType;
   toolCount: number;
@@ -112,7 +111,6 @@ type Connector = {
   createdAt: string;
   updatedAt: string;
   errorMessage?: string;
-  endpoints: string[];
 };
 
 const initialTools: ToolOption[] = [
@@ -236,7 +234,6 @@ const initialConnectors: Connector[] = [
     type: "HTTP API",
     status: "正常",
     baseUrl: "https://ragflow.internal/api",
-    specUrl: "https://ragflow.internal/openapi.json",
     healthPath: "/health",
     auth: "Bearer Token",
     toolCount: 2,
@@ -244,7 +241,6 @@ const initialConnectors: Connector[] = [
     createdBy: "平台研发",
     createdAt: "2026-05-16 10:20",
     updatedAt: "2026-05-19 09:40",
-    endpoints: ["POST /rag_algorithm/parser", "POST /rag_algorithm/splitter", "POST /parse/parse_url"],
   },
   {
     id: "conn-material",
@@ -252,7 +248,6 @@ const initialConnectors: Connector[] = [
     type: "HTTP API",
     status: "正常",
     baseUrl: "https://llm-gateway.internal/api",
-    specUrl: "https://llm-gateway.internal/openapi.json",
     healthPath: "/health",
     auth: "API Key",
     toolCount: 2,
@@ -260,7 +255,6 @@ const initialConnectors: Connector[] = [
     createdBy: "知识工程",
     createdAt: "2026-05-15 15:18",
     updatedAt: "2026-05-19 11:05",
-    endpoints: ["POST /rag_algorithm/summary", "POST /rag_algorithm/qa_extractor", "POST /rag_algorithm/keywords"],
   },
   {
     id: "conn-check",
@@ -268,7 +262,6 @@ const initialConnectors: Connector[] = [
     type: "HTTP API",
     status: "异常",
     baseUrl: "https://rag-quality.internal/api",
-    specUrl: "",
     healthPath: "/status",
     auth: "Basic Auth",
     toolCount: 1,
@@ -277,7 +270,6 @@ const initialConnectors: Connector[] = [
     createdAt: "2026-05-14 11:30",
     updatedAt: "2026-05-19 09:10",
     errorMessage: "健康检查接口 /status 返回 502，最近一次连接超时 3.2s。",
-    endpoints: [],
   },
   {
     id: "conn-material",
@@ -285,7 +277,6 @@ const initialConnectors: Connector[] = [
     type: "HTTP API",
     status: "未检测",
     baseUrl: "https://material.internal/api",
-    specUrl: "",
     healthPath: "/health",
     auth: "API Key",
     toolCount: 0,
@@ -293,7 +284,6 @@ const initialConnectors: Connector[] = [
     createdBy: "知识工程",
     createdAt: "2026-05-19 10:05",
     updatedAt: "2026-05-19 10:05",
-    endpoints: [],
   },
 ];
 
@@ -1025,11 +1015,10 @@ export function ToolHubMcpServicesPage() {
   );
 }
 
-const emptyConnector: Omit<Connector, "id" | "status" | "toolCount" | "lastChecked" | "endpoints"> = {
+const emptyConnector: Omit<Connector, "id" | "status" | "toolCount" | "lastChecked"> = {
   name: "",
   type: "HTTP API",
   baseUrl: "",
-  specUrl: "",
   healthPath: "/health",
   auth: "Bearer Token",
 };
@@ -1079,7 +1068,6 @@ export function ToolHubConnectorsPage() {
       name: connector.name,
       type: connector.type,
       baseUrl: connector.baseUrl,
-      specUrl: connector.specUrl,
       healthPath: connector.healthPath,
       auth: connector.auth,
     });
@@ -1123,7 +1111,6 @@ export function ToolHubConnectorsPage() {
       createdAt: editingConnector?.createdAt ?? "2026-05-19 16:40",
       updatedAt: editingConnector ? "2026-05-19 16:40" : "2026-05-19 16:40",
       errorMessage: editingConnector?.errorMessage,
-      endpoints: connectorDraft.specUrl ? ["GET /rag_algorithm/function_list", "POST /rag_algorithm/parser", "POST /rag_algorithm/splitter"] : [],
     };
     if (editingConnector) {
       setConnectors((prev) => prev.map((connector) => (connector.id === editingConnector.id ? next : connector)));
@@ -1156,7 +1143,6 @@ export function ToolHubConnectorsPage() {
     return (
       <>
         <TextField label="服务根地址" size="small" value={connectorDraft.baseUrl} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, baseUrl: event.target.value }))} helperText="外部服务的根地址，具体接口路径在工具版本中配置。" />
-        <TextField label="OpenAPI Spec URL" size="small" value={connectorDraft.specUrl} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, specUrl: event.target.value }))} helperText="选填；一期可手动维护工具版本。" />
         <TextField label="Health Check Path" size="small" value={connectorDraft.healthPath} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, healthPath: event.target.value }))} />
       </>
     );
@@ -1333,18 +1319,6 @@ export function ToolHubConnectorsPage() {
             </TextField>
             {renderAuthFields()}
           </Box>
-          {connectorDraft.specUrl && (
-            <Paper sx={{ border: "1px solid #e5e7eb", borderRadius: "8px", boxShadow: "none", overflow: "hidden" }}>
-              <Box sx={{ p: 1.5, borderBottom: "1px solid #eef2f7" }}>
-                <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>接口清单</Typography>
-              </Box>
-              {(editingConnector?.endpoints.length ? editingConnector.endpoints : ["OpenAPI，保存或测试连接后可辅助获取接口清单"]).map((endpoint) => (
-                <Box key={endpoint} sx={{ px: 1.5, py: 1, borderBottom: "1px solid #f3f4f6" }}>
-                  <Typography sx={{ fontSize: "12px", color: "#475569", fontFamily: endpoint.includes("/") ? "monospace" : "inherit" }}>{endpoint}</Typography>
-                </Box>
-              ))}
-            </Paper>
-          )}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => testConnector(editingConnector ?? undefined)} variant="outlined" sx={{ textTransform: "none", borderRadius: "6px", color: "#374151", borderColor: "#dbe2ea" }}>测试连接</Button>
@@ -1402,7 +1376,6 @@ export function ToolHubConnectorsPage() {
               <Box sx={{ display: "grid", gridTemplateColumns: "120px minmax(0, 1fr)", rowGap: 0.9, columnGap: 1.5 }}>
                 {[
                   ["服务根地址", detailConnector.baseUrl || "-"],
-                  ["OpenAPI Spec URL", detailConnector.specUrl || "-"],
                   ["Health Check Path", detailConnector.healthPath || "-"],
                 ].map(([label, value]) => (
                   <Box key={label} sx={{ display: "contents" }}>
