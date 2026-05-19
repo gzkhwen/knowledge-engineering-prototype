@@ -210,11 +210,28 @@ const initialServices: McpService[] = [
       { id: "key-test-agent", label: "测试环境", key: "th_test_1_****************", status: "启用", createdAt: "2026-05-16 14:05", lastUsedAt: "2026-05-18 17:36" },
     ],
   },
+  {
+    id: "svc-integration",
+    name: "知识工程联调 MCP",
+    description: "用于摘要和 QA 抽取链路联调，验证模型生成服务的鉴权、限流和返回结构。",
+    instructions: "仅用于联调环境；调用前携带 trace_id，失败时保留底层 API 响应用于排查。",
+    authTarget: "knowledge-agent-integration",
+    status: "运行中",
+    endpoint: "https://mcp.internal/toolhub/knowledge-integration",
+    tools: [
+      { toolId: "summary", versionId: "summary-v1-3-0" },
+      { toolId: "qa-extractor", versionId: "qa-extractor-v1-3-0" },
+    ],
+    callsToday: 12,
+    apiKeys: [
+      { id: "key-integration", label: "模型生成联调", key: "th_test_2_****************", status: "启用", createdAt: "2026-05-19 09:30", lastUsedAt: "2026-05-19 15:48" },
+    ],
+  },
 ];
 
 const initialConnectors: Connector[] = [
   {
-    id: "conn-knowledge",
+    id: "conn-rag",
     name: "RAG 算法服务",
     type: "OpenAPI",
     status: "正常",
@@ -260,6 +277,22 @@ const initialConnectors: Connector[] = [
     createdAt: "2026-05-14 11:30",
     updatedAt: "2026-05-19 09:10",
     errorMessage: "健康检查接口 /status 返回 502，最近一次连接超时 3.2s。",
+    endpoints: [],
+  },
+  {
+    id: "conn-material",
+    name: "原始素材服务",
+    type: "REST API",
+    status: "未检测",
+    baseUrl: "https://material.internal/api",
+    specUrl: "",
+    healthPath: "/health",
+    auth: "API Key",
+    toolCount: 0,
+    lastChecked: "未检测",
+    createdBy: "知识工程",
+    createdAt: "2026-05-19 10:05",
+    updatedAt: "2026-05-19 10:05",
     endpoints: [],
   },
 ];

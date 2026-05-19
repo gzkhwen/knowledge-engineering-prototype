@@ -214,10 +214,10 @@ type RunRecordEndpoint = "管理端" | "运营端";
 type RunResultStatus = "成功" | "失败" | "运行中";
 
 const TOOL_VERSION_CONNECTORS = [
-  { id: "conn-rag", name: "RAG 算法服务", baseUrl: "http://rag-server-dev3-admin.maip.test", authType: "Bearer Token", status: "正常" },
-  { id: "conn-knowledge", name: "知识工程核心 API", baseUrl: "https://api.knowledge.internal/v1", authType: "Bearer Token", status: "正常" },
-  { id: "conn-material", name: "原始素材服务", baseUrl: "https://material.internal/api", authType: "API Key", status: "正常" },
-  { id: "conn-check", name: "构建结果校验服务", baseUrl: "https://verify.internal/api", authType: "Basic Auth", status: "异常" },
+  { id: "conn-rag", name: "RAG 算法服务", baseUrl: "https://ragflow.internal/api", authType: "Bearer Token", status: "正常" },
+  { id: "conn-llm", name: "模型生成服务", baseUrl: "https://llm-gateway.internal/api", authType: "API Key", status: "正常" },
+  { id: "conn-quality", name: "RAG 质量评估服务", baseUrl: "https://rag-quality.internal/api", authType: "Basic Auth", status: "异常" },
+  { id: "conn-material", name: "原始素材服务", baseUrl: "https://material.internal/api", authType: "API Key", status: "未检测" },
 ];
 
 interface ToolParam {
@@ -372,6 +372,8 @@ interface ToolRunRecord {
   type: RunRecordType;
   trigger: string;
   endpoint: RunRecordEndpoint;
+  mcpServiceName?: string;
+  connectorName?: string;
   projectSpace?: string;
   version: string;
   result: RunResultStatus;
@@ -387,7 +389,7 @@ interface ToolRunRecord {
 
 const BLUE = "#3b82f6";
 const SECONDARY_DRAWER_Z_INDEX = 1600;
-const TOOL_STORAGE_KEY = "toolHub_tools_v11";
+const TOOL_STORAGE_KEY = "toolHub_tools_v12";
 const CATEGORY_STORAGE_KEY = "toolHub_categories_v2";
 const CATEGORY_SELECTION_STORAGE_KEY = "toolHub_selected_category_v1";
 const TOOL_CODE_PATTERN = /^[a-z][a-z0-9_]*$/;
@@ -1244,8 +1246,8 @@ function normalizeVersion(version: ToolVersion, toolName: string, toolCode?: str
     gitlabVisibility: version.gitlabVisibility ?? "Public",
     maintainTeam: version.maintainTeam ?? "",
     executionAccessMode: version.executionAccessMode ?? "toolhub_managed",
-    connectorId: version.connectorId ?? (version.httpServiceAddress === RAGFLOW_API_BASE ? "conn-rag" : "conn-knowledge"),
-    connectorName: version.connectorName ?? (version.httpServiceAddress === RAGFLOW_API_BASE ? "RAG 算法服务" : "知识工程核心 API"),
+    connectorId: version.connectorId ?? (version.httpServiceAddress === RAGFLOW_API_BASE ? "conn-rag" : "conn-llm"),
+    connectorName: version.connectorName ?? (version.httpServiceAddress === RAGFLOW_API_BASE ? "RAG 算法服务" : "模型生成服务"),
     connectorBaseUrlSnapshot: version.connectorBaseUrlSnapshot ?? version.httpServiceAddress ?? "",
     connectorAuthType: version.connectorAuthType ?? "Bearer Token",
     serviceEnvironment: version.serviceEnvironment ?? "dev3",
@@ -1343,7 +1345,7 @@ const MCP_SERVICE_VERSION_BINDINGS = [
       "rag_document_parser_v1_3_0",
       "rag_chunk_splitter_v1_3_0",
       "rag_summary_v1_3_0",
-      "rag_qa_extractor_v1_2_0",
+      "rag_qa_extractor_v1_3_0",
     ],
   },
   {
@@ -1351,7 +1353,15 @@ const MCP_SERVICE_VERSION_BINDINGS = [
     status: "停用",
     versionCodes: [
       "rag_document_parser_v1_2_0",
-      "rag_reprocess_v1_3_0",
+      "rag_chunk_splitter_v1_3_0",
+    ],
+  },
+  {
+    serviceName: "知识工程联调 MCP",
+    status: "运行中",
+    versionCodes: [
+      "rag_summary_v1_3_0",
+      "rag_qa_extractor_v1_3_0",
     ],
   },
 ];
@@ -1965,6 +1975,12 @@ function getMockTeam(index: number) {
   return MOCK_TEAMS[index % MOCK_TEAMS.length];
 }
 
+function getComponentConnector(component: Pick<RagflowComponentSpec, "category">) {
+  if (component.category === "智能生成") return TOOL_VERSION_CONNECTORS.find((connector) => connector.id === "conn-llm") ?? TOOL_VERSION_CONNECTORS[0];
+  if (component.category === "质量评估") return TOOL_VERSION_CONNECTORS.find((connector) => connector.id === "conn-quality") ?? TOOL_VERSION_CONNECTORS[0];
+  return TOOL_VERSION_CONNECTORS.find((connector) => connector.id === "conn-rag") ?? TOOL_VERSION_CONNECTORS[0];
+}
+
 const RAGFLOW_COMPONENTS: RagflowComponentSpec[] = [
   {
     id: "document-parser",
@@ -2350,6 +2366,7 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
   const params = buildVersionParamsFromRawInputs(rawInputParams);
   const resultConfig = buildResultConfigFromRawResults(rawResultFields, component.name, version);
   const operationDisplay = createRagflowOperationDisplay(params, resultConfig, rawResultFields);
+  const connector = getComponentConnector(component);
   const runCount = Math.max(0, 180 - index * 13);
   const failureCount = index % 4;
   const isPublished = status === "published";
@@ -2394,13 +2411,13 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     packageVersion: version,
     packageDesc: "存量组件 API 标准接入配置",
     executionAccessMode: "external_http",
-    connectorId: "conn-rag",
-    connectorName: "RAG 算法服务",
-    connectorBaseUrlSnapshot: RAGFLOW_API_BASE,
-    connectorAuthType: "Bearer Token",
+    connectorId: connector.id,
+    connectorName: connector.name,
+    connectorBaseUrlSnapshot: connector.baseUrl,
+    connectorAuthType: connector.authType,
     serviceEnvironment: "prod",
     httpContentType: "application/json",
-    httpAuthConfig: "内部服务鉴权，由网关或环境配置提供",
+    httpAuthConfig: `沿用连接器鉴权：${connector.authType}`,
     asyncMode: component.inputs.some((item) => item.name === "callback_url") ? "同步/异步均支持" : "同步调用",
     callbackPolicy: component.inputs.some((item) => item.name === "callback_url") ? "ToolHub 自动生成回调地址" : "不启用回调",
     callbackUrl: "",
@@ -2409,10 +2426,10 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     progressStatusField: "$.code",
     resultFileField: component.outputs.some((item) => item.name === "result_path") ? "$.result_path" : "",
     isDeployed: "yes",
-    deployedServerAddress: RAGFLOW_API_BASE,
+    deployedServerAddress: connector.baseUrl,
     deployedDirectory: component.endpoint,
     runtimeMode: "http",
-    httpServiceAddress: RAGFLOW_API_BASE,
+    httpServiceAddress: connector.baseUrl,
     httpPath: component.endpoint,
     httpMethod: "POST",
     httpTimeout: component.category === "智能生成" ? "600" : "180",
@@ -2481,7 +2498,8 @@ function createRagflowRunRecords(): Record<string, ToolRunRecord[]> {
   const typeCycle: RunRecordType[] = ["Agent调用", "Flow调用", "调试运行", "Agent调用"];
   const versionCycle = ["v1.3.0", "v1.2.0", "v1.4.0-alpha", "v1.1.0"];
   return Object.fromEntries(RAGFLOW_COMPONENTS.map((component, index) => {
-    const requestAddress = `${RAGFLOW_API_BASE}${component.endpoint}`;
+    const connector = getComponentConnector(component);
+    const requestAddress = `${connector.baseUrl}${component.endpoint}`;
     const callbackEnabled = component.inputs.some((item) => item.name === "callback_url");
     const requestBody = Object.fromEntries(component.inputs.slice(0, 5).map((field) => {
       const meta = RAGFLOW_FIELD_META[field.name];
@@ -2500,11 +2518,22 @@ function createRagflowRunRecords(): Record<string, ToolRunRecord[]> {
       const type = typeCycle[(index + recordIndex) % typeCycle.length];
       const version = versionCycle[(index + recordIndex) % versionCycle.length];
       const taskId = `RUN-${component.toolCode.toUpperCase()}-${String(index + 1).padStart(2, "0")}${String(recordIndex + 1).padStart(2, "0")}`;
+      const mcpServiceName = recordIndex === 0
+        ? "知识工程 Agent MCP"
+        : recordIndex === 1
+          ? "知识工程测试 MCP"
+          : recordIndex === 2
+            ? "工具版本调试 MCP"
+            : component.category === "质量评估"
+              ? "质量评估联调 MCP"
+              : "历史方案兼容 MCP";
       return {
         id: `${component.id}-run-${recordIndex + 1}`,
         type,
         trigger: type === "调试运行" ? getMockUser(index + recordIndex) : type === "Flow调用" ? `liteflow-knowledge-build-${String(index + 1).padStart(3, "0")}` : "知识工程 Agent MCP",
         endpoint: type === "调试运行" ? "管理端" : "运营端",
+        mcpServiceName,
+        connectorName: connector.name,
         projectSpace: type === "调试运行" ? undefined : `知识库构建 / ${component.name}接入验证 / PRJ-20260519-${String(index + 1).padStart(3, "0")}`,
         version,
         result,
@@ -3321,14 +3350,10 @@ export function ToolHubRunRecordsPage() {
     return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
   }
   function getMcpServiceName(record: ToolRunRecord) {
-    return record.type === "调试运行" ? "工具调试 MCP" : "知识工程 Agent MCP";
+    return record.mcpServiceName || (record.type === "调试运行" ? "工具版本调试 MCP" : "知识工程 Agent MCP");
   }
-  function getConnectorName(tool: ToolItem) {
-    if (tool.category === "解析处理") return "文档解析 API";
-    if (tool.category === "智能生成") return "知识生成 API";
-    if (tool.category === "质量评估") return "质量评估 API";
-    if (tool.category === "索引构建") return "索引构建 API";
-    return "知识工程核心 API";
+  function getConnectorName(tool: ToolItem, version: ToolVersion | null, record?: ToolRunRecord) {
+    return record?.connectorName || (version ? getVersionConnectorName(version) : getComponentConnector({ category: tool.category }).name);
   }
   function formatTime(date: Date) {
     const pad = (value: number) => String(value).padStart(2, "0");
@@ -3642,7 +3667,7 @@ export function ToolHubRunRecordsPage() {
                     ["MCP 服务", getMcpServiceName(selectedRecord.record)],
                     ["工具名称", selectedRecord.tool.name],
                     ["工具版本", selectedRecord.record.version],
-                    ["连接器", getConnectorName(selectedRecord.tool)],
+                    ["连接器", getConnectorName(selectedRecord.tool, selectedRecord.version, selectedRecord.record)],
                     ["调用状态", selectedRecord.record.result],
                     ["耗时", getDuration(selectedRecord.record)],
                   ].map(([label, value]) => (
