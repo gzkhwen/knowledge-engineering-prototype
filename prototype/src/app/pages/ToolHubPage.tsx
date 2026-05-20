@@ -153,6 +153,7 @@ interface ToolVersion {
   httpMethod?: string;
   httpTimeout?: string;
   requestBodyTemplate?: string;
+  responseTemplate?: string;
   scriptWorkdir?: string;
   scriptEntryFile?: string;
   scriptEntryFunction?: string;
@@ -548,7 +549,7 @@ function getDefaultInputSubmission(runtimeMode: RuntimeMode): { mode: InputSubmi
   if (runtimeMode === "script") {
     return { mode: "函数参数对象", variable: "params", rule: "默认按标准参数名组装函数参数对象，作为入口函数的第一个参数。" };
   }
-  return { mode: "JSON 配置文件", variable: "input_json", rule: "默认按标准参数名组装 JSON 文件，命令中通过 {{input_json}} 传入文件路径。" };
+  return { mode: "JSON 配置文件", variable: "input_json", rule: "默认按标准参数名组装 JSON 文件，命令中通过配置文件路径传入。" };
 }
 
 function getDefaultOutputRead(runtimeMode: RuntimeMode): { strategy: OutputReadStrategy; statusRule: string; resultLocation: string; errorSource: string } {
@@ -562,7 +563,7 @@ function getExternalHttpDefaultInputSubmission() {
   return {
     mode: "HTTP JSON Body" as InputSubmissionMode,
     variable: "request_body",
-    rule: "按标准入参组装 HTTP JSON Body；系统字段、回调地址等可通过请求映射规则注入。",
+    rule: "按入参配置渲染请求模板后调用工具 API。",
   };
 }
 
@@ -575,40 +576,53 @@ function getExternalHttpDefaultOutputRead() {
   };
 }
 
-const SYSTEM_REQUEST_BODY_VALUES = {
-  request_id: "REQ-20260519-001",
-  timestamp: "2026-05-19T16:18:00+08:00",
-};
-
-function getDefaultRequestBodyTemplate(rawInputParams: RawInputParam[] = []) {
-  const inputPairs = rawInputParams.map((param) => {
+function getDefaultRequestBodyTemplate(rawInputParams: RawInputParam[] = [], requestConfig?: Partial<ToolVersion>) {
+  const baseUrl = requestConfig?.connectorBaseUrlSnapshot || requestConfig?.httpServiceAddress || "<连接器服务根地址>";
+  const path = requestConfig?.httpPath || "/path";
+  const method = requestConfig?.httpMethod || "POST";
+  const contentType = requestConfig?.httpContentType || "application/json";
+  const bodyPairs = rawInputParams.map((param) => {
     const key = param.mappedParamName || param.sourceName;
-    return `    "${key}": {{input.${key}}}`;
+    return `\\\"${key}\\\":{{ .args.${key} }}`;
   });
   return [
     "{",
-    "  \"request_id\": {{system.request_id}},",
-    "  \"parameters\": {",
-    inputPairs.length > 0 ? inputPairs.join(",\n") : "    \"param_1\": {{input.param_1}}",
-    "  }",
+    `  "url": "${baseUrl}${path}",`,
+    `  "method": "${method}",`,
+    "  \"headers\": [",
+    `    {"key": "Content-Type", "value": "${contentType}"},`,
+    "    {\"key\": \"Authorization\", \"value\": \"Bearer <由连接器注入>\"}",
+    "  ],",
+    `  "body": "{${bodyPairs.length > 0 ? bodyPairs.join(",") : "\\\"param_1\\\":{{ .args.param_1 }}"}}"`,
     "}",
   ].join("\n");
 }
 
 function getRagflowRequestBodyTemplate(component: RagflowComponentSpec) {
-  const systemFields = new Set(["request_id", "callback_url", "trans_metadata", "source_metadata"]);
-  const parameterInputs = component.inputs.filter((field) => !systemFields.has(field.name));
-  const hasCallback = component.inputs.some((field) => field.name === "callback_url");
-  const hasSourceMetadata = component.inputs.some((field) => field.name === "source_metadata");
+  const bodyPairs = component.inputs.map((field) => {
+    if (field.name === "callback_url") return "\\\"callback_url\\\":\\\"\\\"";
+    return `\\\"${field.name}\\\":{{ .args.${field.name} }}`;
+  });
 
-  const lines = ["{", "  \"request_id\": {{system.request_id}},"];
-  if (hasCallback) lines.push("  \"callback_url\": \"\",");
-  if (hasSourceMetadata) lines.push("  \"source_metadata\": {{input.source_metadata}},");
-  lines.push("  \"parameters\": {");
-  lines.push(parameterInputs.map((field) => `    "${field.name}": {{input.${field.name}}}`).join(",\n") || "    \"param_1\": {{input.param_1}}");
-  lines.push("  }");
-  lines.push("}");
-  return lines.join("\n");
+  return [
+    "{",
+    `  "url": "${RAGFLOW_API_BASE}${component.endpoint}",`,
+    "  \"method\": \"POST\",",
+    "  \"headers\": [",
+    "    {\"key\": \"Content-Type\", \"value\": \"application/json\"},",
+    "    {\"key\": \"Authorization\", \"value\": \"Bearer <由连接器注入>\"}",
+    "  ],",
+    `  "body": "{${bodyPairs.join(",")}}"`,
+    "}",
+  ].join("\n");
+}
+
+function getDefaultResponseTemplate() {
+  return [
+    "{",
+    "  \"body\": \"{{ toPrettyJson . }}\"",
+    "}",
+  ].join("\n");
 }
 
 function coerceTemplateValue(value: unknown) {
@@ -629,17 +643,12 @@ function coerceTemplateValue(value: unknown) {
   return value;
 }
 
-function buildRequestBodyFromTemplate(template: string | undefined, inputValues: Record<string, unknown>) {
+function buildRequestBodyFromTemplate(template: string | undefined, inputValues: Record<string, unknown>, requestContext: Record<string, unknown> = {}) {
   const source = template?.trim() || getDefaultRequestBodyTemplate();
-  const replaceToken = (_match: string, scope: string, key: string) => {
-    const value = scope === "system"
-      ? SYSTEM_REQUEST_BODY_VALUES[key as keyof typeof SYSTEM_REQUEST_BODY_VALUES] ?? ""
-      : coerceTemplateValue(inputValues[key] ?? "");
-    return JSON.stringify(value);
-  };
+  const replaceNacosArg = (_match: string, key: string) => JSON.stringify(coerceTemplateValue(inputValues[key] ?? ""));
   const rendered = source
-    .replace(/"{{\s*(input|system)\.([a-zA-Z0-9_]+)\s*}}"/g, replaceToken)
-    .replace(/{{\s*(input|system)\.([a-zA-Z0-9_]+)\s*}}/g, replaceToken);
+    .replace(/{{\s*\.args\.([a-zA-Z0-9_]+)\s*}}/g, replaceNacosArg)
+    .replace(/{{\s*toPrettyJson\s+\.\s*}}/g, JSON.stringify(requestContext.raw_response ?? {}));
 
   try {
     return JSON.parse(rendered);
@@ -1362,7 +1371,8 @@ function normalizeVersion(version: ToolVersion, toolName: string, toolCode?: str
     httpPath: version.httpPath ?? "/parse",
     httpMethod: version.httpMethod ?? "POST",
     httpTimeout: version.httpTimeout ?? "120",
-    requestBodyTemplate: version.requestBodyTemplate ?? getDefaultRequestBodyTemplate(rawInputParams),
+    requestBodyTemplate: version.requestBodyTemplate ?? getDefaultRequestBodyTemplate(rawInputParams, version),
+    responseTemplate: version.responseTemplate ?? getDefaultResponseTemplate(),
     scriptWorkdir: version.scriptWorkdir ?? `/opt/toolhub/${toolName}`,
     scriptEntryFile: version.scriptEntryFile ?? "main.py",
     scriptEntryFunction: version.scriptEntryFunction ?? "run",
@@ -1414,6 +1424,16 @@ function getVersionRequestAddress(version: ToolVersion) {
   const base = (version.connectorBaseUrlSnapshot || version.httpServiceAddress || "").replace(/\/+$/, "");
   const path = version.httpPath ? `/${version.httpPath.replace(/^\/+/, "")}` : "";
   return base || path ? `${base}${path}` : "-";
+}
+
+function getRequestTemplateContext(version: ToolVersion) {
+  return {
+    "connector.base_url": (version.connectorBaseUrlSnapshot || version.httpServiceAddress || "").replace(/\/+$/, ""),
+    "connector.auth_header": "Bearer <connector-token>",
+    "request.path": version.httpPath || "/",
+    "request.method": version.httpMethod || "POST",
+    "request.timeout": version.httpTimeout || "120",
+  };
 }
 
 function getVersionConnector(version: ToolVersion) {
@@ -1712,11 +1732,10 @@ function getVersionModelInfo(version: ToolVersion) {
 }
 
 function getVersionStandardizationInfo(version: ToolVersion) {
-  const rawInputCount = version.rawInputParams?.length ?? version.params?.length ?? 0;
   const standardInputCount = version.params?.length ?? 0;
   const resultCount = version.rawResultFields?.length ?? 0;
   const uiCount = version.operationDisplay?.editableFields.filter((field) => field.uiComponent !== "不展示").length ?? 0;
-  return `原始入参 ${rawInputCount} / 标准入参 ${standardInputCount} / 返回 ${resultCount} / UI ${uiCount}`;
+  return `入参 ${standardInputCount} / 出参 ${resultCount} / UI ${uiCount}`;
 }
 
 function createVersionDraft(tool: ToolItem | null) {
@@ -1805,6 +1824,7 @@ function createVersionDraft(tool: ToolItem | null) {
     httpMethod: "POST",
     httpTimeout: "600",
     requestBodyTemplate: getDefaultRequestBodyTemplate(rawInputParams),
+    responseTemplate: getDefaultResponseTemplate(),
     scriptEntryFile: "",
     scriptEntryFunction: "",
     scriptTimeout: "",
@@ -1918,7 +1938,8 @@ function createVersionDraftFromVersion(tool: ToolItem | null, version: ToolVersi
     httpPath: normalized.httpPath ?? "",
     httpMethod: normalized.httpMethod ?? "POST",
     httpTimeout: normalized.httpTimeout ?? "",
-    requestBodyTemplate: normalized.requestBodyTemplate ?? getDefaultRequestBodyTemplate(normalized.rawInputParams ?? base.rawInputParams),
+    requestBodyTemplate: normalized.requestBodyTemplate ?? getDefaultRequestBodyTemplate(normalized.rawInputParams ?? base.rawInputParams, normalized),
+    responseTemplate: normalized.responseTemplate ?? base.responseTemplate,
     scriptWorkdir: normalized.scriptWorkdir ?? "",
     scriptEntryFile: normalized.scriptEntryFile ?? "",
     scriptEntryFunction: normalized.scriptEntryFunction ?? "",
@@ -2453,7 +2474,7 @@ function createRagflowProgressNodes(componentName: string): ProgressNodeConfig[]
       id: `progress-${componentName}-${index + 1}`,
       key,
       name,
-      description: index === 0 ? "校验 ToolHub 标准入参" : index === 1 ? "调用已封装的工具 API" : index === 2 ? "解析响应并写入运行记录" : "返回标准化结果",
+      description: index === 0 ? "校验 ToolHub 入参" : index === 1 ? "调用已封装的工具 API" : index === 2 ? "解析响应并写入运行记录" : "返回标准化结果",
       order: index + 1,
       statuses: createDefaultProgressStatuses(name, key),
     };
@@ -2534,6 +2555,7 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
     httpMethod: "POST",
     httpTimeout: component.category === "智能生成" ? "600" : "180",
     requestBodyTemplate: getRagflowRequestBodyTemplate(component),
+    responseTemplate: getDefaultResponseTemplate(),
     httpHealthcheck: "/health",
     modelResourceRequired: component.inputs.some((item) => item.name.includes("llm") || item.name.includes("embedding")) ? "yes" : "no",
     modelDependencies: component.inputs.some((item) => item.name.includes("llm"))
@@ -2541,7 +2563,7 @@ function createRagflowVersion(component: RagflowComponentSpec, version: string, 
       : [],
     inputSubmissionMode: "HTTP JSON Body",
     inputSubmissionVariable: "request.body",
-    inputSubmissionRule: "按第三步标准入参组装 JSON Body 后调用工具 API。",
+    inputSubmissionRule: "按入参配置渲染请求模板后调用工具 API。",
     outputReadStrategy: "HTTP 响应读取",
     outputStatusRule: "code=0 表示成功；非 0 或 HTTP 异常表示失败。",
     outputResultLocation: component.outputs.some((item) => item.name === "result_path") ? "同步响应 result 或异步回调 result_path" : "同步响应 result",
@@ -4042,18 +4064,14 @@ export function ToolHubDetailPage() {
 
     if (step === 2) {
       if (versionDraft.rawInputParams.length === 0) {
-        toast.error("请至少配置 1 个标准入参");
+        toast.error("请至少配置 1 个入参");
         return false;
       }
 
       for (const item of versionDraft.rawInputParams) {
         const paramName = (item.mappedParamName || item.sourceName).trim();
         if (!paramName) {
-          toast.error("标准入参名称不能为空");
-          return false;
-        }
-        if (!item.displayName?.trim()) {
-          toast.error("标准入参显示名称不能为空");
+          toast.error("入参名称不能为空");
           return false;
         }
         if (!item.inputType) {
@@ -4093,7 +4111,7 @@ export function ToolHubDetailPage() {
       {
         id: `raw-${Date.now()}`,
         sourceName: paramName,
-        displayName: "",
+        displayName: paramName,
         inputType: "文本",
         required: false,
         description: "",
@@ -4114,12 +4132,13 @@ export function ToolHubDetailPage() {
     const nextRawInputs = versionDraft.rawInputParams.map((item) => {
       if (item.id !== paramId) return item;
       const nextName = patch.sourceName ?? patch.mappedParamName;
+      const oldName = item.mappedParamName || item.sourceName;
       return {
         ...item,
         ...patch,
         passingMode: "HTTP JSON Body",
         handlingMode: "mapped" as RawInputHandlingMode,
-        ...(nextName !== undefined ? { sourceName: nextName, mappedParamName: nextName } : {}),
+        ...(nextName !== undefined ? { sourceName: nextName, mappedParamName: nextName, displayName: item.displayName && item.displayName !== oldName ? item.displayName : nextName } : {}),
         ...(patch.description !== undefined ? { mappedParamDescription: patch.description } : {}),
         validationRule: "",
         fixedValue: "",
@@ -4164,11 +4183,7 @@ export function ToolHubDetailPage() {
   const saveParam = () => {
     const paramName = (paramDraft.mappedParamName || paramDraft.sourceName).trim();
     if (!paramName) {
-      toast.error("请填写标准入参名称");
-      return;
-    }
-    if (!paramDraft.displayName?.trim()) {
-      toast.error("请填写显示名称");
+      toast.error("请填写入参名称");
       return;
     }
     if (!paramDraft.inputType) {
@@ -4600,8 +4615,8 @@ export function ToolHubDetailPage() {
       return [field.sourceField, normalizedValue];
     }));
     const requestAddress = getVersionRequestAddress(debugVersion);
-    const generatedRequestBody = buildRequestBodyFromTemplate(debugVersion.requestBodyTemplate, debugInputObject);
-    const debugInput = `mcp_request=${JSON.stringify({ method: "tools/call", params: { name: tool.toolCode, arguments: debugInputObject } })}；api_request_body=${JSON.stringify(generatedRequestBody)}`;
+    const generatedRequest = buildRequestBodyFromTemplate(debugVersion.requestBodyTemplate, debugInputObject, getRequestTemplateContext(debugVersion));
+    const debugInput = `mcp_request=${JSON.stringify({ method: "tools/call", params: { name: tool.toolCode, arguments: debugInputObject } })}；api_request=${JSON.stringify(generatedRequest)}`;
     const requestConfig = `method=${debugVersion.httpMethod || "POST"}；url=${requestAddress}；headers.Content-Type=${debugVersion.httpContentType || "application/json"}；auth=沿用连接器鉴权；timeout=${debugVersion.httpTimeout || "120"}s`;
     const isPendingBeforeDebug = debugVersion.status === "pending";
 
@@ -4788,6 +4803,7 @@ export function ToolHubDetailPage() {
       httpMethod: versionDraft.httpMethod,
       httpTimeout: versionDraft.httpTimeout,
       requestBodyTemplate: versionDraft.requestBodyTemplate,
+      responseTemplate: versionDraft.responseTemplate,
       scriptWorkdir: versionDraft.scriptWorkdir,
       scriptEntryFile: versionDraft.scriptEntryFile,
       scriptEntryFunction: versionDraft.scriptEntryFunction,
@@ -5000,16 +5016,27 @@ export function ToolHubDetailPage() {
     const normalizedValue = Array.isArray(value) ? value : typeof value === "boolean" ? value : value || "";
     return [field.sourceField, normalizedValue];
   }));
-  const debugGeneratedRequestBody = buildRequestBodyFromTemplate(debugVersion?.requestBodyTemplate, debugArguments);
-  const debugApiRequest = {
-    method: debugVersion?.httpMethod || "POST",
-    url: debugVersion ? getVersionRequestAddress(debugVersion) : "-",
-    headers: {
-      "Content-Type": debugVersion?.httpContentType || "application/json",
-      Authorization: "Bearer <connector-token>",
-    },
-    body: debugGeneratedRequestBody,
-  };
+  const debugGeneratedRequest = buildRequestBodyFromTemplate(
+    debugVersion?.requestBodyTemplate,
+    debugArguments,
+    debugVersion ? getRequestTemplateContext(debugVersion) : {},
+  );
+  const debugApiRequest = (
+    debugGeneratedRequest &&
+    typeof debugGeneratedRequest === "object" &&
+    !Array.isArray(debugGeneratedRequest) &&
+    ("url" in debugGeneratedRequest || "method" in debugGeneratedRequest || "body" in debugGeneratedRequest)
+  )
+    ? debugGeneratedRequest
+    : {
+        method: debugVersion?.httpMethod || "POST",
+        url: debugVersion ? getVersionRequestAddress(debugVersion) : "-",
+        headers: {
+          "Content-Type": debugVersion?.httpContentType || "application/json",
+          Authorization: "Bearer <connector-token>",
+        },
+        body: debugGeneratedRequest,
+      };
   const debugApiResponse = debugDraft.debugStatus === "failed"
     ? { code: 1, message: debugDraft.debugErrorMessage || "样例输入与接口参数配置不匹配", error: "invalid_request_body" }
     : debugDraft.debugStatus === "success"
@@ -5593,27 +5620,25 @@ export function ToolHubDetailPage() {
               </Box>
             </Paper>
 
-            <Alert severity="info" sx={{ borderRadius: "8px", fontSize: "12px", py: 0.5 }}>
-              工具 API 已按工具Hub协议完成标准化封装，本区域只配置工具对 Agent 暴露的入参；返回 Schema 由系统自动生成或在详情页只读展示。
-            </Alert>
               <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
                   <Box>
-                    <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>标准入参</Typography>
+                    <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>参数配置</Typography>
                     <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
-                      定义Agent在调用工具时需要传入的标准参数。
+                      按 Nacos 的方式统一维护入参和出参。
                     </Typography>
                   </Box>
                   <Button onClick={addParamRow} variant="outlined" startIcon={<Add sx={{ fontSize: 14 }} />} sx={{ textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, boxShadow: "none" }}>
-                    新增标准入参
+                    新增入参
                   </Button>
                 </Box>
 
+                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827", mb: 1 }}>入参配置</Typography>
                 <TableContainer sx={{ border: "1px solid #e5e7eb", borderRadius: "8px", overflow: "hidden" }}>
                   <Table size="small">
                     <TableHead>
                       <TableRow sx={{ bgcolor: "#f8fafc" }}>
-                        {["显示名称", "参数名称（字段名）", "类型", "是否必填", "参数说明", "默认值/示例值", "操作"].map((head) => (
+                        {["参数名称", "类型", "是否必填", "参数说明", "操作"].map((head) => (
                           <TableCell key={head} sx={{ fontSize: "11px", fontWeight: 600, color: "#64748b", py: 0.75, whiteSpace: "nowrap" }}>
                             {head}
                           </TableCell>
@@ -5623,8 +5648,8 @@ export function ToolHubDetailPage() {
                     <TableBody>
                       {versionDraft.rawInputParams.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={7} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
-                            暂无标准入参，点击“新增标准入参”后手动配置。
+                          <TableCell colSpan={5} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
+                            暂无入参，点击“新增入参”后手动配置。
                           </TableCell>
                         </TableRow>
                       )}
@@ -5632,16 +5657,7 @@ export function ToolHubDetailPage() {
                         const paramName = item.mappedParamName || item.sourceName;
                         return (
                           <TableRow key={item.id}>
-                            <TableCell sx={{ width: "14%", py: 0.75 }}>
-                              <TextField
-                                size="small"
-                                value={item.displayName || ""}
-                                onChange={(event) => updateParamRow(item.id, { displayName: event.target.value })}
-                                placeholder="如 文件地址"
-                                sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
-                              />
-                            </TableCell>
-                            <TableCell sx={{ width: "16%", py: 0.75 }}>
+                            <TableCell sx={{ width: "24%", py: 0.75 }}>
                               <TextField
                                 size="small"
                                 value={paramName}
@@ -5649,7 +5665,7 @@ export function ToolHubDetailPage() {
                                 sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
                               />
                             </TableCell>
-                            <TableCell sx={{ width: 120, py: 0.75 }}>
+                            <TableCell sx={{ width: 132, py: 0.75 }}>
                               <TextField
                                 select
                                 size="small"
@@ -5662,7 +5678,7 @@ export function ToolHubDetailPage() {
                                 ))}
                               </TextField>
                             </TableCell>
-                            <TableCell sx={{ width: 104, py: 0.75 }}>
+                            <TableCell sx={{ width: 112, py: 0.75 }}>
                               <TextField
                                 select
                                 size="small"
@@ -5682,14 +5698,6 @@ export function ToolHubDetailPage() {
                                 sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
                               />
                             </TableCell>
-                            <TableCell sx={{ width: "16%", py: 0.75 }}>
-                              <TextField
-                                size="small"
-                                value={item.mappedDefaultValue}
-                                onChange={(event) => updateParamRow(item.id, { mappedDefaultValue: event.target.value })}
-                                sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}
-                              />
-                            </TableCell>
                             <TableCell sx={{ width: 56, py: 0.75 }}>
                               <IconButton size="small" onClick={() => deleteParamRow(item.id)}>
                                 <Delete sx={{ fontSize: 16 }} />
@@ -5701,31 +5709,73 @@ export function ToolHubDetailPage() {
                     </TableBody>
                   </Table>
                 </TableContainer>
+
+                <Divider sx={{ my: 2.5 }} />
+
+                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+                  <Box>
+                    <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>出参配置</Typography>
+                    <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
+                      描述工具响应返回的字段。
+                    </Typography>
+                  </Box>
+                  <Button onClick={addResultFieldRow} variant="outlined" startIcon={<Add sx={{ fontSize: 14 }} />} sx={{ textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, boxShadow: "none" }}>
+                    新增出参
+                  </Button>
+                </Box>
+                <TableContainer sx={{ border: "1px solid #e5e7eb", borderRadius: "8px", overflow: "hidden" }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: "#f8fafc" }}>
+                        {["参数名称", "类型", "是否必返", "参数说明", "操作"].map((head) => (
+                          <TableCell key={head} sx={{ fontSize: "11px", fontWeight: 600, color: "#64748b", py: 0.75, whiteSpace: "nowrap" }}>{head}</TableCell>
+                        ))}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {versionDraft.rawResultFields.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={5} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
+                            暂无出参，点击“新增出参”后手动配置。
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {versionDraft.rawResultFields.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell sx={{ width: "24%", py: 0.75 }}><TextField size="small" value={item.displayName || ""} onChange={(event) => updateResultFieldRow(item.id, { displayName: event.target.value, sourceField: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
+                          <TableCell sx={{ width: 112, py: 0.75 }}><TextField select size="small" value={item.fieldType} onChange={(event) => updateResultFieldRow(item.id, { fieldType: event.target.value as RawResultFieldType })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}>{RAW_RESULT_FIELD_TYPE_OPTIONS.map((option) => <MenuItem key={option} value={option} sx={{ fontSize: "13px" }}>{option}</MenuItem>)}</TextField></TableCell>
+                          <TableCell sx={{ width: 112, py: 0.75 }}><TextField select size="small" value={item.requiredMode} onChange={(event) => updateResultFieldRow(item.id, { requiredMode: event.target.value as ResultRequiredMode })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}>{RESULT_REQUIRED_MODE_OPTIONS.map((option) => <MenuItem key={option} value={option} sx={{ fontSize: "13px" }}>{option}</MenuItem>)}</TextField></TableCell>
+                          <TableCell sx={{ py: 0.75 }}><TextField size="small" value={item.description} onChange={(event) => updateResultFieldRow(item.id, { description: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
+                          <TableCell sx={{ width: 56, py: 0.75 }}><IconButton size="small" onClick={() => deleteResultFieldRow(item.id)}><Delete sx={{ fontSize: 16 }} /></IconButton></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
               </Paper>
 
               <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2 }}>
                   <Box>
-                    <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>请求体构建</Typography>
-                    <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
-                      用 JSON 模板定义底层 API 实际收到的请求体，可引用标准入参和系统变量。
-                    </Typography>
+                    <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>高级配置</Typography>
+                    <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>按 Nacos 的模板方式描述底层 API 请求与响应。</Typography>
                   </Box>
                   <Button
-                    onClick={() => updateDraft({ requestBodyTemplate: getDefaultRequestBodyTemplate(versionDraft.rawInputParams) })}
+                    onClick={() => updateDraft({ requestBodyTemplate: getDefaultRequestBodyTemplate(versionDraft.rawInputParams, versionDraft) })}
                     variant="outlined"
                     sx={{ textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, flexShrink: 0 }}
                   >
-                    生成默认模板
+                    按当前配置生成模板
                   </Button>
                 </Box>
+                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827", mb: 1 }}>请求模板</Typography>
                 <TextField
                   value={versionDraft.requestBodyTemplate}
                   onChange={(event) => updateDraft({ requestBodyTemplate: event.target.value })}
                   multiline
                   minRows={10}
                   fullWidth
-                  placeholder={getDefaultRequestBodyTemplate(versionDraft.rawInputParams)}
+                  placeholder={getDefaultRequestBodyTemplate(versionDraft.rawInputParams, versionDraft)}
                   sx={{
                     "& .MuiInputBase-root": {
                       borderRadius: "8px",
@@ -5739,74 +5789,27 @@ export function ToolHubDetailPage() {
                     "& .MuiOutlinedInput-notchedOutline": { borderColor: "#1e293b" },
                   }}
                 />
-                <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 1, mt: 1.5 }}>
-                  {[
-                    ["{{input.xxx}}", "引用标准入参"],
-                    ["{{system.request_id}}", "系统生成请求 ID"],
-                    ["{{system.timestamp}}", "系统生成调用时间"],
-                  ].map(([token, desc]) => (
-                    <Box key={token} sx={{ p: 1, borderRadius: "6px", bgcolor: "#f8fafc", border: "1px solid #e5e7eb" }}>
-                      <Typography sx={{ fontSize: "11px", color: "#111827", fontFamily: "monospace" }}>{token}</Typography>
-                      <Typography sx={{ fontSize: "11px", color: "#64748b", mt: 0.25 }}>{desc}</Typography>
-                    </Box>
-                  ))}
-                </Box>
-              </Paper>
-
-              <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-                <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>响应状态判断</Typography>
-                <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 2 }}>
-                  工具Hub判断HTTP响应状态。
-                </Typography>
-                <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1.5 }}>
-                  <TextField label="状态字段" size="small" value={versionDraft.responseStatusField} onChange={(event) => updateDraft({ responseStatusField: event.target.value })} helperText="用于判断业务状态，如 $.code。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
-                  <TextField label="成功值" size="small" value={versionDraft.responseSuccessValue} onChange={(event) => updateDraft({ responseSuccessValue: event.target.value })} helperText="命中该值表示成功，如 0。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
-                  <TextField label="错误信息字段" size="small" value={versionDraft.responseMessageField} onChange={(event) => updateDraft({ responseMessageField: event.target.value })} helperText="失败时读取提示，如 $.msg。" sx={{ "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "14px" }, "& .MuiInputLabel-root": { fontSize: "14px" } }} />
-                </Box>
-              </Paper>
-
-              <Paper sx={{ p: 3, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-                  <Box>
-                    <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>返回 Schema</Typography>
-                    <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
-                      描述底层API返回字段的含义，工具Hub会把原始返回传给Agent，此处的描述用于Agent理解返回结果的含义。
-                    </Typography>
-                  </Box>
-                  <Button onClick={addResultFieldRow} variant="outlined" startIcon={<Add sx={{ fontSize: 14 }} />} sx={{ textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, boxShadow: "none" }}>
-                    新增返回字段
-                  </Button>
-                </Box>
-                <TableContainer sx={{ border: "1px solid #e5e7eb", borderRadius: "8px", overflow: "hidden" }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: "#f8fafc" }}>
-                        {["字段名称", "字段路径", "类型", "是否必返", "字段说明", "操作"].map((head) => (
-                          <TableCell key={head} sx={{ fontSize: "11px", fontWeight: 600, color: "#64748b", py: 0.75, whiteSpace: "nowrap" }}>{head}</TableCell>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {versionDraft.rawResultFields.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={6} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
-                            暂无返回字段，点击“新增返回字段”后手动配置。
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {versionDraft.rawResultFields.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell sx={{ width: "13%", py: 0.75 }}><TextField size="small" value={item.displayName || ""} onChange={(event) => updateResultFieldRow(item.id, { displayName: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
-                          <TableCell sx={{ width: "16%", py: 0.75 }}><TextField size="small" value={item.sourceField} onChange={(event) => updateResultFieldRow(item.id, { sourceField: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
-                          <TableCell sx={{ width: 112, py: 0.75 }}><TextField select size="small" value={item.fieldType} onChange={(event) => updateResultFieldRow(item.id, { fieldType: event.target.value as RawResultFieldType })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}>{RAW_RESULT_FIELD_TYPE_OPTIONS.map((option) => <MenuItem key={option} value={option} sx={{ fontSize: "13px" }}>{option}</MenuItem>)}</TextField></TableCell>
-                          <TableCell sx={{ width: 112, py: 0.75 }}><TextField select size="small" value={item.requiredMode} onChange={(event) => updateResultFieldRow(item.id, { requiredMode: event.target.value as ResultRequiredMode })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }}>{RESULT_REQUIRED_MODE_OPTIONS.map((option) => <MenuItem key={option} value={option} sx={{ fontSize: "13px" }}>{option}</MenuItem>)}</TextField></TableCell>
-                          <TableCell sx={{ py: 0.75 }}><TextField size="small" value={item.description} onChange={(event) => updateResultFieldRow(item.id, { description: event.target.value })} sx={{ width: "100%", "& .MuiInputBase-root": { borderRadius: "6px", fontSize: "12px" } }} /></TableCell>
-                          <TableCell sx={{ width: 56, py: 0.75 }}><IconButton size="small" onClick={() => deleteResultFieldRow(item.id)}><Delete sx={{ fontSize: 16 }} /></IconButton></TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
+                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827", mt: 2.5, mb: 1 }}>响应模板</Typography>
+                <TextField
+                  value={versionDraft.responseTemplate}
+                  onChange={(event) => updateDraft({ responseTemplate: event.target.value })}
+                  multiline
+                  minRows={4}
+                  fullWidth
+                  placeholder={getDefaultResponseTemplate()}
+                  sx={{
+                    "& .MuiInputBase-root": {
+                      borderRadius: "8px",
+                      bgcolor: "#0f172a",
+                      color: "#e2e8f0",
+                      fontFamily: "monospace",
+                      fontSize: "12px",
+                      lineHeight: 1.7,
+                    },
+                    "& textarea": { fontFamily: "monospace" },
+                    "& .MuiOutlinedInput-notchedOutline": { borderColor: "#1e293b" },
+                  }}
+                />
               </Paper>
 
             </Box>
@@ -5880,14 +5883,14 @@ export function ToolHubDetailPage() {
               ])}
 
               <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
-                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>标准入参</Typography>
+                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>入参配置</Typography>
                 <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 1.25 }}>
                   定义 Agent 调用 ToolHub 时需要传入的标准参数。
                 </Typography>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      {["显示名称", "参数名称（字段名）", "类型", "是否必填", "参数说明", "默认值/示例值"].map((head) => (
+                      {["参数名称", "类型", "是否必填", "参数说明"].map((head) => (
                         <TableCell key={head} sx={{ fontSize: "12px", color: "#6b7280", fontWeight: 600, bgcolor: "#f9fafb" }}>{head}</TableCell>
                       ))}
                     </TableRow>
@@ -5895,12 +5898,10 @@ export function ToolHubDetailPage() {
                   <TableBody>
                     {(selectedVersion.rawInputParams ?? []).map((item) => (
                       <TableRow key={item.id}>
-                        <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{item.displayName || "-"}</TableCell>
                         <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{item.handlingMode === "mapped" ? item.mappedParamName || item.sourceName : item.sourceName}</TableCell>
                         <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.inputType}</TableCell>
                         <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.required ? "是" : "否"}</TableCell>
                         <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.mappedParamDescription || item.description}</TableCell>
-                        <TableCell sx={{ fontSize: "12px", color: "#374151", wordBreak: "break-all" }}>{item.mappedDefaultValue || "-"}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -5908,30 +5909,34 @@ export function ToolHubDetailPage() {
               </Paper>
 
               <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
-                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>请求体构建</Typography>
+                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>请求模板</Typography>
                 <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 1.25 }}>
-                  ToolHub 根据该模板把标准入参组装成底层 API 请求体。
+                  ToolHub 根据连接器、接口配置和入参渲染该模板后调用底层 API。
                 </Typography>
                 <Box component="pre" sx={{ m: 0, p: 1.5, borderRadius: "8px", bgcolor: "#0f172a", color: "#e2e8f0", fontSize: "11px", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                  {selectedVersion.requestBodyTemplate || getDefaultRequestBodyTemplate(selectedVersion.rawInputParams ?? [])}
+                  {selectedVersion.requestBodyTemplate || getDefaultRequestBodyTemplate(selectedVersion.rawInputParams ?? [], selectedVersion)}
                 </Box>
               </Paper>
 
-              {detailBlock("响应状态判断", [
-                ["状态字段", selectedVersion.responseStatusField || "$.code"],
-                ["成功值", selectedVersion.responseSuccessValue || "0"],
-                ["错误信息字段", selectedVersion.responseMessageField || "$.msg"],
-              ])}
+              <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
+                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>响应模板</Typography>
+                <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 1.25 }}>
+                  ToolHub 使用该模板组织底层 API 响应并返回给 MCP 调用方。
+                </Typography>
+                <Box component="pre" sx={{ m: 0, p: 1.5, borderRadius: "8px", bgcolor: "#0f172a", color: "#e2e8f0", fontSize: "11px", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {selectedVersion.responseTemplate || getDefaultResponseTemplate()}
+                </Box>
+              </Paper>
 
               <Paper sx={{ p: 2, borderRadius: "8px", border: "1px solid #e5e7eb", boxShadow: "none", bgcolor: "#fff" }}>
-                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>返回 Schema</Typography>
+                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>出参配置</Typography>
                   <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5, mb: 1.25 }}>
-                    描述底层API返回字段的含义，工具Hub会把原始返回传给Agent，此处的描述用于Agent理解返回结果的含义。
+                    描述底层 API 返回字段的含义，供 Agent 理解响应结果。
                   </Typography>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      {["字段名称", "字段路径", "类型", "是否必返", "字段说明"].map((head) => (
+                      {["参数名称", "类型", "是否必返", "参数说明"].map((head) => (
                         <TableCell key={head} sx={{ fontSize: "12px", color: "#6b7280", fontWeight: 600, bgcolor: "#f9fafb" }}>{head}</TableCell>
                       ))}
                     </TableRow>
@@ -5939,15 +5944,14 @@ export function ToolHubDetailPage() {
                   <TableBody>
                     {(selectedVersion.rawResultFields ?? []).length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
-                          暂未识别返回 Schema，工具调用结果将按原始响应返回。
+                        <TableCell colSpan={4} sx={{ py: 3, textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>
+                          暂未配置出参。
                         </TableCell>
                       </TableRow>
                     ) : (
                       (selectedVersion.rawResultFields ?? []).map((item) => (
                         <TableRow key={item.id}>
                           <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{item.displayName || item.outputMapping || "-"}</TableCell>
-                          <TableCell sx={{ fontSize: "12px", color: "#111827" }}>{item.sourceField}</TableCell>
                           <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.fieldType}</TableCell>
                           <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.requiredMode}</TableCell>
                           <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{item.description}</TableCell>
@@ -6036,7 +6040,7 @@ export function ToolHubDetailPage() {
 
       <Dialog open={paramEditorOpen} onClose={() => setParamEditorOpen(false)} fullWidth maxWidth="md" PaperProps={{ sx: scrollableDialogPaperSx }}>
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 700, px: 3, pt: 2.5, pb: 2 }}>
-          {editingParamIndex === null ? "新增标准入参" : "编辑标准入参"}
+          {editingParamIndex === null ? "新增入参" : "编辑入参"}
         </DialogTitle>
         <DialogContent sx={{ px: 3, pb: 2.5, ...scrollableDialogContentSx }}>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
