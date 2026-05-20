@@ -645,9 +645,9 @@ function coerceTemplateValue(value: unknown) {
 
 function buildRequestBodyFromTemplate(template: string | undefined, inputValues: Record<string, unknown>, requestContext: Record<string, unknown> = {}) {
   const source = template?.trim() || getDefaultRequestBodyTemplate();
-  const replaceNacosArg = (_match: string, key: string) => JSON.stringify(coerceTemplateValue(inputValues[key] ?? ""));
+  const replaceTemplateArg = (_match: string, key: string) => JSON.stringify(coerceTemplateValue(inputValues[key] ?? ""));
   const rendered = source
-    .replace(/{{\s*\.args\.([a-zA-Z0-9_]+)\s*}}/g, replaceNacosArg)
+    .replace(/{{\s*\.args\.([a-zA-Z0-9_]+)\s*}}/g, replaceTemplateArg)
     .replace(/{{\s*toPrettyJson\s+\.\s*}}/g, JSON.stringify(requestContext.raw_response ?? {}));
 
   try {
@@ -5625,7 +5625,7 @@ export function ToolHubDetailPage() {
                   <Box>
                     <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>参数配置</Typography>
                     <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>
-                      按 Nacos 的方式统一维护入参和出参。
+                      维护工具调用入参和响应出参。
                     </Typography>
                   </Box>
                   <Button onClick={addParamRow} variant="outlined" startIcon={<Add sx={{ fontSize: 14 }} />} sx={{ textTransform: "none", borderRadius: "6px", fontSize: "13px", px: 2, boxShadow: "none" }}>
@@ -5758,7 +5758,7 @@ export function ToolHubDetailPage() {
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2 }}>
                   <Box>
                     <Typography sx={{ fontSize: "16px", fontWeight: 600, color: "#111827" }}>高级配置</Typography>
-                    <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>按 Nacos 的模板方式描述底层 API 请求与响应。</Typography>
+                    <Typography sx={{ fontSize: "12px", color: "#6b7280", mt: 0.5 }}>配置底层 API 的请求与响应模板。</Typography>
                   </Box>
                   <Button
                     onClick={() => updateDraft({ requestBodyTemplate: getDefaultRequestBodyTemplate(versionDraft.rawInputParams, versionDraft) })}

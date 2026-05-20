@@ -238,7 +238,7 @@ const initialConnectors: Connector[] = [
     auth: "Bearer Token",
     toolCount: 2,
     lastChecked: "2026-05-19 15:35",
-    createdBy: "平台研发",
+    createdBy: "系统管理员",
     createdAt: "2026-05-16 10:20",
     updatedAt: "2026-05-19 09:40",
   },
@@ -673,7 +673,7 @@ export function ToolHubMcpServicesPage() {
             rows={2}
             value={serviceDraft.description}
             onChange={(event) => setServiceDraft((prev) => ({ ...prev, description: event.target.value }))}
-            helperText="给运营和研发查看的服务说明，用于识别这个 MCP 服务的用途和适用范围。"
+            helperText="用于说明这个 MCP 服务的用途和适用范围。"
           />
           <TextField
             label="服务指令"
@@ -993,7 +993,7 @@ export function ToolHubMcpServicesPage() {
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 700 }}>API Key 已生成</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
           <Alert severity="info" sx={{ fontSize: "13px" }}>
-            请立即复制并保存。关闭后仍可在列表中复制当前原型生成的 API Key。
+            请立即复制并保存。关闭后仍可在列表中复制该 API Key。
           </Alert>
           <Box sx={{ p: 1.5, borderRadius: "8px", bgcolor: "#f8fafc", border: "1px solid #eef2f7", display: "flex", gap: 1, alignItems: "center" }}>
             <Typography sx={{ flex: 1, minWidth: 0, fontSize: "12px", color: "#111827", fontFamily: "monospace", wordBreak: "break-all" }}>{createdApiKey?.key}</Typography>
@@ -1312,7 +1312,7 @@ export function ToolHubConnectorsPage() {
         <DialogContent sx={scrollableDialogContentSx}>
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
             <TextField label="连接器名称" size="small" required value={connectorDraft.name} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, name: event.target.value }))} />
-            <TextField label="连接器类型" size="small" value="HTTP API" InputProps={{ readOnly: true }} helperText="一期统一按 HTTP API 接入，具体接口路径在工具版本中配置。" />
+            <TextField label="连接器类型" size="small" value="HTTP API" InputProps={{ readOnly: true }} helperText="具体接口路径在工具版本中配置。" />
             {renderTypeFields()}
             <TextField select label="Authentication" size="small" value={connectorDraft.auth} onChange={(event) => setConnectorDraft((prev) => ({ ...prev, auth: event.target.value as AuthType }))}>
               {["Bearer Token", "API Key", "Basic Auth", "None"].map((auth) => <MenuItem key={auth} value={auth}>{auth}</MenuItem>)}

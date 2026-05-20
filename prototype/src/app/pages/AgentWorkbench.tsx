@@ -499,7 +499,7 @@ export function AgentWorkbench() {
               </Stack>
             </Box>
           ) : (
-            <Box sx={{ p: 2, color: "#94a3b8", fontSize: 13 }}>当前页签用于承接原有工作台信息，本次原型重点展示“方案”页签。</Box>
+            <Box sx={{ p: 2, color: "#94a3b8", fontSize: 13 }}>暂无待展示内容。</Box>
           )}
         </Paper>
       </Box>
