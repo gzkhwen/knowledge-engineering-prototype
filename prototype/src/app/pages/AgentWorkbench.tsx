@@ -111,6 +111,11 @@ const mcpService: McpService = {
   version: "V1.0.0",
 };
 
+const elevatedSelectMenuProps = {
+  sx: { zIndex: 1600 },
+  PaperProps: { sx: { zIndex: 1601 } },
+};
+
 const documentAddressParam: ToolParam = {
   id: "documentAddress",
   label: "文档地址信息",
@@ -936,7 +941,7 @@ function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: b
     return (
       <FormControl fullWidth size="small" sx={commonSx}>
         <InputLabel>{param.label}</InputLabel>
-        <Select label={param.label} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)}>
+        <Select label={param.label} value={String(param.value)} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onChange(event.target.value)}>
           {(param.options ?? []).map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
         </Select>
       </FormControl>
@@ -1030,7 +1035,7 @@ function ToolEditDrawer({
               <Stack spacing={1.25}>
                 <FormControl fullWidth size="small">
                   <InputLabel>输入参数</InputLabel>
-                  <Select label="输入参数" value={node.inputParamId} disabled={!canEdit} onChange={(event) => onInputParamChange(node.nodeId, event.target.value)}>
+                  <Select label="输入参数" value={node.inputParamId} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onInputParamChange(node.nodeId, event.target.value)}>
                     {node.params.map((param) => <MenuItem key={param.id} value={param.id}>{param.label}</MenuItem>)}
                   </Select>
                 </FormControl>
@@ -1039,7 +1044,7 @@ function ToolEditDrawer({
                 ) : (
                   <FormControl fullWidth size="small">
                     <InputLabel>取值方式</InputLabel>
-                    <Select label="取值方式" value={node.inputSource.type} disabled={!canEdit || priorNodes.length === 0} onChange={(event) => setSourceType(event.target.value as InputSource["type"])}>
+                    <Select label="取值方式" value={node.inputSource.type} disabled={!canEdit || priorNodes.length === 0} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceType(event.target.value as InputSource["type"])}>
                       <MenuItem value="fixed">固定值</MenuItem>
                       <MenuItem value="upstream">上游工具输出</MenuItem>
                     </Select>
@@ -1049,13 +1054,13 @@ function ToolEditDrawer({
                   <Stack spacing={1}>
                     <FormControl fullWidth size="small">
                       <InputLabel>来源工具</InputLabel>
-                      <Select label="来源工具" value={selectedSourceNode?.nodeId ?? ""} disabled={!canEdit} onChange={(event) => setSourceNode(event.target.value)}>
+                      <Select label="来源工具" value={selectedSourceNode?.nodeId ?? ""} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceNode(event.target.value)}>
                         {priorNodes.map((item) => <MenuItem key={item.nodeId} value={item.nodeId}>{item.toolName}</MenuItem>)}
                       </Select>
                     </FormControl>
                     <FormControl fullWidth size="small">
                       <InputLabel>输出字段</InputLabel>
-                      <Select label="输出字段" value={selectedOutput?.id ?? ""} disabled={!canEdit || !selectedSourceNode} onChange={(event) => setSourceOutput(event.target.value)}>
+                      <Select label="输出字段" value={selectedOutput?.id ?? ""} disabled={!canEdit || !selectedSourceNode} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceOutput(event.target.value)}>
                         {(selectedSourceNode?.outputs ?? []).map((output) => <MenuItem key={output.id} value={output.id}>{output.label}</MenuItem>)}
                       </Select>
                     </FormControl>
