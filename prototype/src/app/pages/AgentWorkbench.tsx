@@ -334,11 +334,11 @@ function createInitialPlanNodes(): ToolNode[] {
   return [parser, splitter, qa];
 }
 
-function getParamProblems(node: ToolNode) {
+function getParamProblems(node: ToolNode, receivesExternalInput = false) {
   if (!node.enabled) return [];
   return node.params.flatMap((param) => {
     if (!param.required) return [];
-    if (param.id === node.inputParamId && node.inputSource.type === "upstream") return [];
+    if (param.id === node.inputParamId && (node.inputSource.type === "upstream" || receivesExternalInput)) return [];
     if (typeof param.value === "string" && !param.value.trim()) return [`${param.label} 未填写`];
     if (typeof param.value === "number" && ((param.min !== undefined && param.value < param.min) || (param.max !== undefined && param.value > param.max))) {
       return [`${param.label} 超出范围`];
@@ -364,6 +364,7 @@ function getToolInputParam(node: ToolNode) {
 function getInputSourceLabel(node: ToolNode, nodes: ToolNode[]) {
   const inputParam = getToolInputParam(node);
   if (!inputParam) return "未指定输入参数";
+  if (nodes[0]?.nodeId === node.nodeId) return `${inputParam.label} <- 文档地址信息`;
   if (node.inputSource.type !== "upstream") return `${inputParam.label} <- 固定值`;
   const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
   const output = sourceNode?.outputs.find((item) => item.id === node.inputSource.outputId);
@@ -371,6 +372,7 @@ function getInputSourceLabel(node: ToolNode, nodes: ToolNode[]) {
 }
 
 function isInputSourceInvalid(node: ToolNode, nodes: ToolNode[]) {
+  if (nodes[0]?.nodeId === node.nodeId) return false;
   if (node.inputSource.type !== "upstream") return false;
   const priorNodes = getPriorNodes(nodes, node.nodeId);
   const sourceNode = priorNodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
@@ -397,7 +399,7 @@ function getNodeWarnings(nodes: ToolNode[]) {
   const enabledNodes = nodes.filter((node) => node.enabled);
 
   enabledNodes.forEach((node) => {
-    const paramProblems = getParamProblems(node);
+    const paramProblems = getParamProblems(node, nodes[0]?.nodeId === node.nodeId);
     if (paramProblems.length > 0) {
       warnings[node.nodeId] = [...(warnings[node.nodeId] ?? []), ...paramProblems];
     }
@@ -787,7 +789,6 @@ function ToolNodeCard({
   const hasWarning = warnings.length > 0;
   const hasInputWarning = warnings.includes("输入配置异常，请检查。");
   const configParams = node.params.filter((param) => param.id !== node.inputParamId);
-  const showOnPageCount = node.params.filter((param) => param.showOnPage).length;
   return (
     <Box
       draggable={canDrag}
@@ -831,7 +832,6 @@ function ToolNodeCard({
             <ReadonlyConfigRow label="输入" value={getInputSourceLabel(node, allNodes)} warning={isInputSourceInvalid(node, allNodes)} />
             <ReadonlyConfigRow label="参数配置" value={`${configParams.length} 个参数，${configParams.filter((param) => param.required).length} 个必填`} />
             <ReadonlyConfigRow label="输出" value={node.outputs.map((output) => output.label).join("、")} />
-            <ReadonlyConfigRow label="页面展示" value={`${showOnPageCount} 个参数展示到页面`} />
           </Stack>
         </Box>
       )}
@@ -937,7 +937,7 @@ function ToolEditDrawer({
   };
 
   return (
-    <Drawer open={open} onClose={onClose} anchor="right" PaperProps={{ sx: { width: 480, borderTopLeftRadius: "14px", borderBottomLeftRadius: "14px" } }}>
+    <Drawer open={open} onClose={onClose} anchor="right" sx={{ zIndex: (theme) => theme.zIndex.modal + 20 }} PaperProps={{ sx: { width: 480, borderTopLeftRadius: "14px", borderBottomLeftRadius: "14px" } }}>
       <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
         <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", gap: 1 }}>
           <Box sx={{ width: 30, height: 30, borderRadius: "9px", bgcolor: "#f5f3ff", color: "#801AEB", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -956,18 +956,22 @@ function ToolEditDrawer({
               <Stack spacing={1.25}>
                 <FormControl fullWidth size="small">
                   <InputLabel>输入参数</InputLabel>
-                  <Select label="输入参数" value={node.inputParamId} disabled={!canEdit || isFirstNode} onChange={(event) => onInputParamChange(node.nodeId, event.target.value)}>
+                  <Select label="输入参数" value={node.inputParamId} disabled={!canEdit} onChange={(event) => onInputParamChange(node.nodeId, event.target.value)}>
                     {node.params.map((param) => <MenuItem key={param.id} value={param.id}>{param.label}</MenuItem>)}
                   </Select>
                 </FormControl>
-                <FormControl fullWidth size="small">
-                  <InputLabel>取值方式</InputLabel>
-                  <Select label="取值方式" value={node.inputSource.type} disabled={!canEdit || isFirstNode || priorNodes.length === 0} onChange={(event) => setSourceType(event.target.value as InputSource["type"])}>
-                    <MenuItem value="fixed">固定值</MenuItem>
-                    <MenuItem value="upstream">上游工具输出</MenuItem>
-                  </Select>
-                </FormControl>
-                {node.inputSource.type === "upstream" ? (
+                {isFirstNode ? (
+                  <TextField size="small" fullWidth label="取值方式" value="文档地址信息" disabled sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }} />
+                ) : (
+                  <FormControl fullWidth size="small">
+                    <InputLabel>取值方式</InputLabel>
+                    <Select label="取值方式" value={node.inputSource.type} disabled={!canEdit || priorNodes.length === 0} onChange={(event) => setSourceType(event.target.value as InputSource["type"])}>
+                      <MenuItem value="fixed">固定值</MenuItem>
+                      <MenuItem value="upstream">上游工具输出</MenuItem>
+                    </Select>
+                  </FormControl>
+                )}
+                {!isFirstNode && node.inputSource.type === "upstream" ? (
                   <Stack spacing={1}>
                     <FormControl fullWidth size="small">
                       <InputLabel>来源工具</InputLabel>
@@ -983,7 +987,7 @@ function ToolEditDrawer({
                     </FormControl>
                     {sourceInvalid && <Typography sx={{ fontSize: 12, color: "#c2410c" }}>输入配置异常，请检查。</Typography>}
                   </Stack>
-                ) : inputParam ? (
+                ) : !isFirstNode && inputParam ? (
                   <ParamField param={inputParam} canEdit={canEdit && inputParam.editable !== false} onChange={(value) => onParamChange(node.nodeId, inputParam.id, value)} />
                 ) : null}
               </Stack>
@@ -994,11 +998,6 @@ function ToolEditDrawer({
                 {configurableParams.map((param) => (
                   <Box key={param.id} sx={{ border: "1px solid #E0E8F2", borderRadius: "10px", bgcolor: "#fff", p: 1.25 }}>
                     <ParamField param={param} canEdit={canEdit && param.editable !== false && node.enabled} onChange={(value) => onParamChange(node.nodeId, param.id, value)} />
-                    <Divider sx={{ my: 1 }} />
-                    <FormControlLabel
-                      control={<Checkbox checked={Boolean(param.showOnPage)} disabled={!canEdit} onChange={() => onToggleShowOnPage(node.nodeId, param.id)} sx={{ color: "#801AEB", "&.Mui-checked": { color: "#801AEB" } }} />}
-                      label={<Typography sx={{ fontSize: 12, color: "#374151" }}>展示到页面</Typography>}
-                    />
                   </Box>
                 ))}
               </Stack>
