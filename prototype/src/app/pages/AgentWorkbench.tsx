@@ -890,18 +890,16 @@ function ToolNodeCard({
               <Typography sx={{ fontSize: 12, color: isInputSourceInvalid(node, allNodes) ? "#c2410c" : "#1f2937", lineHeight: 1.5, wordBreak: "break-word" }}>{inputParts.paramName}：{inputParts.source}</Typography>
             </ReadonlyConfigBlock>
             <ReadonlyConfigBlock label="参数配置">
-              {node.adjusted ? (
-                requiredParams.length > 0 ? (
-                  <Stack spacing={0.5}>
-                    {requiredParams.map((param) => (
-                      <Box key={param.id} sx={{ display: "grid", gridTemplateColumns: "88px minmax(0, 1fr)", gap: 0.75 }}>
-                        <Typography sx={{ fontSize: 11.5, color: "#64748b" }}>{param.label}：</Typography>
-                        <Typography sx={{ fontSize: 11.5, color: "#1f2937", wordBreak: "break-word" }}>{formatParamValue(param.value)}</Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                ) : <Typography sx={{ fontSize: 12, color: "#64748b" }}>无必填参数</Typography>
-              ) : <Typography sx={{ fontSize: 12, color: "#374151" }}>{`${configParams.length} 个参数，${requiredParams.length} 个必填`}</Typography>}
+              {requiredParams.length > 0 ? (
+                <Stack spacing={0.5}>
+                  {requiredParams.map((param) => (
+                    <Box key={param.id} sx={{ display: "grid", gridTemplateColumns: "88px minmax(0, 1fr)", gap: 0.75 }}>
+                      <Typography sx={{ fontSize: 11.5, color: "#64748b" }}>{param.label}：</Typography>
+                      <Typography sx={{ fontSize: 11.5, color: "#1f2937", wordBreak: "break-word" }}>{formatParamValue(param.value)}</Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              ) : <Typography sx={{ fontSize: 12, color: "#64748b" }}>无必填参数</Typography>}
             </ReadonlyConfigBlock>
             <ReadonlyConfigBlock label="输出">
               <Stack spacing={0.5}>
