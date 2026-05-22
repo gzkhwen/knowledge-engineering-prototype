@@ -55,6 +55,7 @@ interface ToolParam {
   editable?: boolean;
   showOnPage?: boolean;
   options?: string[];
+  format?: string;
   visibleWhen?: { paramId: string; value: string | number | boolean };
   min?: number;
   max?: number;
@@ -123,6 +124,7 @@ const parseObjectParam: ToolParam = {
   label: "解析对象",
   desc: "待解析的文件地址对象，常用格式：{ fileUrl, fileName, fileType }。",
   type: "textarea",
+  format: "文件URL对象",
   value: '{ "fileUrl": "https://example.com/demo.pdf", "fileName": "demo.pdf", "fileType": "pdf" }',
   required: true,
   editable: true,
@@ -133,6 +135,7 @@ const chunkObjectParam: ToolParam = {
   label: "分片对象",
   desc: "待分片的对象，常用格式：Array<json>。",
   type: "textarea",
+  format: "Array<json>",
   value: "",
   required: true,
   editable: true,
@@ -143,6 +146,7 @@ const extractionObjectParam: ToolParam = {
   label: "提取对象",
   desc: "待提取的对象，常用格式：Array<json>。",
   type: "textarea",
+  format: "Array<json>",
   value: "",
   required: true,
   editable: true,
@@ -370,6 +374,10 @@ function getOutputFormat(output: ToolOutput) {
   return output.desc.split(/[，,]/)[0] || "未知格式";
 }
 
+function getParamFormat(param: ToolParam) {
+  return param.format ?? param.type;
+}
+
 function formatParamValue(value: ToolParam["value"]) {
   if (Array.isArray(value)) return value.length ? value.join("、") : "未选择";
   if (typeof value === "boolean") return value ? "开启" : "关闭";
@@ -446,6 +454,7 @@ export function AgentWorkbench() {
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [draggingCategory, setDraggingCategory] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [confirmedCategories, setConfirmedCategories] = useState<Set<string>>(new Set());
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [hasManualEdits, setHasManualEdits] = useState(false);
 
@@ -462,6 +471,13 @@ export function AgentWorkbench() {
     : toolCatalog.filter((tool) => tool.category === selectedCategory);
   const currentTool = toolCatalog.find((tool) => tool.id === selectedToolId) ?? filteredTools[0] ?? null;
   const selectedToolAdded = currentTool ? addedToolIds.has(currentTool.id) : false;
+  const selectedToolCategoryConfirmed = currentTool ? confirmedCategories.has(currentTool.category) : false;
+  const allCategoriesConfirmed = categorySections.length > 0 && categorySections.every((section) => confirmedCategories.has(section.category));
+  const isCategoryEditable = (category: string) => canEdit && !confirmedCategories.has(category);
+  const isNodeEditable = (nodeId: string) => {
+    const node = planNodes.find((item) => item.nodeId === nodeId);
+    return Boolean(node && isCategoryEditable(node.category));
+  };
 
   const updateNode = (nodeId: string, updater: (node: ToolNode) => ToolNode) => {
     setPlanNodes((current) => current.map((node) => (node.nodeId === nodeId ? updater(node) : node)));
@@ -474,7 +490,7 @@ export function AgentWorkbench() {
   };
 
   const addTool = () => {
-    if (!canEdit || !currentTool || selectedToolAdded) return;
+    if (!canEdit || !currentTool || selectedToolAdded || selectedToolCategoryConfirmed) return;
     const node = createNode(currentTool.id);
     setPlanNodes((current) => [...current, { ...node, expanded: true, adjusted: true }]);
     setHasManualEdits(true);
@@ -483,7 +499,7 @@ export function AgentWorkbench() {
   };
 
   const removeNode = (nodeId: string) => {
-    if (!canEdit) return;
+    if (!isNodeEditable(nodeId)) return;
     setPlanNodes((current) => current.filter((node) => node.nodeId !== nodeId));
     setEditingNodeId((current) => (current === nodeId ? null : current));
     setHasManualEdits(true);
@@ -493,22 +509,39 @@ export function AgentWorkbench() {
   const regenerateByAgent = () => {
     if (!canEdit) return;
     setPlanNodes(cloneNodes(initialPlanNodes));
+    setConfirmedCategories(new Set());
     setEditingNodeId(null);
     setHasManualEdits(false);
     toast.success("已使用 Agent 最新生成方案覆盖当前编辑内容");
   };
 
   const confirmPlan = () => {
+    if (!allCategoriesConfirmed) {
+      toast.error("请先确认所有分类方案");
+      return;
+    }
     if (allProblems.length > 0) {
       toast.error("当前方案仍存在校验问题");
       return;
     }
     setConfirmed(true);
-    toast.success("处理方案已确认");
+    toast.success("处理方案已保存");
+  };
+
+  const confirmCategory = (category: string) => {
+    if (!canEdit || confirmedCategories.has(category)) return;
+    const section = categorySections.find((item) => item.category === category);
+    const sectionProblems = section?.nodes.flatMap((node) => nodeWarnings[node.nodeId] ?? []) ?? [];
+    if (sectionProblems.length > 0) {
+      toast.error(`${getPlanTitle(category)}存在校验问题`);
+      return;
+    }
+    setConfirmedCategories((current) => new Set([...current, category]));
+    toast.success(`${getPlanTitle(category)}已确认`);
   };
 
   const onDropNode = (targetId: string) => {
-    if (!draggingNodeId || draggingNodeId === targetId || !canEdit) return;
+    if (!draggingNodeId || draggingNodeId === targetId || !isNodeEditable(draggingNodeId) || !isNodeEditable(targetId)) return;
     const from = planNodes.findIndex((node) => node.nodeId === draggingNodeId);
     const to = planNodes.findIndex((node) => node.nodeId === targetId);
     if (from < 0 || to < 0) return;
@@ -522,7 +555,7 @@ export function AgentWorkbench() {
   };
 
   const changeParam = (nodeId: string, paramId: string, value: ToolParam["value"]) => {
-    if (!canEdit) return;
+    if (!isNodeEditable(nodeId)) return;
     updateNode(nodeId, (node) => ({
       ...node,
       adjusted: true,
@@ -532,13 +565,13 @@ export function AgentWorkbench() {
   };
 
   const updateInputParam = (nodeId: string, inputParamId: string) => {
-    if (!canEdit) return;
+    if (!isNodeEditable(nodeId)) return;
     updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputParamId, inputSource: { type: "fixed" } }));
     setHasManualEdits(true);
   };
 
   const updateInputSource = (nodeId: string, source: InputSource) => {
-    if (!canEdit) return;
+    if (!isNodeEditable(nodeId)) return;
     updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputSource: source }));
     setHasManualEdits(true);
   };
@@ -553,7 +586,7 @@ export function AgentWorkbench() {
   };
 
   const moveCategoryTo = (category: string, targetCategory: string) => {
-    if (!canEdit || category === targetCategory) return;
+    if (!canEdit || category === targetCategory || confirmedCategories.has(category) || confirmedCategories.has(targetCategory)) return;
     const categoriesInOrder = categorySections.map((section) => section.category);
     const from = categoriesInOrder.indexOf(category);
     const to = categoriesInOrder.indexOf(targetCategory);
@@ -622,7 +655,7 @@ export function AgentWorkbench() {
 	                    </Box>
                     <Tooltip title="添加工具">
                       <span>
-                        <IconButton size="small" aria-label="添加工具" disabled={!canEdit} onClick={openAddTool} sx={{ width: 30, height: 30, bgcolor: "#801AEB", color: "#fff", borderRadius: "8px", "&:hover": { bgcolor: "#6D16C9" }, "&.Mui-disabled": { bgcolor: "#e5e7eb", color: "#9ca3af" } }}>
+                        <IconButton size="small" aria-label="添加工具" disabled={!canEdit || allCategoriesConfirmed} onClick={openAddTool} sx={{ width: 30, height: 30, bgcolor: "#801AEB", color: "#fff", borderRadius: "8px", "&:hover": { bgcolor: "#6D16C9" }, "&.Mui-disabled": { bgcolor: "#e5e7eb", color: "#9ca3af" } }}>
                           <Add fontSize="small" />
                         </IconButton>
                       </span>
@@ -636,9 +669,12 @@ export function AgentWorkbench() {
                     category={section.category}
                     nodes={section.nodes}
                     allNodes={planNodes}
-                    canEdit={canEdit}
+                    canEdit={isCategoryEditable(section.category)}
                     warnings={nodeWarnings}
-                    canDragCategory={canEdit && categorySections.length > 1}
+                    isConfirmed={confirmedCategories.has(section.category)}
+                    canConfirm={canEdit && !confirmedCategories.has(section.category)}
+                    canDragCategory={isCategoryEditable(section.category) && categorySections.length > 1}
+                    onConfirm={() => confirmCategory(section.category)}
                     onCategoryDragStart={() => setDraggingCategory(section.category)}
                     onCategoryDrop={() => {
                       if (draggingCategory) moveCategoryTo(draggingCategory, section.category);
@@ -655,7 +691,7 @@ export function AgentWorkbench() {
                   />
                 ))}
 
-                <Button startIcon={<FactCheck />} onClick={confirmPlan} disabled={!canEdit} variant="contained" sx={{ mt: 1, bgcolor: allProblems.length ? "#cbd5e1" : "#801AEB", borderRadius: "10px", textTransform: "none", "&:hover": { bgcolor: allProblems.length ? "#cbd5e1" : "#6D16C9" } }}>
+                <Button startIcon={<FactCheck />} onClick={confirmPlan} disabled={!canEdit || !allCategoriesConfirmed || allProblems.length > 0} variant="contained" sx={{ mt: 1, bgcolor: (!allCategoriesConfirmed || allProblems.length) ? "#cbd5e1" : "#801AEB", borderRadius: "10px", textTransform: "none", "&:hover": { bgcolor: (!allCategoriesConfirmed || allProblems.length) ? "#cbd5e1" : "#6D16C9" } }}>
                   保存为处理方案
                 </Button>
               </Stack>
@@ -684,6 +720,7 @@ export function AgentWorkbench() {
         service={mcpService}
         addedToolIds={addedToolIds}
         selectedToolAdded={selectedToolAdded}
+        selectedToolCategoryConfirmed={selectedToolCategoryConfirmed}
         onClose={() => setAddDialogOpen(false)}
         onAdd={addTool}
       />
@@ -691,7 +728,7 @@ export function AgentWorkbench() {
         open={Boolean(editingNode)}
         node={editingNode}
         allNodes={planNodes}
-        canEdit={canEdit}
+        canEdit={editingNode ? isCategoryEditable(editingNode.category) : false}
         onClose={() => setEditingNodeId(null)}
         onInputParamChange={updateInputParam}
         onInputSourceChange={updateInputSource}
@@ -708,7 +745,10 @@ function PlanSection({
   allNodes,
   canEdit,
   warnings,
+  isConfirmed,
+  canConfirm,
   canDragCategory,
+  onConfirm,
   onCategoryDragStart,
   onCategoryDrop,
   onRemove,
@@ -723,7 +763,10 @@ function PlanSection({
   allNodes: ToolNode[];
   canEdit: boolean;
   warnings: Record<string, string[]>;
+  isConfirmed: boolean;
+  canConfirm: boolean;
   canDragCategory: boolean;
+  onConfirm: () => void;
   onCategoryDragStart: () => void;
   onCategoryDrop: () => void;
   onRemove: (nodeId: string) => void;
@@ -747,6 +790,9 @@ function PlanSection({
           {canDragCategory && <DragIndicator sx={{ color: "#9ca3af", cursor: "grab", fontSize: 18 }} />}
           <Typography sx={{ fontSize: 14, fontWeight: 700, color: "#1f2937" }}>{title}</Typography>
         </Box>
+        <Button size="small" variant={isConfirmed ? "outlined" : "contained"} disabled={!canConfirm} onClick={onConfirm} sx={{ height: 26, minWidth: 72, px: 1, borderRadius: "8px", fontSize: 11, textTransform: "none", bgcolor: isConfirmed ? "#fff" : "#801AEB", color: isConfirmed ? "#16a34a" : "#fff", borderColor: isConfirmed ? "#bbf7d0" : "#801AEB", "&:hover": { bgcolor: isConfirmed ? "#fff" : "#6D16C9" } }}>
+          {isConfirmed ? "已确认" : "确认方案"}
+        </Button>
       </Box>
       <Stack spacing={1} sx={{ p: 1 }}>
         {nodes.map((node) => (
@@ -841,8 +887,7 @@ function ToolNodeCard({
         <Box sx={{ borderTop: "1px solid #EEF2F7", p: 1.25, bgcolor: "#FBFCFF" }}>
           <Stack spacing={1.1}>
             <ReadonlyConfigBlock label="输入">
-              <Typography sx={{ fontSize: 12, color: isInputSourceInvalid(node, allNodes) ? "#c2410c" : "#1f2937", lineHeight: 1.5 }}>{inputParts.paramName}</Typography>
-              <Typography sx={{ fontSize: 11.5, color: isInputSourceInvalid(node, allNodes) ? "#c2410c" : "#64748b", lineHeight: 1.5 }}>{inputParts.source}</Typography>
+              <Typography sx={{ fontSize: 12, color: isInputSourceInvalid(node, allNodes) ? "#c2410c" : "#1f2937", lineHeight: 1.5, wordBreak: "break-word" }}>{inputParts.paramName}：{inputParts.source}</Typography>
             </ReadonlyConfigBlock>
             <ReadonlyConfigBlock label="参数配置">
               {node.adjusted ? (
@@ -850,7 +895,7 @@ function ToolNodeCard({
                   <Stack spacing={0.5}>
                     {requiredParams.map((param) => (
                       <Box key={param.id} sx={{ display: "grid", gridTemplateColumns: "88px minmax(0, 1fr)", gap: 0.75 }}>
-                        <Typography sx={{ fontSize: 11.5, color: "#64748b" }}>{param.label}</Typography>
+                        <Typography sx={{ fontSize: 11.5, color: "#64748b" }}>{param.label}：</Typography>
                         <Typography sx={{ fontSize: 11.5, color: "#1f2937", wordBreak: "break-word" }}>{formatParamValue(param.value)}</Typography>
                       </Box>
                     ))}
@@ -1129,6 +1174,7 @@ function AddToolDialog({
   service,
   addedToolIds,
   selectedToolAdded,
+  selectedToolCategoryConfirmed,
   onClose,
   onAdd,
 }: {
@@ -1143,6 +1189,7 @@ function AddToolDialog({
   service: McpService;
   addedToolIds: Set<string>;
   selectedToolAdded: boolean;
+  selectedToolCategoryConfirmed: boolean;
   onClose: () => void;
   onAdd: () => void;
 }) {
@@ -1160,8 +1207,8 @@ function AddToolDialog({
           <IconButton onClick={onClose}><Close /></IconButton>
         </Box>
       </DialogTitle>
-      <DialogContent sx={{ display: "grid", gridTemplateColumns: "168px minmax(260px, 1fr) 260px", gap: 1.5, minHeight: 420 }}>
-        <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1 }}>
+      <DialogContent sx={{ display: "grid", gridTemplateColumns: "168px minmax(260px, 1fr) 280px", gap: 1.5, height: 460, overflow: "hidden" }}>
+        <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1, minHeight: 0, overflow: "auto" }}>
           <Typography sx={{ fontSize: 12, color: "#64748b", fontWeight: 700, mb: 1 }}>分类</Typography>
           <Stack spacing={0.5}>
             {categories.map((category) => {
@@ -1175,7 +1222,7 @@ function AddToolDialog({
           </Stack>
         </Paper>
 
-        <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1 }}>
+        <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1, minHeight: 0, overflow: "auto" }}>
           <Typography sx={{ fontSize: 12, color: "#64748b", fontWeight: 700, mb: 1 }}>MCP 工具</Typography>
           <Stack spacing={0.75}>
             {tools.length === 0 && <Typography sx={{ fontSize: 12, color: "#94a3b8", p: 1 }}>当前分类下没有工具。</Typography>}
@@ -1193,7 +1240,7 @@ function AddToolDialog({
           </Stack>
         </Paper>
 
-        <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1.25 }}>
+        <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1.25, minHeight: 0, overflow: "auto" }}>
           <Typography sx={{ fontSize: 12, color: "#64748b", fontWeight: 700, mb: 1 }}>入参 / 返回参数</Typography>
           {currentTool ? <Stack spacing={1.25}>
             <Box>
@@ -1203,7 +1250,7 @@ function AddToolDialog({
                   <Box key={param.id} sx={{ p: 0.85, borderRadius: "8px", bgcolor: "#F8FAFC", border: "1px solid #EEF2F7" }}>
                     <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
                       <Typography sx={{ fontSize: 12, fontWeight: 700, color: "#1f2937" }}>{param.label}</Typography>
-                      <Chip label={param.type} size="small" sx={{ height: 17, fontSize: 10, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
+                      <Chip label={getParamFormat(param)} size="small" sx={{ height: 17, fontSize: 10, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
                       {param.required && <Chip label="必填" size="small" sx={{ height: 17, fontSize: 10, bgcolor: "#fff7ed", color: "#c2410c" }} />}
                     </Stack>
                     <Typography sx={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.5, mt: 0.35 }}>{param.desc}</Typography>
@@ -1217,7 +1264,10 @@ function AddToolDialog({
               <Stack spacing={0.75}>
                 {currentTool.outputs.map((output) => (
                   <Box key={output.id} sx={{ p: 0.85, borderRadius: "8px", bgcolor: "#FBFCFF", border: "1px solid #EEF2F7" }}>
-                    <Typography sx={{ fontSize: 12, fontWeight: 700, color: "#1f2937" }}>{output.label}</Typography>
+                    <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Typography sx={{ fontSize: 12, fontWeight: 700, color: "#1f2937" }}>{output.label}</Typography>
+                      <Chip label={getOutputFormat(output)} size="small" sx={{ height: 17, fontSize: 10, bgcolor: "#eef2ff", color: "#4338ca" }} />
+                    </Stack>
                     <Typography sx={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.5, mt: 0.35 }}>{output.desc}</Typography>
                   </Box>
                 ))}
@@ -1228,7 +1278,7 @@ function AddToolDialog({
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose} sx={{ textTransform: "none", color: "#64748b" }}>取消</Button>
-        <Button disabled={!currentTool || selectedToolAdded} onClick={onAdd} variant="contained" sx={{ textTransform: "none", bgcolor: "#801AEB", borderRadius: "10px", "&:hover": { bgcolor: "#6D16C9" } }}>{selectedToolAdded ? "工具已添加" : "确认添加"}</Button>
+        <Button disabled={!currentTool || selectedToolAdded || selectedToolCategoryConfirmed} onClick={onAdd} variant="contained" sx={{ textTransform: "none", bgcolor: "#801AEB", borderRadius: "10px", "&:hover": { bgcolor: "#6D16C9" } }}>{selectedToolAdded ? "工具已添加" : selectedToolCategoryConfirmed ? "方案已确认" : "确认添加"}</Button>
       </DialogActions>
     </Dialog>
   );
