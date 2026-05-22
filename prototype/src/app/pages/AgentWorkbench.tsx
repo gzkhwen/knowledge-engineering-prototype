@@ -962,16 +962,13 @@ function ToolNodeCard({
         <Box sx={{ borderTop: "1px solid #EEF2F7", p: 1.25, bgcolor: "#FBFCFF" }}>
           <Stack spacing={1.1}>
             <ReadonlyConfigBlock label="输入">
-              <Typography sx={{ fontSize: 12, color: isInputSourceInvalid(node, allNodes) ? "#c2410c" : "#1f2937", lineHeight: 1.5, wordBreak: "break-word" }}>{inputParts.paramName}：{inputParts.source}</Typography>
+              <ReadonlyKeyValue label={inputParts.paramName} value={inputParts.source} warning={isInputSourceInvalid(node, allNodes)} />
             </ReadonlyConfigBlock>
             <ReadonlyConfigBlock label="参数配置">
               {requiredParams.length > 0 ? (
                 <Stack spacing={0.5}>
                   {requiredParams.map((param) => (
-                    <Box key={param.id} sx={{ display: "grid", gridTemplateColumns: "112px minmax(0, 1fr)", columnGap: 0.5 }}>
-                      <Typography sx={{ fontSize: 11.5, color: "#64748b" }}>{param.label}：</Typography>
-                      <Typography sx={{ fontSize: 11.5, color: "#1f2937", wordBreak: "break-word" }}>{formatParamValue(param.value)}</Typography>
-                    </Box>
+                    <ReadonlyKeyValue key={param.id} label={param.label} value={formatParamValue(param.value)} />
                   ))}
                 </Stack>
               ) : <Typography sx={{ fontSize: 12, color: "#64748b" }}>无必填参数</Typography>}
@@ -999,6 +996,14 @@ function ReadonlyConfigBlock({ label, children }: { label: string; children: Rea
       <Typography sx={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>{label}</Typography>
       <Box sx={{ minWidth: 0 }}>{children}</Box>
     </Box>
+  );
+}
+
+function ReadonlyKeyValue({ label, value, warning = false }: { label: string; value: string; warning?: boolean }) {
+  return (
+    <Typography sx={{ fontSize: 12, color: warning ? "#c2410c" : "#1f2937", lineHeight: 1.5, wordBreak: "break-word" }}>
+      <Box component="span" sx={{ color: "#64748b" }}>{label}：</Box>{value}
+    </Typography>
   );
 }
 
@@ -1124,6 +1129,7 @@ function ToolEditDrawer({
   const sourceInvalid = isInputSourceInvalid(node, allNodes);
   const isFirstInputLocked = isFirstCategoryFirstNode(node, allNodes);
   const fixedInputText = getFixedInputSourceText(node, allNodes);
+  const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
 
   const setSourceType = (type: InputSource["type"]) => {
     if (type === "fixed") {
@@ -1145,7 +1151,7 @@ function ToolEditDrawer({
 
 
   return (
-    <Drawer open={open} onClose={onClose} anchor="right" sx={{ zIndex: (theme) => theme.zIndex.modal + 20 }} PaperProps={{ sx: { width: 480, borderTopLeftRadius: "14px", borderBottomLeftRadius: "14px" } }}>
+    <Drawer open={open} onClose={onClose} anchor="right" sx={{ zIndex: (theme) => theme.zIndex.modal + 20 }} PaperProps={{ sx: { width: 480, borderRadius: 0 } }}>
       <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
         <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", gap: 1 }}>
           <Box sx={{ width: 30, height: 30, borderRadius: "9px", bgcolor: "#f5f3ff", color: "#801AEB", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1162,7 +1168,7 @@ function ToolEditDrawer({
           <Stack spacing={1.5}>
             <ConfigBlock title="指定输入参数">
               <Stack spacing={1.25}>
-                <FormControl fullWidth size="small">
+                <FormControl fullWidth size="small" sx={inputFieldSx}>
                   <InputLabel>指定输入参数</InputLabel>
                   <Select label="指定输入参数" value={node.inputParamId} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onInputParamChange(node.nodeId, event.target.value)}>
                     {node.params.map((param) => <MenuItem key={param.id} value={param.id}>{param.label}</MenuItem>)}
@@ -1171,7 +1177,7 @@ function ToolEditDrawer({
                 {isFirstInputLocked ? (
                   <TextField size="small" fullWidth label="取值方式" value="文件地址信息" disabled sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }} />
                 ) : (
-                  <FormControl fullWidth size="small">
+                  <FormControl fullWidth size="small" sx={inputFieldSx}>
                     <InputLabel>取值方式</InputLabel>
                     <Select label="取值方式" value={node.inputSource.type} disabled={!canEdit || priorNodes.length === 0} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceType(event.target.value as InputSource["type"])}>
                       <MenuItem value="fixed">{fixedInputText}</MenuItem>
@@ -1181,7 +1187,7 @@ function ToolEditDrawer({
                 )}
                 {!isFirstInputLocked && node.inputSource.type === "upstream" ? (
                   <Stack spacing={1}>
-                    <FormControl fullWidth size="small">
+                    <FormControl fullWidth size="small" sx={inputFieldSx}>
                       <InputLabel>来源工具</InputLabel>
                       <Select label="来源工具" value={selectedSourceNode?.nodeId ?? ""} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceNode(event.target.value)}>
                         {priorNodes.map((item) => <MenuItem key={item.nodeId} value={item.nodeId}>{item.toolName}</MenuItem>)}
