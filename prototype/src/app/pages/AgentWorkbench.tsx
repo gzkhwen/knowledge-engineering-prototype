@@ -118,30 +118,30 @@ const elevatedSelectMenuProps = {
   PaperProps: { sx: { zIndex: 1601 } },
 };
 
-const documentAddressParam: ToolParam = {
-  id: "documentAddress",
-  label: "文档地址信息",
-  desc: "解析入口输出的文档地址信息。",
+const parseObjectParam: ToolParam = {
+  id: "parseObject",
+  label: "解析对象",
+  desc: "待解析的文件地址对象，常用格式：{ fileUrl, fileName, fileType }。",
   type: "textarea",
-  value: "解析入口输出的文档地址信息",
+  value: '{ "fileUrl": "https://example.com/demo.pdf", "fileName": "demo.pdf", "fileType": "pdf" }',
   required: true,
   editable: true,
 };
 
-const documentParseInputParam: ToolParam = {
-  id: "documentParseResult",
-  label: "文档解析结果",
-  desc: "来自解析工具的解析结果。",
+const chunkObjectParam: ToolParam = {
+  id: "chunkObject",
+  label: "分片对象",
+  desc: "待分片的对象，常用格式：Array<json>。",
   type: "textarea",
   value: "",
   required: true,
   editable: true,
 };
 
-const textChunkInputParam: ToolParam = {
-  id: "textChunkResult",
-  label: "文本分片结果",
-  desc: "来自分片工具的分片结果。",
+const extractionObjectParam: ToolParam = {
+  id: "extractionObject",
+  label: "提取对象",
+  desc: "待提取的对象，常用格式：Array<json>。",
   type: "textarea",
   value: "",
   required: true,
@@ -156,7 +156,7 @@ const chunkPreprocessOptions = ["删除换行符", "删除所有URL", "替换掉
 const separatorPresetOptions = ["\n\n", "\n", "。", "；", "###", "---", "+++"];
 
 const commonParseParams: ToolParam[] = [
-  documentAddressParam,
+  parseObjectParam,
   { id: "parseStrategy", label: "解析策略", desc: "选择通用解析策略。", type: "multiSelect", value: ["文档内容提取"], editable: true, options: ["文档文字提取", "文档内容提取", "提取文档图谱", "图片内容解析", "表格深度解析"] },
   { id: "ocrService", label: "OCR服务", desc: "选择用于 OCR 的服务。", type: "select", value: "预置服务-OCR", required: true, editable: true, options: ocrServiceOptions },
   { id: "vlmModel", label: "VLM模型", desc: "选择 VLM 图片理解模型。", type: "select", value: "Qwen2.5-VL-32B-Instruct", required: true, editable: true, options: vlmModelOptions },
@@ -165,17 +165,17 @@ const commonParseParams: ToolParam[] = [
 ];
 
 const multimodalParseParams: ToolParam[] = [
-  documentAddressParam,
+  parseObjectParam,
   { id: "parseStrategy", label: "解析策略", desc: "选择多模态解析策略。", type: "multiSelect", value: ["文档内容解析"], editable: true, options: ["文档内容解析", "提取文档图片"] },
   { id: "vlmModel", label: "VLM模型", desc: "选择 VLM 图片理解模型。", type: "select", value: "Qwen2.5-VL-32B-Instruct", required: true, editable: true, options: vlmModelOptions },
   { id: "systemPrompt", label: "System", desc: "多模态解析系统提示词。", type: "textarea", value: "你是图像文字识别与信息抽取专家，精通图像预处理、OCR 及数学公式解析，能从各类票据、证件和表单中精准抽取关键信息，输出简洁、客观的 Markdown 结果。\n按照以下流程处理输入图像并输出结果：\n1. **图像预处理**  \n   - 灰度化、二值化、去噪等，提高识别率。\n2. **OCR 识别**  \n   - 提取所有文字；  \n   - 对数学公式应用公式识别算法，输出 LaTeX。\n3. **区域定位与信息抽取**  \n   - 对票据、证件、表单等，定位并抽取“姓名”“日期”“金额”等核心字段。\n4. **结果格式**  \n   - 仅输出客观识别/抽取内容，不做任何二次加工或总结；  \n   - Markdown 格式：  \n     - 普通文本直接写；  \n     - 公式使用 `$$…$$`（LaTeX）；  \n     - 结构化数据使用 Markdown 表格。\n示例：\n- **文字+公式识别**  \n  输入：`![示例](example.jpg)`  \n  输出：\n  ```markdown\n  文本：Hello, world!  \n  公式：$$E = mc^2$$\n  ```", editable: true },
   { id: "userPrompt", label: "User", desc: "多模态解析用户提示词。", type: "textarea", value: "提取图片信息", editable: true },
 ];
 
-const policyParseParams: ToolParam[] = [documentAddressParam];
+const policyParseParams: ToolParam[] = [parseObjectParam];
 
 const commonChunkParams: ToolParam[] = [
-  documentParseInputParam,
+  chunkObjectParam,
   { id: "chunkAssociate", label: "分片关联信息", desc: "选择需要写入分片结果的关联信息。", type: "multiSelect", value: [], editable: true, options: chunkAssociateOptions },
   { id: "chunkSize", label: "理想分块长度", desc: "单个分片的目标长度。", type: "number", value: 1024, required: true, editable: true, min: 1, max: 100000, unit: "字" },
   { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 200, required: true, editable: true, min: 0, max: 100000, unit: "字" },
@@ -183,7 +183,7 @@ const commonChunkParams: ToolParam[] = [
 ];
 
 const customSeparatorChunkParams: ToolParam[] = [
-  documentParseInputParam,
+  chunkObjectParam,
   { id: "chunkAssociate", label: "分片关联信息", desc: "选择需要写入分片结果的关联信息。", type: "multiSelect", value: [], editable: true, options: chunkAssociateOptions },
   { id: "customSeparator", label: "自定义分隔符", desc: "使用分隔符进行分片。", type: "text", value: "+++", required: true, editable: true },
   { id: "chunkSize", label: "理想分块长度", desc: "单个分片的目标长度。", type: "number", value: 1024, required: true, editable: true, min: 1, max: 100000, unit: "字" },
@@ -192,7 +192,7 @@ const customSeparatorChunkParams: ToolParam[] = [
 ];
 
 const recursiveSeparatorChunkParams: ToolParam[] = [
-  documentParseInputParam,
+  chunkObjectParam,
   { id: "mode", label: "模式选择", desc: "选择分片关联模式。", type: "select", value: "关联文件信息", required: true, editable: true, options: ["关联文件信息", "保留父子切片结构"] },
   { id: "chunkAssociate", label: "分片关联信息", desc: "模式为关联文件信息时配置。", type: "multiSelect", value: [], editable: true, options: chunkAssociateOptions, visibleWhen: { paramId: "mode", value: "关联文件信息" } },
   { id: "chunkSize", label: "理想分块长度", desc: "递归分片目标长度。", type: "number", value: 512, required: true, editable: true, min: 1, max: 100000, unit: "字" },
@@ -201,7 +201,7 @@ const recursiveSeparatorChunkParams: ToolParam[] = [
 ];
 
 const ocrChunkParams: ToolParam[] = [
-  documentParseInputParam,
+  chunkObjectParam,
   { id: "mode", label: "模式选择", desc: "选择分片关联模式。", type: "select", value: "关联文件信息", required: true, editable: true, options: ["关联文件信息", "保留父子切片结构"] },
   { id: "chunkAssociate", label: "分片关联信息", desc: "模式为关联文件信息时配置。", type: "multiSelect", value: [], editable: true, options: chunkAssociateOptions, visibleWhen: { paramId: "mode", value: "关联文件信息" } },
   { id: "chunkSize", label: "理想分块长度", desc: "根据 OCR 识别标题和段落聚合的目标长度。", type: "number", value: 512, required: true, editable: true, min: 1, max: 100000, unit: "字" },
@@ -209,17 +209,17 @@ const ocrChunkParams: ToolParam[] = [
   { id: "preprocess", label: "分片预处理", desc: "选择分片前需要执行的文本预处理。", type: "multiSelect", value: [], editable: true, options: chunkPreprocessOptions },
 ];
 
-const policyChunkParams: ToolParam[] = [documentParseInputParam];
+const policyChunkParams: ToolParam[] = [chunkObjectParam];
 
 const videoAudioSyncChunkParams: ToolParam[] = [
-  documentParseInputParam,
+  chunkObjectParam,
   { id: "chunkAssociate", label: "分片关联信息", desc: "选择需要写入分片结果的关联信息。", type: "multiSelect", value: ["关联文件名"], editable: true, options: ["关联文件名"] },
   { id: "segmentCount", label: "理想分段个数", desc: "希望切分出的分段数量。", type: "number", value: 10, required: true, editable: true, min: 1, max: 1000, unit: "段" },
   { id: "preprocess", label: "分片预处理", desc: "选择分片前需要执行的文本预处理。", type: "multiSelect", value: [], editable: true, options: chunkPreprocessOptions },
 ];
 
 const qaParams: ToolParam[] = [
-  textChunkInputParam,
+  extractionObjectParam,
   { id: "aiModel", label: "AI模型", desc: "选择提取模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: extractionModelOptions },
   { id: "temperature", label: "温度", desc: "模型生成温度。", type: "number", value: 0.7, required: true, editable: true, min: 0, max: 2 },
   { id: "maxTokens", label: "max tokens", desc: "模型最大输出 tokens。", type: "number", value: 2048, required: true, editable: true, min: 1, max: 32768 },
@@ -228,7 +228,7 @@ const qaParams: ToolParam[] = [
 ];
 
 const summaryParams: ToolParam[] = [
-  textChunkInputParam,
+  extractionObjectParam,
   { id: "aiModel", label: "AI模型", desc: "选择提取模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: extractionModelOptions },
   { id: "temperature", label: "温度", desc: "模型生成温度。", type: "number", value: 0.7, required: true, editable: true, min: 0, max: 2 },
   { id: "maxTokens", label: "max tokens", desc: "模型最大输出 tokens。", type: "number", value: 2048, required: true, editable: true, min: 1, max: 32768 },
@@ -237,7 +237,7 @@ const summaryParams: ToolParam[] = [
 ];
 
 const keywordParams: ToolParam[] = [
-  textChunkInputParam,
+  extractionObjectParam,
   { id: "aiModel", label: "AI模型", desc: "选择提取模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: extractionModelOptions },
   { id: "temperature", label: "温度", desc: "模型生成温度。", type: "number", value: 0.7, required: true, editable: true, min: 0, max: 2 },
   { id: "maxTokens", label: "max tokens", desc: "模型最大输出 tokens。", type: "number", value: 2048, required: true, editable: true, min: 1, max: 32768 },
@@ -350,8 +350,8 @@ function isParamVisible(node: ToolNode, param: ToolParam) {
 function getInputSourceLabel(node: ToolNode, nodes: ToolNode[]) {
   const inputParam = getToolInputParam(node);
   if (!inputParam) return "未指定输入参数";
-  if (nodes[0]?.nodeId === node.nodeId) return `${inputParam.label} <- 文档地址信息`;
-  if (node.inputSource.type !== "upstream") return `${inputParam.label} <- 固定值`;
+  if (nodes[0]?.nodeId === node.nodeId) return `${inputParam.label} <- ${node.category === "解析" ? "样例文件" : "外部输入"}`;
+  if (node.inputSource.type !== "upstream") return `${inputParam.label} <- 外部输入`;
   const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
   const output = sourceNode?.outputs.find((item) => item.id === node.inputSource.outputId);
   return `${inputParam.label} <- ${sourceNode?.toolName ?? "来源已失效"}.${output?.label ?? "输出已失效"}`;
@@ -359,8 +359,8 @@ function getInputSourceLabel(node: ToolNode, nodes: ToolNode[]) {
 function getInputSourceParts(node: ToolNode, nodes: ToolNode[]) {
   const inputParam = getToolInputParam(node);
   if (!inputParam) return { paramName: "未指定输入参数", source: "未指定来源" };
-  if (nodes[0]?.nodeId === node.nodeId) return { paramName: inputParam.label, source: "文档地址信息" };
-  if (node.inputSource.type !== "upstream") return { paramName: inputParam.label, source: "固定值" };
+  if (nodes[0]?.nodeId === node.nodeId) return { paramName: inputParam.label, source: node.category === "解析" ? "样例文件" : "外部输入" };
+  if (node.inputSource.type !== "upstream") return { paramName: inputParam.label, source: "外部输入" };
   const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
   const output = sourceNode?.outputs.find((item) => item.id === node.inputSource.outputId);
   return { paramName: inputParam.label, source: `${sourceNode?.toolName ?? "来源已失效"}.${output?.label ?? "输出已失效"}` };
@@ -1051,12 +1051,12 @@ function ToolEditDrawer({
                   </Select>
                 </FormControl>
                 {isFirstNode ? (
-                  <TextField size="small" fullWidth label="取值方式" value="文档地址信息" disabled sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }} />
+                  <TextField size="small" fullWidth label="取值方式" value={node.category === "解析" ? "样例文件" : "外部输入"} disabled sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }} />
                 ) : (
                   <FormControl fullWidth size="small">
                     <InputLabel>取值方式</InputLabel>
                     <Select label="取值方式" value={node.inputSource.type} disabled={!canEdit || priorNodes.length === 0} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceType(event.target.value as InputSource["type"])}>
-                      <MenuItem value="fixed">固定值</MenuItem>
+                      <MenuItem value="fixed">外部输入</MenuItem>
                       <MenuItem value="upstream">上游工具输出</MenuItem>
                     </Select>
                   </FormControl>
