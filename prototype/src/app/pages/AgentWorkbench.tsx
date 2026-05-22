@@ -744,10 +744,6 @@ export function AgentWorkbench() {
                       if (draggingCategory) moveCategoryTo(draggingCategory, section.category);
                     }}
                     onRemove={removeNode}
-                    onToggle={(nodeId) => {
-                      updateNode(nodeId, (node) => ({ ...node, adjusted: true, enabled: !node.enabled }));
-                      setHasManualEdits(true);
-                    }}
                     onExpand={(nodeId) => updateNode(nodeId, (node) => ({ ...node, expanded: !node.expanded }))}
                     onEdit={(nodeId) => setEditingNodeId(nodeId)}
                     onDragStart={setDraggingNodeId}
@@ -818,7 +814,6 @@ function PlanSection({
   onCategoryDragStart,
   onCategoryDrop,
   onRemove,
-  onToggle,
   onExpand,
   onEdit,
   onDragStart,
@@ -838,7 +833,6 @@ function PlanSection({
   onCategoryDragStart: () => void;
   onCategoryDrop: () => void;
   onRemove: (nodeId: string) => void;
-  onToggle: (nodeId: string) => void;
   onExpand: (nodeId: string) => void;
   onEdit: (nodeId: string) => void;
   onDragStart: (nodeId: string) => void;
@@ -879,7 +873,6 @@ function PlanSection({
             canDrag={canEdit && nodes.length > 1}
             warnings={warnings[node.nodeId] ?? []}
             onRemove={() => onRemove(node.nodeId)}
-            onToggle={() => onToggle(node.nodeId)}
             onExpand={() => onExpand(node.nodeId)}
             onEdit={() => onEdit(node.nodeId)}
             onDragStart={() => onDragStart(node.nodeId)}
@@ -898,7 +891,6 @@ function ToolNodeCard({
   canDrag,
   warnings,
   onRemove,
-  onToggle,
   onExpand,
   onEdit,
   onDragStart,
@@ -910,7 +902,6 @@ function ToolNodeCard({
   canDrag: boolean;
   warnings: string[];
   onRemove: () => void;
-  onToggle: () => void;
   onExpand: () => void;
   onEdit: () => void;
   onDragStart: () => void;
@@ -938,7 +929,6 @@ function ToolNodeCard({
     >
       <Box sx={{ px: 1, py: 1, display: "flex", alignItems: "center", gap: 0.75 }}>
         {canDrag && <DragIndicator sx={{ color: "#9ca3af", cursor: "grab", fontSize: 18 }} />}
-        <Checkbox size="small" checked={node.enabled} disabled={!canEdit} onChange={onToggle} sx={{ p: 0.25, color: "#801AEB", "&.Mui-checked": { color: "#801AEB" } }} />
         <Box sx={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 0.35 }}>
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {node.toolName}
