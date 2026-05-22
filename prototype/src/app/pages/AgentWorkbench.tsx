@@ -35,8 +35,6 @@ import {
   ExpandLess,
   ExpandMore,
   FactCheck,
-  KeyboardArrowDown,
-  KeyboardArrowUp,
   Send,
   UploadFile,
   WarningAmber,
@@ -113,57 +111,144 @@ const mcpService: McpService = {
   version: "V1.0.0",
 };
 
+const parserParams: ToolParam[] = [
+  { id: "documentAddress", label: "文档地址信息", desc: "解析入口输出的文档地址信息。", type: "textarea", value: "解析入口输出的文档地址信息", required: true, editable: true },
+  { id: "parseMode", label: "解析方式", desc: "选择文档解析方式。", type: "select", value: "通用解析", required: true, editable: true, showOnPage: true, options: ["通用解析", "多模态解析", "医保政策文件解析"] },
+  { id: "textExtract", label: "文档文字提取（OCR）", desc: "基于规则的文档文字提取。", type: "switch", value: false, editable: true },
+  { id: "contentExtract", label: "文档内容提取（OCR）", desc: "图片、扫描文档需要开启。", type: "switch", value: true, editable: true, showOnPage: true },
+  { id: "imageExtract", label: "提取文档图片（OCR）", desc: "图文混合问答需要开启。", type: "switch", value: false, editable: true },
+  { id: "vlmExtract", label: "图片内容解析（VLM）", desc: "理解并提取图片信息。", type: "switch", value: false, editable: true, showOnPage: true },
+  { id: "tableDeepParse", label: "表格深度解析（OCR）", desc: "深度识别文档中表格信息。", type: "switch", value: false, editable: true },
+  { id: "ocrService", label: "OCR服务", desc: "选择用于 OCR 的解析服务。", type: "select", value: "通用OCR服务", required: true, editable: true, options: ["通用OCR服务", "医保文档OCR服务", "票据OCR服务"] },
+  { id: "vlmModel", label: "VLM模型", desc: "图片内容理解模型。", type: "select", value: "qwen-vl-plus", editable: true, options: ["qwen-vl-plus", "qwen-vl-max", "internvl2"] },
+  { id: "systemPrompt", label: "System", desc: "多模态解析时使用的系统提示词。", type: "textarea", value: "你是图像文字识别与信息抽取专家，精通图像预处理、OCR 及数学公式解析，输出简洁、客观的 Markdown 结果。", editable: true },
+  { id: "userPrompt", label: "User", desc: "多模态解析时使用的用户提示词。", type: "textarea", value: "提取图片信息", editable: true },
+];
+
+const splitterParams: ToolParam[] = [
+  { id: "documentParseResult", label: "文档解析结果", desc: "来自文档解析工具的解析结果。", type: "textarea", value: "", required: true, editable: true },
+  { id: "splitMode", label: "分片方式", desc: "选择文本分片方式。", type: "select", value: "通用分片", required: true, editable: true, showOnPage: true, options: ["通用分片", "自定义分隔符分片", "分隔符递归分片", "OCR解析专用分片", "医保政策文件分片"] },
+  { id: "associateFileName", label: "关联文件名", desc: "为分片结果关联文档名称。", type: "switch", value: false, editable: true, showOnPage: true },
+  { id: "associateTitle", label: "关联标题及子标题", desc: "为分片结果关联标题和子标题信息。", type: "switch", value: false, editable: true, showOnPage: true },
+  { id: "chunkSize", label: "理想分块长度", desc: "单个分片的目标长度。", type: "number", value: 1024, required: true, editable: true, showOnPage: true, min: 200, max: 4000, unit: "字" },
+  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 200, required: true, editable: true, min: 0, max: 1000, unit: "字" },
+  { id: "customSeparator", label: "自定义分隔符", desc: "自定义分隔符分片时必填，例如 +++。", type: "text", value: "+++", editable: true },
+  { id: "recursiveSeparators", label: "切分分隔符", desc: "递归分片时按优先级依次切分。", type: "tags", value: ["\\n\\n", "\\n"], editable: true },
+  { id: "removeLineBreak", label: "删除换行符", desc: "分片预处理，删除文本中的换行符。", type: "switch", value: false, editable: true },
+  { id: "removeUrl", label: "删除所有URL", desc: "分片预处理，删除文本中的 URL。", type: "switch", value: false, editable: true },
+  { id: "normalizeWhitespace", label: "替换连续空格换行符和制表符", desc: "分片预处理，标准化连续空白字符。", type: "switch", value: false, editable: true },
+  { id: "removeEmail", label: "删除所有电子邮件地址", desc: "分片预处理，删除文本中的邮箱地址。", type: "switch", value: false, editable: true },
+];
+
+const extractionBaseParams: ToolParam[] = [
+  { id: "textChunkResult", label: "文本分片结果", desc: "来自文本分片工具的分片结果。", type: "textarea", value: "", required: true, editable: true },
+  { id: "aiModel", label: "AI模型", desc: "用于抽取任务的模型。", type: "select", value: "qwen3-8b", required: true, editable: true, showOnPage: true, options: ["qwen3-8b", "qwen3-14b", "qwen-plus"] },
+];
+
 const toolCatalog: McpTool[] = [
   {
     id: "document-parser",
-    name: "文档解析",
+    name: "通用解析",
     category: "解析",
     summary: "解析 Word、PDF、Excel、图片、HTML 等文档，提取文本、版面和结构化解析结果。",
     status: "可用",
     input: "sampleFile",
     output: "rawText",
-    params: [
-      { id: "documentAddress", label: "文档地址信息", desc: "解析入口输出的文档地址信息。", type: "textarea", value: "解析入口输出的文档地址信息", required: true, editable: true },
-      { id: "parseMode", label: "解析方式", desc: "选择文档解析方式。", type: "select", value: "通用解析", required: true, editable: true, showOnPage: true, options: ["通用解析", "多模态解析", "医保政策文件解析"] },
-      { id: "textExtract", label: "文档文字提取（OCR）", desc: "基于规则的文档文字提取。", type: "switch", value: false, editable: true },
-      { id: "contentExtract", label: "文档内容提取（OCR）", desc: "图片、扫描文档需要开启。", type: "switch", value: true, editable: true, showOnPage: true },
-      { id: "imageExtract", label: "提取文档图片（OCR）", desc: "图文混合问答需要开启。", type: "switch", value: false, editable: true },
-      { id: "vlmExtract", label: "图片内容解析（VLM）", desc: "理解并提取图片信息。", type: "switch", value: false, editable: true, showOnPage: true },
-      { id: "tableDeepParse", label: "表格深度解析（OCR）", desc: "深度识别文档中表格信息。", type: "switch", value: false, editable: true },
-      { id: "ocrService", label: "OCR服务", desc: "选择用于 OCR 的解析服务。", type: "select", value: "通用OCR服务", required: true, editable: true, options: ["通用OCR服务", "医保文档OCR服务", "票据OCR服务"] },
-      { id: "vlmModel", label: "VLM模型", desc: "图片内容理解模型。", type: "select", value: "qwen-vl-plus", editable: true, options: ["qwen-vl-plus", "qwen-vl-max", "internvl2"] },
-      { id: "systemPrompt", label: "System", desc: "多模态解析时使用的系统提示词。", type: "textarea", value: "你是图像文字识别与信息抽取专家，精通图像预处理、OCR 及数学公式解析，输出简洁、客观的 Markdown 结果。", editable: true },
-      { id: "userPrompt", label: "User", desc: "多模态解析时使用的用户提示词。", type: "textarea", value: "提取图片信息", editable: true },
-    ],
-    outputs: [
-      { id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含解析后的文本、版面、图片和表格信息。" },
-    ],
+    params: parserParams,
+    outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含解析后的文本、版面、图片和表格信息。" }],
+  },
+  {
+    id: "multimodal-parser",
+    name: "多模态解析",
+    category: "解析",
+    summary: "使用多模态大模型理解文档与图片内容，适合图片、扫描件和复杂版面。",
+    status: "可用",
+    input: "sampleFile",
+    output: "rawText",
+    params: parserParams.map((param) => (param.id === "parseMode" ? { ...param, value: "多模态解析" } : param)),
+    outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含多模态解析后的文本、图片理解和版面信息。" }],
+  },
+  {
+    id: "medical-policy-parser",
+    name: "医保政策文件解析",
+    category: "解析",
+    summary: "面向医保政策类文档解析，提取政策条款、标题层级和关键结构。",
+    status: "可用",
+    input: "sampleFile",
+    output: "rawText",
+    params: parserParams.map((param) => (param.id === "parseMode" ? { ...param, value: "医保政策文件解析" } : param)),
+    outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含医保政策文档的条款、标题和正文结构。" }],
   },
   {
     id: "chunk-splitter",
-    name: "文本分片",
+    name: "通用分片",
     category: "分片",
-    summary: "将输入文本按照规则切分为结构化文字片段，支持通用分片、自定义分隔符和 OCR 专用分片。",
+    summary: "为纯文本文档提供灵活的分块和重叠设置。",
     status: "可用",
     input: "rawText",
     output: "cleanText",
+    params: splitterParams,
+    outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含分片文本、标题、来源和元数据。" }],
+  },
+  {
+    id: "custom-separator-splitter",
+    name: "自定义分隔符分片",
+    category: "分片",
+    summary: "使用指定分隔符严格切分文本，适合边界明确的文档。",
+    status: "可用",
+    input: "rawText",
+    output: "cleanText",
+    params: splitterParams.map((param) => (param.id === "splitMode" ? { ...param, value: "自定义分隔符分片" } : param)),
+    outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含按自定义分隔符切分后的文本片段。" }],
+  },
+  {
+    id: "recursive-separator-splitter",
+    name: "分隔符递归分片",
+    category: "分片",
+    summary: "按分隔符优先级递归切分，优先保留语义完整。",
+    status: "可用",
+    input: "rawText",
+    output: "cleanText",
+    params: splitterParams.map((param) => (param.id === "splitMode" ? { ...param, value: "分隔符递归分片" } : param)),
+    outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含递归切分后的文本片段。" }],
+  },
+  {
+    id: "ocr-splitter",
+    name: "OCR解析专用分片",
+    category: "分片",
+    summary: "根据 OCR 识别标题和段落进行切分、聚合。",
+    status: "可用",
+    input: "rawText",
+    output: "cleanText",
+    params: splitterParams.map((param) => (param.id === "splitMode" ? { ...param, value: "OCR解析专用分片" } : param)),
+    outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含面向 OCR 结果聚合后的文本片段。" }],
+  },
+  {
+    id: "medical-policy-splitter",
+    name: "医保政策文件分片",
+    category: "分片",
+    summary: "适合医保政策类文件分片，根据内容标题及段落切分为完整内容。",
+    status: "可用",
+    input: "rawText",
+    output: "cleanText",
+    params: splitterParams.map((param) => (param.id === "splitMode" ? { ...param, value: "医保政策文件分片" } : param)),
+    outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含医保政策文件分片结果。" }],
+  },
+  {
+    id: "qa-extractor",
+    name: "QA提取",
+    category: "抽取",
+    summary: "基于文本分片抽取问答对，适用于从非结构化文档中获取清晰问答知识。",
+    status: "可用",
+    input: "cleanText",
+    output: "qaPairs",
     params: [
-      { id: "documentParseResult", label: "文档解析结果", desc: "来自文档解析工具的解析结果。", type: "textarea", value: "", required: true, editable: true },
-      { id: "splitMode", label: "分片方式", desc: "选择文本分片方式。", type: "select", value: "通用分片", required: true, editable: true, showOnPage: true, options: ["通用分片", "自定义分隔符分片", "分隔符递归分片", "OCR解析专用分片", "医保政策文件分片"] },
-      { id: "associateFileName", label: "关联文件名", desc: "为分片结果关联文档名称。", type: "switch", value: false, editable: true, showOnPage: true },
-      { id: "associateTitle", label: "关联标题及子标题", desc: "为分片结果关联标题和子标题信息。", type: "switch", value: false, editable: true, showOnPage: true },
-      { id: "chunkSize", label: "理想分块长度", desc: "单个分片的目标长度。", type: "number", value: 1024, required: true, editable: true, showOnPage: true, min: 200, max: 4000, unit: "字" },
-      { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 200, required: true, editable: true, min: 0, max: 1000, unit: "字" },
-      { id: "customSeparator", label: "自定义分隔符", desc: "自定义分隔符分片时必填，例如 +++。", type: "text", value: "+++", editable: true },
-      { id: "recursiveSeparators", label: "切分分隔符", desc: "递归分片时按优先级依次切分。", type: "tags", value: ["\\n\\n", "\\n"], editable: true },
-      { id: "removeLineBreak", label: "删除换行符", desc: "分片预处理，删除文本中的换行符。", type: "switch", value: false, editable: true },
-      { id: "removeUrl", label: "删除所有URL", desc: "分片预处理，删除文本中的 URL。", type: "switch", value: false, editable: true },
-      { id: "normalizeWhitespace", label: "替换连续空格换行符和制表符", desc: "分片预处理，标准化连续空白字符。", type: "switch", value: false, editable: true },
-      { id: "removeEmail", label: "删除所有电子邮件地址", desc: "分片预处理，删除文本中的邮箱地址。", type: "switch", value: false, editable: true },
+      ...extractionBaseParams,
+      { id: "systemPrompt", label: "System Prompt", desc: "QA 提取系统提示词。", type: "textarea", value: "你是一个QA抽取专家，擅长学习和分析提供的文本信息，并整理为标准问答知识。", editable: true },
+      { id: "referencePrompt", label: "引用模板提示词", desc: "用于控制问答引用和来源格式。", type: "textarea", value: "学习和分析<context></context>中的文本，并整理学习成果。", editable: true },
+      { id: "maxCount", label: "最多生成条数", desc: "限制单份样例最多生成的问答数量。", type: "number", value: 30, required: true, editable: true, showOnPage: true, min: 1, max: 100, unit: "条" },
     ],
-    outputs: [
-      { id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含分片文本、标题、来源和元数据。" },
-    ],
+    outputs: [{ id: "qaResult", label: "QA提取结果", desc: "Array<json>，包含问题、答案和引用来源。" }],
   },
   {
     id: "summary",
@@ -174,33 +259,11 @@ const toolCatalog: McpTool[] = [
     input: "cleanText",
     output: "rawText",
     params: [
-      { id: "textChunkResult", label: "文本分片结果", desc: "来自文本分片工具的分片结果。", type: "textarea", value: "", required: true, editable: true },
-      { id: "aiModel", label: "AI模型", desc: "用于摘要总结的模型。", type: "select", value: "qwen3-8b", required: true, editable: true, showOnPage: true, options: ["qwen3-8b", "qwen3-14b", "qwen-plus"] },
+      ...extractionBaseParams,
       { id: "systemPrompt", label: "System Prompt", desc: "摘要总结系统提示词。", type: "textarea", value: "你是一个摘要总结专家，擅长从非结构化文档中提炼关键事实、规则和结论。", editable: true },
       { id: "summaryLength", label: "摘要长度", desc: "控制摘要输出长度。", type: "number", value: 300, required: true, editable: true, showOnPage: true, min: 80, max: 1000, unit: "tokens" },
     ],
-    outputs: [
-      { id: "summaryResult", label: "摘要总结结果", desc: "Array<json>，包含摘要内容和来源引用。" },
-    ],
-  },
-  {
-    id: "qa-extractor",
-    name: "QA 抽取",
-    category: "抽取",
-    summary: "基于文本分片抽取问答对，适用于从非结构化文档中获取清晰问答知识。",
-    status: "可用",
-    input: "cleanText",
-    output: "qaPairs",
-    params: [
-      { id: "textChunkResult", label: "文本分片结果", desc: "来自文本分片工具的分片结果。", type: "textarea", value: "", required: true, editable: true },
-      { id: "aiModel", label: "AI模型", desc: "用于 QA 抽取的模型。", type: "select", value: "qwen3-8b", required: true, editable: true, showOnPage: true, options: ["qwen3-8b", "qwen3-14b", "qwen-plus"] },
-      { id: "systemPrompt", label: "System Prompt", desc: "QA 抽取系统提示词。", type: "textarea", value: "你是一个QA抽取专家，擅长学习和分析提供的文本信息，并整理为标准问答知识。", editable: true },
-      { id: "referencePrompt", label: "引用模板提示词", desc: "用于控制问答引用和来源格式。", type: "textarea", value: "学习和分析<context></context>中的文本，并整理学习成果。", editable: true },
-      { id: "maxCount", label: "最多生成条数", desc: "限制单份样例最多生成的问答数量。", type: "number", value: 30, required: true, editable: true, showOnPage: true, min: 1, max: 100, unit: "条" },
-    ],
-    outputs: [
-      { id: "qaResult", label: "QA抽取结果", desc: "Array<json>，包含问题、答案和引用来源。" },
-    ],
+    outputs: [{ id: "summaryResult", label: "摘要总结结果", desc: "Array<json>，包含摘要内容和来源引用。" }],
   },
   {
     id: "keyword-extractor",
@@ -211,14 +274,11 @@ const toolCatalog: McpTool[] = [
     input: "cleanText",
     output: "rawText",
     params: [
-      { id: "textChunkResult", label: "文本分片结果", desc: "来自文本分片工具的分片结果。", type: "textarea", value: "", required: true, editable: true },
-      { id: "aiModel", label: "AI模型", desc: "用于关键词提取的模型。", type: "select", value: "qwen3-8b", required: true, editable: true, showOnPage: true, options: ["qwen3-8b", "qwen3-14b", "qwen-plus"] },
+      ...extractionBaseParams,
       { id: "keywordCount", label: "关键词数量", desc: "控制单个切片最多输出的关键词数量。", type: "number", value: 12, required: true, editable: true, showOnPage: true, min: 3, max: 50, unit: "个" },
       { id: "includeEntity", label: "包含实体词", desc: "开启后同时抽取机构、产品、规则等实体词。", type: "switch", value: true, editable: true },
     ],
-    outputs: [
-      { id: "keywordResult", label: "关键词提取结果", desc: "Array<json>，包含关键词、实体词和权重。" },
-    ],
+    outputs: [{ id: "keywordResult", label: "关键词提取结果", desc: "Array<json>，包含关键词、实体词和权重。" }],
   },
 ];
 
@@ -345,7 +405,7 @@ function getNodeWarnings(nodes: ToolNode[]) {
       warnings[node.nodeId] = [...(warnings[node.nodeId] ?? []), `${node.toolName} 当前不可用于新处理方案`];
     }
     if (isInputSourceInvalid(node, nodes)) {
-      warnings[node.nodeId] = [...(warnings[node.nodeId] ?? []), "输入来源已失效或不在当前工具之前"];
+      warnings[node.nodeId] = [...(warnings[node.nodeId] ?? []), "输入配置异常，请检查。"];
     }
   });
 
@@ -374,6 +434,7 @@ export function AgentWorkbench() {
   const [selectedCategory, setSelectedCategory] = useState("全部");
   const [selectedToolId, setSelectedToolId] = useState(toolCatalog[0].id);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [draggingCategory, setDraggingCategory] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [hasManualEdits, setHasManualEdits] = useState(false);
@@ -386,10 +447,11 @@ export function AgentWorkbench() {
   const editingNode = planNodes.find((node) => node.nodeId === editingNodeId) ?? null;
   const addedToolIds = useMemo(() => new Set(planNodes.map((node) => node.toolId)), [planNodes]);
 
-  const filteredTools = (selectedCategory === "全部"
+  const filteredTools = selectedCategory === "全部"
     ? toolCatalog
-    : toolCatalog.filter((tool) => tool.category === selectedCategory)).filter((tool) => !addedToolIds.has(tool.id));
-  const currentTool = filteredTools.find((tool) => tool.id === selectedToolId) ?? filteredTools[0] ?? null;
+    : toolCatalog.filter((tool) => tool.category === selectedCategory);
+  const currentTool = toolCatalog.find((tool) => tool.id === selectedToolId) ?? filteredTools[0] ?? null;
+  const selectedToolAdded = currentTool ? addedToolIds.has(currentTool.id) : false;
 
   const updateNode = (nodeId: string, updater: (node: ToolNode) => ToolNode) => {
     setPlanNodes((current) => current.map((node) => (node.nodeId === nodeId ? updater(node) : node)));
@@ -398,11 +460,11 @@ export function AgentWorkbench() {
   const openAddTool = () => {
     setAddDialogOpen(true);
     setSelectedCategory("全部");
-    setSelectedToolId(toolCatalog.find((tool) => !addedToolIds.has(tool.id))?.id ?? "");
+    setSelectedToolId(toolCatalog[0]?.id ?? "");
   };
 
   const addTool = () => {
-    if (!canEdit || !currentTool) return;
+    if (!canEdit || !currentTool || selectedToolAdded) return;
     const node = createNode(currentTool.id);
     setPlanNodes((current) => [...current, { ...node, expanded: true }]);
     setHasManualEdits(true);
@@ -440,6 +502,7 @@ export function AgentWorkbench() {
     const from = planNodes.findIndex((node) => node.nodeId === draggingNodeId);
     const to = planNodes.findIndex((node) => node.nodeId === targetId);
     if (from < 0 || to < 0) return;
+    if (planNodes[from].category !== planNodes[to].category) return;
     const next = [...planNodes];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
@@ -478,37 +541,19 @@ export function AgentWorkbench() {
     setHasManualEdits(true);
   };
 
-  const moveCategory = (category: string, direction: "up" | "down") => {
-    if (!canEdit) return;
+  const moveCategoryTo = (category: string, targetCategory: string) => {
+    if (!canEdit || category === targetCategory) return;
     const categoriesInOrder = categorySections.map((section) => section.category);
     const from = categoriesInOrder.indexOf(category);
-    const to = direction === "up" ? from - 1 : from + 1;
-    if (from < 0 || to < 0 || to >= categoriesInOrder.length) return;
+    const to = categoriesInOrder.indexOf(targetCategory);
+    if (from < 0 || to < 0) return;
     const nextCategories = [...categoriesInOrder];
     const [moved] = nextCategories.splice(from, 1);
     nextCategories.splice(to, 0, moved);
     const grouped = new Map(categorySections.map((section) => [section.category, section.nodes]));
     setPlanNodes(nextCategories.flatMap((item) => grouped.get(item) ?? []));
     setHasManualEdits(true);
-  };
-
-  const moveNodeInCategory = (nodeId: string, direction: "up" | "down") => {
-    if (!canEdit) return;
-    const node = planNodes.find((item) => item.nodeId === nodeId);
-    if (!node) return;
-    const sameCategoryNodes = planNodes.filter((item) => item.category === node.category);
-    const fromInCategory = sameCategoryNodes.findIndex((item) => item.nodeId === nodeId);
-    const toInCategory = direction === "up" ? fromInCategory - 1 : fromInCategory + 1;
-    if (toInCategory < 0 || toInCategory >= sameCategoryNodes.length) return;
-    const nextCategoryNodes = [...sameCategoryNodes];
-    const [moved] = nextCategoryNodes.splice(fromInCategory, 1);
-    nextCategoryNodes.splice(toInCategory, 0, moved);
-    const next = planNodes.map((item) => {
-      if (item.category !== node.category) return item;
-      return nextCategoryNodes.shift()!;
-    });
-    setPlanNodes(next);
-    setHasManualEdits(true);
+    setDraggingCategory(null);
   };
 
   return (
@@ -582,10 +627,11 @@ export function AgentWorkbench() {
                     allNodes={planNodes}
                     canEdit={canEdit}
                     warnings={nodeWarnings}
-                    canMoveCategoryUp={categorySections.findIndex((item) => item.category === section.category) > 0}
-                    canMoveCategoryDown={categorySections.findIndex((item) => item.category === section.category) < categorySections.length - 1}
-                    onMoveCategoryUp={() => moveCategory(section.category, "up")}
-                    onMoveCategoryDown={() => moveCategory(section.category, "down")}
+                    canDragCategory={canEdit && categorySections.length > 1}
+                    onCategoryDragStart={() => setDraggingCategory(section.category)}
+                    onCategoryDrop={() => {
+                      if (draggingCategory) moveCategoryTo(draggingCategory, section.category);
+                    }}
                     onRemove={removeNode}
                     onToggle={(nodeId) => {
                       updateNode(nodeId, (node) => ({ ...node, enabled: !node.enabled }));
@@ -593,8 +639,6 @@ export function AgentWorkbench() {
                     }}
                     onExpand={(nodeId) => updateNode(nodeId, (node) => ({ ...node, expanded: !node.expanded }))}
                     onEdit={(nodeId) => setEditingNodeId(nodeId)}
-                    onMoveNodeUp={(nodeId) => moveNodeInCategory(nodeId, "up")}
-                    onMoveNodeDown={(nodeId) => moveNodeInCategory(nodeId, "down")}
                     onDragStart={setDraggingNodeId}
                     onDrop={onDropNode}
                   />
@@ -617,8 +661,7 @@ export function AgentWorkbench() {
         selectedCategory={selectedCategory}
         onCategoryChange={(category) => {
           setSelectedCategory(category);
-          const available = (category === "全部" ? toolCatalog : toolCatalog.filter((tool) => tool.category === category)).filter((tool) => !addedToolIds.has(tool.id));
-          const nextTool = available[0];
+          const nextTool = (category === "全部" ? toolCatalog : toolCatalog.filter((tool) => tool.category === category))[0];
           setSelectedToolId(nextTool?.id ?? "");
         }}
         tools={filteredTools}
@@ -629,6 +672,7 @@ export function AgentWorkbench() {
         currentTool={currentTool}
         service={mcpService}
         addedToolIds={addedToolIds}
+        selectedToolAdded={selectedToolAdded}
         onClose={() => setAddDialogOpen(false)}
         onAdd={addTool}
       />
@@ -653,16 +697,13 @@ function PlanSection({
   allNodes,
   canEdit,
   warnings,
-  canMoveCategoryUp,
-  canMoveCategoryDown,
-  onMoveCategoryUp,
-  onMoveCategoryDown,
+  canDragCategory,
+  onCategoryDragStart,
+  onCategoryDrop,
   onRemove,
   onToggle,
   onExpand,
   onEdit,
-  onMoveNodeUp,
-  onMoveNodeDown,
   onDragStart,
   onDrop,
 }: {
@@ -671,50 +712,44 @@ function PlanSection({
   allNodes: ToolNode[];
   canEdit: boolean;
   warnings: Record<string, string[]>;
-  canMoveCategoryUp: boolean;
-  canMoveCategoryDown: boolean;
-  onMoveCategoryUp: () => void;
-  onMoveCategoryDown: () => void;
+  canDragCategory: boolean;
+  onCategoryDragStart: () => void;
+  onCategoryDrop: () => void;
   onRemove: (nodeId: string) => void;
   onToggle: (nodeId: string) => void;
   onExpand: (nodeId: string) => void;
   onEdit: (nodeId: string) => void;
-  onMoveNodeUp: (nodeId: string) => void;
-  onMoveNodeDown: (nodeId: string) => void;
   onDragStart: (nodeId: string) => void;
   onDrop: (nodeId: string) => void;
 }) {
   const title = getPlanTitle(category);
   return (
-    <Box sx={{ border: "1px solid #E0E8F2", borderRadius: "12px", overflow: "hidden" }}>
+    <Box
+      draggable={canDragCategory}
+      onDragStart={canDragCategory ? onCategoryDragStart : undefined}
+      onDragOver={canDragCategory ? (event) => event.preventDefault() : undefined}
+      onDrop={canDragCategory ? onCategoryDrop : undefined}
+      sx={{ border: "1px solid #E0E8F2", borderRadius: "12px", overflow: "hidden" }}
+    >
       <Box sx={{ px: 1.5, py: 1.25, bgcolor: "#FBFCFF", borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
-        <Box sx={{ minWidth: 0 }}>
+        <Box sx={{ minWidth: 0, display: "flex", alignItems: "center", gap: 0.75 }}>
+          {canDragCategory && <DragIndicator sx={{ color: "#9ca3af", cursor: "grab", fontSize: 18 }} />}
           <Typography sx={{ fontSize: 14, fontWeight: 700, color: "#1f2937" }}>{title}</Typography>
         </Box>
-        {canEdit && (
-          <Stack direction="row" spacing={0.25}>
-            <IconButton aria-label="上移分类" size="small" disabled={!canMoveCategoryUp} onClick={onMoveCategoryUp} sx={{ width: 26, height: 26 }}><KeyboardArrowUp fontSize="small" /></IconButton>
-            <IconButton aria-label="下移分类" size="small" disabled={!canMoveCategoryDown} onClick={onMoveCategoryDown} sx={{ width: 26, height: 26 }}><KeyboardArrowDown fontSize="small" /></IconButton>
-          </Stack>
-        )}
       </Box>
       <Stack spacing={1} sx={{ p: 1 }}>
-        {nodes.map((node, index) => (
+        {nodes.map((node) => (
           <ToolNodeCard
             key={node.nodeId}
             node={node}
             allNodes={allNodes}
-            index={index}
             canEdit={canEdit}
-            canMoveUp={index > 0}
-            canMoveDown={index < nodes.length - 1}
+            canDrag={canEdit && nodes.length > 1}
             warnings={warnings[node.nodeId] ?? []}
             onRemove={() => onRemove(node.nodeId)}
             onToggle={() => onToggle(node.nodeId)}
             onExpand={() => onExpand(node.nodeId)}
             onEdit={() => onEdit(node.nodeId)}
-            onMoveUp={() => onMoveNodeUp(node.nodeId)}
-            onMoveDown={() => onMoveNodeDown(node.nodeId)}
             onDragStart={() => onDragStart(node.nodeId)}
             onDrop={() => onDrop(node.nodeId)}
           />
@@ -727,48 +762,41 @@ function PlanSection({
 function ToolNodeCard({
   node,
   allNodes,
-  index,
   canEdit,
-  canMoveUp,
-  canMoveDown,
+  canDrag,
   warnings,
   onRemove,
   onToggle,
   onExpand,
   onEdit,
-  onMoveUp,
-  onMoveDown,
   onDragStart,
   onDrop,
 }: {
   node: ToolNode;
   allNodes: ToolNode[];
-  index: number;
   canEdit: boolean;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
+  canDrag: boolean;
   warnings: string[];
   onRemove: () => void;
   onToggle: () => void;
   onExpand: () => void;
   onEdit: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
   onDragStart: () => void;
   onDrop: () => void;
 }) {
   const hasWarning = warnings.length > 0;
+  const hasInputWarning = warnings.includes("输入配置异常，请检查。");
   const configParams = node.params.filter((param) => param.id !== node.inputParamId);
   const showOnPageCount = node.params.filter((param) => param.showOnPage).length;
   return (
     <Box
-      draggable={canEdit}
-      onDragStart={onDragStart}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={onDrop}
+      draggable={canDrag}
+      onDragStart={canDrag ? onDragStart : undefined}
+      onDragOver={canDrag ? (event) => event.preventDefault() : undefined}
+      onDrop={canDrag ? onDrop : undefined}
       sx={{
         border: "1px solid",
-        borderColor: hasWarning ? "#fed7aa" : "#E0E8F2",
+        borderColor: hasInputWarning ? "#ef4444" : hasWarning ? "#fed7aa" : "#E0E8F2",
         borderRadius: "10px",
         bgcolor: hasWarning ? "#fffaf0" : node.enabled ? "#fff" : "#F8FAFC",
         opacity: node.enabled ? 1 : 0.7,
@@ -776,32 +804,23 @@ function ToolNodeCard({
       }}
     >
       <Box sx={{ px: 1, py: 1, display: "flex", alignItems: "center", gap: 0.75 }}>
-        <DragIndicator sx={{ color: canEdit ? "#9ca3af" : "#d1d5db", cursor: canEdit ? "grab" : "default", fontSize: 18 }} />
-        <Box sx={{ width: 22, height: 22, borderRadius: "50%", bgcolor: hasWarning ? "#ffedd5" : "#f5f3ff", color: hasWarning ? "#c2410c" : "#801AEB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>
-          {index + 1}
-        </Box>
+        {canDrag && <DragIndicator sx={{ color: "#9ca3af", cursor: "grab", fontSize: 18 }} />}
         <Checkbox size="small" checked={node.enabled} disabled={!canEdit} onChange={onToggle} sx={{ p: 0.25, color: "#801AEB", "&.Mui-checked": { color: "#801AEB" } }} />
-        <Box sx={{ minWidth: 0, flex: 1 }}>
+        <Box sx={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 0.35 }}>
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {node.toolName}
           </Typography>
+          <IconButton aria-label={node.expanded ? "收起工具配置" : "展开工具配置"} onClick={onExpand} size="small" sx={{ color: "#64748b", width: 24, height: 24, flex: "0 0 auto" }}>{node.expanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}</IconButton>
         </Box>
-        {canEdit && (
-          <Stack direction="row" spacing={0.1}>
-            <IconButton aria-label="上移工具" size="small" disabled={!canMoveUp} onClick={onMoveUp} sx={{ width: 24, height: 24 }}><KeyboardArrowUp sx={{ fontSize: 17 }} /></IconButton>
-            <IconButton aria-label="下移工具" size="small" disabled={!canMoveDown} onClick={onMoveDown} sx={{ width: 24, height: 24 }}><KeyboardArrowDown sx={{ fontSize: 17 }} /></IconButton>
-          </Stack>
-        )}
         {canEdit && <IconButton aria-label="编辑工具" onClick={onEdit} size="small" sx={{ color: "#801AEB" }}><EditOutlined fontSize="small" /></IconButton>}
-        <IconButton aria-label={node.expanded ? "收起工具配置" : "展开工具配置"} onClick={onExpand} size="small" sx={{ color: "#64748b" }}>{node.expanded ? <ExpandLess /> : <ExpandMore />}</IconButton>
         {canEdit && <IconButton onClick={onRemove} size="small" sx={{ color: "#ef4444", "&:hover": { bgcolor: "#fef2f2" } }}><DeleteOutline fontSize="small" /></IconButton>}
       </Box>
       {warnings.length > 0 && (
-        <Box sx={{ mx: 1, mb: 1, p: 1, borderRadius: "8px", bgcolor: "#fff7ed", border: "1px solid #fed7aa" }}>
+        <Box sx={{ mx: 1, mb: 1, p: 1, borderRadius: "8px", bgcolor: hasInputWarning ? "#fef2f2" : "#fff7ed", border: `1px solid ${hasInputWarning ? "#fecaca" : "#fed7aa"}` }}>
           {warnings.map((warning) => (
             <Stack key={warning} direction="row" spacing={0.75} alignItems="flex-start">
-              <WarningAmber sx={{ fontSize: 15, color: "#c2410c", mt: "1px" }} />
-              <Typography sx={{ fontSize: 11, color: "#9a3412", lineHeight: 1.5 }}>{warning}</Typography>
+              <WarningAmber sx={{ fontSize: 15, color: hasInputWarning ? "#dc2626" : "#c2410c", mt: "1px" }} />
+              <Typography sx={{ fontSize: 11, color: hasInputWarning ? "#b91c1c" : "#9a3412", lineHeight: 1.5 }}>{warning}</Typography>
             </Stack>
           ))}
         </Box>
@@ -894,6 +913,7 @@ function ToolEditDrawer({
   const selectedSourceNode = priorNodes.find((item) => item.nodeId === node.inputSource.sourceNodeId) ?? priorNodes[0];
   const selectedOutput = selectedSourceNode?.outputs.find((output) => output.id === node.inputSource.outputId) ?? selectedSourceNode?.outputs[0];
   const sourceInvalid = isInputSourceInvalid(node, allNodes);
+  const isFirstNode = allNodes[0]?.nodeId === node.nodeId;
 
   const setSourceType = (type: InputSource["type"]) => {
     if (type === "fixed") {
@@ -936,13 +956,13 @@ function ToolEditDrawer({
               <Stack spacing={1.25}>
                 <FormControl fullWidth size="small">
                   <InputLabel>输入参数</InputLabel>
-                  <Select label="输入参数" value={node.inputParamId} disabled={!canEdit} onChange={(event) => onInputParamChange(node.nodeId, event.target.value)}>
+                  <Select label="输入参数" value={node.inputParamId} disabled={!canEdit || isFirstNode} onChange={(event) => onInputParamChange(node.nodeId, event.target.value)}>
                     {node.params.map((param) => <MenuItem key={param.id} value={param.id}>{param.label}</MenuItem>)}
                   </Select>
                 </FormControl>
                 <FormControl fullWidth size="small">
                   <InputLabel>取值方式</InputLabel>
-                  <Select label="取值方式" value={node.inputSource.type} disabled={!canEdit || priorNodes.length === 0} onChange={(event) => setSourceType(event.target.value as InputSource["type"])}>
+                  <Select label="取值方式" value={node.inputSource.type} disabled={!canEdit || isFirstNode || priorNodes.length === 0} onChange={(event) => setSourceType(event.target.value as InputSource["type"])}>
                     <MenuItem value="fixed">固定值</MenuItem>
                     <MenuItem value="upstream">上游工具输出</MenuItem>
                   </Select>
@@ -961,7 +981,7 @@ function ToolEditDrawer({
                         {(selectedSourceNode?.outputs ?? []).map((output) => <MenuItem key={output.id} value={output.id}>{output.label}</MenuItem>)}
                       </Select>
                     </FormControl>
-                    {sourceInvalid && <Typography sx={{ fontSize: 12, color: "#c2410c" }}>当前输入来源已失效或不在当前工具之前。</Typography>}
+                    {sourceInvalid && <Typography sx={{ fontSize: 12, color: "#c2410c" }}>输入配置异常，请检查。</Typography>}
                   </Stack>
                 ) : inputParam ? (
                   <ParamField param={inputParam} canEdit={canEdit && inputParam.editable !== false} onChange={(value) => onParamChange(node.nodeId, inputParam.id, value)} />
@@ -1021,6 +1041,7 @@ function AddToolDialog({
   currentTool,
   service,
   addedToolIds,
+  selectedToolAdded,
   onClose,
   onAdd,
 }: {
@@ -1034,6 +1055,7 @@ function AddToolDialog({
   currentTool: McpTool | null;
   service: McpService;
   addedToolIds: Set<string>;
+  selectedToolAdded: boolean;
   onClose: () => void;
   onAdd: () => void;
 }) {
@@ -1056,7 +1078,7 @@ function AddToolDialog({
           <Typography sx={{ fontSize: 12, color: "#64748b", fontWeight: 700, mb: 1 }}>分类</Typography>
           <Stack spacing={0.5}>
             {categories.map((category) => {
-              const count = (category === "全部" ? toolCatalog : toolCatalog.filter((tool) => tool.category === category)).filter((tool) => !addedToolIds.has(tool.id)).length;
+              const count = (category === "全部" ? toolCatalog : toolCatalog.filter((tool) => tool.category === category)).length;
               return (
               <Button key={category} onClick={() => onCategoryChange(category)} sx={{ justifyContent: "space-between", color: selectedCategory === category ? "#6d28d9" : "#64748b", bgcolor: selectedCategory === category ? "#f5f3ff" : "transparent", textTransform: "none", borderRadius: "8px" }}>
                 <span>{category}</span>
@@ -1069,13 +1091,18 @@ function AddToolDialog({
         <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1 }}>
           <Typography sx={{ fontSize: 12, color: "#64748b", fontWeight: 700, mb: 1 }}>MCP 工具</Typography>
           <Stack spacing={0.75}>
-            {tools.length === 0 && <Typography sx={{ fontSize: 12, color: "#94a3b8", p: 1 }}>当前分类下没有可添加工具。</Typography>}
-            {tools.map((tool) => (
-              <Box key={tool.id} onClick={() => onToolChange(tool.id)} sx={{ p: 1, borderRadius: "10px", border: "1px solid", borderColor: selectedToolId === tool.id ? "#c4b5fd" : "#EEF2F7", bgcolor: selectedToolId === tool.id ? "#faf5ff" : "#fff", cursor: "pointer" }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{tool.name}</Typography>
+            {tools.length === 0 && <Typography sx={{ fontSize: 12, color: "#94a3b8", p: 1 }}>当前分类下没有工具。</Typography>}
+            {tools.map((tool) => {
+              const isAdded = addedToolIds.has(tool.id);
+              return (
+              <Box key={tool.id} onClick={() => onToolChange(tool.id)} sx={{ p: 1, borderRadius: "10px", border: "1px solid", borderColor: selectedToolId === tool.id ? "#c4b5fd" : "#EEF2F7", bgcolor: selectedToolId === tool.id ? "#faf5ff" : "#fff", cursor: "pointer", opacity: isAdded ? 0.62 : 1 }}>
+                <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between">
+                  <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{tool.name}</Typography>
+                  {isAdded && <Chip label="已添加" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f1f5f9", color: "#64748b" }} />}
+                </Stack>
                 <Typography sx={{ fontSize: 11, color: "#64748b", lineHeight: 1.5, mt: 0.5 }}>{tool.summary}</Typography>
               </Box>
-            ))}
+            );})}
           </Stack>
         </Paper>
 
@@ -1109,12 +1136,12 @@ function AddToolDialog({
                 ))}
               </Stack>
             </Box>
-          </Stack> : <Typography sx={{ fontSize: 12, color: "#94a3b8", p: 1 }}>请选择一个未添加的工具。</Typography>}
+          </Stack> : <Typography sx={{ fontSize: 12, color: "#94a3b8", p: 1 }}>请选择一个工具。</Typography>}
         </Paper>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose} sx={{ textTransform: "none", color: "#64748b" }}>取消</Button>
-        <Button disabled={!currentTool} onClick={onAdd} variant="contained" sx={{ textTransform: "none", bgcolor: "#801AEB", borderRadius: "10px", "&:hover": { bgcolor: "#6D16C9" } }}>确认添加</Button>
+        <Button disabled={!currentTool || selectedToolAdded} onClick={onAdd} variant="contained" sx={{ textTransform: "none", bgcolor: "#801AEB", borderRadius: "10px", "&:hover": { bgcolor: "#6D16C9" } }}>{selectedToolAdded ? "工具已添加" : "确认添加"}</Button>
       </DialogActions>
     </Dialog>
   );
