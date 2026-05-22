@@ -94,6 +94,14 @@ export function OpsLayout() {
     return location.pathname.includes(`/project/${currentProjectId}/${subPath}`);
   };
 
+  const isSolutionActive = () => {
+    if (!currentProjectId) return false;
+    const projectBasePath = `/ops/project/${currentProjectId}`;
+    return location.pathname === projectBasePath ||
+      location.pathname === `${projectBasePath}/` ||
+      location.pathname.includes(`${projectBasePath}/agent-workbench/`);
+  };
+
   const isGroupActive = (subItems: { path: string }[]) => {
     return subItems.some(item => isPathActive(item.path));
   };
@@ -210,6 +218,22 @@ export function OpsLayout() {
             </ListItem>
 
             <Box sx={{ my: 0.75, mx: 1, borderBottom: "1px solid #e8eaed" }} />
+
+            {/* 项目方案管理 */}
+            <ListItem disablePadding sx={{ mb: 0.25 }}>
+              <Tooltip title={!currentProjectId ? "请先选择项目空间" : ""} placement="right" arrow>
+                <ListItemButton
+                  onClick={() => currentProjectId && navigate(`/ops/project/${currentProjectId}`)}
+                  selected={isSolutionActive()}
+                  sx={parentItemStyle(isSolutionActive())}>
+                  <ListItemIcon sx={{ minWidth: 28, color: isSolutionActive() ? "#7c3aed" : "#94a3b8" }}>
+                    <AccountTreeOutlined sx={{ fontSize: 16 }} />
+                  </ListItemIcon>
+                  <ListItemText primary="项目方案管理"
+                    primaryTypographyProps={{ fontSize: "13px", fontWeight: isSolutionActive() ? 500 : 400, color: isSolutionActive() ? "#5b21b6" : "#64748b" }} />
+                </ListItemButton>
+              </Tooltip>
+            </ListItem>
 
             {/* ── Group: 原始材料接入与标准化处理 ── */}
             <ListItem disablePadding sx={{ mb: 0.25 }}>
