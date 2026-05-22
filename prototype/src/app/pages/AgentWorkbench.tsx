@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useParams } from "react-router";
 import {
   Box,
   Button,
@@ -26,7 +26,6 @@ import {
 } from "@mui/material";
 import {
   Add,
-  ArrowBack,
   AutoAwesome,
   Close,
   DeleteOutline,
@@ -34,7 +33,6 @@ import {
   ExpandLess,
   ExpandMore,
   FactCheck,
-  History,
   Send,
   UploadFile,
   WarningAmber,
@@ -266,7 +264,6 @@ function getPlanProblems(nodes: ToolNode[]) {
 }
 
 export function AgentWorkbench() {
-  const navigate = useNavigate();
   const { projectId, categoryId, formType } = useParams<{ projectId: string; categoryId: string; formType: string }>();
   const displayFormType = formType ? decodeURIComponent(formType) : "问答库";
   const displayCategory = useMemo(() => {
@@ -354,22 +351,7 @@ export function AgentWorkbench() {
   };
 
   return (
-    <Box sx={{ height: "calc(100vh - 104px)", display: "flex", flexDirection: "column", gap: 2 }}>
-      <Paper elevation={0} sx={{ border: "1px solid #E0E8F2", borderRadius: "12px", bgcolor: "#fff", px: 2, py: 1.5 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-          <Button startIcon={<ArrowBack />} onClick={() => navigate(projectId ? `/ops/project/${projectId}` : "/ops")} sx={{ color: "#6b7280", fontSize: 13, textTransform: "none" }}>
-            返回
-          </Button>
-          <Divider orientation="vertical" flexItem />
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography sx={{ fontSize: 20, fontWeight: 700, color: "#111827" }}>处理方案调整工作台</Typography>
-            <Typography sx={{ fontSize: 12, color: "#6b7280", mt: 0.25 }}>知识工程项目 · {displayFormType} · 末级类目：{displayCategory}</Typography>
-          </Box>
-          <Chip label={confirmed ? "已确认" : "新建草稿"} size="small" sx={{ bgcolor: confirmed ? "#dcfce7" : "#f5f3ff", color: confirmed ? "#15803d" : "#6d28d9", fontWeight: 600 }} />
-          <Button startIcon={<History />} variant="outlined" sx={{ textTransform: "none", borderColor: "#E0E8F2", color: "#374151" }}>历史版本</Button>
-        </Box>
-      </Paper>
-
+    <Box sx={{ height: "calc(100vh - 104px)", display: "flex", flexDirection: "column" }}>
       <Box sx={{ display: "grid", gridTemplateColumns: "248px minmax(360px, 1fr) 420px", gap: 2, minHeight: 0, flex: 1 }}>
         <Paper elevation={0} sx={{ border: "1px solid #E0E8F2", borderRadius: "12px", bgcolor: "#fff", p: 1.5, minHeight: 0 }}>
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#374151", mb: 1 }}>样例文件上传</Typography>
@@ -420,16 +402,11 @@ export function AgentWorkbench() {
           {rightTab === 1 ? (
             <Box sx={{ p: 1.5, minHeight: 0, overflow: "auto", flex: 1 }}>
               <Stack spacing={1.2}>
-                <Box>
-                  <Stack direction="row" spacing={1} alignItems="flex-start" justifyContent="space-between">
-                    <Box sx={{ minWidth: 0 }}>
-                      <Typography sx={{ fontSize: 12, color: "#64748b" }}>末级类目：{displayCategory} · {displayFormType}</Typography>
-                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
-                        <Chip label={confirmed ? "已确认" : "草稿"} size="small" sx={{ bgcolor: confirmed ? "#dcfce7" : "#f5f3ff", color: confirmed ? "#15803d" : "#6d28d9" }} />
-                        <Chip label={allProblems.length ? `${allProblems.length} 项待处理` : "方案校验通过"} size="small" sx={{ bgcolor: allProblems.length ? "#fff7ed" : "#ecfdf5", color: allProblems.length ? "#c2410c" : "#047857" }} />
-                        <Chip label={`${categorySections.length} 类方案`} size="small" sx={{ bgcolor: "#eff6ff", color: "#2563eb" }} />
-                      </Stack>
-                    </Box>
+	                <Box>
+	                  <Stack direction="row" spacing={1} alignItems="flex-start" justifyContent="space-between">
+	                    <Box sx={{ minWidth: 0 }}>
+	                      <Typography sx={{ fontSize: 12, color: "#64748b" }}>末级类目：{displayCategory} · {displayFormType}</Typography>
+	                    </Box>
                     <Tooltip title="添加工具">
                       <span>
                         <IconButton size="small" aria-label="添加工具" disabled={!canEdit} onClick={openAddTool} sx={{ width: 30, height: 30, bgcolor: "#801AEB", color: "#fff", borderRadius: "8px", "&:hover": { bgcolor: "#6D16C9" }, "&.Mui-disabled": { bgcolor: "#e5e7eb", color: "#9ca3af" } }}>
