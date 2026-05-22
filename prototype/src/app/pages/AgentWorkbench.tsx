@@ -71,6 +71,7 @@ interface McpTool {
   summary: string;
   status: "可用" | "不可用";
   params: ToolParam[];
+  outputs: { id: string; label: string; desc: string }[];
   input: ChainType;
   output: ChainType;
 }
@@ -91,7 +92,7 @@ interface ToolNode {
 
 const mcpService: McpService = {
   name: "nacos-knowledge-tool-mcp",
-  version: "2026.05.1",
+  version: "V1.0.0",
 };
 
 const toolCatalog: McpTool[] = [
@@ -108,6 +109,10 @@ const toolCatalog: McpTool[] = [
       { id: "parseTable", label: "表格解析", desc: "开启后保留表格单元格结构。", type: "switch", value: true, editable: true },
       { id: "callback", label: "异步回调", desc: "长文档解析时自动生成 callback_url。", type: "switch", value: true, editable: true },
     ],
+    outputs: [
+      { id: "rawText", label: "解析文本", desc: "文档解析后的正文内容。" },
+      { id: "resultPath", label: "结果地址", desc: "解析结果文件的存储路径。" },
+    ],
   },
   {
     id: "chunk-splitter",
@@ -122,6 +127,10 @@ const toolCatalog: McpTool[] = [
       { id: "overlap", label: "Overlap", desc: "相邻 chunk 的重叠长度。", type: "number", value: 120, required: true, editable: true, min: 0, max: 400, unit: "字" },
       { id: "heading", label: "按标题层级切片", desc: "开启后优先按标题层级断点切片。", type: "switch", value: true, editable: true },
     ],
+    outputs: [
+      { id: "chunks", label: "切片列表", desc: "面向检索和生成使用的标准化片段。" },
+      { id: "metadata", label: "切片元数据", desc: "标题层级、来源页码和片段序号。" },
+    ],
   },
   {
     id: "summary",
@@ -134,6 +143,10 @@ const toolCatalog: McpTool[] = [
     params: [
       { id: "maxTokens", label: "摘要长度", desc: "控制单段摘要最大 token 数。", type: "number", value: 300, required: true, editable: true, min: 80, max: 1000, unit: "tokens" },
       { id: "temperature", label: "生成温度", desc: "值越低输出越稳定。", type: "number", value: 0.2, required: true, editable: true, min: 0, max: 1 },
+    ],
+    outputs: [
+      { id: "summaryText", label: "摘要文本", desc: "按切片生成的摘要内容。" },
+      { id: "sourceRef", label: "来源引用", desc: "摘要对应的原始切片引用。" },
     ],
   },
   {
@@ -148,6 +161,11 @@ const toolCatalog: McpTool[] = [
       { id: "maxCount", label: "最多生成条数", desc: "限制单份样例最多生成的问答数量。", type: "number", value: 30, required: true, editable: true, min: 1, max: 100, unit: "条" },
       { id: "prompt", label: "抽取要求", desc: "描述问答生成的业务要求。", type: "textarea", value: "围绕知识库构建场景抽取用户高频问题，答案应简洁、准确，并保留来源片段。", required: true, editable: true },
       { id: "questionTypes", label: "问题类型", desc: "限定生成的问题类型。", type: "tags", value: ["操作步骤", "异常排查", "规则说明"], editable: true },
+    ],
+    outputs: [
+      { id: "question", label: "问题", desc: "生成的标准问题。" },
+      { id: "answer", label: "答案", desc: "与问题匹配的答案内容。" },
+      { id: "citation", label: "引用来源", desc: "答案引用的来源片段。" },
     ],
   },
 ];
@@ -655,12 +673,9 @@ function AddToolDialog({
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <Box>
             <Typography sx={{ fontSize: 18, fontWeight: 700 }}>添加工具</Typography>
-            <Typography sx={{ fontSize: 12, color: "#6b7280", mt: 0.5 }}>
-              从当前 MCP 服务暴露的工具中选择，添加后会按工具分类自动归入对应方案框
-            </Typography>
             <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 1 }}>
               <Chip label={`MCP 服务：${service.name}`} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
-              <Chip label={`服务版本：${service.version}`} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#eff6ff", color: "#2563eb" }} />
+              <Chip label={service.version} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#eff6ff", color: "#2563eb" }} />
             </Stack>
           </Box>
           <IconButton onClick={onClose}><Close /></IconButton>
@@ -684,10 +699,7 @@ function AddToolDialog({
           <Stack spacing={0.75}>
             {tools.map((tool) => (
               <Box key={tool.id} onClick={() => onToolChange(tool.id)} sx={{ p: 1, borderRadius: "10px", border: "1px solid", borderColor: selectedToolId === tool.id ? "#c4b5fd" : "#EEF2F7", bgcolor: selectedToolId === tool.id ? "#faf5ff" : "#fff", cursor: "pointer" }}>
-                <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between">
-                  <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{tool.name}</Typography>
-                  <Chip label={tool.status} size="small" sx={{ height: 18, fontSize: 10, bgcolor: tool.status === "可用" ? "#ecfdf5" : "#fef2f2", color: tool.status === "可用" ? "#047857" : "#dc2626" }} />
-                </Stack>
+                <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{tool.name}</Typography>
                 <Typography sx={{ fontSize: 11, color: "#64748b", lineHeight: 1.5, mt: 0.5 }}>{tool.summary}</Typography>
               </Box>
             ))}
@@ -695,29 +707,34 @@ function AddToolDialog({
         </Paper>
 
         <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1.25 }}>
-          <Typography sx={{ fontSize: 12, color: "#64748b", fontWeight: 700, mb: 1 }}>工具详情</Typography>
-          <Stack spacing={1}>
+          <Typography sx={{ fontSize: 12, color: "#64748b", fontWeight: 700, mb: 1 }}>入参 / 返回参数</Typography>
+          <Stack spacing={1.25}>
             <Box>
-              <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>工具名称</Typography>
-              <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937", mt: 0.25 }}>{currentTool.name}</Typography>
-            </Box>
-            <Box>
-              <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>所属分类</Typography>
-              <Typography sx={{ fontSize: 12, color: "#374151", mt: 0.25 }}>{currentTool.category}</Typography>
-            </Box>
-            <Box>
-              <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>来源服务</Typography>
-              <Typography sx={{ fontSize: 12, color: "#374151", mt: 0.25 }}>{service.name}</Typography>
-              <Typography sx={{ fontSize: 11, color: "#64748b", mt: 0.25 }}>版本：{service.version}</Typography>
+              <Typography sx={{ fontSize: 11, color: "#94a3b8", mb: 0.75 }}>入参</Typography>
+              <Stack spacing={0.75}>
+                {currentTool.params.map((param) => (
+                  <Box key={param.id} sx={{ p: 0.85, borderRadius: "8px", bgcolor: "#F8FAFC", border: "1px solid #EEF2F7" }}>
+                    <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Typography sx={{ fontSize: 12, fontWeight: 700, color: "#1f2937" }}>{param.label}</Typography>
+                      <Chip label={param.type} size="small" sx={{ height: 17, fontSize: 10, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
+                      {param.required && <Chip label="必填" size="small" sx={{ height: 17, fontSize: 10, bgcolor: "#fff7ed", color: "#c2410c" }} />}
+                    </Stack>
+                    <Typography sx={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.5, mt: 0.35 }}>{param.desc}</Typography>
+                  </Box>
+                ))}
+              </Stack>
             </Box>
             <Divider />
             <Box>
-              <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>说明</Typography>
-              <Typography sx={{ fontSize: 11, color: "#64748b", lineHeight: 1.6, mt: 0.5 }}>{currentTool.summary}</Typography>
-            </Box>
-            <Box>
-              <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>参数数量</Typography>
-              <Typography sx={{ fontSize: 12, color: "#374151", mt: 0.25 }}>{currentTool.params.length} 个可配置参数</Typography>
+              <Typography sx={{ fontSize: 11, color: "#94a3b8", mb: 0.75 }}>返回参数</Typography>
+              <Stack spacing={0.75}>
+                {currentTool.outputs.map((output) => (
+                  <Box key={output.id} sx={{ p: 0.85, borderRadius: "8px", bgcolor: "#FBFCFF", border: "1px solid #EEF2F7" }}>
+                    <Typography sx={{ fontSize: 12, fontWeight: 700, color: "#1f2937" }}>{output.label}</Typography>
+                    <Typography sx={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.5, mt: 0.35 }}>{output.desc}</Typography>
+                  </Box>
+                ))}
+              </Stack>
             </Box>
           </Stack>
         </Paper>
