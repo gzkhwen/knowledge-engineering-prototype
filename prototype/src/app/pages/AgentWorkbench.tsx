@@ -101,6 +101,7 @@ interface ToolNode {
   summary: string;
   enabled: boolean;
   expanded: boolean;
+  adjusted: boolean;
   inputParamId: string;
   inputSource: InputSource;
   params: ToolParam[];
@@ -297,6 +298,7 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
     summary: tool.summary,
     enabled: true,
     expanded: false,
+    adjusted: false,
     inputParamId: params[0]?.id ?? "",
     inputSource,
     params,
@@ -353,6 +355,28 @@ function getInputSourceLabel(node: ToolNode, nodes: ToolNode[]) {
   const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
   const output = sourceNode?.outputs.find((item) => item.id === node.inputSource.outputId);
   return `${inputParam.label} <- ${sourceNode?.toolName ?? "来源已失效"}.${output?.label ?? "输出已失效"}`;
+}
+function getInputSourceParts(node: ToolNode, nodes: ToolNode[]) {
+  const inputParam = getToolInputParam(node);
+  if (!inputParam) return { paramName: "未指定输入参数", source: "未指定来源" };
+  if (nodes[0]?.nodeId === node.nodeId) return { paramName: inputParam.label, source: "文档地址信息" };
+  if (node.inputSource.type !== "upstream") return { paramName: inputParam.label, source: "固定值" };
+  const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
+  const output = sourceNode?.outputs.find((item) => item.id === node.inputSource.outputId);
+  return { paramName: inputParam.label, source: `${sourceNode?.toolName ?? "来源已失效"}.${output?.label ?? "输出已失效"}` };
+}
+
+function getOutputFormat(output: ToolOutput) {
+  return output.desc.split(/[，,]/)[0] || "未知格式";
+}
+
+function formatParamValue(value: ToolParam["value"]) {
+  if (Array.isArray(value)) return value.length ? value.join("、") : "未选择";
+  if (typeof value === "boolean") return value ? "开启" : "关闭";
+  if (typeof value === "number") return String(value);
+  const trimmed = value.trim();
+  if (!trimmed) return "未填写";
+  return trimmed.length > 48 ? `${trimmed.slice(0, 48)}...` : trimmed;
 }
 
 function isInputSourceInvalid(node: ToolNode, nodes: ToolNode[]) {
@@ -452,7 +476,7 @@ export function AgentWorkbench() {
   const addTool = () => {
     if (!canEdit || !currentTool || selectedToolAdded) return;
     const node = createNode(currentTool.id);
-    setPlanNodes((current) => [...current, { ...node, expanded: true }]);
+    setPlanNodes((current) => [...current, { ...node, expanded: true, adjusted: true }]);
     setHasManualEdits(true);
     setAddDialogOpen(false);
     toast.success(`已添加工具，已归入${getPlanTitle(node.category)}`);
@@ -491,7 +515,7 @@ export function AgentWorkbench() {
     if (planNodes[from].category !== planNodes[to].category) return;
     const next = [...planNodes];
     const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
+    next.splice(to, 0, { ...moved, adjusted: true });
     setPlanNodes(next);
     setHasManualEdits(true);
     setDraggingNodeId(null);
@@ -501,6 +525,7 @@ export function AgentWorkbench() {
     if (!canEdit) return;
     updateNode(nodeId, (node) => ({
       ...node,
+      adjusted: true,
       params: node.params.map((param) => (param.id === paramId ? { ...param, value } : param)),
     }));
     setHasManualEdits(true);
@@ -508,13 +533,13 @@ export function AgentWorkbench() {
 
   const updateInputParam = (nodeId: string, inputParamId: string) => {
     if (!canEdit) return;
-    updateNode(nodeId, (node) => ({ ...node, inputParamId, inputSource: { type: "fixed" } }));
+    updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputParamId, inputSource: { type: "fixed" } }));
     setHasManualEdits(true);
   };
 
   const updateInputSource = (nodeId: string, source: InputSource) => {
     if (!canEdit) return;
-    updateNode(nodeId, (node) => ({ ...node, inputSource: source }));
+    updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputSource: source }));
     setHasManualEdits(true);
   };
 
@@ -620,7 +645,7 @@ export function AgentWorkbench() {
                     }}
                     onRemove={removeNode}
                     onToggle={(nodeId) => {
-                      updateNode(nodeId, (node) => ({ ...node, enabled: !node.enabled }));
+                      updateNode(nodeId, (node) => ({ ...node, adjusted: true, enabled: !node.enabled }));
                       setHasManualEdits(true);
                     }}
                     onExpand={(nodeId) => updateNode(nodeId, (node) => ({ ...node, expanded: !node.expanded }))}
@@ -772,7 +797,9 @@ function ToolNodeCard({
 }) {
   const hasWarning = warnings.length > 0;
   const hasInputWarning = warnings.includes("输入配置异常，请检查。");
+  const inputParts = getInputSourceParts(node, allNodes);
   const configParams = node.params.filter((param) => param.id !== node.inputParamId && isParamVisible(node, param));
+  const requiredParams = configParams.filter((param) => param.required);
   return (
     <Box
       draggable={canDrag}
@@ -813,9 +840,34 @@ function ToolNodeCard({
       {node.expanded && (
         <Box sx={{ borderTop: "1px solid #EEF2F7", p: 1.25, bgcolor: "#FBFCFF" }}>
           <Stack spacing={1.1}>
-            <ReadonlyConfigRow label="输入" value={getInputSourceLabel(node, allNodes)} warning={isInputSourceInvalid(node, allNodes)} />
-            <ReadonlyConfigRow label="参数配置" value={`${configParams.length} 个参数，${configParams.filter((param) => param.required).length} 个必填`} />
-            <ReadonlyConfigRow label="输出" value={node.outputs.map((output) => output.label).join("、")} />
+            <ReadonlyConfigBlock label="输入">
+              <Typography sx={{ fontSize: 12, color: isInputSourceInvalid(node, allNodes) ? "#c2410c" : "#1f2937", lineHeight: 1.5 }}>{inputParts.paramName}</Typography>
+              <Typography sx={{ fontSize: 11.5, color: isInputSourceInvalid(node, allNodes) ? "#c2410c" : "#64748b", lineHeight: 1.5 }}>{inputParts.source}</Typography>
+            </ReadonlyConfigBlock>
+            <ReadonlyConfigBlock label="参数配置">
+              {node.adjusted ? (
+                requiredParams.length > 0 ? (
+                  <Stack spacing={0.5}>
+                    {requiredParams.map((param) => (
+                      <Box key={param.id} sx={{ display: "grid", gridTemplateColumns: "88px minmax(0, 1fr)", gap: 0.75 }}>
+                        <Typography sx={{ fontSize: 11.5, color: "#64748b" }}>{param.label}</Typography>
+                        <Typography sx={{ fontSize: 11.5, color: "#1f2937", wordBreak: "break-word" }}>{formatParamValue(param.value)}</Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                ) : <Typography sx={{ fontSize: 12, color: "#64748b" }}>无必填参数</Typography>
+              ) : <Typography sx={{ fontSize: 12, color: "#374151" }}>{`${configParams.length} 个参数，${requiredParams.length} 个必填`}</Typography>}
+            </ReadonlyConfigBlock>
+            <ReadonlyConfigBlock label="输出">
+              <Stack spacing={0.5}>
+                {node.outputs.map((output) => (
+                  <Stack key={output.id} direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Typography sx={{ fontSize: 12, color: "#374151" }}>{output.label}</Typography>
+                    <Chip label={getOutputFormat(output)} size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#eef2ff", color: "#4338ca" }} />
+                  </Stack>
+                ))}
+              </Stack>
+            </ReadonlyConfigBlock>
           </Stack>
         </Box>
       )}
@@ -823,11 +875,11 @@ function ToolNodeCard({
   );
 }
 
-function ReadonlyConfigRow({ label, value, warning = false }: { label: string; value: string; warning?: boolean }) {
+function ReadonlyConfigBlock({ label, children }: { label: string; children: ReactNode }) {
   return (
     <Box sx={{ display: "grid", gridTemplateColumns: "64px minmax(0, 1fr)", gap: 1, alignItems: "start" }}>
       <Typography sx={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>{label}</Typography>
-      <Typography sx={{ fontSize: 12, color: warning ? "#c2410c" : "#374151", lineHeight: 1.55, wordBreak: "break-word" }}>{value}</Typography>
+      <Box sx={{ minWidth: 0 }}>{children}</Box>
     </Box>
   );
 }
@@ -1034,9 +1086,7 @@ function ToolEditDrawer({
             <ConfigBlock title="参数配置">
               <Stack spacing={1.25}>
                 {configurableParams.map((param) => (
-                  <Box key={param.id} sx={{ border: "1px solid #E0E8F2", borderRadius: "10px", bgcolor: "#fff", p: 1.25 }}>
-                    <ParamField param={param} canEdit={canEdit && param.editable !== false && node.enabled} onChange={(value) => onParamChange(node.nodeId, param.id, value)} />
-                  </Box>
+                  <ParamField key={param.id} param={param} canEdit={canEdit && param.editable !== false && node.enabled} onChange={(value) => onParamChange(node.nodeId, param.id, value)} />
                 ))}
               </Stack>
             </ConfigBlock>
