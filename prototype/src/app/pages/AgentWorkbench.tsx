@@ -379,11 +379,6 @@ export function AgentWorkbench() {
               <Typography sx={{ fontSize: 13, color: "#374151", lineHeight: 1.7 }}>
                 已基于样例文件生成处理方案。右侧方案区会按已添加的 MCP 工具分类自动生成对应方案框，请确认工具可用性、参数和执行顺序。
               </Typography>
-              <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: "wrap" }} useFlexGap>
-                {categorySections.map((section) => (
-                  <Chip key={section.category} label={`${getPlanTitle(section.category)}已生成`} size="small" sx={{ bgcolor: "#ecfdf5", color: "#047857" }} />
-                ))}
-              </Stack>
             </Box>
           </Box>
           <Box sx={{ p: 1.5, borderTop: "1px solid #EEF2F7", display: "flex", gap: 1 }}>
@@ -480,17 +475,12 @@ function PlanSection({
   onDrop: (nodeId: string) => void;
 }) {
   const title = getPlanTitle(category);
-  const hasWarnings = nodes.some((node) => warnings[node.nodeId]?.length);
   return (
     <Box sx={{ border: "1px solid #E0E8F2", borderRadius: "12px", overflow: "hidden" }}>
-      <Box sx={{ px: 1.5, py: 1.25, bgcolor: "#FBFCFF", borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+      <Box sx={{ px: 1.5, py: 1.25, bgcolor: "#FBFCFF", borderBottom: "1px solid #EEF2F7" }}>
         <Box sx={{ minWidth: 0 }}>
           <Typography sx={{ fontSize: 14, fontWeight: 700, color: "#1f2937" }}>{title}</Typography>
-          <Typography sx={{ fontSize: 11, color: "#94a3b8", mt: 0.25 }}>由已添加工具的“{category}”分类自动生成</Typography>
         </Box>
-        <Stack direction="row" spacing={0.5} alignItems="center">
-          <Chip label={hasWarnings ? "待处理" : "已生成"} size="small" sx={{ bgcolor: hasWarnings ? "#fff7ed" : "#ecfdf5", color: hasWarnings ? "#c2410c" : "#047857" }} />
-        </Stack>
       </Box>
       <Stack spacing={1} sx={{ p: 1 }}>
         {nodes.map((node, index) => (
@@ -524,7 +514,6 @@ function ToolNodeCard({
   onDragStart: () => void;
   onDrop: () => void;
 }) {
-  const paramProblems = getParamProblems(node);
   const hasWarning = warnings.length > 0;
   return (
     <Box
@@ -551,11 +540,6 @@ function ToolNodeCard({
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {node.toolName}
           </Typography>
-          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5, flexWrap: "wrap" }}>
-            <Chip label={hasWarning ? "需处理" : paramProblems.length ? "参数缺失" : "已配置"} size="small" sx={{ height: 18, fontSize: 10, bgcolor: hasWarning || paramProblems.length ? "#fff7ed" : "#ecfdf5", color: hasWarning || paramProblems.length ? "#c2410c" : "#047857" }} />
-            <Chip label={node.status} size="small" sx={{ height: 18, fontSize: 10, bgcolor: node.status === "可用" ? "#eff6ff" : "#fef2f2", color: node.status === "可用" ? "#2563eb" : "#dc2626" }} />
-            <Typography sx={{ fontSize: 10, color: "#94a3b8" }}>{node.serviceName} · {node.serviceVersion}</Typography>
-          </Stack>
         </Box>
         <IconButton onClick={onExpand} size="small" sx={{ color: "#64748b" }}>{node.expanded ? <ExpandLess /> : <ExpandMore />}</IconButton>
         {canEdit && <IconButton onClick={onRemove} size="small" sx={{ color: "#ef4444", "&:hover": { bgcolor: "#fef2f2" } }}><DeleteOutline fontSize="small" /></IconButton>}
@@ -572,7 +556,6 @@ function ToolNodeCard({
       )}
       {node.expanded && (
         <Box sx={{ borderTop: "1px solid #EEF2F7", p: 1.25, bgcolor: "#FBFCFF" }}>
-          <Typography sx={{ fontSize: 11, color: "#64748b", mb: 1 }}>{node.summary}</Typography>
           <Stack spacing={1}>
             {node.params.map((param) => <ParamField key={param.id} param={param} canEdit={canEdit && param.editable !== false && node.enabled} onChange={(value) => onParamChange(param.id, value)} />)}
           </Stack>
