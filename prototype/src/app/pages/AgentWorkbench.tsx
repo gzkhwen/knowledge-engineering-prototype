@@ -42,7 +42,7 @@ import {
 import { toast } from "sonner";
 import { dataStore } from "../store/DataStore";
 
-type ParamType = "text" | "textarea" | "number" | "select" | "switch" | "tags";
+type ParamType = "text" | "textarea" | "number" | "select" | "multiSelect" | "switch" | "tags";
 type ChainType = "sampleFile" | "documentFile" | "rawText" | "cleanText" | "qaPairs";
 
 interface ToolParam {
@@ -55,6 +55,7 @@ interface ToolParam {
   editable?: boolean;
   showOnPage?: boolean;
   options?: string[];
+  visibleWhen?: { paramId: string; value: string | number | boolean };
   min?: number;
   max?: number;
   unit?: string;
@@ -146,25 +147,27 @@ const textChunkInputParam: ToolParam = {
   editable: true,
 };
 
+const ocrServiceOptions = ["gpt-4o", "mockai", "预置服务-OCR", "Qwen2.5-VL-32B-Instruct"];
+const vlmModelOptions = ["gpt-4o", "Qwen2.5-VL-32B-Instruct"];
+const extractionModelOptions = ["qwen3-8b", "qwen3-14b", "qwen-plus", "gpt-4o"];
+const chunkAssociateOptions = ["关联文件名", "关联标题及子标题"];
+const chunkPreprocessOptions = ["删除换行符", "删除所有URL", "替换掉连续的空格换行符和制表符", "删除所有电子邮件地址"];
+const separatorPresetOptions = ["\n\n", "\n", "。", "；", "###", "---", "+++"];
+
 const commonParseParams: ToolParam[] = [
   documentAddressParam,
-  { id: "textExtract", label: "文档文字提取（OCR）", desc: "基于规则的文档文字提取。", type: "switch", value: false, editable: false },
-  { id: "contentExtract", label: "文档内容提取（OCR）", desc: "图片、扫描文档需要开启。", type: "switch", value: true, editable: true },
-  { id: "imageExtract", label: "提取文档图片（OCR）", desc: "图文混合问答需要开启。", type: "switch", value: false, editable: true },
-  { id: "vlmExtract", label: "图片内容解析（VLM）", desc: "理解并提取图片信息。", type: "switch", value: false, editable: true },
-  { id: "tableDeepParse", label: "表格深度解析（OCR）", desc: "深度识别文档中表格信息。", type: "switch", value: false, editable: true },
-  { id: "ocrService", label: "OCR服务", desc: "选择用于 OCR 的解析服务。", type: "select", value: "通用OCR服务", required: true, editable: true, options: ["通用OCR服务", "医保文档OCR服务", "票据OCR服务"] },
-  { id: "vlmModel", label: "VLM模型", desc: "图片内容理解模型。", type: "select", value: "qwen-vl-plus", editable: true, options: ["qwen-vl-plus", "qwen-vl-max", "internvl2"] },
-  { id: "systemPrompt", label: "System", desc: "图片内容解析时使用的系统提示词。", type: "textarea", value: "你是图像文字识别与信息抽取专家，精通图像预处理、OCR 及数学公式解析，能从各类票据、证件和表单中精准抽取关键信息，输出简洁、客观的 Markdown 结果。", editable: true },
-  { id: "userPrompt", label: "User", desc: "图片内容解析时使用的用户提示词。", type: "textarea", value: "提取图片信息", editable: true },
+  { id: "parseStrategy", label: "解析策略", desc: "选择通用解析策略。", type: "multiSelect", value: ["文档内容提取"], editable: true, options: ["文档文字提取", "文档内容提取", "提取文档图谱", "图片内容解析", "表格深度解析"] },
+  { id: "ocrService", label: "OCR服务", desc: "选择用于 OCR 的服务。", type: "select", value: "预置服务-OCR", required: true, editable: true, options: ocrServiceOptions },
+  { id: "vlmModel", label: "VLM模型", desc: "选择 VLM 图片理解模型。", type: "select", value: "Qwen2.5-VL-32B-Instruct", required: true, editable: true, options: vlmModelOptions },
+  { id: "systemPrompt", label: "System", desc: "图片识别与信息抽取系统提示词。", type: "textarea", value: "你是图像文字识别与信息抽取专家，精通图像预处理、OCR 及数学公式解析，能从各类票据、证件和表单中精准抽取关键信息，输出简洁、客观的 Markdown 结果。\n按照以下流程处理输入图像并输出结果：\n1. **图像预处理**  \n   - 灰度化、二值化、去噪等，提高识别率。\n2. **OCR 识别**  \n   - 提取所有文字；  \n   - 对数学公式应用公式识别算法，输出 LaTeX。\n3. **区域定位与信息抽取**  \n   - 对票据、证件、表单等，定位并抽取“姓名”“日期”“金额”等核心字段。\n4. **结果格式**  \n   - 仅输出客观识别/抽取内容，不做任何二次加工或总结；  \n   - Markdown 格式：  \n     - 普通文本直接写；  \n     - 公式使用 `$$…$$`（LaTeX）；  \n     - 结构化数据使用 Markdown 表格。\n示例：\n- **文字+公式识别**  \n  输入：`![示例](example.jpg)`  \n  输出：\n  ```markdown\n  文本：Hello, world!  \n  公式：$$E = mc^2$$\n  ```", editable: true },
+  { id: "userPrompt", label: "User", desc: "图片识别与信息抽取用户提示词。", type: "textarea", value: "提取图片信息", editable: true },
 ];
 
 const multimodalParseParams: ToolParam[] = [
   documentAddressParam,
-  { id: "vlmContentExtract", label: "文档内容解析（VLM）", desc: "使用 VLM 理解并提取文档信息。", type: "switch", value: true, editable: false },
-  { id: "imageExtract", label: "提取文档图片", desc: "按页转化文档为图片并保留。", type: "switch", value: false, editable: true },
-  { id: "vlmModel", label: "VLM模型", desc: "选择 VLM 图片理解模型。", type: "select", value: "qwen-vl-plus", required: true, editable: true, options: ["qwen-vl-plus", "qwen-vl-max", "internvl2"] },
-  { id: "systemPrompt", label: "System", desc: "多模态解析系统提示词。", type: "textarea", value: "你是图像文字识别与信息抽取专家，精通图像预处理、OCR 及数学公式解析，能从各类票据、证件和表单中精准抽取关键信息，输出简洁、客观的 Markdown 结果。", editable: true },
+  { id: "parseStrategy", label: "解析策略", desc: "选择多模态解析策略。", type: "multiSelect", value: ["文档内容解析"], editable: true, options: ["文档内容解析", "提取文档图片"] },
+  { id: "vlmModel", label: "VLM模型", desc: "选择 VLM 图片理解模型。", type: "select", value: "Qwen2.5-VL-32B-Instruct", required: true, editable: true, options: vlmModelOptions },
+  { id: "systemPrompt", label: "System", desc: "多模态解析系统提示词。", type: "textarea", value: "你是图像文字识别与信息抽取专家，精通图像预处理、OCR 及数学公式解析，能从各类票据、证件和表单中精准抽取关键信息，输出简洁、客观的 Markdown 结果。\n按照以下流程处理输入图像并输出结果：\n1. **图像预处理**  \n   - 灰度化、二值化、去噪等，提高识别率。\n2. **OCR 识别**  \n   - 提取所有文字；  \n   - 对数学公式应用公式识别算法，输出 LaTeX。\n3. **区域定位与信息抽取**  \n   - 对票据、证件、表单等，定位并抽取“姓名”“日期”“金额”等核心字段。\n4. **结果格式**  \n   - 仅输出客观识别/抽取内容，不做任何二次加工或总结；  \n   - Markdown 格式：  \n     - 普通文本直接写；  \n     - 公式使用 `$$…$$`（LaTeX）；  \n     - 结构化数据使用 Markdown 表格。\n示例：\n- **文字+公式识别**  \n  输入：`![示例](example.jpg)`  \n  输出：\n  ```markdown\n  文本：Hello, world!  \n  公式：$$E = mc^2$$\n  ```", editable: true },
   { id: "userPrompt", label: "User", desc: "多模态解析用户提示词。", type: "textarea", value: "提取图片信息", editable: true },
 ];
 
@@ -172,193 +175,88 @@ const policyParseParams: ToolParam[] = [documentAddressParam];
 
 const commonChunkParams: ToolParam[] = [
   documentParseInputParam,
-  { id: "associateFileName", label: "关联文件名", desc: "为分片结果关联文档名称。", type: "switch", value: false, editable: true },
-  { id: "associateTitle", label: "关联标题及子标题", desc: "为分片结果关联标题和子标题信息。", type: "switch", value: false, editable: true },
-  { id: "chunkSize", label: "理想分块长度", desc: "单个分片的目标长度。", type: "number", value: 1024, required: true, editable: true, min: 200, max: 4000, unit: "字" },
-  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 200, required: true, editable: true, min: 0, max: 1000, unit: "字" },
-  { id: "removeLineBreak", label: "删除换行符", desc: "分片预处理，删除文本中的换行符。", type: "switch", value: false, editable: true },
-  { id: "removeUrl", label: "删除所有URL", desc: "分片预处理，删除文本中的 URL。", type: "switch", value: false, editable: true },
-  { id: "normalizeWhitespace", label: "替换掉连续的空格换行符和制表符", desc: "分片预处理，标准化连续空白字符。", type: "switch", value: false, editable: true },
-  { id: "removeEmail", label: "删除所有电子邮件地址", desc: "分片预处理，删除文本中的邮箱地址。", type: "switch", value: false, editable: true },
+  { id: "chunkAssociate", label: "分片关联信息", desc: "选择需要写入分片结果的关联信息。", type: "multiSelect", value: [], editable: true, options: chunkAssociateOptions },
+  { id: "chunkSize", label: "理想分块长度", desc: "单个分片的目标长度。", type: "number", value: 1024, required: true, editable: true, min: 1, max: 100000, unit: "字" },
+  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 200, required: true, editable: true, min: 0, max: 100000, unit: "字" },
+  { id: "preprocess", label: "分片预处理", desc: "选择分片前需要执行的文本预处理。", type: "multiSelect", value: [], editable: true, options: chunkPreprocessOptions },
 ];
 
 const customSeparatorChunkParams: ToolParam[] = [
   documentParseInputParam,
-  { id: "associateFileName", label: "关联文件名", desc: "为分片结果关联文档名称。", type: "switch", value: false, editable: true },
-  { id: "associateTitle", label: "关联标题及子标题", desc: "为分片结果关联标题和子标题信息。", type: "switch", value: false, editable: true },
-  { id: "customSeparator", label: "自定义分隔符", desc: "使用分隔符进行分片，例如：+++。", type: "text", value: "+++", required: true, editable: true },
-  { id: "chunkSize", label: "理想分块长度", desc: "单个分片的目标长度。", type: "number", value: 1024, required: true, editable: true, min: 200, max: 4000, unit: "字" },
-  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 200, required: true, editable: true, min: 0, max: 1000, unit: "字" },
-  { id: "removeLineBreak", label: "删除换行符", desc: "分片预处理，删除文本中的换行符。", type: "switch", value: false, editable: true },
-  { id: "removeUrl", label: "删除所有URL", desc: "分片预处理，删除文本中的 URL。", type: "switch", value: false, editable: true },
-  { id: "normalizeWhitespace", label: "替换掉连续的空格换行符和制表符", desc: "分片预处理，标准化连续空白字符。", type: "switch", value: false, editable: true },
-  { id: "removeEmail", label: "删除所有电子邮件地址", desc: "分片预处理，删除文本中的邮箱地址。", type: "switch", value: false, editable: true },
+  { id: "chunkAssociate", label: "分片关联信息", desc: "选择需要写入分片结果的关联信息。", type: "multiSelect", value: [], editable: true, options: chunkAssociateOptions },
+  { id: "customSeparator", label: "自定义分隔符", desc: "使用分隔符进行分片。", type: "text", value: "+++", required: true, editable: true },
+  { id: "chunkSize", label: "理想分块长度", desc: "单个分片的目标长度。", type: "number", value: 1024, required: true, editable: true, min: 1, max: 100000, unit: "字" },
+  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 200, required: true, editable: true, min: 0, max: 100000, unit: "字" },
+  { id: "preprocess", label: "分片预处理", desc: "选择分片前需要执行的文本预处理。", type: "multiSelect", value: [], editable: true, options: chunkPreprocessOptions },
 ];
 
 const recursiveSeparatorChunkParams: ToolParam[] = [
   documentParseInputParam,
-  { id: "mode", label: "模式选择", desc: "选择分片关联模式。", type: "select", value: "关联文件信息", editable: true, options: ["关联文件信息", "保留父子切片结构"] },
-  { id: "associateFileName", label: "关联文件名", desc: "为分片结果关联文档名称。", type: "switch", value: false, editable: true },
-  { id: "associateTitle", label: "关联标题及子标题", desc: "为分片结果关联标题和子标题信息。", type: "switch", value: false, editable: true },
-  { id: "chunkSize", label: "理想分块长度", desc: "递归分片目标长度。", type: "number", value: 512, required: true, editable: true, min: 100, max: 4000, unit: "字" },
-  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 50, required: true, editable: true, min: 0, max: 1000, unit: "字" },
-  { id: "recursiveSeparators", label: "切分分隔符", desc: "按优先级依次切分，优先保留语义完整。", type: "tags", value: ["\\n\\n", "\\n"], editable: true },
+  { id: "mode", label: "模式选择", desc: "选择分片关联模式。", type: "select", value: "关联文件信息", required: true, editable: true, options: ["关联文件信息", "保留父子切片结构"] },
+  { id: "chunkAssociate", label: "分片关联信息", desc: "模式为关联文件信息时配置。", type: "multiSelect", value: [], editable: true, options: chunkAssociateOptions, visibleWhen: { paramId: "mode", value: "关联文件信息" } },
+  { id: "chunkSize", label: "理想分块长度", desc: "递归分片目标长度。", type: "number", value: 512, required: true, editable: true, min: 1, max: 100000, unit: "字" },
+  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 50, required: true, editable: true, min: 0, max: 100000, unit: "字" },
+  { id: "sliceSeparators", label: "切片分隔符", desc: "最多添加10个分隔符，支持预置分隔符和自定义分隔符。", type: "tags", value: ["\n\n", "\n"], editable: true, options: separatorPresetOptions, max: 10 },
 ];
 
 const ocrChunkParams: ToolParam[] = [
   documentParseInputParam,
-  { id: "mode", label: "模式选择", desc: "选择分片关联模式。", type: "select", value: "关联文件信息", editable: true, options: ["关联文件信息", "保留父子切片结构"] },
-  { id: "associateFileName", label: "关联文件名", desc: "为分片结果关联文档名称。", type: "switch", value: false, editable: true },
-  { id: "associateTitle", label: "关联标题及子标题", desc: "为分片结果关联标题和子标题信息。", type: "switch", value: false, editable: true },
-  { id: "chunkSize", label: "理想分块长度", desc: "根据 OCR 识别标题和段落聚合的目标长度。", type: "number", value: 512, required: true, editable: true, min: 100, max: 4000, unit: "字" },
-  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 50, required: true, editable: true, min: 0, max: 1000, unit: "字" },
-  { id: "removeLineBreak", label: "删除换行符", desc: "分片预处理，删除文本中的换行符。", type: "switch", value: false, editable: true },
+  { id: "mode", label: "模式选择", desc: "选择分片关联模式。", type: "select", value: "关联文件信息", required: true, editable: true, options: ["关联文件信息", "保留父子切片结构"] },
+  { id: "chunkAssociate", label: "分片关联信息", desc: "模式为关联文件信息时配置。", type: "multiSelect", value: [], editable: true, options: chunkAssociateOptions, visibleWhen: { paramId: "mode", value: "关联文件信息" } },
+  { id: "chunkSize", label: "理想分块长度", desc: "根据 OCR 识别标题和段落聚合的目标长度。", type: "number", value: 512, required: true, editable: true, min: 1, max: 100000, unit: "字" },
+  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 50, required: true, editable: true, min: 0, max: 100000, unit: "字" },
+  { id: "preprocess", label: "分片预处理", desc: "选择分片前需要执行的文本预处理。", type: "multiSelect", value: [], editable: true, options: chunkPreprocessOptions },
 ];
 
 const policyChunkParams: ToolParam[] = [documentParseInputParam];
 
+const videoAudioSyncChunkParams: ToolParam[] = [
+  documentParseInputParam,
+  { id: "chunkAssociate", label: "分片关联信息", desc: "选择需要写入分片结果的关联信息。", type: "multiSelect", value: ["关联文件名"], editable: true, options: ["关联文件名"] },
+  { id: "segmentCount", label: "理想分段个数", desc: "希望切分出的分段数量。", type: "number", value: 10, required: true, editable: true, min: 1, max: 1000, unit: "段" },
+  { id: "preprocess", label: "分片预处理", desc: "选择分片前需要执行的文本预处理。", type: "multiSelect", value: [], editable: true, options: chunkPreprocessOptions },
+];
+
 const qaParams: ToolParam[] = [
   textChunkInputParam,
-  { id: "aiModel", label: "AI模型", desc: "用于 QA 提取的模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: ["qwen3-8b", "qwen3-14b", "qwen-plus"] },
-  { id: "systemPrompt", label: "System Prompt", desc: "QA 提取系统提示词。", type: "textarea", value: "你是一个QA抽取专家，擅长学习和分析提供的文本信息。<context></context> 标记中是一段文本。你的任务是学习和分析<context></context>的文本，并按照要求整理学习成果。", editable: true },
-  { id: "referencePrompt", label: "引用模板提示词", desc: "用于控制问答引用和来源格式。", type: "textarea", value: "学习和分析<context></context>的文本，并整理学习成果。", editable: true },
+  { id: "aiModel", label: "AI模型", desc: "选择提取模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: extractionModelOptions },
+  { id: "temperature", label: "温度", desc: "模型生成温度。", type: "number", value: 0.7, required: true, editable: true, min: 0, max: 2 },
+  { id: "maxTokens", label: "max tokens", desc: "模型最大输出 tokens。", type: "number", value: 2048, required: true, editable: true, min: 1, max: 32768 },
+  { id: "systemPrompt", label: "System Prompt", desc: "QA 提取系统提示词。", type: "textarea", value: "你是一个QA抽取专家，擅长学习和分析提供的文本信息。\n<context></context> 标记中是一段文本。\n你的任务是学习和分析<context></context>的文本，并按照以下步骤整理学习成果：\n1. 给出<context></context>的文本描述的主体(subject)\n2. 提出问题(question)\n3. 给出每个问题的答案(answer)", editable: true },
+  { id: "guidePrompt", label: "引导模板提示词", desc: "用于控制问答引用和来源格式。", type: "textarea", value: "学习和分析<context></context>的文本，并整理学习成果。\n任务要求:\n- 如果<context></context>内有表格，那么提取的主体(subject)不能是\"表格\"\n- 答案需详细完整，给出相关原文描述。\n- 答案可以包含普通文字、链接、代码、表格、公示、媒体链接等 markdown 元素。\n- 可以对答案添加或者删去一些分隔符，让FAQ答案语句通顺。\n- 尽可能多地提出问题，但最多提出3个问题。\n- 记得按照要求的json格式回答。", editable: true },
 ];
 
 const summaryParams: ToolParam[] = [
   textChunkInputParam,
-  { id: "aiModel", label: "AI模型", desc: "用于摘要总结的模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: ["qwen3-8b", "qwen3-14b", "qwen-plus"] },
-  { id: "systemPrompt", label: "System Prompt", desc: "摘要总结系统提示词。", type: "textarea", value: "你是一个摘要总结专家，擅长从非结构化文档中提炼关键事实、规则和结论。", editable: true },
+  { id: "aiModel", label: "AI模型", desc: "选择提取模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: extractionModelOptions },
+  { id: "temperature", label: "温度", desc: "模型生成温度。", type: "number", value: 0.7, required: true, editable: true, min: 0, max: 2 },
+  { id: "maxTokens", label: "max tokens", desc: "模型最大输出 tokens。", type: "number", value: 2048, required: true, editable: true, min: 1, max: 32768 },
+  { id: "systemPrompt", label: "System Prompt", desc: "摘要总结系统提示词。", type: "textarea", value: "你是一个摘要提取专家，能够从用户提供的文档中生成简洁准确的摘要。\n<context></context> 标记中是一段文本。\n你的任务是：学习和分析<context></context>的文本，并总结提炼摘要(Summary)。\n\n限制条件:\n1. Summary：总结提炼文档(Document)中文本段的主旨;\n2. Summary：不能含有指代词，表达通顺，意思清楚;\n3. 文档内容中没有图片，所以当摘要需要引用图片时，应该改写隐去图片引用；\n4. 总是按照JSON格式输出。", editable: true },
+  { id: "guidePrompt", label: "引导模板提示词", desc: "摘要总结引导模板提示词。", type: "textarea", value: "请从上面的文档总结提炼摘要，记得按照要求的json格式回答。", editable: true },
 ];
 
 const keywordParams: ToolParam[] = [
   textChunkInputParam,
-  { id: "aiModel", label: "AI模型", desc: "用于关键词提取的模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: ["qwen3-8b", "qwen3-14b", "qwen-plus"] },
-  { id: "keywordCount", label: "关键词数量", desc: "控制单个切片最多输出的关键词数量。", type: "number", value: 12, required: true, editable: true, min: 3, max: 50, unit: "个" },
-  { id: "includeEntity", label: "包含实体词", desc: "开启后同时抽取机构、产品、规则等实体词。", type: "switch", value: true, editable: true },
+  { id: "aiModel", label: "AI模型", desc: "选择提取模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: extractionModelOptions },
+  { id: "temperature", label: "温度", desc: "模型生成温度。", type: "number", value: 0.7, required: true, editable: true, min: 0, max: 2 },
+  { id: "maxTokens", label: "max tokens", desc: "模型最大输出 tokens。", type: "number", value: 2048, required: true, editable: true, min: 1, max: 32768 },
+  { id: "systemPrompt", label: "System Prompt", desc: "关键词提取系统提示词。", type: "textarea", value: "你是一个关键词提取专家，能够从用户提供的文档(Document)中生成简洁准确的关键词（keywords）。\n<context></context> 标记中是一段文本。\n你的任务是：学习和分析<context></context>的文本，并提取出其中最重要的关键词。\n\n限制条件:\n1. 这些关键词应该能够准确反映文本的核心主题和主要内容。\n2. 请注意，最终结果请以有效的JSON格式返回。", editable: true },
+  { id: "guidePrompt", label: "引导模板提示词", desc: "关键词提取引导模板提示词。", type: "textarea", value: "以上是原文信息，请理解以上信息后生成不超过5个关键词，记得按照要求的json格式回答。", editable: true },
 ];
 
 const toolCatalog: McpTool[] = [
-  {
-    id: "document-parser",
-    name: "通用解析",
-    category: "解析",
-    summary: "解析 Word、PDF、Excel 等主流文档，提取文本和版面布局。",
-    status: "可用",
-    input: "sampleFile",
-    output: "rawText",
-    params: commonParseParams,
-    outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含解析后的文本、版面、图片和表格信息。" }],
-  },
-  {
-    id: "multimodal-parser",
-    name: "多模态解析",
-    category: "解析",
-    summary: "使用多模态大模型对文档内容进行解析，效果好、速度慢。",
-    status: "可用",
-    input: "sampleFile",
-    output: "rawText",
-    params: multimodalParseParams,
-    outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含多模态解析后的文本、图片理解和版面信息。" }],
-  },
-  {
-    id: "medical-policy-parser",
-    name: "医保政策文件解析",
-    category: "解析",
-    summary: "适用于解析医保政策类文件，支持 .docx 格式。",
-    status: "可用",
-    input: "sampleFile",
-    output: "rawText",
-    params: policyParseParams,
-    outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含医保政策文档的条款、标题和正文结构。" }],
-  },
-  {
-    id: "chunk-splitter",
-    name: "通用分片",
-    category: "分片",
-    summary: "为纯文本文档提供灵活的分块和重叠设置，同时可为 OCR 文档附加文档名称和标题信息。",
-    status: "可用",
-    input: "rawText",
-    output: "cleanText",
-    params: commonChunkParams,
-    outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含分片文本、标题、来源和元数据。" }],
-  },
-  {
-    id: "custom-separator-splitter",
-    name: "自定义分隔符分片",
-    category: "分片",
-    summary: "使用分隔符严格切分，两个分割符中间的内容为一个分片。",
-    status: "可用",
-    input: "rawText",
-    output: "cleanText",
-    params: customSeparatorChunkParams,
-    outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含按自定义分隔符切分后的文本片段。" }],
-  },
-  {
-    id: "recursive-separator-splitter",
-    name: "分隔符递归分片",
-    category: "分片",
-    summary: "按分隔符优先级依次切分，优先保留语义完整，超长则降级到更细分隔符。",
-    status: "可用",
-    input: "rawText",
-    output: "cleanText",
-    params: recursiveSeparatorChunkParams,
-    outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含递归切分后的文本片段。" }],
-  },
-  {
-    id: "ocr-splitter",
-    name: "OCR解析专用分片",
-    category: "分片",
-    summary: "根据 OCR 识别的标题及段落进行切分、聚合，长度参考理想分块长度。",
-    status: "可用",
-    input: "rawText",
-    output: "cleanText",
-    params: ocrChunkParams,
-    outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含面向 OCR 结果聚合后的文本片段。" }],
-  },
-  {
-    id: "medical-policy-splitter",
-    name: "医保政策文件分片",
-    category: "分片",
-    summary: "适合医保政策类文件分片，根据内容标题及段落切分为完整内容。",
-    status: "可用",
-    input: "rawText",
-    output: "cleanText",
-    params: policyChunkParams,
-    outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含医保政策文件分片结果。" }],
-  },
-  {
-    id: "qa-extractor",
-    name: "QA提取",
-    category: "抽取",
-    summary: "基于文本分片抽取问答对，适用于从非结构化文档中获取清晰问答知识。",
-    status: "可用",
-    input: "cleanText",
-    output: "qaPairs",
-    params: qaParams,
-    outputs: [{ id: "qaResult", label: "QA提取结果", desc: "Array<json>，包含问题、答案和引用来源。" }],
-  },
-  {
-    id: "summary",
-    name: "摘要总结",
-    category: "抽取",
-    summary: "基于文本分片结果生成摘要总结，输出摘要内容和来源引用。",
-    status: "可用",
-    input: "cleanText",
-    output: "rawText",
-    params: summaryParams,
-    outputs: [{ id: "summaryResult", label: "摘要总结结果", desc: "Array<json>，包含摘要内容和来源引用。" }],
-  },
-  {
-    id: "keyword-extractor",
-    name: "关键词提取",
-    category: "抽取",
-    summary: "从文本分片中抽取关键词、实体词和业务标签。",
-    status: "可用",
-    input: "cleanText",
-    output: "rawText",
-    params: keywordParams,
-    outputs: [{ id: "keywordResult", label: "关键词提取结果", desc: "Array<json>，包含关键词、实体词和权重。" }],
-  },
+  { id: "document-parser", name: "通用解析", category: "解析", summary: "解析 Word、PDF、Excel 等主流文档，提取文本和版面布局。", status: "可用", input: "sampleFile", output: "rawText", params: commonParseParams, outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含解析后的文本、版面、图片和表格信息。" }] },
+  { id: "multimodal-parser", name: "多模态解析", category: "解析", summary: "使用多模态大模型对文档内容进行解析，效果好、速度慢。", status: "可用", input: "sampleFile", output: "rawText", params: multimodalParseParams, outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含多模态解析后的文本、图片理解和版面信息。" }] },
+  { id: "medical-policy-parser", name: "医保政策解析", category: "解析", summary: "适用于解析医保政策类文件。", status: "可用", input: "sampleFile", output: "rawText", params: policyParseParams, outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含医保政策文档的条款、标题和正文结构。" }] },
+  { id: "chunk-splitter", name: "通用分片", category: "分片", summary: "为纯文本文档提供灵活的分块和重叠设置。", status: "可用", input: "rawText", output: "cleanText", params: commonChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含分片文本、标题、来源和元数据。" }] },
+  { id: "custom-separator-splitter", name: "自定义分隔符分片", category: "分片", summary: "沿用通用分片配置，并使用指定分隔符切分文本。", status: "可用", input: "rawText", output: "cleanText", params: customSeparatorChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含按自定义分隔符切分后的文本片段。" }] },
+  { id: "recursive-separator-splitter", name: "分隔符递归分片", category: "分片", summary: "按分隔符优先级依次切分，优先保留语义完整。", status: "可用", input: "rawText", output: "cleanText", params: recursiveSeparatorChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含递归切分后的文本片段。" }] },
+  { id: "ocr-splitter", name: "OCR解析专用分片", category: "分片", summary: "根据 OCR 识别的标题及段落进行切分、聚合。", status: "可用", input: "rawText", output: "cleanText", params: ocrChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含面向 OCR 结果聚合后的文本片段。" }] },
+  { id: "medical-policy-splitter", name: "医保政策解析分片", category: "分片", summary: "适合医保政策类文件分片，页面上没有可配置参数。", status: "可用", input: "rawText", output: "cleanText", params: policyChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含医保政策文件分片结果。" }] },
+  { id: "video-audio-sync-splitter", name: "视频声画同步分片", category: "分片", summary: "按声画同步结果切分视频文本片段。", status: "可用", input: "rawText", output: "cleanText", params: videoAudioSyncChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含视频声画同步分片结果。" }] },
+  { id: "qa-extractor", name: "QA提取", category: "抽取", summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [{ id: "qaResult", label: "QA提取结果", desc: "Array<json>，包含问题、答案和引用来源。" }] },
+  { id: "summary", name: "摘要总结", category: "抽取", summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [{ id: "summaryResult", label: "摘要总结结果", desc: "Array<json>，包含摘要内容和来源引用。" }] },
+  { id: "keyword-extractor", name: "关键词提取", category: "抽取", summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [{ id: "keywordResult", label: "关键词提取结果", desc: "Array<json>，包含关键词和权重。" }] },
 ];
 
 const initialPlanNodes: ToolNode[] = createInitialPlanNodes();
@@ -416,6 +314,7 @@ function createInitialPlanNodes(): ToolNode[] {
 function getParamProblems(node: ToolNode, receivesExternalInput = false) {
   if (!node.enabled) return [];
   return node.params.flatMap((param) => {
+    if (!isParamVisible(node, param)) return [];
     if (!param.required) return [];
     if (param.id === node.inputParamId && (node.inputSource.type === "upstream" || receivesExternalInput)) return [];
     if (typeof param.value === "string" && !param.value.trim()) return [`${param.label} 未填写`];
@@ -438,6 +337,12 @@ function getPriorNodes(nodes: ToolNode[], nodeId: string) {
 
 function getToolInputParam(node: ToolNode) {
   return node.params.find((param) => param.id === node.inputParamId) ?? node.params[0];
+}
+
+function isParamVisible(node: ToolNode, param: ToolParam) {
+  if (!param.visibleWhen) return true;
+  const controller = node.params.find((item) => item.id === param.visibleWhen?.paramId);
+  return controller?.value === param.visibleWhen.value;
 }
 
 function getInputSourceLabel(node: ToolNode, nodes: ToolNode[]) {
@@ -867,7 +772,7 @@ function ToolNodeCard({
 }) {
   const hasWarning = warnings.length > 0;
   const hasInputWarning = warnings.includes("输入配置异常，请检查。");
-  const configParams = node.params.filter((param) => param.id !== node.inputParamId);
+  const configParams = node.params.filter((param) => param.id !== node.inputParamId && isParamVisible(node, param));
   return (
     <Box
       draggable={canDrag}
@@ -947,17 +852,71 @@ function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: b
       </FormControl>
     );
   }
-  if (param.type === "textarea") return <TextField size="small" fullWidth multiline minRows={3} label={param.label} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} helperText={param.desc} sx={commonSx} />;
+  if (param.type === "multiSelect") {
+    const selected = Array.isArray(param.value) ? param.value : [];
+    return (
+      <FormControl fullWidth size="small" sx={commonSx}>
+        <InputLabel>{param.label}</InputLabel>
+        <Select
+          multiple
+          label={param.label}
+          value={selected}
+          disabled={!canEdit}
+          MenuProps={elevatedSelectMenuProps}
+          renderValue={(value) => (value as string[]).join("、") || "未选择"}
+          onChange={(event) => onChange(typeof event.target.value === "string" ? event.target.value.split(",") : event.target.value)}
+        >
+          {(param.options ?? []).map((option) => (
+            <MenuItem key={option} value={option}>
+              <Checkbox size="small" checked={selected.includes(option)} sx={{ p: 0.5, mr: 0.5, color: "#801AEB", "&.Mui-checked": { color: "#801AEB" } }} />
+              {option}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+    );
+  }
+  if (param.type === "textarea") return <TextField size="small" fullWidth multiline minRows={4} label={param.label} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} helperText={param.desc} sx={commonSx} />;
   if (param.type === "number") return <TextField size="small" fullWidth type="number" label={param.label} value={Number(param.value)} disabled={!canEdit} onChange={(event) => onChange(Number(event.target.value))} helperText={`${param.desc}${param.unit ? `，单位：${param.unit}` : ""}`} sx={commonSx} />;
   if (param.type === "tags") {
     const tags = Array.isArray(param.value) ? param.value : [];
+    const limit = param.max ?? 10;
+    const addTag = (tag: string) => {
+      const normalized = tag.trim();
+      if (!normalized || tags.includes(normalized) || tags.length >= limit) return;
+      onChange([...tags, normalized]);
+    };
+    const removeTag = (tag: string) => onChange(tags.filter((item) => item !== tag));
     return (
       <Box>
         <Typography sx={{ fontSize: 12, color: "#374151", mb: 0.75 }}>{param.label}</Typography>
-        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-          {tags.map((tag) => <Chip key={tag} label={tag} size="small" sx={{ bgcolor: "#f5f3ff", color: "#6d28d9" }} />)}
-          {canEdit && <Chip label="新增" size="small" onClick={() => onChange([...tags, "新增标签"])} sx={{ borderStyle: "dashed" }} variant="outlined" />}
+        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+          {tags.map((tag) => <Chip key={tag} label={tag} size="small" onDelete={canEdit ? () => removeTag(tag) : undefined} sx={{ bgcolor: "#f5f3ff", color: "#6d28d9" }} />)}
         </Stack>
+        {canEdit && tags.length < limit && (
+          <Stack spacing={1}>
+            <FormControl fullWidth size="small" sx={commonSx}>
+              <InputLabel>添加预置分隔符</InputLabel>
+              <Select label="添加预置分隔符" value="" MenuProps={elevatedSelectMenuProps} onChange={(event) => addTag(event.target.value)}>
+                {(param.options ?? []).map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              fullWidth
+              label="自定义分隔符"
+              placeholder="输入后按 Enter 添加"
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                addTag((event.currentTarget as HTMLInputElement).value);
+                (event.currentTarget as HTMLInputElement).value = "";
+              }}
+              sx={commonSx}
+            />
+          </Stack>
+        )}
+        <Typography sx={{ fontSize: 11, color: "#94a3b8", mt: 0.75 }}>{param.desc} 当前 {tags.length}/{limit}</Typography>
       </Box>
     );
   }
@@ -988,7 +947,7 @@ function ToolEditDrawer({
   if (!node) return null;
   const priorNodes = getPriorNodes(allNodes, node.nodeId);
   const inputParam = getToolInputParam(node);
-  const configurableParams = node.params.filter((param) => param.id !== node.inputParamId);
+  const configurableParams = node.params.filter((param) => param.id !== node.inputParamId && isParamVisible(node, param));
   const selectedSourceNode = priorNodes.find((item) => item.nodeId === node.inputSource.sourceNodeId) ?? priorNodes[0];
   const selectedOutput = selectedSourceNode?.outputs.find((output) => output.id === node.inputSource.outputId) ?? selectedSourceNode?.outputs[0];
   const sourceInvalid = isInputSourceInvalid(node, allNodes);
