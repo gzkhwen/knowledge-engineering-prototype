@@ -111,38 +111,125 @@ const mcpService: McpService = {
   version: "V1.0.0",
 };
 
-const parserParams: ToolParam[] = [
-  { id: "documentAddress", label: "文档地址信息", desc: "解析入口输出的文档地址信息。", type: "textarea", value: "解析入口输出的文档地址信息", required: true, editable: true },
-  { id: "parseMode", label: "解析方式", desc: "选择文档解析方式。", type: "select", value: "通用解析", required: true, editable: true, showOnPage: true, options: ["通用解析", "多模态解析", "医保政策文件解析"] },
-  { id: "textExtract", label: "文档文字提取（OCR）", desc: "基于规则的文档文字提取。", type: "switch", value: false, editable: true },
-  { id: "contentExtract", label: "文档内容提取（OCR）", desc: "图片、扫描文档需要开启。", type: "switch", value: true, editable: true, showOnPage: true },
+const documentAddressParam: ToolParam = {
+  id: "documentAddress",
+  label: "文档地址信息",
+  desc: "解析入口输出的文档地址信息。",
+  type: "textarea",
+  value: "解析入口输出的文档地址信息",
+  required: true,
+  editable: true,
+};
+
+const documentParseInputParam: ToolParam = {
+  id: "documentParseResult",
+  label: "文档解析结果",
+  desc: "来自解析工具的解析结果。",
+  type: "textarea",
+  value: "",
+  required: true,
+  editable: true,
+};
+
+const textChunkInputParam: ToolParam = {
+  id: "textChunkResult",
+  label: "文本分片结果",
+  desc: "来自分片工具的分片结果。",
+  type: "textarea",
+  value: "",
+  required: true,
+  editable: true,
+};
+
+const commonParseParams: ToolParam[] = [
+  documentAddressParam,
+  { id: "textExtract", label: "文档文字提取（OCR）", desc: "基于规则的文档文字提取。", type: "switch", value: false, editable: false },
+  { id: "contentExtract", label: "文档内容提取（OCR）", desc: "图片、扫描文档需要开启。", type: "switch", value: true, editable: true },
   { id: "imageExtract", label: "提取文档图片（OCR）", desc: "图文混合问答需要开启。", type: "switch", value: false, editable: true },
-  { id: "vlmExtract", label: "图片内容解析（VLM）", desc: "理解并提取图片信息。", type: "switch", value: false, editable: true, showOnPage: true },
+  { id: "vlmExtract", label: "图片内容解析（VLM）", desc: "理解并提取图片信息。", type: "switch", value: false, editable: true },
   { id: "tableDeepParse", label: "表格深度解析（OCR）", desc: "深度识别文档中表格信息。", type: "switch", value: false, editable: true },
   { id: "ocrService", label: "OCR服务", desc: "选择用于 OCR 的解析服务。", type: "select", value: "通用OCR服务", required: true, editable: true, options: ["通用OCR服务", "医保文档OCR服务", "票据OCR服务"] },
   { id: "vlmModel", label: "VLM模型", desc: "图片内容理解模型。", type: "select", value: "qwen-vl-plus", editable: true, options: ["qwen-vl-plus", "qwen-vl-max", "internvl2"] },
-  { id: "systemPrompt", label: "System", desc: "多模态解析时使用的系统提示词。", type: "textarea", value: "你是图像文字识别与信息抽取专家，精通图像预处理、OCR 及数学公式解析，输出简洁、客观的 Markdown 结果。", editable: true },
-  { id: "userPrompt", label: "User", desc: "多模态解析时使用的用户提示词。", type: "textarea", value: "提取图片信息", editable: true },
+  { id: "systemPrompt", label: "System", desc: "图片内容解析时使用的系统提示词。", type: "textarea", value: "你是图像文字识别与信息抽取专家，精通图像预处理、OCR 及数学公式解析，能从各类票据、证件和表单中精准抽取关键信息，输出简洁、客观的 Markdown 结果。", editable: true },
+  { id: "userPrompt", label: "User", desc: "图片内容解析时使用的用户提示词。", type: "textarea", value: "提取图片信息", editable: true },
 ];
 
-const splitterParams: ToolParam[] = [
-  { id: "documentParseResult", label: "文档解析结果", desc: "来自文档解析工具的解析结果。", type: "textarea", value: "", required: true, editable: true },
-  { id: "splitMode", label: "分片方式", desc: "选择文本分片方式。", type: "select", value: "通用分片", required: true, editable: true, showOnPage: true, options: ["通用分片", "自定义分隔符分片", "分隔符递归分片", "OCR解析专用分片", "医保政策文件分片"] },
-  { id: "associateFileName", label: "关联文件名", desc: "为分片结果关联文档名称。", type: "switch", value: false, editable: true, showOnPage: true },
-  { id: "associateTitle", label: "关联标题及子标题", desc: "为分片结果关联标题和子标题信息。", type: "switch", value: false, editable: true, showOnPage: true },
-  { id: "chunkSize", label: "理想分块长度", desc: "单个分片的目标长度。", type: "number", value: 1024, required: true, editable: true, showOnPage: true, min: 200, max: 4000, unit: "字" },
+const multimodalParseParams: ToolParam[] = [
+  documentAddressParam,
+  { id: "vlmContentExtract", label: "文档内容解析（VLM）", desc: "使用 VLM 理解并提取文档信息。", type: "switch", value: true, editable: false },
+  { id: "imageExtract", label: "提取文档图片", desc: "按页转化文档为图片并保留。", type: "switch", value: false, editable: true },
+  { id: "vlmModel", label: "VLM模型", desc: "选择 VLM 图片理解模型。", type: "select", value: "qwen-vl-plus", required: true, editable: true, options: ["qwen-vl-plus", "qwen-vl-max", "internvl2"] },
+  { id: "systemPrompt", label: "System", desc: "多模态解析系统提示词。", type: "textarea", value: "你是图像文字识别与信息抽取专家，精通图像预处理、OCR 及数学公式解析，能从各类票据、证件和表单中精准抽取关键信息，输出简洁、客观的 Markdown 结果。", editable: true },
+  { id: "userPrompt", label: "User", desc: "多模态解析用户提示词。", type: "textarea", value: "提取图片信息", editable: true },
+];
+
+const policyParseParams: ToolParam[] = [documentAddressParam];
+
+const commonChunkParams: ToolParam[] = [
+  documentParseInputParam,
+  { id: "associateFileName", label: "关联文件名", desc: "为分片结果关联文档名称。", type: "switch", value: false, editable: true },
+  { id: "associateTitle", label: "关联标题及子标题", desc: "为分片结果关联标题和子标题信息。", type: "switch", value: false, editable: true },
+  { id: "chunkSize", label: "理想分块长度", desc: "单个分片的目标长度。", type: "number", value: 1024, required: true, editable: true, min: 200, max: 4000, unit: "字" },
   { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 200, required: true, editable: true, min: 0, max: 1000, unit: "字" },
-  { id: "customSeparator", label: "自定义分隔符", desc: "自定义分隔符分片时必填，例如 +++。", type: "text", value: "+++", editable: true },
-  { id: "recursiveSeparators", label: "切分分隔符", desc: "递归分片时按优先级依次切分。", type: "tags", value: ["\\n\\n", "\\n"], editable: true },
   { id: "removeLineBreak", label: "删除换行符", desc: "分片预处理，删除文本中的换行符。", type: "switch", value: false, editable: true },
   { id: "removeUrl", label: "删除所有URL", desc: "分片预处理，删除文本中的 URL。", type: "switch", value: false, editable: true },
-  { id: "normalizeWhitespace", label: "替换连续空格换行符和制表符", desc: "分片预处理，标准化连续空白字符。", type: "switch", value: false, editable: true },
+  { id: "normalizeWhitespace", label: "替换掉连续的空格换行符和制表符", desc: "分片预处理，标准化连续空白字符。", type: "switch", value: false, editable: true },
   { id: "removeEmail", label: "删除所有电子邮件地址", desc: "分片预处理，删除文本中的邮箱地址。", type: "switch", value: false, editable: true },
 ];
 
-const extractionBaseParams: ToolParam[] = [
-  { id: "textChunkResult", label: "文本分片结果", desc: "来自文本分片工具的分片结果。", type: "textarea", value: "", required: true, editable: true },
-  { id: "aiModel", label: "AI模型", desc: "用于抽取任务的模型。", type: "select", value: "qwen3-8b", required: true, editable: true, showOnPage: true, options: ["qwen3-8b", "qwen3-14b", "qwen-plus"] },
+const customSeparatorChunkParams: ToolParam[] = [
+  documentParseInputParam,
+  { id: "associateFileName", label: "关联文件名", desc: "为分片结果关联文档名称。", type: "switch", value: false, editable: true },
+  { id: "associateTitle", label: "关联标题及子标题", desc: "为分片结果关联标题和子标题信息。", type: "switch", value: false, editable: true },
+  { id: "customSeparator", label: "自定义分隔符", desc: "使用分隔符进行分片，例如：+++。", type: "text", value: "+++", required: true, editable: true },
+  { id: "chunkSize", label: "理想分块长度", desc: "单个分片的目标长度。", type: "number", value: 1024, required: true, editable: true, min: 200, max: 4000, unit: "字" },
+  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 200, required: true, editable: true, min: 0, max: 1000, unit: "字" },
+  { id: "removeLineBreak", label: "删除换行符", desc: "分片预处理，删除文本中的换行符。", type: "switch", value: false, editable: true },
+  { id: "removeUrl", label: "删除所有URL", desc: "分片预处理，删除文本中的 URL。", type: "switch", value: false, editable: true },
+  { id: "normalizeWhitespace", label: "替换掉连续的空格换行符和制表符", desc: "分片预处理，标准化连续空白字符。", type: "switch", value: false, editable: true },
+  { id: "removeEmail", label: "删除所有电子邮件地址", desc: "分片预处理，删除文本中的邮箱地址。", type: "switch", value: false, editable: true },
+];
+
+const recursiveSeparatorChunkParams: ToolParam[] = [
+  documentParseInputParam,
+  { id: "mode", label: "模式选择", desc: "选择分片关联模式。", type: "select", value: "关联文件信息", editable: true, options: ["关联文件信息", "保留父子切片结构"] },
+  { id: "associateFileName", label: "关联文件名", desc: "为分片结果关联文档名称。", type: "switch", value: false, editable: true },
+  { id: "associateTitle", label: "关联标题及子标题", desc: "为分片结果关联标题和子标题信息。", type: "switch", value: false, editable: true },
+  { id: "chunkSize", label: "理想分块长度", desc: "递归分片目标长度。", type: "number", value: 512, required: true, editable: true, min: 100, max: 4000, unit: "字" },
+  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 50, required: true, editable: true, min: 0, max: 1000, unit: "字" },
+  { id: "recursiveSeparators", label: "切分分隔符", desc: "按优先级依次切分，优先保留语义完整。", type: "tags", value: ["\\n\\n", "\\n"], editable: true },
+];
+
+const ocrChunkParams: ToolParam[] = [
+  documentParseInputParam,
+  { id: "mode", label: "模式选择", desc: "选择分片关联模式。", type: "select", value: "关联文件信息", editable: true, options: ["关联文件信息", "保留父子切片结构"] },
+  { id: "associateFileName", label: "关联文件名", desc: "为分片结果关联文档名称。", type: "switch", value: false, editable: true },
+  { id: "associateTitle", label: "关联标题及子标题", desc: "为分片结果关联标题和子标题信息。", type: "switch", value: false, editable: true },
+  { id: "chunkSize", label: "理想分块长度", desc: "根据 OCR 识别标题和段落聚合的目标长度。", type: "number", value: 512, required: true, editable: true, min: 100, max: 4000, unit: "字" },
+  { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 50, required: true, editable: true, min: 0, max: 1000, unit: "字" },
+  { id: "removeLineBreak", label: "删除换行符", desc: "分片预处理，删除文本中的换行符。", type: "switch", value: false, editable: true },
+];
+
+const policyChunkParams: ToolParam[] = [documentParseInputParam];
+
+const qaParams: ToolParam[] = [
+  textChunkInputParam,
+  { id: "aiModel", label: "AI模型", desc: "用于 QA 提取的模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: ["qwen3-8b", "qwen3-14b", "qwen-plus"] },
+  { id: "systemPrompt", label: "System Prompt", desc: "QA 提取系统提示词。", type: "textarea", value: "你是一个QA抽取专家，擅长学习和分析提供的文本信息。<context></context> 标记中是一段文本。你的任务是学习和分析<context></context>的文本，并按照要求整理学习成果。", editable: true },
+  { id: "referencePrompt", label: "引用模板提示词", desc: "用于控制问答引用和来源格式。", type: "textarea", value: "学习和分析<context></context>的文本，并整理学习成果。", editable: true },
+];
+
+const summaryParams: ToolParam[] = [
+  textChunkInputParam,
+  { id: "aiModel", label: "AI模型", desc: "用于摘要总结的模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: ["qwen3-8b", "qwen3-14b", "qwen-plus"] },
+  { id: "systemPrompt", label: "System Prompt", desc: "摘要总结系统提示词。", type: "textarea", value: "你是一个摘要总结专家，擅长从非结构化文档中提炼关键事实、规则和结论。", editable: true },
+];
+
+const keywordParams: ToolParam[] = [
+  textChunkInputParam,
+  { id: "aiModel", label: "AI模型", desc: "用于关键词提取的模型。", type: "select", value: "qwen3-8b", required: true, editable: true, options: ["qwen3-8b", "qwen3-14b", "qwen-plus"] },
+  { id: "keywordCount", label: "关键词数量", desc: "控制单个切片最多输出的关键词数量。", type: "number", value: 12, required: true, editable: true, min: 3, max: 50, unit: "个" },
+  { id: "includeEntity", label: "包含实体词", desc: "开启后同时抽取机构、产品、规则等实体词。", type: "switch", value: true, editable: true },
 ];
 
 const toolCatalog: McpTool[] = [
@@ -150,77 +237,77 @@ const toolCatalog: McpTool[] = [
     id: "document-parser",
     name: "通用解析",
     category: "解析",
-    summary: "解析 Word、PDF、Excel、图片、HTML 等文档，提取文本、版面和结构化解析结果。",
+    summary: "解析 Word、PDF、Excel 等主流文档，提取文本和版面布局。",
     status: "可用",
     input: "sampleFile",
     output: "rawText",
-    params: parserParams,
+    params: commonParseParams,
     outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含解析后的文本、版面、图片和表格信息。" }],
   },
   {
     id: "multimodal-parser",
     name: "多模态解析",
     category: "解析",
-    summary: "使用多模态大模型理解文档与图片内容，适合图片、扫描件和复杂版面。",
+    summary: "使用多模态大模型对文档内容进行解析，效果好、速度慢。",
     status: "可用",
     input: "sampleFile",
     output: "rawText",
-    params: parserParams.map((param) => (param.id === "parseMode" ? { ...param, value: "多模态解析" } : param)),
+    params: multimodalParseParams,
     outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含多模态解析后的文本、图片理解和版面信息。" }],
   },
   {
     id: "medical-policy-parser",
     name: "医保政策文件解析",
     category: "解析",
-    summary: "面向医保政策类文档解析，提取政策条款、标题层级和关键结构。",
+    summary: "适用于解析医保政策类文件，支持 .docx 格式。",
     status: "可用",
     input: "sampleFile",
     output: "rawText",
-    params: parserParams.map((param) => (param.id === "parseMode" ? { ...param, value: "医保政策文件解析" } : param)),
+    params: policyParseParams,
     outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含医保政策文档的条款、标题和正文结构。" }],
   },
   {
     id: "chunk-splitter",
     name: "通用分片",
     category: "分片",
-    summary: "为纯文本文档提供灵活的分块和重叠设置。",
+    summary: "为纯文本文档提供灵活的分块和重叠设置，同时可为 OCR 文档附加文档名称和标题信息。",
     status: "可用",
     input: "rawText",
     output: "cleanText",
-    params: splitterParams,
+    params: commonChunkParams,
     outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含分片文本、标题、来源和元数据。" }],
   },
   {
     id: "custom-separator-splitter",
     name: "自定义分隔符分片",
     category: "分片",
-    summary: "使用指定分隔符严格切分文本，适合边界明确的文档。",
+    summary: "使用分隔符严格切分，两个分割符中间的内容为一个分片。",
     status: "可用",
     input: "rawText",
     output: "cleanText",
-    params: splitterParams.map((param) => (param.id === "splitMode" ? { ...param, value: "自定义分隔符分片" } : param)),
+    params: customSeparatorChunkParams,
     outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含按自定义分隔符切分后的文本片段。" }],
   },
   {
     id: "recursive-separator-splitter",
     name: "分隔符递归分片",
     category: "分片",
-    summary: "按分隔符优先级递归切分，优先保留语义完整。",
+    summary: "按分隔符优先级依次切分，优先保留语义完整，超长则降级到更细分隔符。",
     status: "可用",
     input: "rawText",
     output: "cleanText",
-    params: splitterParams.map((param) => (param.id === "splitMode" ? { ...param, value: "分隔符递归分片" } : param)),
+    params: recursiveSeparatorChunkParams,
     outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含递归切分后的文本片段。" }],
   },
   {
     id: "ocr-splitter",
     name: "OCR解析专用分片",
     category: "分片",
-    summary: "根据 OCR 识别标题和段落进行切分、聚合。",
+    summary: "根据 OCR 识别的标题及段落进行切分、聚合，长度参考理想分块长度。",
     status: "可用",
     input: "rawText",
     output: "cleanText",
-    params: splitterParams.map((param) => (param.id === "splitMode" ? { ...param, value: "OCR解析专用分片" } : param)),
+    params: ocrChunkParams,
     outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含面向 OCR 结果聚合后的文本片段。" }],
   },
   {
@@ -231,7 +318,7 @@ const toolCatalog: McpTool[] = [
     status: "可用",
     input: "rawText",
     output: "cleanText",
-    params: splitterParams.map((param) => (param.id === "splitMode" ? { ...param, value: "医保政策文件分片" } : param)),
+    params: policyChunkParams,
     outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含医保政策文件分片结果。" }],
   },
   {
@@ -242,12 +329,7 @@ const toolCatalog: McpTool[] = [
     status: "可用",
     input: "cleanText",
     output: "qaPairs",
-    params: [
-      ...extractionBaseParams,
-      { id: "systemPrompt", label: "System Prompt", desc: "QA 提取系统提示词。", type: "textarea", value: "你是一个QA抽取专家，擅长学习和分析提供的文本信息，并整理为标准问答知识。", editable: true },
-      { id: "referencePrompt", label: "引用模板提示词", desc: "用于控制问答引用和来源格式。", type: "textarea", value: "学习和分析<context></context>中的文本，并整理学习成果。", editable: true },
-      { id: "maxCount", label: "最多生成条数", desc: "限制单份样例最多生成的问答数量。", type: "number", value: 30, required: true, editable: true, showOnPage: true, min: 1, max: 100, unit: "条" },
-    ],
+    params: qaParams,
     outputs: [{ id: "qaResult", label: "QA提取结果", desc: "Array<json>，包含问题、答案和引用来源。" }],
   },
   {
@@ -258,11 +340,7 @@ const toolCatalog: McpTool[] = [
     status: "可用",
     input: "cleanText",
     output: "rawText",
-    params: [
-      ...extractionBaseParams,
-      { id: "systemPrompt", label: "System Prompt", desc: "摘要总结系统提示词。", type: "textarea", value: "你是一个摘要总结专家，擅长从非结构化文档中提炼关键事实、规则和结论。", editable: true },
-      { id: "summaryLength", label: "摘要长度", desc: "控制摘要输出长度。", type: "number", value: 300, required: true, editable: true, showOnPage: true, min: 80, max: 1000, unit: "tokens" },
-    ],
+    params: summaryParams,
     outputs: [{ id: "summaryResult", label: "摘要总结结果", desc: "Array<json>，包含摘要内容和来源引用。" }],
   },
   {
@@ -273,11 +351,7 @@ const toolCatalog: McpTool[] = [
     status: "可用",
     input: "cleanText",
     output: "rawText",
-    params: [
-      ...extractionBaseParams,
-      { id: "keywordCount", label: "关键词数量", desc: "控制单个切片最多输出的关键词数量。", type: "number", value: 12, required: true, editable: true, showOnPage: true, min: 3, max: 50, unit: "个" },
-      { id: "includeEntity", label: "包含实体词", desc: "开启后同时抽取机构、产品、规则等实体词。", type: "switch", value: true, editable: true },
-    ],
+    params: keywordParams,
     outputs: [{ id: "keywordResult", label: "关键词提取结果", desc: "Array<json>，包含关键词、实体词和权重。" }],
   },
 ];
