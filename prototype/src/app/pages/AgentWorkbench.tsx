@@ -444,7 +444,7 @@ function isFirstCategoryFirstNode(node: ToolNode, nodes: ToolNode[]) {
 }
 
 function getFixedInputSourceText(node: ToolNode, nodes: ToolNode[]) {
-  return isFirstCategoryFirstNode(node, nodes) ? "文件地址信息" : "待处理文件地址信息";
+  return "待处理文件地址信息";
 }
 
 function getNodeWarnings(nodes: ToolNode[]) {
@@ -1164,7 +1164,7 @@ function ToolEditDrawer({
                   </Select>
                 </FormControl>
                 {isFirstInputLocked ? (
-                  <TextField size="small" fullWidth label="取值方式" value="文件地址信息" disabled sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }} />
+                  <TextField size="small" fullWidth label="取值方式" value="待处理文件地址信息" disabled sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }} />
                 ) : (
                   <FormControl fullWidth size="small" sx={inputFieldSx}>
                     <InputLabel>取值方式</InputLabel>
@@ -1184,8 +1184,6 @@ function ToolEditDrawer({
                     </FormControl>
                     {sourceInvalid && <Typography sx={{ fontSize: 12, color: "#c2410c" }}>输入配置异常，请检查。</Typography>}
                   </Stack>
-                ) : !isFirstInputLocked && inputParam ? (
-                  <ParamField param={inputParam} canEdit={canEdit && inputParam.editable !== false} onChange={(value) => onParamChange(node.nodeId, inputParam.id, value)} />
                 ) : null}
               </Stack>
             </ConfigBlock>
