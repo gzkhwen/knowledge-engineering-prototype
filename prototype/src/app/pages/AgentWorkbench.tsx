@@ -66,6 +66,7 @@ interface ToolOutput {
   id: string;
   label: string;
   desc: string;
+  path: string;
 }
 
 interface InputSource {
@@ -249,19 +250,23 @@ const keywordParams: ToolParam[] = [
   { id: "guidePrompt", label: "引导模板提示词", desc: "关键词提取引导模板提示词。", type: "textarea", value: "以上是原文信息，请理解以上信息后生成不超过5个关键词，记得按照要求的json格式回答。", editable: true },
 ];
 
+function createOutput(id: string, label: string, desc: string, path: string): ToolOutput {
+  return { id, label, desc, path };
+}
+
 const toolCatalog: McpTool[] = [
-  { id: "document-parser", name: "通用解析", category: "解析", summary: "解析 Word、PDF、Excel 等主流文档，提取文本和版面布局。", status: "可用", input: "sampleFile", output: "rawText", params: commonParseParams, outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含解析后的文本、版面、图片和表格信息。" }] },
-  { id: "multimodal-parser", name: "多模态解析", category: "解析", summary: "使用多模态大模型对文档内容进行解析，效果好、速度慢。", status: "可用", input: "sampleFile", output: "rawText", params: multimodalParseParams, outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含多模态解析后的文本、图片理解和版面信息。" }] },
-  { id: "medical-policy-parser", name: "医保政策解析", category: "解析", summary: "适用于解析医保政策类文件。", status: "可用", input: "sampleFile", output: "rawText", params: policyParseParams, outputs: [{ id: "documentParseResult", label: "文档解析结果", desc: "Array<json>，包含医保政策文档的条款、标题和正文结构。" }] },
-  { id: "chunk-splitter", name: "通用分片", category: "分片", summary: "为纯文本文档提供灵活的分块和重叠设置。", status: "可用", input: "rawText", output: "cleanText", params: commonChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含分片文本、标题、来源和元数据。" }] },
-  { id: "custom-separator-splitter", name: "自定义分隔符分片", category: "分片", summary: "沿用通用分片配置，并使用指定分隔符切分文本。", status: "可用", input: "rawText", output: "cleanText", params: customSeparatorChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含按自定义分隔符切分后的文本片段。" }] },
-  { id: "recursive-separator-splitter", name: "分隔符递归分片", category: "分片", summary: "按分隔符优先级依次切分，优先保留语义完整。", status: "可用", input: "rawText", output: "cleanText", params: recursiveSeparatorChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含递归切分后的文本片段。" }] },
-  { id: "ocr-splitter", name: "OCR解析专用分片", category: "分片", summary: "根据 OCR 识别的标题及段落进行切分、聚合。", status: "可用", input: "rawText", output: "cleanText", params: ocrChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含面向 OCR 结果聚合后的文本片段。" }] },
-  { id: "medical-policy-splitter", name: "医保政策解析分片", category: "分片", summary: "适合医保政策类文件分片，页面上没有可配置参数。", status: "可用", input: "rawText", output: "cleanText", params: policyChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含医保政策文件分片结果。" }] },
-  { id: "video-audio-sync-splitter", name: "视频声画同步分片", category: "分片", summary: "按声画同步结果切分视频文本片段。", status: "可用", input: "rawText", output: "cleanText", params: videoAudioSyncChunkParams, outputs: [{ id: "textChunkResult", label: "文本分片结果", desc: "Array<json>，包含视频声画同步分片结果。" }] },
-  { id: "qa-extractor", name: "QA提取", category: "抽取", summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [{ id: "qaResult", label: "QA提取结果", desc: "Array<json>，包含问题、答案和引用来源。" }] },
-  { id: "summary", name: "摘要总结", category: "抽取", summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [{ id: "summaryResult", label: "摘要总结结果", desc: "Array<json>，包含摘要内容和来源引用。" }] },
-  { id: "keyword-extractor", name: "关键词提取", category: "抽取", summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [{ id: "keywordResult", label: "关键词提取结果", desc: "Array<json>，包含关键词和权重。" }] },
+  { id: "document-parser", name: "通用解析", category: "解析", summary: "解析 Word、PDF、Excel 等主流文档，提取文本和版面布局。", status: "可用", input: "sampleFile", output: "rawText", params: commonParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含解析后的文本、版面、图片和表格信息。", "data.documentParseResult")] },
+  { id: "multimodal-parser", name: "多模态解析", category: "解析", summary: "使用多模态大模型对文档内容进行解析，效果好、速度慢。", status: "可用", input: "sampleFile", output: "rawText", params: multimodalParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含多模态解析后的文本、图片理解和版面信息。", "data.documentParseResult")] },
+  { id: "medical-policy-parser", name: "医保政策解析", category: "解析", summary: "适用于解析医保政策类文件。", status: "可用", input: "sampleFile", output: "rawText", params: policyParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含医保政策文档的条款、标题和正文结构。", "data.documentParseResult")] },
+  { id: "chunk-splitter", name: "通用分片", category: "分片", summary: "为纯文本文档提供灵活的分块和重叠设置。", status: "可用", input: "rawText", output: "cleanText", params: commonChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含分片文本、标题、来源和元数据。", "data.textChunkResult")] },
+  { id: "custom-separator-splitter", name: "自定义分隔符分片", category: "分片", summary: "沿用通用分片配置，并使用指定分隔符切分文本。", status: "可用", input: "rawText", output: "cleanText", params: customSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含按自定义分隔符切分后的文本片段。", "data.textChunkResult")] },
+  { id: "recursive-separator-splitter", name: "分隔符递归分片", category: "分片", summary: "按分隔符优先级依次切分，优先保留语义完整。", status: "可用", input: "rawText", output: "cleanText", params: recursiveSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含递归切分后的文本片段。", "data.textChunkResult")] },
+  { id: "ocr-splitter", name: "OCR解析专用分片", category: "分片", summary: "根据 OCR 识别的标题及段落进行切分、聚合。", status: "可用", input: "rawText", output: "cleanText", params: ocrChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含面向 OCR 结果聚合后的文本片段。", "data.textChunkResult")] },
+  { id: "medical-policy-splitter", name: "医保政策解析分片", category: "分片", summary: "适合医保政策类文件分片，页面上没有可配置参数。", status: "可用", input: "rawText", output: "cleanText", params: policyChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含医保政策文件分片结果。", "data.textChunkResult")] },
+  { id: "video-audio-sync-splitter", name: "视频声画同步分片", category: "分片", summary: "按声画同步结果切分视频文本片段。", status: "可用", input: "rawText", output: "cleanText", params: videoAudioSyncChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含视频声画同步分片结果。", "data.textChunkResult")] },
+  { id: "qa-extractor", name: "QA提取", category: "抽取", summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [createOutput("qaResult", "QA提取结果", "Array<json>，包含问题、答案和引用来源。", "data.qaResult")] },
+  { id: "summary", name: "摘要总结", category: "抽取", summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [createOutput("summaryResult", "摘要总结结果", "Array<json>，包含摘要内容和来源引用。", "data.summaryResult")] },
+  { id: "keyword-extractor", name: "关键词提取", category: "抽取", summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [createOutput("keywordResult", "关键词提取结果", "Array<json>，包含关键词和权重。", "data.keywordResult")] },
 ];
 
 const initialPlanNodes: ToolNode[] = createInitialPlanNodes();
@@ -375,7 +380,7 @@ function getOutputFormat(output: ToolOutput) {
 function getResponseTemplate(outputs: ToolOutput[]) {
   return JSON.stringify(
     outputs.reduce<Record<string, string>>((template, output) => {
-      template[output.id] = `{{ response.${output.id} }}`;
+      template[output.id] = `{{ response.${output.path} }}`;
       return template;
     }, {}),
     null,
@@ -1204,6 +1209,11 @@ function ToolEditDrawer({
                         {(selectedSourceNode?.outputs ?? []).map((output) => <MenuItem key={output.id} value={output.id}>{output.label}</MenuItem>)}
                       </Select>
                     </FormControl>
+                    {selectedSourceOutput ? (
+                      <Typography sx={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+                        取值路径：{selectedSourceOutput.path}
+                      </Typography>
+                    ) : null}
                     {sourceInvalid && <Typography sx={{ fontSize: 12, color: "#c2410c" }}>输入配置异常，请检查。</Typography>}
                   </Stack>
                 ) : null}
