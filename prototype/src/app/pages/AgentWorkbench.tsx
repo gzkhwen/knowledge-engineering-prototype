@@ -1096,7 +1096,6 @@ function ToolEditDrawer({
   const inputParam = getToolInputParam(node);
   const configurableParams = node.params.filter((param) => param.id !== node.inputParamId && isParamVisible(node, param));
   const isFirstTool = allNodes[0]?.nodeId === node.nodeId;
-  const previousTool = isFirstTool ? null : allNodes[allNodes.findIndex((item) => item.nodeId === node.nodeId) - 1];
   const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
 
 
@@ -1125,9 +1124,9 @@ function ToolEditDrawer({
                   </Select>
                 </FormControl>
                 {isFirstTool ? (
-                  <Typography sx={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>默认将处理文件的地址信息作为输入参数的值。</Typography>
+                  <TextField size="small" fullWidth label="取值方式" value="文件地址信息" disabled sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }} />
                 ) : (
-                  <Typography sx={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>工具输入参数默认将前置工具【{previousTool?.toolName ?? "前置工具"}】的输出结果当做参数值。</Typography>
+                  <Typography sx={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>工具输入参数值默认为前置工具的输出结果。</Typography>
                 )}
               </Stack>
             </ConfigBlock>
