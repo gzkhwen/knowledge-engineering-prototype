@@ -713,7 +713,6 @@ export function AgentWorkbench() {
 	                  <Stack direction="row" spacing={1} alignItems="flex-start" justifyContent="space-between">
 	                    <Box sx={{ minWidth: 0 }}>
 	                      <Typography sx={{ fontSize: 12, color: "#64748b" }}>末级类目：{displayCategory} · {displayFormType}</Typography>
-                        <Chip label={hasManualEdits ? "智能+人工" : "智能方案"} size="small" sx={{ mt: 0.75, height: 22, fontSize: 11, bgcolor: hasManualEdits ? "#fff7ed" : "#eff6ff", color: hasManualEdits ? "#c2410c" : "#2563eb", fontWeight: 700 }} />
 	                    </Box>
                     <Tooltip title="添加工具">
                       <span>
