@@ -377,17 +377,6 @@ function getOutputFormat(output: ToolOutput) {
   return output.desc.split(/[，,]/)[0] || "未知格式";
 }
 
-function getResponseTemplate(outputs: ToolOutput[]) {
-  return JSON.stringify(
-    outputs.reduce<Record<string, string>>((template, output) => {
-      template[output.id] = `{{ response.${output.path} }}`;
-      return template;
-    }, {}),
-    null,
-    2,
-  );
-}
-
 function getParamFormat(param: ToolParam) {
   return param.format ?? param.type;
 }
@@ -1333,10 +1322,9 @@ function AddToolDialog({
         </Paper>
 
         <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1.25, minHeight: 0, overflow: "auto" }}>
-          <Typography sx={{ fontSize: 12, color: "#64748b", fontWeight: 700, mb: 1 }}>入参 / 返回参数</Typography>
           {currentTool ? <Stack spacing={1.25}>
             <Box>
-              <Typography sx={{ fontSize: 11, color: "#94a3b8", mb: 0.75 }}>入参</Typography>
+              <Typography sx={{ fontSize: 13, color: "#111827", fontWeight: 800, mb: 0.75 }}>入参</Typography>
               <Stack spacing={0.75}>
                 {currentTool.params.map((param) => (
                   <Box key={param.id} sx={{ p: 0.85, borderRadius: "8px", bgcolor: "#F8FAFC", border: "1px solid #EEF2F7" }}>
@@ -1352,7 +1340,7 @@ function AddToolDialog({
             </Box>
             <Divider />
             <Box>
-              <Typography sx={{ fontSize: 11, color: "#94a3b8", mb: 0.75 }}>返回参数</Typography>
+              <Typography sx={{ fontSize: 13, color: "#111827", fontWeight: 800, mb: 0.75 }}>出参</Typography>
               <Stack spacing={0.75}>
                 {currentTool.outputs.map((output) => (
                   <Box key={output.id} sx={{ p: 0.85, borderRadius: "8px", bgcolor: "#FBFCFF", border: "1px solid #EEF2F7" }}>
@@ -1364,12 +1352,6 @@ function AddToolDialog({
                   </Box>
                 ))}
               </Stack>
-              <Box sx={{ mt: 1 }}>
-                <Typography sx={{ fontSize: 11, color: "#94a3b8", mb: 0.75 }}>响应模板</Typography>
-                <Box sx={{ p: 0.85, borderRadius: "8px", bgcolor: "#0f172a", color: "#e2e8f0", fontSize: 10.5, fontFamily: "monospace", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
-                  {getResponseTemplate(currentTool.outputs)}
-                </Box>
-              </Box>
             </Box>
           </Stack> : <Typography sx={{ fontSize: 12, color: "#94a3b8", p: 1 }}>请选择一个工具。</Typography>}
         </Paper>
