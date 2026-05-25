@@ -1040,8 +1040,8 @@ function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: b
       </FormControl>
     );
   }
-  if (param.type === "textarea") return <TextField size="small" fullWidth multiline minRows={4} label={param.label} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} helperText={param.desc} sx={commonSx} />;
-  if (param.type === "number") return <TextField size="small" fullWidth type="number" label={param.label} value={Number(param.value)} disabled={!canEdit} onChange={(event) => onChange(Number(event.target.value))} helperText={`${param.desc}${param.unit ? `，单位：${param.unit}` : ""}`} sx={commonSx} />;
+  if (param.type === "textarea") return <TextField size="small" fullWidth multiline minRows={4} label={param.label} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} sx={commonSx} />;
+  if (param.type === "number") return <TextField size="small" fullWidth type="number" label={param.label} value={Number(param.value)} disabled={!canEdit} onChange={(event) => onChange(Number(event.target.value))} sx={commonSx} />;
   if (param.type === "tags") {
     const tags = Array.isArray(param.value) ? param.value : [];
     const limit = param.max ?? 10;
@@ -1080,11 +1080,10 @@ function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: b
             />
           </Stack>
         )}
-        <Typography sx={{ fontSize: 11, color: "#94a3b8", mt: 0.75 }}>{param.desc} 当前 {tags.length}/{limit}</Typography>
       </Box>
     );
   }
-  return <TextField size="small" fullWidth label={param.label} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} helperText={param.desc} sx={commonSx} />;
+  return <TextField size="small" fullWidth label={param.label} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} sx={commonSx} />;
 }
 
 function ToolEditDrawer({
