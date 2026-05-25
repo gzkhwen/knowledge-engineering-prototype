@@ -287,6 +287,20 @@ function cloneNodes(nodes: ToolNode[]): ToolNode[] {
   }));
 }
 
+function normalizeInputSources(nodes: ToolNode[]): ToolNode[] {
+  return nodes.map((node, index) => {
+    if (index === 0) return { ...node, inputSource: { type: "fixed" } };
+    const sourceNode = nodes[index - 1];
+    const output = sourceNode.outputs[0];
+    return {
+      ...node,
+      inputSource: output
+        ? { type: "upstream", sourceNodeId: sourceNode.nodeId, outputId: output.id }
+        : { type: "upstream" },
+    };
+  });
+}
+
 function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }): ToolNode {
   const tool = toolCatalog.find((item) => item.id === toolId);
   if (!tool) throw new Error("Unknown MCP tool");
@@ -314,7 +328,7 @@ function createInitialPlanNodes(): ToolNode[] {
   const parser = createNode("document-parser", { type: "fixed" });
   const splitter = createNode("chunk-splitter", { type: "upstream", sourceNodeId: parser.nodeId, outputId: "documentParseResult" });
   const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputId: "textChunkResult" });
-  return [parser, splitter, qa];
+  return normalizeInputSources([parser, splitter, qa]);
 }
 
 function getParamProblems(node: ToolNode, receivesExternalInput = false) {
@@ -386,7 +400,7 @@ function formatParamValue(value: ToolParam["value"]) {
 }
 
 function isInputSourceInvalid(node: ToolNode, nodes: ToolNode[]) {
-  if (isFirstCategoryFirstNode(node, nodes)) return false;
+  if (nodes[0]?.nodeId === node.nodeId) return false;
   if (node.inputSource.type !== "upstream") return false;
   const priorNodes = getPriorNodes(nodes, node.nodeId);
   const sourceNode = priorNodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
@@ -430,21 +444,8 @@ function insertNodeByCategory(nodes: ToolNode[], node: ToolNode) {
   return next;
 }
 
-function getFirstCategory(nodes: ToolNode[]) {
-  return getCategorySections(nodes)[0]?.category;
-}
-
-function isFirstCategoryNode(node: ToolNode, nodes: ToolNode[]) {
-  return getFirstCategory(nodes) === node.category;
-}
-
-function isFirstCategoryFirstNode(node: ToolNode, nodes: ToolNode[]) {
-  const firstSection = getCategorySections(nodes)[0];
-  return firstSection?.nodes[0]?.nodeId === node.nodeId;
-}
-
 function getFixedInputSourceText(node: ToolNode, nodes: ToolNode[]) {
-  return isFirstCategoryNode(node, nodes) ? "文件地址信息" : "外部输入";
+  return nodes[0]?.nodeId === node.nodeId ? "文件地址信息" : "外部输入";
 }
 
 function getNodeWarnings(nodes: ToolNode[]) {
@@ -502,12 +503,14 @@ export function AgentWorkbench() {
   const canEdit = !confirmed;
   const editingNode = planNodes.find((node) => node.nodeId === editingNodeId) ?? null;
   const addedToolIds = useMemo(() => new Set(planNodes.map((node) => node.toolId)), [planNodes]);
+  const addedCategories = useMemo(() => new Set(planNodes.map((node) => node.category)), [planNodes]);
 
   const filteredTools = selectedCategory === "全部"
     ? toolCatalog
     : toolCatalog.filter((tool) => tool.category === selectedCategory);
   const currentTool = toolCatalog.find((tool) => tool.id === selectedToolId) ?? filteredTools[0] ?? null;
   const selectedToolAdded = currentTool ? addedToolIds.has(currentTool.id) : false;
+  const selectedToolCategoryHasTool = currentTool ? addedCategories.has(currentTool.category) : false;
   const selectedToolCategoryConfirmed = currentTool ? confirmedCategories.has(currentTool.category) : false;
   const allCategoriesConfirmed = categorySections.length > 0 && categorySections.every((section) => confirmedCategories.has(section.category));
   const firstUnconfirmedCategory = categorySections.find((section) => !confirmedCategories.has(section.category))?.category;
@@ -535,9 +538,9 @@ export function AgentWorkbench() {
   };
 
   const addTool = () => {
-    if (!canEdit || !currentTool || selectedToolAdded || selectedToolCategoryConfirmed) return;
+    if (!canEdit || !currentTool || selectedToolAdded || selectedToolCategoryHasTool || selectedToolCategoryConfirmed) return;
     const node = createNode(currentTool.id);
-    setPlanNodes((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
+    setPlanNodes((current) => normalizeInputSources(insertNodeByCategory(current, { ...node, expanded: true, adjusted: true })));
     setHasManualEdits(true);
     setAddDialogOpen(false);
     toast.success(`已添加工具，已归入${getPlanTitle(node.category)}`);
@@ -545,7 +548,7 @@ export function AgentWorkbench() {
 
   const removeNode = (nodeId: string) => {
     if (!isNodeEditable(nodeId)) return;
-    setPlanNodes((current) => current.filter((node) => node.nodeId !== nodeId));
+    setPlanNodes((current) => normalizeInputSources(current.filter((node) => node.nodeId !== nodeId)));
     setEditingNodeId((current) => (current === nodeId ? null : current));
     setHasManualEdits(true);
     toast.success("已删除工具节点");
@@ -553,7 +556,7 @@ export function AgentWorkbench() {
 
   const regenerateByAgent = () => {
     if (!canEdit) return;
-    setPlanNodes(cloneNodes(initialPlanNodes));
+    setPlanNodes(normalizeInputSources(cloneNodes(initialPlanNodes)));
     setConfirmedCategories(new Set());
     setEditingNodeId(null);
     setHasManualEdits(false);
@@ -611,7 +614,7 @@ export function AgentWorkbench() {
     const next = [...planNodes];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, { ...moved, adjusted: true });
-    setPlanNodes(next);
+    setPlanNodes(normalizeInputSources(next));
     setHasManualEdits(true);
     setDraggingNodeId(null);
   };
@@ -628,22 +631,7 @@ export function AgentWorkbench() {
 
   const updateInputParam = (nodeId: string, inputParamId: string) => {
     if (!isNodeEditable(nodeId)) return;
-    updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputParamId, inputSource: { type: "fixed" } }));
-    setHasManualEdits(true);
-  };
-
-  const updateInputSource = (nodeId: string, source: InputSource) => {
-    if (!isNodeEditable(nodeId)) return;
-    updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputSource: source }));
-    setHasManualEdits(true);
-  };
-
-  const toggleParamShowOnPage = (nodeId: string, paramId: string) => {
-    if (!canEdit) return;
-    updateNode(nodeId, (node) => ({
-      ...node,
-      params: node.params.map((param) => (param.id === paramId ? { ...param, showOnPage: !param.showOnPage } : param)),
-    }));
+    setPlanNodes((current) => normalizeInputSources(current.map((node) => (node.nodeId === nodeId ? { ...node, adjusted: true, inputParamId } : node))));
     setHasManualEdits(true);
   };
 
@@ -657,7 +645,7 @@ export function AgentWorkbench() {
     const [moved] = nextCategories.splice(from, 1);
     nextCategories.splice(to, 0, moved);
     const grouped = new Map(categorySections.map((section) => [section.category, section.nodes]));
-    setPlanNodes(nextCategories.flatMap((item) => grouped.get(item) ?? []));
+    setPlanNodes(normalizeInputSources(nextCategories.flatMap((item) => grouped.get(item) ?? [])));
     setHasManualEdits(true);
     setDraggingCategory(null);
   };
@@ -778,7 +766,9 @@ export function AgentWorkbench() {
         currentTool={currentTool}
         service={mcpService}
         addedToolIds={addedToolIds}
+        addedCategories={addedCategories}
         selectedToolAdded={selectedToolAdded}
+        selectedToolCategoryHasTool={selectedToolCategoryHasTool}
         selectedToolCategoryConfirmed={selectedToolCategoryConfirmed}
         onClose={() => setAddDialogOpen(false)}
         onAdd={addTool}
@@ -790,9 +780,7 @@ export function AgentWorkbench() {
         canEdit={editingNode ? isCategoryEditable(editingNode.category) : false}
         onClose={() => setEditingNodeId(null)}
         onInputParamChange={updateInputParam}
-        onInputSourceChange={updateInputSource}
         onParamChange={changeParam}
-        onToggleShowOnPage={toggleParamShowOnPage}
       />
     </Box>
   );
@@ -1094,9 +1082,7 @@ function ToolEditDrawer({
   canEdit,
   onClose,
   onInputParamChange,
-  onInputSourceChange,
   onParamChange,
-  onToggleShowOnPage,
 }: {
   open: boolean;
   node: ToolNode | null;
@@ -1104,39 +1090,13 @@ function ToolEditDrawer({
   canEdit: boolean;
   onClose: () => void;
   onInputParamChange: (nodeId: string, inputParamId: string) => void;
-  onInputSourceChange: (nodeId: string, source: InputSource) => void;
   onParamChange: (nodeId: string, paramId: string, value: ToolParam["value"]) => void;
-  onToggleShowOnPage: (nodeId: string, paramId: string) => void;
 }) {
   if (!node) return null;
-  const priorNodes = getPriorNodes(allNodes, node.nodeId);
   const inputParam = getToolInputParam(node);
   const configurableParams = node.params.filter((param) => param.id !== node.inputParamId && isParamVisible(node, param));
-  const selectedSourceNode = node.inputSource.type === "upstream"
-    ? priorNodes.find((item) => item.nodeId === node.inputSource.sourceNodeId) ?? null
-    : null;
-  const sourceInvalid = isInputSourceInvalid(node, allNodes);
-  const isFirstInputLocked = isFirstCategoryFirstNode(node, allNodes);
-  const fixedInputText = getFixedInputSourceText(node, allNodes);
+  const isFirstTool = allNodes[0]?.nodeId === node.nodeId;
   const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
-
-  const setSourceType = (type: InputSource["type"]) => {
-    if (type === "fixed") {
-      onInputSourceChange(node.nodeId, { type: "fixed" });
-      return;
-    }
-    const sourceNode = selectedSourceNode ?? priorNodes[0];
-    const output = sourceNode?.outputs[0];
-    if (!sourceNode || !output) return;
-    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: sourceNode.nodeId, outputId: output.id });
-  };
-
-  const setSourceNode = (sourceNodeId: string) => {
-    const sourceNode = priorNodes.find((item) => item.nodeId === sourceNodeId);
-    const output = sourceNode?.outputs[0];
-    if (!sourceNode || !output) return;
-    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: sourceNode.nodeId, outputId: output.id });
-  };
 
 
   return (
@@ -1155,7 +1115,7 @@ function ToolEditDrawer({
 
         <Box sx={{ p: 2, overflow: "auto", flex: 1, bgcolor: "#FBFCFF" }}>
           <Stack spacing={1.5}>
-            <ConfigBlock title="指定输入参数">
+            <ConfigBlock title="工具输入">
               <Stack spacing={1.25}>
                 <FormControl fullWidth size="small" sx={inputFieldSx}>
                   <InputLabel>指定输入参数</InputLabel>
@@ -1163,30 +1123,11 @@ function ToolEditDrawer({
                     {node.params.map((param) => <MenuItem key={param.id} value={param.id}>{param.label}</MenuItem>)}
                   </Select>
                 </FormControl>
-                {isFirstInputLocked ? (
+                {isFirstTool ? (
                   <TextField size="small" fullWidth label="取值方式" value="文件地址信息" disabled sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }} />
                 ) : (
-                  <FormControl fullWidth size="small" sx={inputFieldSx}>
-                    <InputLabel>取值方式</InputLabel>
-                    <Select label="取值方式" value={node.inputSource.type} disabled={!canEdit || priorNodes.length === 0} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceType(event.target.value as InputSource["type"])}>
-                      <MenuItem value="fixed">{fixedInputText}</MenuItem>
-                      <MenuItem value="upstream">上游工具输出</MenuItem>
-                    </Select>
-                  </FormControl>
+                  <Typography sx={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>工具输入参数值默认为前置工具的输出结果。</Typography>
                 )}
-                {!isFirstInputLocked && node.inputSource.type === "upstream" ? (
-                  <Stack spacing={1}>
-                    <FormControl fullWidth size="small" sx={inputFieldSx}>
-                      <InputLabel>来源工具</InputLabel>
-                      <Select label="来源工具" value={selectedSourceNode?.nodeId ?? ""} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceNode(event.target.value)}>
-                        {priorNodes.map((item) => <MenuItem key={item.nodeId} value={item.nodeId}>{item.toolName}</MenuItem>)}
-                      </Select>
-                    </FormControl>
-                    {sourceInvalid && <Typography sx={{ fontSize: 12, color: "#c2410c" }}>输入配置异常，请检查。</Typography>}
-                  </Stack>
-                ) : !isFirstInputLocked && inputParam ? (
-                  <ParamField param={inputParam} canEdit={canEdit && inputParam.editable !== false} onChange={(value) => onParamChange(node.nodeId, inputParam.id, value)} />
-                ) : null}
               </Stack>
             </ConfigBlock>
 
@@ -1235,7 +1176,9 @@ function AddToolDialog({
   currentTool,
   service,
   addedToolIds,
+  addedCategories,
   selectedToolAdded,
+  selectedToolCategoryHasTool,
   selectedToolCategoryConfirmed,
   onClose,
   onAdd,
@@ -1250,7 +1193,9 @@ function AddToolDialog({
   currentTool: McpTool | null;
   service: McpService;
   addedToolIds: Set<string>;
+  addedCategories: Set<string>;
   selectedToolAdded: boolean;
+  selectedToolCategoryHasTool: boolean;
   selectedToolCategoryConfirmed: boolean;
   onClose: () => void;
   onAdd: () => void;
@@ -1290,11 +1235,16 @@ function AddToolDialog({
             {tools.length === 0 && <Typography sx={{ fontSize: 12, color: "#94a3b8", p: 1 }}>当前分类下没有工具。</Typography>}
             {tools.map((tool) => {
               const isAdded = addedToolIds.has(tool.id);
+              const categoryHasTool = addedCategories.has(tool.category);
               return (
-              <Box key={tool.id} onClick={() => onToolChange(tool.id)} sx={{ p: 1, borderRadius: "10px", border: "1px solid", borderColor: selectedToolId === tool.id ? "#c4b5fd" : "#EEF2F7", bgcolor: selectedToolId === tool.id ? "#faf5ff" : "#fff", cursor: "pointer", opacity: isAdded ? 0.62 : 1 }}>
+              <Box key={tool.id} onClick={() => onToolChange(tool.id)} sx={{ p: 1, borderRadius: "10px", border: "1px solid", borderColor: selectedToolId === tool.id ? "#c4b5fd" : "#EEF2F7", bgcolor: selectedToolId === tool.id ? "#faf5ff" : "#fff", cursor: "pointer", opacity: categoryHasTool ? 0.62 : 1 }}>
                 <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between">
                   <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{tool.name}</Typography>
-                  {isAdded && <Chip label="已添加" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f1f5f9", color: "#64748b" }} />}
+                  {isAdded ? (
+                    <Chip label="已添加" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f1f5f9", color: "#64748b" }} />
+                  ) : categoryHasTool ? (
+                    <Chip label="分类已选" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f1f5f9", color: "#64748b" }} />
+                  ) : null}
                 </Stack>
                 <Typography sx={{ fontSize: 11, color: "#64748b", lineHeight: 1.5, mt: 0.5 }}>{tool.summary}</Typography>
               </Box>
@@ -1340,7 +1290,7 @@ function AddToolDialog({
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose} sx={{ textTransform: "none", color: "#64748b" }}>取消</Button>
-        <Button disabled={!currentTool || selectedToolAdded || selectedToolCategoryConfirmed} onClick={onAdd} variant="contained" sx={{ textTransform: "none", bgcolor: "#801AEB", borderRadius: "10px", "&:hover": { bgcolor: "#6D16C9" } }}>{selectedToolAdded ? "工具已添加" : selectedToolCategoryConfirmed ? "方案已确认" : "确认添加"}</Button>
+        <Button disabled={!currentTool || selectedToolAdded || selectedToolCategoryHasTool || selectedToolCategoryConfirmed} onClick={onAdd} variant="contained" sx={{ textTransform: "none", bgcolor: "#801AEB", borderRadius: "10px", "&:hover": { bgcolor: "#6D16C9" } }}>{selectedToolAdded ? "工具已添加" : selectedToolCategoryHasTool ? "分类已添加工具" : selectedToolCategoryConfirmed ? "方案已确认" : "确认添加"}</Button>
       </DialogActions>
     </Dialog>
   );
