@@ -1167,12 +1167,6 @@ function ToolEditDrawer({
           <Stack spacing={1.5}>
             <ConfigBlock title="工具输入">
               <Stack spacing={1.25}>
-                <FormControl fullWidth size="small" sx={inputFieldSx}>
-                  <InputLabel>指定输入参数</InputLabel>
-                  <Select label="指定输入参数" value={node.inputParamId} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onInputParamChange(node.nodeId, event.target.value)}>
-                    {node.params.map((param) => <MenuItem key={param.id} value={param.id}>{param.label}</MenuItem>)}
-                  </Select>
-                </FormControl>
                 {isFirstInputLocked ? (
                   <TextField size="small" fullWidth label="取值方式" value="待处理文件地址信息" disabled sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }} />
                 ) : (
@@ -1187,14 +1181,14 @@ function ToolEditDrawer({
                 {!isFirstInputLocked && node.inputSource.type === "upstream" ? (
                   <Stack spacing={1}>
                     <FormControl fullWidth size="small" sx={inputFieldSx}>
-                      <InputLabel>来源工具</InputLabel>
-                      <Select label="来源工具" value={selectedSourceNode?.nodeId ?? ""} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceNode(event.target.value)}>
+                      <InputLabel>选择上游工具</InputLabel>
+                      <Select label="选择上游工具" value={selectedSourceNode?.nodeId ?? ""} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceNode(event.target.value)}>
                         {priorNodes.map((item) => <MenuItem key={item.nodeId} value={item.nodeId}>{item.toolName}</MenuItem>)}
                       </Select>
                     </FormControl>
                     <FormControl fullWidth size="small" sx={inputFieldSx}>
-                      <InputLabel>返回参数</InputLabel>
-                      <Select label="返回参数" value={selectedSourceOutput?.id ?? ""} disabled={!canEdit || !selectedSourceNode} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceOutput(event.target.value)}>
+                      <InputLabel>选择上游工具输出参数</InputLabel>
+                      <Select label="选择上游工具输出参数" value={selectedSourceOutput?.id ?? ""} disabled={!canEdit || !selectedSourceNode} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceOutput(event.target.value)}>
                         {(selectedSourceNode?.outputs ?? []).map((output) => <MenuItem key={output.id} value={output.id}>{output.label}</MenuItem>)}
                       </Select>
                     </FormControl>
@@ -1206,10 +1200,21 @@ function ToolEditDrawer({
                     {sourceInvalid && <Typography sx={{ fontSize: 12, color: "#c2410c" }}>输入配置异常，请检查。</Typography>}
                   </Stack>
                 ) : null}
+                <Box>
+                  <FormControl fullWidth size="small" sx={inputFieldSx}>
+                    <InputLabel>选择当前工具的输入参数</InputLabel>
+                    <Select label="选择当前工具的输入参数" value={node.inputParamId} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onInputParamChange(node.nodeId, event.target.value)}>
+                      {node.params.map((param) => <MenuItem key={param.id} value={param.id}>{param.label}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                  <Typography sx={{ mt: 0.5, fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+                    从当前工具的全部入参里选择作为工具输入的参数，接收输入值。
+                  </Typography>
+                </Box>
               </Stack>
             </ConfigBlock>
 
-            <ConfigBlock title="参数配置">
+            <ConfigBlock title="工具配置">
               <Stack spacing={1.25}>
                 {configurableParams.map((param) => (
                   <ParamField key={param.id} param={param} canEdit={canEdit && param.editable !== false && node.enabled} onChange={(value) => onParamChange(node.nodeId, param.id, value)} />
@@ -1217,7 +1222,7 @@ function ToolEditDrawer({
               </Stack>
             </ConfigBlock>
 
-            <ConfigBlock title="输出">
+            <ConfigBlock title="工具输出">
               <Stack spacing={0.75}>
                 {node.outputs.map((output) => (
                   <Box key={output.id} sx={{ p: 1, borderRadius: "9px", bgcolor: "#fff", border: "1px solid #EEF2F7" }}>
