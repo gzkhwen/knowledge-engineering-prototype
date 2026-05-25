@@ -1208,7 +1208,7 @@ function ToolEditDrawer({
                     </Select>
                   </FormControl>
                   <Typography sx={{ mt: 0.5, fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
-                    从当前工具的全部入参里选择作为工具输入的参数，接收输入值。
+                    从当前工具的入参中选择一个参数，用于接收前面配置的输入值。
                   </Typography>
                 </Box>
               </Stack>
