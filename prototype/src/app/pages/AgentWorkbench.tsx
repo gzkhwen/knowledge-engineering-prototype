@@ -372,6 +372,17 @@ function getOutputFormat(output: ToolOutput) {
   return output.desc.split(/[，,]/)[0] || "未知格式";
 }
 
+function getResponseTemplate(outputs: ToolOutput[]) {
+  return JSON.stringify(
+    outputs.reduce<Record<string, string>>((template, output) => {
+      template[output.id] = `{{ response.${output.id} }}`;
+      return template;
+    }, {}),
+    null,
+    2,
+  );
+}
+
 function getParamFormat(param: ToolParam) {
   return param.format ?? param.type;
 }
@@ -1114,6 +1125,7 @@ function ToolEditDrawer({
   const selectedSourceNode = node.inputSource.type === "upstream"
     ? priorNodes.find((item) => item.nodeId === node.inputSource.sourceNodeId) ?? null
     : null;
+  const selectedSourceOutput = selectedSourceNode?.outputs.find((output) => output.id === node.inputSource.outputId) ?? null;
   const sourceInvalid = isInputSourceInvalid(node, allNodes);
   const isFirstInputLocked = isFirstCategoryFirstNode(node, allNodes);
   const fixedInputText = getFixedInputSourceText(node, allNodes);
@@ -1135,6 +1147,11 @@ function ToolEditDrawer({
     const output = sourceNode?.outputs[0];
     if (!sourceNode || !output) return;
     onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: sourceNode.nodeId, outputId: output.id });
+  };
+
+  const setSourceOutput = (outputId: string) => {
+    if (!selectedSourceNode || !selectedSourceNode.outputs.some((output) => output.id === outputId)) return;
+    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: selectedSourceNode.nodeId, outputId });
   };
 
 
@@ -1179,6 +1196,12 @@ function ToolEditDrawer({
                       <InputLabel>来源工具</InputLabel>
                       <Select label="来源工具" value={selectedSourceNode?.nodeId ?? ""} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceNode(event.target.value)}>
                         {priorNodes.map((item) => <MenuItem key={item.nodeId} value={item.nodeId}>{item.toolName}</MenuItem>)}
+                      </Select>
+                    </FormControl>
+                    <FormControl fullWidth size="small" sx={inputFieldSx}>
+                      <InputLabel>返回参数</InputLabel>
+                      <Select label="返回参数" value={selectedSourceOutput?.id ?? ""} disabled={!canEdit || !selectedSourceNode} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceOutput(event.target.value)}>
+                        {(selectedSourceNode?.outputs ?? []).map((output) => <MenuItem key={output.id} value={output.id}>{output.label}</MenuItem>)}
                       </Select>
                     </FormControl>
                     {sourceInvalid && <Typography sx={{ fontSize: 12, color: "#c2410c" }}>输入配置异常，请检查。</Typography>}
@@ -1331,6 +1354,12 @@ function AddToolDialog({
                   </Box>
                 ))}
               </Stack>
+              <Box sx={{ mt: 1 }}>
+                <Typography sx={{ fontSize: 11, color: "#94a3b8", mb: 0.75 }}>响应模板</Typography>
+                <Box sx={{ p: 0.85, borderRadius: "8px", bgcolor: "#0f172a", color: "#e2e8f0", fontSize: 10.5, fontFamily: "monospace", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
+                  {getResponseTemplate(currentTool.outputs)}
+                </Box>
+              </Box>
             </Box>
           </Stack> : <Typography sx={{ fontSize: 12, color: "#94a3b8", p: 1 }}>请选择一个工具。</Typography>}
         </Paper>
