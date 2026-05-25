@@ -5,7 +5,7 @@ import {
 } from "@mui/material";
 import {
   Category, Description, AccountCircle, Logout, ManageAccounts,
-  Engineering, Settings, Hub,
+  Engineering, Settings, Hub, Extension,
 } from "@mui/icons-material";
 import { useState, useEffect } from "react";
 import { User } from "../types";
@@ -16,9 +16,15 @@ const menuItems = [
   { path: "/admin/classification", label: "分类管理", icon: <Category sx={{ fontSize: 16 }} /> },
   { path: "/admin/template",       label: "模板管理", icon: <Description sx={{ fontSize: 16 }} /> },
   {
+    path: "/admin/tools",
+    label: "工具管理",
+    icon: <Extension sx={{ fontSize: 16 }} />,
+  },
+  {
     path: "/admin/tool-hub",
     label: "工具 Hub",
     icon: <Hub sx={{ fontSize: 16 }} />,
+    hidden: true,
     children: [
       { path: "/admin/tool-hub/mcp-services", label: "MCP 服务" },
       { path: "/admin/tool-hub", label: "工具库" },
@@ -95,7 +101,7 @@ export function AdminLayout() {
         sx={{ width: DRAWER_WIDTH, flexShrink: 0, "& .MuiDrawer-paper": { width: DRAWER_WIDTH, boxSizing: "border-box", bgcolor: "#f8f9fb", borderRight: "1px solid #e8eaed", pt: "56px" } }}>
         <Box sx={{ py: 1.5, px: 1.25 }}>
           <List disablePadding>
-            {menuItems.map((item) => {
+            {menuItems.filter((item) => !item.hidden).map((item) => {
               const selected = item.children
                 ? item.children.some((child) => child.path === location.pathname || (child.path === "/admin/tool-hub" && /^\/admin\/tool-hub\/(?!run-records|mcp-services|connectors)/.test(location.pathname)))
                 : location.pathname.startsWith(item.path);

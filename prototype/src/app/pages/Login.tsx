@@ -29,7 +29,7 @@ export function Login() {
     };
     localStorage.setItem("currentUser", JSON.stringify(user));
 
-    navigate("/admin/tool-hub/mcp-services");
+    navigate("/admin/tools");
   };
 
   return (

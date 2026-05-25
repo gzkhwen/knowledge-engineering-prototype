@@ -7,6 +7,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   Dialog,
   DialogActions,
@@ -57,6 +58,7 @@ import {
   RocketLaunch,
   Search,
   Close,
+  Sync,
   WarningAmber,
 } from "@mui/icons-material";
 import { Fragment, type ReactNode } from "react";
@@ -1450,6 +1452,7 @@ function getVersionConnectorName(version: ToolVersion) {
 const MCP_SERVICE_VERSION_BINDINGS = [
   {
     serviceName: "知识工程 Agent MCP",
+    serviceVersion: "V1.0.0",
     status: "运行中",
     versionCodes: [
       "rag_document_parser_v1_3_0",
@@ -1460,6 +1463,7 @@ const MCP_SERVICE_VERSION_BINDINGS = [
   },
   {
     serviceName: "知识工程测试 MCP",
+    serviceVersion: "V1.0.0",
     status: "停用",
     versionCodes: [
       "rag_document_parser_v1_2_0",
@@ -1468,6 +1472,7 @@ const MCP_SERVICE_VERSION_BINDINGS = [
   },
   {
     serviceName: "知识工程联调 MCP",
+    serviceVersion: "V1.0.0",
     status: "运行中",
     versionCodes: [
       "rag_summary_v1_3_0",
@@ -1490,6 +1495,15 @@ function getAssociatedMcpServiceNames(version: ToolVersion) {
   return MCP_SERVICE_VERSION_BINDINGS
     .filter((service) => service.versionCodes.includes(versionCode))
     .map((service) => service.serviceName);
+}
+
+function getToolMcpServiceInfo(tool: ToolItem) {
+  const publishedVersions = tool.versions.filter((version) => version.status === "published" && version.versionCode);
+  for (const version of publishedVersions) {
+    const binding = MCP_SERVICE_VERSION_BINDINGS.find((service) => service.versionCodes.includes(version.versionCode || ""));
+    if (binding) return { name: binding.serviceName, version: binding.serviceVersion };
+  }
+  return { name: "-", version: "-" };
 }
 
 function getVersionMcpServiceRefs(version: ToolVersion) {
@@ -2786,7 +2800,6 @@ export function ToolHubPage() {
   const [categories, setCategoriesState] = useState<string[]>(loadCategories);
   const [selectedCategory, setSelectedCategory] = useState(loadSelectedCategory);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("all");
   const [addOpen, setAddOpen] = useState(false);
   const [editingToolId, setEditingToolId] = useState<string | null>(null);
   const [newTool, setNewTool] = useState({
@@ -2799,6 +2812,9 @@ export function ToolHubPage() {
   const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
   const [categoryEditorMode, setCategoryEditorMode] = useState<CategoryEditorMode>("create");
   const [categoryDraft, setCategoryDraft] = useState("");
+  const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
+  const [batchCategoryOpen, setBatchCategoryOpen] = useState(false);
+  const [batchCategory, setBatchCategory] = useState(loadCategories()[0] ?? "解析");
   const [categoryMenuAnchor, setCategoryMenuAnchor] = useState<null | HTMLElement>(null);
   const [categoryMenuTarget, setCategoryMenuTarget] = useState<string | null>(null);
   const [deleteConfirmToolId, setDeleteConfirmToolId] = useState<string | null>(null);
@@ -2845,13 +2861,25 @@ export function ToolHubPage() {
 
   const filtered = useMemo(() => toolsInCategory.filter((tool) => {
     if (query && !tool.name.toLowerCase().includes(query.toLowerCase())) return false;
-    if (status !== "all" && tool.status !== status) return false;
     return true;
-  }), [toolsInCategory, query, status]);
+  }), [toolsInCategory, query]);
 
   const pagedTools = useMemo(() => (
     filtered.slice(toolPage * toolRowsPerPage, toolPage * toolRowsPerPage + toolRowsPerPage)
   ), [filtered, toolPage, toolRowsPerPage]);
+
+  const pagedToolIds = useMemo(() => pagedTools.map((tool) => tool.id), [pagedTools]);
+  const currentPageAllSelected = pagedToolIds.length > 0 && pagedToolIds.every((id) => selectedToolIds.includes(id));
+  const currentPagePartSelected = pagedToolIds.some((id) => selectedToolIds.includes(id)) && !currentPageAllSelected;
+
+  const currentMcpServiceInfo = {
+    name: "知识工程 Agent MCP",
+    protocol: "streamable",
+    version: "V1.0.0",
+    status: "连接正常",
+    description: "从 Nacos 同步知识解析、分片和抽取相关工具，供处理方案编排时选择使用。",
+    lastSyncedAt: "2026-05-25 20:42",
+  };
 
   const stats = useMemo(() => ({
     total: toolsInCategory.length,
@@ -2876,6 +2904,47 @@ export function ToolHubPage() {
   const openCreateTool = () => {
     resetAddTool();
     setAddOpen(true);
+  };
+
+  const syncMcpTools = () => {
+    toast.success("已触发 MCP 工具同步");
+  };
+
+  const toggleSelectTool = (toolId: string) => {
+    setSelectedToolIds((prev) => (
+      prev.includes(toolId) ? prev.filter((id) => id !== toolId) : [...prev, toolId]
+    ));
+  };
+
+  const toggleSelectCurrentPage = () => {
+    setSelectedToolIds((prev) => {
+      if (currentPageAllSelected) {
+        return prev.filter((id) => !pagedToolIds.includes(id));
+      }
+      return Array.from(new Set([...prev, ...pagedToolIds]));
+    });
+  };
+
+  const openBatchCategoryDialog = () => {
+    if (selectedToolIds.length === 0) {
+      toast.error("请先选择工具");
+      return;
+    }
+    setBatchCategory(categories[0] ?? "");
+    setBatchCategoryOpen(true);
+  };
+
+  const saveBatchCategory = () => {
+    if (!batchCategory) {
+      toast.error("请选择分类");
+      return;
+    }
+    setTools((prev) => prev.map((tool) => (
+      selectedToolIds.includes(tool.id) ? { ...tool, category: batchCategory, updatedAt: "2026-05-25 21:00:00" } : tool
+    )));
+    setSelectedToolIds([]);
+    setBatchCategoryOpen(false);
+    toast.success("已批量设置工具分类");
   };
 
   const openEditTool = (toolId: string) => {
@@ -3133,38 +3202,35 @@ export function ToolHubPage() {
       </Paper>
 
       <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
-        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 2 }}>
-          <Typography sx={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>工具库</Typography>
-        </Box>
-
-        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: 1.5, mb: 2 }}>
-          {[
-            { label: "工具总数", value: stats.total, icon: <Hub />, color: "#334155" },
-            { label: "已启用工具", value: stats.enabled, icon: <CheckCircle />, color: "#15803d" },
-            { label: "已发布版本", value: stats.publishedVersions, icon: <RocketLaunch />, color: "#7c3aed" },
-            { label: "在使用版本", value: stats.activeVersions, icon: <FactCheck />, color: "#b45309" },
-          ].map((item) => (
-            <Paper key={item.label} sx={{ p: 2, borderRadius: "10px", border: "1px solid #e5e7eb", boxShadow: "none", display: "flex", alignItems: "center", gap: 1.5 }}>
-              <Box sx={{ width: 34, height: 34, borderRadius: "8px", bgcolor: "#eff6ff", color: BLUE, display: "flex", alignItems: "center", justifyContent: "center", "& svg": { fontSize: 18 } }}>
-                {item.icon}
+        <Paper sx={{ p: 2, mb: 1.5, border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", bgcolor: "#fff" }}>
+          <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", columnGap: 2, alignItems: "start" }}>
+            <Box sx={{ minWidth: 0 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 1.25, height: 18 }}>
+                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>已连接MCP服务</Typography>
+                <Tooltip title="同步工具">
+                  <Box component="button" onClick={syncMcpTools} sx={{ width: 16, height: 16, p: 0, m: 0, border: "none", bgcolor: "transparent", color: BLUE, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                    <Sync sx={{ fontSize: 15 }} />
+                  </Box>
+                </Tooltip>
               </Box>
-              <Box>
-                <Typography sx={{ fontSize: "21px", fontWeight: 700, color: item.color, lineHeight: 1 }}>{item.value}</Typography>
-                <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.5 }}>{item.label}</Typography>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                <Typography sx={{ fontSize: "15px", fontWeight: 700, color: "#111827" }}>{currentMcpServiceInfo.name}</Typography>
+                <Chip label={currentMcpServiceInfo.protocol} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: "#eff6ff", color: BLUE, border: "none" }} />
+                <Chip label={currentMcpServiceInfo.version} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: "#f1f5f9", color: "#475569", border: "none" }} />
+                <Chip label={currentMcpServiceInfo.status} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: "#f0fdf4", color: "#16a34a", border: "none" }} />
               </Box>
-            </Paper>
-          ))}
-        </Box>
+              <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.75, lineHeight: 1.6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                MCP服务介绍：{currentMcpServiceInfo.description}
+              </Typography>
+              <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.25, lineHeight: 1.6 }}>
+                最近同步时间：{currentMcpServiceInfo.lastSyncedAt}
+              </Typography>
+            </Box>
+          </Box>
+        </Paper>
 
         <Box sx={{ display: "flex", gap: 1.5, mb: 1.5, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
           <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center" }}>
-            <FormControl size="small" sx={{ minWidth: 120 }}>
-              <Select value={status} onChange={(event) => { setStatus(event.target.value); setToolPage(0); }} sx={{ borderRadius: "8px", fontSize: "13px", bgcolor: "#fff", "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}>
-                <MenuItem value="all" sx={{ fontSize: "13px" }}>全部状态</MenuItem>
-                <MenuItem value="enabled" sx={{ fontSize: "13px" }}>启用</MenuItem>
-                <MenuItem value="disabled" sx={{ fontSize: "13px" }}>停用</MenuItem>
-              </Select>
-            </FormControl>
             <TextField
               size="small"
               placeholder="搜索工具名称"
@@ -3180,10 +3246,15 @@ export function ToolHubPage() {
               }}
               sx={{ width: 260, "& .MuiOutlinedInput-root": { borderRadius: "8px", bgcolor: "#fff", fontSize: "13px" }, "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}
             />
+            {selectedToolIds.length > 0 && (
+              <Typography sx={{ fontSize: "12px", color: "#64748b" }}>已选择 {selectedToolIds.length} 个工具</Typography>
+            )}
           </Box>
-          <Button variant="contained" startIcon={<Add sx={{ fontSize: 16 }} />} onClick={openCreateTool} sx={{ bgcolor: BLUE, textTransform: "none", borderRadius: "6px", boxShadow: "none" }}>
-            新建工具
-          </Button>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Button variant="contained" onClick={openBatchCategoryDialog} disabled={selectedToolIds.length === 0} sx={{ bgcolor: BLUE, textTransform: "none", borderRadius: "6px", boxShadow: "none", fontSize: "13px", height: 36, "&:hover": { bgcolor: "#2563eb", boxShadow: "none" }, "&.Mui-disabled": { bgcolor: "#e5e7eb", color: "#9ca3af" } }}>
+              设置分类
+            </Button>
+          </Box>
         </Box>
 
         <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", overflow: "hidden", flex: 1, display: "flex", flexDirection: "column", minHeight: 0, width: "100%", maxWidth: "100%" }}>
@@ -3195,18 +3266,18 @@ export function ToolHubPage() {
           ) : (
             <>
               <TableContainer sx={{ flex: 1, width: "100%", maxWidth: "100%", overflowX: "auto", overflowY: "auto", display: "block", WebkitOverflowScrolling: "touch", "&::-webkit-scrollbar": { height: 12 }, "&::-webkit-scrollbar-track": { bgcolor: "#f1f5f9" }, "&::-webkit-scrollbar-thumb": { bgcolor: "#cbd5e1", borderRadius: 999, border: "3px solid #f1f5f9" }, "&::-webkit-scrollbar-thumb:hover": { bgcolor: "#94a3b8" } }}>
-                <Table size="small" stickyHeader sx={{ minWidth: 980, tableLayout: "fixed" }}>
+                <Table size="small" stickyHeader sx={{ minWidth: 720, tableLayout: "fixed" }}>
                   <TableHead>
                     <TableRow sx={{ bgcolor: "#f8f9fb" }}>
+                      <TableCell sx={{ width: "40px", fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, px: 1, bgcolor: "#f8f9fb", borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap" }}>
+                        <Checkbox size="small" checked={currentPageAllSelected} indeterminate={currentPagePartSelected} onChange={toggleSelectCurrentPage} sx={{ p: 0.25 }} />
+                      </TableCell>
                       {[
-                        ["工具名称", "220px"],
-                        ["分类", "120px"],
-                        ["工具状态", "100px"],
-                        ["已发布版本数", "120px"],
-                        ["最近调用", "160px"],
-                        ["操作", "220px"],
+                        ["工具名称", "160px"],
+                        ["工具描述", "420px"],
+                        ["工具分类", "140px"],
                       ].map(([head, width]) => (
-                        <TableCell key={head} sx={{ width, fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, bgcolor: "#f8f9fb", borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap" }}>
+                        <TableCell key={head} sx={{ width, fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, px: 1.25, bgcolor: "#f8f9fb", borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap" }}>
                           {head}
                         </TableCell>
                       ))}
@@ -3214,32 +3285,16 @@ export function ToolHubPage() {
                   </TableHead>
                   <TableBody>
                     {pagedTools.map((tool, index) => {
-                      const publishedCount = tool.versions.filter((version) => version.status === "published").length;
                       return (
                         <TableRow key={tool.id} sx={{ bgcolor: (toolPage * toolRowsPerPage + index) % 2 === 0 ? "#fff" : "#fafafa", "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
-                          <TableCell sx={{ py: 1.5, minWidth: 0 }}>
-                            <Typography component="button" onClick={() => navigate(`/admin/tool-hub/${tool.id}?tab=versions`)} sx={{ border: "none", p: 0, m: 0, bgcolor: "transparent", fontSize: "13px", color: "#111827", fontWeight: 500, cursor: "pointer", textAlign: "left", "&:hover": { color: BLUE, textDecoration: "underline" } }}>{tool.name}</Typography>
+                          <TableCell sx={{ py: 1.5, px: 1 }}>
+                            <Checkbox size="small" checked={selectedToolIds.includes(tool.id)} onChange={() => toggleSelectTool(tool.id)} sx={{ p: 0.25 }} />
                           </TableCell>
-                          <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151" }}>{tool.category}</TableCell>
-                          <TableCell sx={{ py: 1.5 }}><StatusChip status={tool.status} /></TableCell>
-                          <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#374151" }}>{publishedCount}</TableCell>
-                          <TableCell sx={{ py: 1.5, fontSize: "12px", color: "#64748b", whiteSpace: "nowrap" }}>{tool.lastCalledAt}</TableCell>
-                          <TableCell sx={{ py: 1.5 }}>
-                            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
-                              <Switch size="small" checked={tool.status === "enabled"} onChange={() => toggleToolStatus(tool.id)} />
-                              <Typography component="button" onClick={() => navigate(`/admin/tool-hub/${tool.id}?tab=versions`)} sx={{ border: "none", p: 0, m: 0, bgcolor: "transparent", color: BLUE, fontSize: "12px", cursor: "pointer" }}>
-                                详情
-                              </Typography>
-                              <Typography component="button" onClick={() => openEditTool(tool.id)} sx={{ border: "none", p: 0, m: 0, bgcolor: "transparent", color: BLUE, fontSize: "12px", cursor: "pointer" }}>
-                                编辑
-                              </Typography>
-                              {tool.status === "disabled" && (
-                                <Typography component="button" onClick={() => setDeleteConfirmToolId(tool.id)} sx={{ border: "none", p: 0, m: 0, bgcolor: "transparent", color: "#ef4444", fontSize: "12px", cursor: "pointer" }}>
-                                  删除
-                                </Typography>
-                              )}
-                            </Box>
+                          <TableCell sx={{ py: 1.5, px: 1.25, minWidth: 0 }}>
+                            <Typography sx={{ fontSize: "13px", color: "#111827", fontWeight: 500 }}>{tool.name}</Typography>
                           </TableCell>
+                          <TableCell sx={{ py: 1.5, px: 1.25, fontSize: "12px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tool.description}</TableCell>
+                          <TableCell sx={{ py: 1.5, px: 1.25, fontSize: "12px", color: "#374151" }}>{tool.category}</TableCell>
                         </TableRow>
                       );
                     })}
@@ -3271,6 +3326,26 @@ export function ToolHubPage() {
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setCategoryEditorOpen(false)} sx={{ textTransform: "none", color: "#64748b" }}>取消</Button>
           <Button onClick={saveCategory} variant="contained" sx={{ bgcolor: BLUE, textTransform: "none", boxShadow: "none" }}>保存</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={batchCategoryOpen} onClose={() => setBatchCategoryOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle sx={{ fontSize: "16px", fontWeight: 700, px: 3, pt: 2.25, pb: 0.75 }}>设置分类</DialogTitle>
+        <DialogContent sx={{ px: 3, pt: "0 !important", pb: 1 }}>
+          <Box>
+            <Typography sx={{ fontSize: "12px", color: "#64748b", mb: 0.75 }}>已选择 {selectedToolIds.length} 个工具</Typography>
+            <FormControl size="small" fullWidth>
+              <Select value={batchCategory} onChange={(event) => setBatchCategory(event.target.value)}>
+                {categories.map((category) => (
+                  <MenuItem key={category} value={category}>{category}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setBatchCategoryOpen(false)} sx={{ textTransform: "none", color: "#64748b" }}>取消</Button>
+          <Button onClick={saveBatchCategory} variant="contained" sx={{ bgcolor: BLUE, textTransform: "none", boxShadow: "none" }}>确认</Button>
         </DialogActions>
       </Dialog>
 

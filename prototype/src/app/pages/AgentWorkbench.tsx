@@ -72,7 +72,7 @@ interface ToolOutput {
 interface InputSource {
   type: "fixed" | "upstream";
   sourceNodeId?: string;
-  outputId?: string;
+  outputPath?: string;
 }
 
 interface McpService {
@@ -317,8 +317,8 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
 
 function createInitialPlanNodes(): ToolNode[] {
   const parser = createNode("document-parser", { type: "fixed" });
-  const splitter = createNode("chunk-splitter", { type: "upstream", sourceNodeId: parser.nodeId, outputId: "documentParseResult" });
-  const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputId: "textChunkResult" });
+  const splitter = createNode("chunk-splitter", { type: "upstream", sourceNodeId: parser.nodeId, outputPath: "content[0].text" });
+  const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "content[0].text" });
   return [parser, splitter, qa];
 }
 
@@ -361,16 +361,14 @@ function getInputSourceLabel(node: ToolNode, nodes: ToolNode[]) {
   if (!inputParam) return "未指定输入参数";
   if (node.inputSource.type !== "upstream") return `${inputParam.label} <- ${getFixedInputSourceText(node, nodes)}`;
   const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
-  const output = sourceNode?.outputs.find((item) => item.id === node.inputSource.outputId);
-  return `${inputParam.label} <- ${sourceNode?.toolName ?? "来源已失效"}.${output?.label ?? "输出已失效"}`;
+  return `${inputParam.label} <- ${sourceNode?.toolName ?? "来源已失效"} / ${node.inputSource.outputPath || "未配置取值路径"}`;
 }
 function getInputSourceParts(node: ToolNode, nodes: ToolNode[]) {
   const inputParam = getToolInputParam(node);
   if (!inputParam) return { paramName: "未指定输入参数", source: "未指定来源" };
   if (node.inputSource.type !== "upstream") return { paramName: inputParam.label, source: getFixedInputSourceText(node, nodes) };
   const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
-  const output = sourceNode?.outputs.find((item) => item.id === node.inputSource.outputId);
-  return { paramName: inputParam.label, source: `${sourceNode?.toolName ?? "来源已失效"}.${output?.label ?? "输出已失效"}` };
+  return { paramName: inputParam.label, source: `${sourceNode?.toolName ?? "来源已失效"} / ${node.inputSource.outputPath || "未配置取值路径"}` };
 }
 
 function getOutputFormat(output: ToolOutput) {
@@ -390,12 +388,18 @@ function formatParamValue(value: ToolParam["value"]) {
   return trimmed.length > 48 ? `${trimmed.slice(0, 48)}...` : trimmed;
 }
 
+function isValidOutputPath(path?: string) {
+  const value = path?.trim();
+  if (!value) return false;
+  return /^[A-Za-z_$][\w$]*(\[\d+\])*(\.[A-Za-z_$][\w$]*(\[\d+\])*)*$/.test(value);
+}
+
 function isInputSourceInvalid(node: ToolNode, nodes: ToolNode[]) {
   if (isFirstCategoryFirstNode(node, nodes)) return false;
   if (node.inputSource.type !== "upstream") return false;
   const priorNodes = getPriorNodes(nodes, node.nodeId);
   const sourceNode = priorNodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
-  return !sourceNode || !sourceNode.outputs.some((output) => output.id === node.inputSource.outputId);
+  return !sourceNode || !isValidOutputPath(node.inputSource.outputPath);
 }
 
 function getCategorySections(nodes: ToolNode[]) {
@@ -633,7 +637,7 @@ export function AgentWorkbench() {
 
   const updateInputParam = (nodeId: string, inputParamId: string) => {
     if (!isNodeEditable(nodeId)) return;
-    updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputParamId, inputSource: { type: "fixed" } }));
+    updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputParamId }));
     setHasManualEdits(true);
   };
 
@@ -1119,7 +1123,6 @@ function ToolEditDrawer({
   const selectedSourceNode = node.inputSource.type === "upstream"
     ? priorNodes.find((item) => item.nodeId === node.inputSource.sourceNodeId) ?? null
     : null;
-  const selectedSourceOutput = selectedSourceNode?.outputs.find((output) => output.id === node.inputSource.outputId) ?? null;
   const sourceInvalid = isInputSourceInvalid(node, allNodes);
   const isFirstInputLocked = isFirstCategoryFirstNode(node, allNodes);
   const fixedInputText = getFixedInputSourceText(node, allNodes);
@@ -1131,21 +1134,19 @@ function ToolEditDrawer({
       return;
     }
     const sourceNode = selectedSourceNode ?? priorNodes[0];
-    const output = sourceNode?.outputs[0];
-    if (!sourceNode || !output) return;
-    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: sourceNode.nodeId, outputId: output.id });
+    if (!sourceNode) return;
+    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: sourceNode.nodeId, outputPath: node.inputSource.outputPath || "content[0].text" });
   };
 
   const setSourceNode = (sourceNodeId: string) => {
     const sourceNode = priorNodes.find((item) => item.nodeId === sourceNodeId);
-    const output = sourceNode?.outputs[0];
-    if (!sourceNode || !output) return;
-    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: sourceNode.nodeId, outputId: output.id });
+    if (!sourceNode) return;
+    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: sourceNode.nodeId, outputPath: node.inputSource.outputPath || "content[0].text" });
   };
 
-  const setSourceOutput = (outputId: string) => {
-    if (!selectedSourceNode || !selectedSourceNode.outputs.some((output) => output.id === outputId)) return;
-    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: selectedSourceNode.nodeId, outputId });
+  const setOutputPath = (outputPath: string) => {
+    if (!selectedSourceNode) return;
+    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: selectedSourceNode.nodeId, outputPath });
   };
 
 
@@ -1186,17 +1187,18 @@ function ToolEditDrawer({
                         {priorNodes.map((item) => <MenuItem key={item.nodeId} value={item.nodeId}>{item.toolName}</MenuItem>)}
                       </Select>
                     </FormControl>
-                    <FormControl fullWidth size="small" sx={inputFieldSx}>
-                      <InputLabel>选择上游工具输出参数</InputLabel>
-                      <Select label="选择上游工具输出参数" value={selectedSourceOutput?.id ?? ""} disabled={!canEdit || !selectedSourceNode} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceOutput(event.target.value)}>
-                        {(selectedSourceNode?.outputs ?? []).map((output) => <MenuItem key={output.id} value={output.id}>{output.label}</MenuItem>)}
-                      </Select>
-                    </FormControl>
-                    {selectedSourceOutput ? (
-                      <Typography sx={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
-                        取值路径：{selectedSourceOutput.path}
-                      </Typography>
-                    ) : null}
+                    <TextField
+                      size="small"
+                      fullWidth
+                      label="取值路径"
+                      value={node.inputSource.outputPath ?? ""}
+                      disabled={!canEdit || !selectedSourceNode}
+                      onChange={(event) => setOutputPath(event.target.value)}
+                      sx={inputFieldSx}
+                    />
+                    <Typography sx={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+                      系统将从上游工具的原始输出中按该路径取值，并写入当前工具的输入参数。
+                    </Typography>
                     {sourceInvalid && <Typography sx={{ fontSize: 12, color: "#c2410c" }}>输入配置异常，请检查。</Typography>}
                   </Stack>
                 ) : null}
