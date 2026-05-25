@@ -444,7 +444,7 @@ function isFirstCategoryFirstNode(node: ToolNode, nodes: ToolNode[]) {
 }
 
 function getFixedInputSourceText(node: ToolNode, nodes: ToolNode[]) {
-  return isFirstCategoryNode(node, nodes) ? "文件地址信息" : "外部输入";
+  return isFirstCategoryFirstNode(node, nodes) ? "文件地址信息" : "待处理文件地址信息";
 }
 
 function getNodeWarnings(nodes: ToolNode[]) {
@@ -1155,7 +1155,7 @@ function ToolEditDrawer({
 
         <Box sx={{ p: 2, overflow: "auto", flex: 1, bgcolor: "#FBFCFF" }}>
           <Stack spacing={1.5}>
-            <ConfigBlock title="指定输入参数">
+            <ConfigBlock title="工具输入">
               <Stack spacing={1.25}>
                 <FormControl fullWidth size="small" sx={inputFieldSx}>
                   <InputLabel>指定输入参数</InputLabel>
@@ -1169,8 +1169,8 @@ function ToolEditDrawer({
                   <FormControl fullWidth size="small" sx={inputFieldSx}>
                     <InputLabel>取值方式</InputLabel>
                     <Select label="取值方式" value={node.inputSource.type} disabled={!canEdit || priorNodes.length === 0} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceType(event.target.value as InputSource["type"])}>
-                      <MenuItem value="fixed">{fixedInputText}</MenuItem>
                       <MenuItem value="upstream">上游工具输出</MenuItem>
+                      <MenuItem value="fixed">{fixedInputText}</MenuItem>
                     </Select>
                   </FormControl>
                 )}
