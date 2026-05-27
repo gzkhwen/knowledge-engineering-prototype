@@ -26,6 +26,7 @@ import {
   MenuItem,
   Paper,
   Select,
+  Stack,
   Switch,
   Tab,
   Table,
@@ -359,6 +360,7 @@ interface ToolItem {
   toolCode: string;
   name: string;
   category: string;
+  mcpServiceName?: string;
   sourceType: string;
   owner: string;
   createdBy: string;
@@ -403,6 +405,26 @@ const TOOL_STORAGE_KEY = "toolHub_tools_v14";
 const CATEGORY_STORAGE_KEY = "toolHub_categories_v2";
 const CATEGORY_SELECTION_STORAGE_KEY = "toolHub_selected_category_v1";
 const TOOL_CODE_PATTERN = /^[a-z][a-z0-9_]*$/;
+const MCP_SERVICE_OPTIONS = [
+  {
+    name: "Nacos 知识工程 MCP",
+    type: "Nacos",
+    protocol: "Streamable HTTP",
+    version: "V1.0.0",
+    status: "连接正常",
+    description: "从 Nacos 同步知识解析、分片和抽取相关工具。",
+    lastSyncedAt: "2026-05-27 10:18",
+  },
+  {
+    name: "客户自建文档处理 MCP",
+    type: "标准 MCP Server",
+    protocol: "SSE",
+    version: "V1.1.0",
+    status: "连接正常",
+    description: "客户侧自建 MCP Server，提供医保政策文档处理工具。",
+    lastSyncedAt: "2026-05-27 09:42",
+  },
+];
 const scrollableDialogPaperSx = { borderRadius: "12px", maxHeight: "calc(100vh - 48px)", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" };
 const scrollableDialogContentSx = { overflowY: "auto" };
 const dialogGlobalStyles = (
@@ -2614,6 +2636,7 @@ function createRagflowTool(component: RagflowComponentSpec, index: number): Tool
     toolCode: component.toolCode,
     name: component.name,
     category: component.category,
+    mcpServiceName: component.name.includes("医保") || index % 4 === 2 ? "客户自建文档处理 MCP" : "Nacos 知识工程 MCP",
     sourceType: "存量 HTTP 服务",
     owner: getMockTeam(index),
     createdBy: getMockUser(index),
@@ -2632,6 +2655,13 @@ function createRagflowTool(component: RagflowComponentSpec, index: number): Tool
 }
 
 const INITIAL_TOOLS: ToolItem[] = RAGFLOW_COMPONENTS.map(createRagflowTool);
+
+function getToolMcpServiceName(tool: ToolItem, index = 0) {
+  if (tool.mcpServiceName) return tool.mcpServiceName;
+  return tool.name.includes("医保") || tool.name.includes("OCR") || tool.name.includes("关键词") || tool.name.includes("递归") || index % 4 === 2
+    ? "客户自建文档处理 MCP"
+    : "Nacos 知识工程 MCP";
+}
 
 function createRagflowRunRecords(): Record<string, ToolRunRecord[]> {
   const resultCycle: RunResultStatus[] = ["成功", "运行中", "失败", "成功"];
@@ -2799,6 +2829,7 @@ export function ToolHubPage() {
   const [tools, setToolsState] = useState<ToolItem[]>(loadTools);
   const [categories, setCategoriesState] = useState<string[]>(loadCategories);
   const [selectedCategory, setSelectedCategory] = useState(loadSelectedCategory);
+  const [selectedMcpService, setSelectedMcpService] = useState("all");
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [editingToolId, setEditingToolId] = useState<string | null>(null);
@@ -2860,9 +2891,13 @@ export function ToolHubPage() {
   ), [selectedCategory, visibleTools]);
 
   const filtered = useMemo(() => toolsInCategory.filter((tool) => {
-    if (query && !tool.name.toLowerCase().includes(query.toLowerCase())) return false;
+    if (selectedMcpService !== "all" && getToolMcpServiceName(tool) !== selectedMcpService) return false;
+    if (query) {
+      const keyword = query.toLowerCase();
+      if (!tool.name.toLowerCase().includes(keyword) && !tool.description.toLowerCase().includes(keyword)) return false;
+    }
     return true;
-  }), [toolsInCategory, query]);
+  }), [toolsInCategory, query, selectedMcpService]);
 
   const pagedTools = useMemo(() => (
     filtered.slice(toolPage * toolRowsPerPage, toolPage * toolRowsPerPage + toolRowsPerPage)
@@ -2873,12 +2908,8 @@ export function ToolHubPage() {
   const currentPagePartSelected = pagedToolIds.some((id) => selectedToolIds.includes(id)) && !currentPageAllSelected;
 
   const currentMcpServiceInfo = {
-    name: "知识工程 Agent MCP",
-    protocol: "streamable",
-    version: "V1.0.0",
-    status: "连接正常",
-    description: "从 Nacos 同步知识解析、分片和抽取相关工具，供处理方案编排时选择使用。",
-    lastSyncedAt: "2026-05-25 20:42",
+    description: "已同步 Nacos 与客户自建 MCP Server 的工具，供处理方案编排时按分类选择使用。",
+    lastSyncedAt: "2026-05-27 10:18",
   };
 
   const stats = useMemo(() => ({
@@ -3213,12 +3244,17 @@ export function ToolHubPage() {
                   </Box>
                 </Tooltip>
               </Box>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-                <Typography sx={{ fontSize: "15px", fontWeight: 700, color: "#111827" }}>{currentMcpServiceInfo.name}</Typography>
-                <Chip label={currentMcpServiceInfo.protocol} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: "#eff6ff", color: BLUE, border: "none" }} />
-                <Chip label={currentMcpServiceInfo.version} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: "#f1f5f9", color: "#475569", border: "none" }} />
-                <Chip label={currentMcpServiceInfo.status} size="small" sx={{ height: 22, fontSize: "11px", bgcolor: "#f0fdf4", color: "#16a34a", border: "none" }} />
-              </Box>
+              <Stack spacing={0.75}>
+                {MCP_SERVICE_OPTIONS.map((service) => (
+                  <Box key={service.name} sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                    <Typography sx={{ fontSize: "14px", fontWeight: 700, color: "#111827" }}>{service.name}</Typography>
+                    <Chip label={service.type} size="small" sx={{ height: 21, fontSize: "10.5px", bgcolor: "#f8fafc", color: "#64748b", border: "none" }} />
+                    <Chip label={service.protocol} size="small" sx={{ height: 21, fontSize: "10.5px", bgcolor: "#eff6ff", color: BLUE, border: "none" }} />
+                    <Chip label={service.version} size="small" sx={{ height: 21, fontSize: "10.5px", bgcolor: "#f1f5f9", color: "#475569", border: "none" }} />
+                    <Chip label={service.status} size="small" sx={{ height: 21, fontSize: "10.5px", bgcolor: "#f0fdf4", color: "#16a34a", border: "none" }} />
+                  </Box>
+                ))}
+              </Stack>
               <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.75, lineHeight: 1.6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 MCP服务介绍：{currentMcpServiceInfo.description}
               </Typography>
@@ -3231,9 +3267,21 @@ export function ToolHubPage() {
 
         <Box sx={{ display: "flex", gap: 1.5, mb: 1.5, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
           <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center" }}>
+            <FormControl size="small" sx={{ width: 220, "& .MuiOutlinedInput-root": { borderRadius: "8px", bgcolor: "#fff", fontSize: "13px" }, "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}>
+              <Select
+                value={selectedMcpService}
+                onChange={(event) => { setSelectedMcpService(event.target.value); setToolPage(0); }}
+                displayEmpty
+              >
+                <MenuItem value="all" sx={{ fontSize: "13px" }}>全部MCP服务</MenuItem>
+                {MCP_SERVICE_OPTIONS.map((service) => (
+                  <MenuItem key={service.name} value={service.name} sx={{ fontSize: "13px" }}>{service.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <TextField
               size="small"
-              placeholder="搜索工具名称"
+              placeholder="搜索工具名称/描述"
               value={query}
               onChange={(event) => { setQuery(event.target.value); setToolPage(0); }}
               InputProps={{
@@ -3266,15 +3314,16 @@ export function ToolHubPage() {
           ) : (
             <>
               <TableContainer sx={{ flex: 1, width: "100%", maxWidth: "100%", overflowX: "auto", overflowY: "auto", display: "block", WebkitOverflowScrolling: "touch", "&::-webkit-scrollbar": { height: 12 }, "&::-webkit-scrollbar-track": { bgcolor: "#f1f5f9" }, "&::-webkit-scrollbar-thumb": { bgcolor: "#cbd5e1", borderRadius: 999, border: "3px solid #f1f5f9" }, "&::-webkit-scrollbar-thumb:hover": { bgcolor: "#94a3b8" } }}>
-                <Table size="small" stickyHeader sx={{ minWidth: 720, tableLayout: "fixed" }}>
+                <Table size="small" stickyHeader sx={{ minWidth: 890, tableLayout: "fixed" }}>
                   <TableHead>
                     <TableRow sx={{ bgcolor: "#f8f9fb" }}>
                       <TableCell sx={{ width: "40px", fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, px: 1, bgcolor: "#f8f9fb", borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap" }}>
                         <Checkbox size="small" checked={currentPageAllSelected} indeterminate={currentPagePartSelected} onChange={toggleSelectCurrentPage} sx={{ p: 0.25 }} />
                       </TableCell>
                       {[
-                        ["工具名称", "160px"],
-                        ["工具描述", "420px"],
+                        ["工具名称", "150px"],
+                        ["工具描述", "310px"],
+                        ["所属MCP服务", "190px"],
                         ["工具分类", "140px"],
                       ].map(([head, width]) => (
                         <TableCell key={head} sx={{ width, fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, px: 1.25, bgcolor: "#f8f9fb", borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap" }}>
@@ -3294,6 +3343,7 @@ export function ToolHubPage() {
                             <Typography sx={{ fontSize: "13px", color: "#111827", fontWeight: 500 }}>{tool.name}</Typography>
                           </TableCell>
                           <TableCell sx={{ py: 1.5, px: 1.25, fontSize: "12px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tool.description}</TableCell>
+                          <TableCell sx={{ py: 1.5, px: 1.25, fontSize: "12px", color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getToolMcpServiceName(tool, index)}</TableCell>
                           <TableCell sx={{ py: 1.5, px: 1.25, fontSize: "12px", color: "#374151" }}>{tool.category}</TableCell>
                         </TableRow>
                       );

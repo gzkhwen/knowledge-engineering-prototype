@@ -5,7 +5,7 @@ import {
 } from "@mui/material";
 import {
   Category, Description, AccountCircle, Logout, ManageAccounts,
-  Engineering, Settings, Hub, Extension,
+  Engineering, Settings, Hub, Extension, CloudQueue,
 } from "@mui/icons-material";
 import { useState, useEffect } from "react";
 import { User } from "../types";
@@ -15,6 +15,11 @@ const DRAWER_WIDTH = 200;
 const menuItems = [
   { path: "/admin/classification", label: "分类管理", icon: <Category sx={{ fontSize: 16 }} /> },
   { path: "/admin/template",       label: "模板管理", icon: <Description sx={{ fontSize: 16 }} /> },
+  {
+    path: "/admin/mcp-services",
+    label: "MCP服务管理",
+    icon: <CloudQueue sx={{ fontSize: 16 }} />,
+  },
   {
     path: "/admin/tools",
     label: "工具管理",

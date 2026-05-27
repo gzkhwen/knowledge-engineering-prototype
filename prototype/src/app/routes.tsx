@@ -14,7 +14,7 @@ import { RelationshipManagement } from "./pages/RelationshipManagement";
 import { ClassificationManagement } from "./pages/ClassificationManagement";
 import { TemplateManagement } from "./pages/TemplateManagement";
 import { TemplateEditor } from "./pages/TemplateEditor";
-import { ToolManagementPage } from "./pages/ToolManagementPage";
+import { McpServiceManagementPage, ToolManagementPage } from "./pages/ToolManagementPage";
 import { ToolHubDetailPage, ToolHubPage, ToolHubRunRecordsPage } from "./pages/ToolHubPage";
 import { ToolHubConnectorsPage, ToolHubMcpServicesPage } from "./pages/ToolHubMcpPages";
 import { StylePreview } from "./components/StylePreview";
@@ -54,7 +54,8 @@ export const router = createHashRouter([
     Component: AdminLayout,
     ErrorBoundary,
     children: [
-      { index: true,          Component: ToolManagementPage },
+      { index: true,          Component: McpServiceManagementPage },
+      { path: "mcp-services", Component: McpServiceManagementPage },
       { path: "tools",        Component: ToolManagementPage },
       { path: "tools/library", Component: ToolManagementPage },
       { path: "tool-hub/mcp-services", Component: ToolHubMcpServicesPage },
