@@ -59,7 +59,6 @@ import {
   RocketLaunch,
   Search,
   Close,
-  Sync,
   WarningAmber,
 } from "@mui/icons-material";
 import { Fragment, type ReactNode } from "react";
@@ -2907,11 +2906,6 @@ export function ToolHubPage() {
   const currentPageAllSelected = pagedToolIds.length > 0 && pagedToolIds.every((id) => selectedToolIds.includes(id));
   const currentPagePartSelected = pagedToolIds.some((id) => selectedToolIds.includes(id)) && !currentPageAllSelected;
 
-  const currentMcpServiceInfo = {
-    description: "已同步 Nacos 与客户自建 MCP Server 的工具，供处理方案编排时按分类选择使用。",
-    lastSyncedAt: "2026-05-27 10:18",
-  };
-
   const stats = useMemo(() => ({
     total: toolsInCategory.length,
     enabled: toolsInCategory.filter((tool) => tool.status === "enabled").length,
@@ -2935,10 +2929,6 @@ export function ToolHubPage() {
   const openCreateTool = () => {
     resetAddTool();
     setAddOpen(true);
-  };
-
-  const syncMcpTools = () => {
-    toast.success("已触发 MCP 工具同步");
   };
 
   const toggleSelectTool = (toolId: string) => {
@@ -3233,38 +3223,6 @@ export function ToolHubPage() {
       </Paper>
 
       <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
-        <Paper sx={{ p: 2, mb: 1.5, border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", bgcolor: "#fff" }}>
-          <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", columnGap: 2, alignItems: "start" }}>
-            <Box sx={{ minWidth: 0 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 1.25, height: 18 }}>
-                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>已连接MCP服务</Typography>
-                <Tooltip title="同步工具">
-                  <Box component="button" onClick={syncMcpTools} sx={{ width: 16, height: 16, p: 0, m: 0, border: "none", bgcolor: "transparent", color: BLUE, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-                    <Sync sx={{ fontSize: 15 }} />
-                  </Box>
-                </Tooltip>
-              </Box>
-              <Stack spacing={0.75}>
-                {MCP_SERVICE_OPTIONS.map((service) => (
-                  <Box key={service.name} sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-                    <Typography sx={{ fontSize: "14px", fontWeight: 700, color: "#111827" }}>{service.name}</Typography>
-                    <Chip label={service.type} size="small" sx={{ height: 21, fontSize: "10.5px", bgcolor: "#f8fafc", color: "#64748b", border: "none" }} />
-                    <Chip label={service.protocol} size="small" sx={{ height: 21, fontSize: "10.5px", bgcolor: "#eff6ff", color: BLUE, border: "none" }} />
-                    <Chip label={service.version} size="small" sx={{ height: 21, fontSize: "10.5px", bgcolor: "#f1f5f9", color: "#475569", border: "none" }} />
-                    <Chip label={service.status} size="small" sx={{ height: 21, fontSize: "10.5px", bgcolor: "#f0fdf4", color: "#16a34a", border: "none" }} />
-                  </Box>
-                ))}
-              </Stack>
-              <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.75, lineHeight: 1.6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                MCP服务介绍：{currentMcpServiceInfo.description}
-              </Typography>
-              <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.25, lineHeight: 1.6 }}>
-                最近同步时间：{currentMcpServiceInfo.lastSyncedAt}
-              </Typography>
-            </Box>
-          </Box>
-        </Paper>
-
         <Box sx={{ display: "flex", gap: 1.5, mb: 1.5, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
           <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center" }}>
             <FormControl size="small" sx={{ width: 220, "& .MuiOutlinedInput-root": { borderRadius: "8px", bgcolor: "#fff", fontSize: "13px" }, "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e8eaed" } }}>

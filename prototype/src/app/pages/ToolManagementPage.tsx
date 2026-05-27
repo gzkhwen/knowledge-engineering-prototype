@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   Add,
-  CloudQueue,
   Delete,
   Edit,
   Link as LinkIcon,
@@ -16,7 +15,6 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   FormControl,
   IconButton,
   InputLabel,
@@ -159,9 +157,6 @@ export function McpServiceManagementPage() {
   const [draft, setDraft] = useState<McpServiceDraft>(defaultDraft);
   const [connectionTested, setConnectionTested] = useState(false);
 
-  const activeCount = services.filter((service) => service.status !== "已停用").length;
-  const totalTools = services.reduce((sum, service) => sum + service.toolCount, 0);
-
   const openCreate = () => {
     setEditingId(null);
     setDraft(defaultDraft);
@@ -253,28 +248,27 @@ export function McpServiceManagementPage() {
   };
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-      <Paper sx={{ p: 2, border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none" }}>
-        <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 2 }}>
-          <Box>
-            <Typography sx={{ fontSize: "18px", fontWeight: 700, color: "#111827" }}>MCP服务管理</Typography>
-            <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.5 }}>
-              接入 Nacos 或客户自建 MCP Server，完成连接测试和工具同步；这里只维护服务接入关系，不编辑工具定义。
-            </Typography>
-          </Box>
-          <Button variant="contained" startIcon={<Add sx={{ fontSize: 16 }} />} onClick={openCreate} sx={{ height: 34, bgcolor: BLUE, borderRadius: "6px", textTransform: "none", boxShadow: "none", fontSize: "13px", "&:hover": { bgcolor: "#2563eb", boxShadow: "none" } }}>
-            接入MCP服务
-          </Button>
+    <Box sx={{ display: "flex", flexDirection: "column", height: "calc(100vh - 112px)", minHeight: 0 }}>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, mb: 1.5 }}>
+        <Box>
+          <Typography sx={{ fontSize: "15px", fontWeight: 700, color: "#111827" }}>MCP服务管理</Typography>
+          <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.25 }}>
+            接入 Nacos 或客户自建 MCP Server，完成连接测试和工具同步；这里只维护服务接入关系，不编辑工具定义。
+          </Typography>
         </Box>
-        <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-          <Chip label={`服务 ${services.length}`} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#eff6ff", color: "#2563eb" }} />
-          <Chip label={`启用 ${activeCount}`} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#f0fdf4", color: "#16a34a" }} />
-          <Chip label={`同步工具 ${totalTools}`} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#f8fafc", color: "#64748b" }} />
-        </Stack>
-      </Paper>
+        <Button variant="contained" startIcon={<Add sx={{ fontSize: 16 }} />} onClick={openCreate} sx={{ height: 34, bgcolor: BLUE, borderRadius: "6px", textTransform: "none", boxShadow: "none", fontSize: "13px", "&:hover": { bgcolor: "#2563eb", boxShadow: "none" } }}>
+          接入MCP服务
+        </Button>
+      </Box>
 
-      <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", overflow: "hidden" }}>
-        <TableContainer>
+      <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", overflow: "hidden", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <Box>
+            <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>服务列表</Typography>
+            <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.25 }}>共 {services.length} 个服务</Typography>
+          </Box>
+        </Box>
+        <TableContainer sx={{ flex: 1, overflow: "auto" }}>
           <Table size="small" sx={{ tableLayout: "fixed", minWidth: 960 }}>
             <TableHead>
               <TableRow>
@@ -289,14 +283,14 @@ export function McpServiceManagementPage() {
                   ["最近同步", "140px"],
                   ["操作", "180px"],
                 ].map(([label, width]) => (
-                  <TableCell key={label} sx={{ width, bgcolor: "#f8f9fb", fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.25, borderBottom: "1px solid #f0f0f0" }}>{label}</TableCell>
+                  <TableCell key={label} sx={{ width, bgcolor: "#f8f9fb", fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, borderBottom: "1px solid #f0f0f0" }}>{label}</TableCell>
                 ))}
               </TableRow>
             </TableHead>
             <TableBody>
               {services.map((service, index) => (
                 <TableRow key={service.id} sx={{ bgcolor: index % 2 === 0 ? "#fff" : "#fafafa", "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
-                  <TableCell sx={{ py: 1.4 }}>
+                  <TableCell sx={{ py: 1.5 }}>
                     <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>{service.name}</Typography>
                     <Typography sx={{ fontSize: "11px", color: "#64748b", mt: 0.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{service.description}</Typography>
                   </TableCell>
