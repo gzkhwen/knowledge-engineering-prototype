@@ -51,6 +51,7 @@ interface McpServiceItem {
   description: string;
   status: McpServiceStatus;
   toolCount: number;
+  toolNames: string[];
   lastSyncedAt: string;
 }
 
@@ -92,6 +93,7 @@ const initialServices: McpServiceItem[] = [
     description: "从 Nacos 暴露知识解析、分片和抽取相关工具。",
     status: "连接正常",
     toolCount: 8,
+    toolNames: ["通用解析", "多模态解析", "通用分片", "自定义分隔符分片", "QA提取", "摘要总结", "文档图谱抽取", "表格深度解析"],
     lastSyncedAt: "2026-05-27 10:18",
   },
   {
@@ -105,6 +107,7 @@ const initialServices: McpServiceItem[] = [
     description: "客户侧自建 MCP Server，提供医保政策文档处理工具。",
     status: "连接正常",
     toolCount: 5,
+    toolNames: ["医保政策文件解析", "分隔符递归分片", "OCR解析专用分片", "医保政策文件分片", "关键词提取"],
     lastSyncedAt: "2026-05-27 09:42",
   },
   {
@@ -118,9 +121,12 @@ const initialServices: McpServiceItem[] = [
     description: "客户侧评估工具服务，当前连接异常，保留上次同步工具。",
     status: "连接异常",
     toolCount: 2,
+    toolNames: ["RAG质量评估", "问答一致性检查"],
     lastSyncedAt: "2026-05-26 17:30",
   },
 ];
+
+const discoveredToolNames = ["文档解析", "文本分片", "QA提取"];
 
 function nowText() {
   const now = new Date();
@@ -146,6 +152,7 @@ function toService(draft: McpServiceDraft, id = `svc-${Date.now()}`): McpService
     description: draft.description.trim(),
     status: "连接正常",
     toolCount: id.startsWith("svc-") ? 0 : 3,
+    toolNames: [],
     lastSyncedAt: "-",
   };
 }
@@ -214,7 +221,7 @@ export function McpServiceManagementPage() {
     if (editingId) {
       setServices((items) => items.map((item) => (
         item.id === editingId
-          ? { ...item, ...toService(draft, editingId), toolCount: item.toolCount, lastSyncedAt: item.lastSyncedAt }
+          ? { ...item, ...toService(draft, editingId), toolCount: item.toolCount, toolNames: item.toolNames, lastSyncedAt: item.lastSyncedAt }
           : item
       )));
       toast.success("MCP 服务已更新");
@@ -228,7 +235,13 @@ export function McpServiceManagementPage() {
   const syncService = (serviceId: string) => {
     setServices((items) => items.map((item) => (
       item.id === serviceId
-        ? { ...item, status: "连接正常", toolCount: Math.max(item.toolCount, 3), lastSyncedAt: nowText() }
+        ? {
+            ...item,
+            status: "连接正常",
+            toolCount: Math.max(item.toolCount, discoveredToolNames.length),
+            toolNames: item.toolNames.length ? item.toolNames : discoveredToolNames,
+            lastSyncedAt: nowText(),
+          }
         : item
     )));
     toast.success("已触发工具同步");
@@ -279,7 +292,7 @@ export function McpServiceManagementPage() {
                   ["服务地址", "280px"],
                   ["版本", "90px"],
                   ["状态", "100px"],
-                  ["工具数", "80px"],
+                  ["工具数", "90px"],
                   ["最近同步", "140px"],
                   ["操作", "180px"],
                 ].map(([label, width]) => (
@@ -302,7 +315,23 @@ export function McpServiceManagementPage() {
                   </TableCell>
                   <TableCell><Chip label={service.version} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#f8fafc", color: "#64748b" }} /></TableCell>
                   <TableCell><Chip label={service.status} size="small" sx={{ height: 21, fontSize: 10.5, ...statusSx(service.status) }} /></TableCell>
-                  <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{service.toolCount}</TableCell>
+                  <TableCell>
+                    <Tooltip
+                      arrow
+                      placement="top"
+                      title={(
+                        <Box>
+                          {service.toolNames.length ? service.toolNames.map((toolName) => (
+                            <Typography key={toolName} sx={{ fontSize: "12px", lineHeight: 1.7 }}>{toolName}</Typography>
+                          )) : (
+                            <Typography sx={{ fontSize: "12px" }}>暂无同步工具</Typography>
+                          )}
+                        </Box>
+                      )}
+                    >
+                      <Chip label={`${service.toolCount} 个`} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#eff6ff", color: "#2563eb" }} />
+                    </Tooltip>
+                  </TableCell>
                   <TableCell sx={{ fontSize: "12px", color: "#64748b" }}>{service.lastSyncedAt}</TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={0.25}>
@@ -321,49 +350,37 @@ export function McpServiceManagementPage() {
         </TableContainer>
       </Paper>
 
-      <Dialog open={dialogOpen} onClose={closeDialog} maxWidth="sm" fullWidth>
+      <Dialog open={dialogOpen} onClose={closeDialog} maxWidth="md" fullWidth>
         <DialogTitle sx={{ fontSize: "16px", fontWeight: 700, px: 3, pt: 2.25, pb: 1 }}>
           {editingId ? "编辑MCP服务" : "接入MCP服务"}
         </DialogTitle>
         <DialogContent sx={{ px: 3, pt: "8px !important", pb: 1 }}>
-          <Stack spacing={1.5}>
+          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
             <TextField label="服务名称" size="small" value={draft.name} onChange={(event) => updateDraft({ name: event.target.value })} fullWidth />
-            <Stack direction="row" spacing={1}>
-              <FormControl size="small" fullWidth>
-                <InputLabel>服务类型</InputLabel>
-                <Select label="服务类型" value={draft.serviceType} onChange={(event) => updateDraft({ serviceType: event.target.value as McpServiceType })}>
-                  <MenuItem value="Nacos">Nacos</MenuItem>
-                  <MenuItem value="标准 MCP Server">标准 MCP Server</MenuItem>
-                </Select>
-              </FormControl>
-              <FormControl size="small" fullWidth>
+            <FormControl size="small" fullWidth>
                 <InputLabel>协议类型</InputLabel>
                 <Select label="协议类型" value={draft.transport} onChange={(event) => updateDraft({ transport: event.target.value as McpTransport })}>
                   <MenuItem value="Streamable HTTP">Streamable HTTP</MenuItem>
                   <MenuItem value="SSE">SSE</MenuItem>
                 </Select>
-              </FormControl>
-            </Stack>
-            <TextField label="服务地址" size="small" value={draft.endpoint} onChange={(event) => updateDraft({ endpoint: event.target.value })} placeholder={draft.transport === "SSE" ? "https://example.com/mcp/sse" : "https://example.com/mcp"} fullWidth />
-            <Stack direction="row" spacing={1}>
-              <FormControl size="small" sx={{ width: 180 }}>
+            </FormControl>
+            <TextField label="服务地址" size="small" value={draft.endpoint} onChange={(event) => updateDraft({ endpoint: event.target.value })} placeholder={draft.transport === "SSE" ? "https://example.com/mcp/sse" : "https://example.com/mcp"} fullWidth sx={{ gridColumn: "1 / -1" }} />
+            <FormControl size="small" fullWidth>
                 <InputLabel>鉴权方式</InputLabel>
                 <Select label="鉴权方式" value={draft.authType} onChange={(event) => updateDraft({ authType: event.target.value as McpAuthType })}>
                   <MenuItem value="无鉴权">无鉴权</MenuItem>
                   <MenuItem value="Bearer Token">Bearer Token</MenuItem>
                   <MenuItem value="API Key">API Key</MenuItem>
                 </Select>
-              </FormControl>
-              {draft.authType !== "无鉴权" ? (
-                <>
-                  <TextField label="Header" size="small" value={draft.authHeader} onChange={(event) => updateDraft({ authHeader: event.target.value })} sx={{ width: 160 }} />
-                  <TextField label="密钥" size="small" type="password" value={draft.authValue} onChange={(event) => updateDraft({ authValue: event.target.value })} sx={{ flex: 1 }} />
-                </>
-              ) : null}
-            </Stack>
-            <TextField label="服务版本" size="small" value={draft.version} onChange={(event) => updateDraft({ version: event.target.value })} fullWidth />
-            <TextField label="服务描述" size="small" value={draft.description} onChange={(event) => updateDraft({ description: event.target.value })} multiline minRows={2} fullWidth />
-            <Box sx={{ p: 1.25, border: "1px solid #e5e7eb", borderRadius: "8px", bgcolor: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.5 }}>
+            </FormControl>
+            {draft.authType !== "无鉴权" ? (
+              <TextField label="Header" size="small" value={draft.authHeader} onChange={(event) => updateDraft({ authHeader: event.target.value })} fullWidth />
+            ) : <Box />}
+            {draft.authType !== "无鉴权" ? (
+              <TextField label="密钥" size="small" type="password" value={draft.authValue} onChange={(event) => updateDraft({ authValue: event.target.value })} fullWidth sx={{ gridColumn: "1 / -1" }} />
+            ) : null}
+            <TextField label="服务描述" size="small" value={draft.description} onChange={(event) => updateDraft({ description: event.target.value })} multiline minRows={2} fullWidth sx={{ gridColumn: "1 / -1" }} />
+            <Box sx={{ p: 1.25, border: "1px solid #e5e7eb", borderRadius: "8px", bgcolor: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.5, gridColumn: "1 / -1" }}>
               <Box>
                 <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>连接测试</Typography>
                 <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.25 }}>测试 initialize 和 tools/list 是否可用。</Typography>
@@ -373,13 +390,13 @@ export function McpServiceManagementPage() {
               </Button>
             </Box>
             {connectionTested ? (
-              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ gridColumn: "1 / -1" }}>
                 {["连接正常", "initialize 成功", "tools/list 可用", "可同步工具"].map((item) => (
                   <Chip key={item} label={item} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#f0fdf4", color: "#16a34a" }} />
                 ))}
               </Stack>
             ) : null}
-          </Stack>
+          </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={closeDialog} sx={{ textTransform: "none", color: "#64748b" }}>取消</Button>

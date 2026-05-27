@@ -17,7 +17,7 @@ const menuItems = [
   { path: "/admin/template",       label: "模板管理", icon: <Description sx={{ fontSize: 16 }} /> },
   {
     path: "/admin/mcp-services",
-    label: "MCP服务管理",
+    label: "接入MCP服务管理",
     icon: <CloudQueue sx={{ fontSize: 16 }} />,
   },
   {
