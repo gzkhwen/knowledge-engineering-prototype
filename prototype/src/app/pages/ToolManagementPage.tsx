@@ -282,15 +282,13 @@ export function McpServiceManagementPage() {
           </Box>
         </Box>
         <TableContainer sx={{ flex: 1, overflow: "auto" }}>
-          <Table size="small" sx={{ tableLayout: "fixed", minWidth: 960 }}>
+          <Table size="small" sx={{ tableLayout: "fixed", minWidth: 760 }}>
             <TableHead>
               <TableRow>
                 {[
                   ["服务名称", "190px"],
-                  ["类型", "110px"],
                   ["协议", "120px"],
                   ["服务地址", "280px"],
-                  ["版本", "90px"],
                   ["状态", "100px"],
                   ["工具数", "90px"],
                   ["最近同步", "140px"],
@@ -307,13 +305,11 @@ export function McpServiceManagementPage() {
                     <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>{service.name}</Typography>
                     <Typography sx={{ fontSize: "11px", color: "#64748b", mt: 0.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{service.description}</Typography>
                   </TableCell>
-                  <TableCell sx={{ fontSize: "12px", color: "#374151" }}>{service.serviceType}</TableCell>
                   <TableCell><Chip label={service.transport} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#eff6ff", color: "#2563eb" }} /></TableCell>
                   <TableCell sx={{ fontSize: "12px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <LinkIcon sx={{ fontSize: 13, color: "#94a3b8", mr: 0.5, verticalAlign: "-2px" }} />
                     {service.endpoint}
                   </TableCell>
-                  <TableCell><Chip label={service.version} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#f8fafc", color: "#64748b" }} /></TableCell>
                   <TableCell><Chip label={service.status} size="small" sx={{ height: 21, fontSize: 10.5, ...statusSx(service.status) }} /></TableCell>
                   <TableCell>
                     <Tooltip
