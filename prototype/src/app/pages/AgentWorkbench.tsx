@@ -84,7 +84,7 @@ interface McpTool {
   id: string;
   name: string;
   category: string;
-  sourceType?: "mcp" | "builtin";
+  sourceType?: "external" | "system";
   summary: string;
   status: "可用" | "不可用";
   params: ToolParam[];
@@ -99,7 +99,7 @@ interface ToolNode {
   toolId: string;
   toolName: string;
   category: string;
-  sourceType: "mcp" | "builtin";
+  sourceType: "external" | "system";
   serviceName: string;
   serviceVersion: string;
   status: McpTool["status"];
@@ -119,8 +119,8 @@ const mcpService: McpService = {
   version: "V1.0.0",
 };
 
-const builtinService: McpService = {
-  name: "平台内置工具",
+const systemMcpService: McpService = {
+  name: "知识工程内置 MCP Server",
   version: "V1.0.0",
 };
 
@@ -364,8 +364,8 @@ const toolCatalog: McpTool[] = [
   { id: "qa-extractor", name: "QA提取", category: "抽取", summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [createOutput("qaResult", "QA提取结果", "Array<json>，包含问题、答案和引用来源。", "data.qaResult")] },
   { id: "summary", name: "摘要总结", category: "抽取", summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [createOutput("summaryResult", "摘要总结结果", "Array<json>，包含摘要内容和来源引用。", "data.summaryResult")] },
   { id: "keyword-extractor", name: "关键词提取", category: "抽取", summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [createOutput("keywordResult", "关键词提取结果", "Array<json>，包含关键词和权重。", "data.keywordResult")] },
-  { id: "builtin-code", name: "代码工具", category: "内置工具", sourceType: "builtin", summary: "接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。", status: "可用", input: "rawText", output: "cleanText", params: codeToolParams, outputs: [createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"), createOutput("cleanBlocks", "标准文本块", "Array<json>，可作为后置分片或抽取工具输入。", "data.cleanBlocks")], allowMultiple: true },
-  { id: "builtin-storage", name: "数据存储工具", category: "内置工具", sourceType: "builtin", summary: "选择前置工具输出中的指定路径，将结果写入 ES、对象存储、向量库或中间表。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true },
+  { id: "system-code", name: "代码工具", category: "系统工具", sourceType: "system", summary: "由知识工程内置 MCP Server 提供，接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。", status: "可用", input: "rawText", output: "cleanText", params: codeToolParams, outputs: [createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"), createOutput("cleanBlocks", "标准文本块", "Array<json>，可作为后置分片或抽取工具输入。", "data.cleanBlocks")], allowMultiple: true },
+  { id: "system-storage", name: "数据存储工具", category: "系统工具", sourceType: "system", summary: "由知识工程内置 MCP Server 提供，选择前置工具输出中的指定路径，将结果写入 ES、对象存储、向量库或中间表。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true },
 ];
 
 const initialPlanNodes: ToolNode[] = createInitialPlanNodes();
@@ -400,9 +400,9 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
     toolId: tool.id,
     toolName: tool.name,
     category: tool.category,
-    sourceType: tool.sourceType ?? "mcp",
-    serviceName: tool.sourceType === "builtin" ? builtinService.name : mcpService.name,
-    serviceVersion: tool.sourceType === "builtin" ? builtinService.version : mcpService.version,
+    sourceType: tool.sourceType ?? "external",
+    serviceName: tool.sourceType === "system" ? systemMcpService.name : mcpService.name,
+    serviceVersion: tool.sourceType === "system" ? systemMcpService.version : mcpService.version,
     status: tool.status,
     summary: tool.summary,
     allowMultiple: tool.allowMultiple ?? false,
@@ -418,9 +418,9 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
 
 function createInitialPlanNodes(): ToolNode[] {
   const parser = createNode("document-parser", { type: "fixed" });
-  const code = createNode("builtin-code", { type: "upstream", sourceNodeId: parser.nodeId, outputPath: "data.documentParseResult" });
+  const code = createNode("system-code", { type: "upstream", sourceNodeId: parser.nodeId, outputPath: "data.documentParseResult" });
   const splitter = createNode("chunk-splitter", { type: "upstream", sourceNodeId: code.nodeId, outputPath: "data.cleanBlocks" });
-  const storage = createNode("builtin-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+  const storage = createNode("system-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "content[0].text" });
   return [parser, code, splitter, storage, qa];
 }
@@ -520,13 +520,13 @@ function getCategorySections(nodes: ToolNode[]) {
 }
 
 function getCategoryOrder(category: string) {
-  const order = ["解析", "内置工具", "分片", "抽取"];
+  const order = ["解析", "系统工具", "分片", "抽取"];
   const index = order.indexOf(category);
   return index >= 0 ? index : order.length;
 }
 
 function insertNodeByCategory(nodes: ToolNode[], node: ToolNode) {
-  if (node.sourceType === "builtin") {
+  if (node.sourceType === "system") {
     return [...nodes, node];
   }
   const lastSameCategoryIndex = nodes.reduce((lastIndex, item, index) => (item.category === node.category ? index : lastIndex), -1);
@@ -622,7 +622,9 @@ export function AgentWorkbench() {
     : toolCatalog.filter((tool) => tool.category === selectedCategory);
   const currentTool = toolCatalog.find((tool) => tool.id === selectedToolId) ?? filteredTools[0] ?? null;
   const selectedToolAdded = currentTool ? addedToolIds.has(currentTool.id) && !currentTool.allowMultiple : false;
-  const selectedToolCategoryConfirmed = currentTool ? confirmedCategories.has(currentTool.category) : false;
+  const selectedToolCategoryConfirmed = currentTool
+    ? categorySections.some((section) => section.category === currentTool.category && confirmedCategories.has(section.sectionId))
+    : false;
   const allCategoriesConfirmed = categorySections.length > 0 && categorySections.every((section) => confirmedCategories.has(section.sectionId));
   const firstUnconfirmedSectionId = categorySections.find((section) => !confirmedCategories.has(section.sectionId))?.sectionId;
   const canConfirmSection = (sectionId: string) => canEdit && firstUnconfirmedSectionId === sectionId;
@@ -653,14 +655,14 @@ export function AgentWorkbench() {
     const upstreamNode = planNodes[planNodes.length - 1];
     const node = createNode(
       currentTool.id,
-      currentTool.sourceType === "builtin" && upstreamNode
+      currentTool.sourceType === "system" && upstreamNode
         ? { type: "upstream", sourceNodeId: upstreamNode.nodeId, outputPath: upstreamNode.outputs[0]?.path ?? "data.result" }
         : { type: "fixed" },
     );
     setPlanNodes((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
     setHasManualEdits(true);
     setAddDialogOpen(false);
-    toast.success(`已添加${node.sourceType === "builtin" ? "内置工具" : "MCP工具"}，已归入${getPlanTitle(node.category)}`);
+    toast.success(`已添加${node.sourceType === "system" ? "系统工具" : "MCP工具"}，已归入${getPlanTitle(node.category)}`);
   };
 
   const removeNode = (nodeId: string) => {
@@ -808,7 +810,7 @@ export function AgentWorkbench() {
           <Box sx={{ p: 2, flex: 1, overflow: "auto", bgcolor: "#FBFCFF" }}>
             <Box sx={{ maxWidth: 560, bgcolor: "#fff", border: "1px solid #E0E8F2", borderRadius: "12px", p: 2 }}>
               <Typography sx={{ fontSize: 13, color: "#374151", lineHeight: 1.7 }}>
-                已基于样例文件生成处理方案。右侧方案区会按工具分类生成方案框，MCP 工具负责业务处理，内置工具负责代码适配和结果存储。
+                已基于样例文件生成处理方案。右侧方案区统一展示接入知识工程的 MCP Server 工具，系统工具由知识工程内置 MCP Server 提供。
               </Typography>
             </Box>
           </Box>
@@ -1052,13 +1054,13 @@ function ToolNodeCard({
             {node.toolName}
           </Typography>
           <Chip
-            label={node.sourceType === "builtin" ? "内置" : "MCP"}
+            label={node.sourceType === "system" ? "系统" : "MCP"}
             size="small"
             sx={{
               height: 18,
               fontSize: 10,
-              bgcolor: node.sourceType === "builtin" ? "#f5f3ff" : "#eff6ff",
-              color: node.sourceType === "builtin" ? "#6d28d9" : "#2563eb",
+              bgcolor: node.sourceType === "system" ? "#f5f3ff" : "#eff6ff",
+              color: node.sourceType === "system" ? "#6d28d9" : "#2563eb",
               "& .MuiChip-label": { px: 0.6 },
             }}
           />
@@ -1092,9 +1094,9 @@ function ToolNodeCard({
                 </Stack>
               ) : <Typography sx={{ fontSize: 12, color: "#64748b" }}>无必填参数</Typography>}
             </ReadonlyConfigBlock>
-            {node.sourceType === "builtin" && (
+            {node.sourceType === "system" && (
               <ReadonlyConfigBlock label="工具来源">
-                <ReadonlyKeyValue label="类型" value="平台内置工具，不在管理端 MCP 工具资产中展示" />
+                <ReadonlyKeyValue label="类型" value="知识工程内置 MCP Server 工具，管理端可见但服务不可修改" />
               </ReadonlyConfigBlock>
             )}
             <ReadonlyConfigBlock label="输出">
@@ -1286,7 +1288,7 @@ function ToolEditDrawer({
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#111827" }}>{node.toolName}</Typography>
             <Typography sx={{ fontSize: 12, color: "#64748b" }}>
-              {getPlanTitle(node.category)} · {node.sourceType === "builtin" ? "平台内置工具" : `${node.serviceName} ${node.serviceVersion}`}
+              {getPlanTitle(node.category)} · {node.serviceName} ${node.serviceVersion}
             </Typography>
           </Box>
           <IconButton onClick={onClose}><Close /></IconButton>
@@ -1344,7 +1346,7 @@ function ToolEditDrawer({
               </Stack>
             </ConfigBlock>
 
-            <ConfigBlock title={node.sourceType === "builtin" ? "内置工具配置" : "工具配置"}>
+            <ConfigBlock title={node.sourceType === "system" ? "系统工具配置" : "工具配置"}>
               <Stack spacing={1.25}>
                 {configurableParams.map((param) => (
                   <ParamField key={param.id} param={param} canEdit={canEdit && param.editable !== false && node.enabled} onChange={(value) => onParamChange(node.nodeId, param.id, value)} />
@@ -1418,7 +1420,7 @@ function AddToolDialog({
             <Typography sx={{ fontSize: 18, fontWeight: 700 }}>添加工具</Typography>
             <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 1 }}>
               <Chip label={`MCP 服务：${service.name}`} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#eff6ff", color: "#2563eb" }} />
-              <Chip label="内置工具：代码工具 / 数据存储工具" size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
+              <Chip label={`系统服务：${systemMcpService.name}`} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
             </Stack>
           </Box>
           <IconButton onClick={onClose}><Close /></IconButton>
@@ -1450,7 +1452,7 @@ function AddToolDialog({
                 <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between">
                   <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{tool.name}</Typography>
                   <Stack direction="row" spacing={0.5} alignItems="center">
-                    <Chip label={tool.sourceType === "builtin" ? "内置" : "MCP"} size="small" sx={{ height: 18, fontSize: 10, bgcolor: tool.sourceType === "builtin" ? "#f5f3ff" : "#eff6ff", color: tool.sourceType === "builtin" ? "#6d28d9" : "#2563eb" }} />
+                    <Chip label={tool.sourceType === "system" ? "系统" : "MCP"} size="small" sx={{ height: 18, fontSize: 10, bgcolor: tool.sourceType === "system" ? "#f5f3ff" : "#eff6ff", color: tool.sourceType === "system" ? "#6d28d9" : "#2563eb" }} />
                     {isAdded && <Chip label="已添加" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f1f5f9", color: "#64748b" }} />}
                   </Stack>
                 </Stack>

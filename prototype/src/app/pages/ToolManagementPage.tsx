@@ -35,7 +35,7 @@ import {
 import { toast } from "sonner";
 import { ToolHubPage } from "./ToolHubPage";
 
-type McpServiceType = "Nacos" | "标准 MCP Server";
+type McpServiceType = "系统内置" | "Nacos" | "标准 MCP Server";
 type McpTransport = "Streamable HTTP" | "SSE";
 type McpAuthType = "无鉴权" | "Bearer Token" | "API Key";
 type McpServiceStatus = "连接正常" | "连接异常" | "已停用";
@@ -53,6 +53,7 @@ interface McpServiceItem {
   toolCount: number;
   toolNames: string[];
   lastSyncedAt: string;
+  locked?: boolean;
 }
 
 interface McpServiceDraft {
@@ -82,6 +83,21 @@ const defaultDraft: McpServiceDraft = {
 };
 
 const initialServices: McpServiceItem[] = [
+  {
+    id: "svc-system-internal",
+    name: "知识工程内置 MCP Server",
+    serviceType: "系统内置",
+    transport: "Streamable HTTP",
+    endpoint: "system://knowledge-engineering/internal-mcp",
+    authType: "无鉴权",
+    version: "V1.0.0",
+    description: "知识工程平台自研维护的系统工具服务，向 Agent 和流程引擎提供代码工具、数据存储工具。",
+    status: "连接正常",
+    toolCount: 2,
+    toolNames: ["代码工具", "数据存储工具"],
+    lastSyncedAt: "系统预置",
+    locked: true,
+  },
   {
     id: "svc-nacos",
     name: "Nacos 知识工程 MCP",
@@ -172,6 +188,10 @@ export function McpServiceManagementPage() {
   };
 
   const openEdit = (service: McpServiceItem) => {
+    if (service.locked) {
+      toast.info("系统内置 MCP Server 不允许修改连接信息");
+      return;
+    }
     setEditingId(service.id);
     setDraft({
       name: service.name,
@@ -233,6 +253,11 @@ export function McpServiceManagementPage() {
   };
 
   const syncService = (serviceId: string) => {
+    const target = services.find((item) => item.id === serviceId);
+    if (target?.locked) {
+      toast.info("系统内置 MCP Server 由平台自动维护，无需手动同步");
+      return;
+    }
     setServices((items) => items.map((item) => (
       item.id === serviceId
         ? {
@@ -248,6 +273,11 @@ export function McpServiceManagementPage() {
   };
 
   const toggleService = (serviceId: string) => {
+    const target = services.find((item) => item.id === serviceId);
+    if (target?.locked) {
+      toast.info("系统内置 MCP Server 不允许停用");
+      return;
+    }
     setServices((items) => items.map((item) => (
       item.id === serviceId
         ? { ...item, status: item.status === "已停用" ? "连接正常" : "已停用" }
@@ -256,6 +286,11 @@ export function McpServiceManagementPage() {
   };
 
   const deleteService = (serviceId: string) => {
+    const target = services.find((item) => item.id === serviceId);
+    if (target?.locked) {
+      toast.info("系统内置 MCP Server 不允许删除");
+      return;
+    }
     setServices((items) => items.filter((item) => item.id !== serviceId));
     toast.success("MCP 服务已删除");
   };
@@ -266,7 +301,7 @@ export function McpServiceManagementPage() {
         <Box>
           <Typography sx={{ fontSize: "15px", fontWeight: 700, color: "#111827" }}>MCP服务管理</Typography>
           <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.25 }}>
-            接入 Nacos 或客户自建 MCP Server，完成连接测试和工具同步；这里只维护服务接入关系，不编辑工具定义。
+            接入 Nacos 或客户自建 MCP Server，完成连接测试和工具同步；系统内置 MCP Server 可见但不允许修改。
           </Typography>
         </Box>
         <Button variant="contained" startIcon={<Add sx={{ fontSize: 16 }} />} onClick={openCreate} sx={{ height: 34, bgcolor: BLUE, borderRadius: "6px", textTransform: "none", boxShadow: "none", fontSize: "13px", "&:hover": { bgcolor: "#2563eb", boxShadow: "none" } }}>
@@ -305,7 +340,12 @@ export function McpServiceManagementPage() {
                     <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>{service.name}</Typography>
                     <Typography sx={{ fontSize: "11px", color: "#64748b", mt: 0.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{service.description}</Typography>
                   </TableCell>
-                  <TableCell><Chip label={service.transport} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#eff6ff", color: "#2563eb" }} /></TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Chip label={service.transport} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: service.locked ? "#f5f3ff" : "#eff6ff", color: service.locked ? "#6d28d9" : "#2563eb" }} />
+                      {service.locked && <Chip label="系统内置" size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#f1f5f9", color: "#475569" }} />}
+                    </Stack>
+                  </TableCell>
                   <TableCell sx={{ fontSize: "12px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <LinkIcon sx={{ fontSize: 13, color: "#94a3b8", mr: 0.5, verticalAlign: "-2px" }} />
                     {service.endpoint}
@@ -331,12 +371,12 @@ export function McpServiceManagementPage() {
                   <TableCell sx={{ fontSize: "12px", color: "#64748b" }}>{service.lastSyncedAt}</TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={0.25}>
-                      <Tooltip title="同步工具"><IconButton size="small" onClick={() => syncService(service.id)} sx={{ color: BLUE }}><Sync sx={{ fontSize: 16 }} /></IconButton></Tooltip>
-                      <Tooltip title="编辑"><IconButton size="small" onClick={() => openEdit(service)} sx={{ color: "#64748b" }}><Edit sx={{ fontSize: 16 }} /></IconButton></Tooltip>
-                      <Button size="small" onClick={() => toggleService(service.id)} sx={{ minWidth: 44, px: 0.75, fontSize: 12, textTransform: "none", color: service.status === "已停用" ? "#16a34a" : "#64748b" }}>
+                      <Tooltip title={service.locked ? "系统内置服务自动维护" : "同步工具"}><span><IconButton disabled={service.locked} size="small" onClick={() => syncService(service.id)} sx={{ color: BLUE }}><Sync sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+                      <Tooltip title={service.locked ? "系统内置服务不允许修改" : "编辑"}><span><IconButton disabled={service.locked} size="small" onClick={() => openEdit(service)} sx={{ color: "#64748b" }}><Edit sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+                      <Button disabled={service.locked} size="small" onClick={() => toggleService(service.id)} sx={{ minWidth: 44, px: 0.75, fontSize: 12, textTransform: "none", color: service.status === "已停用" ? "#16a34a" : "#64748b" }}>
                         {service.status === "已停用" ? "启用" : "停用"}
                       </Button>
-                      <Tooltip title="删除"><IconButton size="small" onClick={() => deleteService(service.id)} sx={{ color: "#ef4444" }}><Delete sx={{ fontSize: 16 }} /></IconButton></Tooltip>
+                      <Tooltip title={service.locked ? "系统内置服务不允许删除" : "删除"}><span><IconButton disabled={service.locked} size="small" onClick={() => deleteService(service.id)} sx={{ color: "#ef4444" }}><Delete sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
                     </Stack>
                   </TableCell>
                 </TableRow>

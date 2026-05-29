@@ -406,6 +406,15 @@ const CATEGORY_SELECTION_STORAGE_KEY = "toolHub_selected_category_v1";
 const TOOL_CODE_PATTERN = /^[a-z][a-z0-9_]*$/;
 const MCP_SERVICE_OPTIONS = [
   {
+    name: "知识工程内置 MCP Server",
+    type: "系统内置",
+    protocol: "Streamable HTTP",
+    version: "V1.0.0",
+    status: "连接正常",
+    description: "知识工程平台自研维护的系统工具服务，提供代码工具和数据存储工具。",
+    lastSyncedAt: "系统预置",
+  },
+  {
     name: "Nacos 知识工程 MCP",
     type: "Nacos",
     protocol: "Streamable HTTP",
@@ -450,7 +459,7 @@ const VERSION_STATUS: Record<VersionStatus, { label: string; bg: string; color: 
 
 const DELETABLE_VERSION_STATUSES: VersionStatus[] = ["wait_debug", "pending", "stopped"];
 
-const INITIAL_CATEGORIES = ["文档解析", "内容处理", "智能生成", "质量评估"];
+const INITIAL_CATEGORIES = ["系统工具", "文档解析", "内容处理", "智能生成", "质量评估"];
 
 const FIELD_COMPONENTS: VersionConfigField[] = [
   { name: "OCR 模型", type: "下拉单选", value: "qwen3.5-plus", editable: true },
@@ -2653,7 +2662,77 @@ function createRagflowTool(component: RagflowComponentSpec, index: number): Tool
   };
 }
 
-const INITIAL_TOOLS: ToolItem[] = RAGFLOW_COMPONENTS.map(createRagflowTool);
+const SYSTEM_MCP_COMPONENTS: RagflowComponentSpec[] = [
+  {
+    id: "system-code-tool",
+    toolCode: "system_code_transform",
+    name: "代码工具",
+    category: "系统工具",
+    endpoint: "/system/code_transform",
+    description: "接收前置工具输出，通过代码脚本完成清洗、转换、过滤和合并，并输出可被后置工具引用的变量。",
+    detail: "由知识工程内置 MCP Server 提供，支持沙箱执行、超时限制、执行审计和样例试跑。",
+    inputs: [
+      { name: "input", type: "对象", required: true, description: "前置工具输出对象" },
+      { name: "script", type: "文本", required: true, description: "转换脚本" },
+      { name: "output_schema", type: "对象", required: true, description: "脚本输出变量声明" },
+      { name: "dry_run", type: "布尔", description: "是否仅进行样例试跑", defaultValue: "true" },
+    ],
+    outputs: [
+      { name: "code", type: "数字", required: true, description: "状态码，0 表示正常", outputMapping: "执行状态" },
+      { name: "msg", type: "文本", description: "状态信息", outputMapping: "错误信息" },
+      { name: "result", type: "对象", description: "脚本处理后的结构化结果", outputMapping: "结构化结果" },
+      { name: "variables", type: "对象", description: "按输出声明生成的变量集合", outputMapping: "主要结果内容" },
+    ],
+    resultExample: "variables.cleanBlocks=[{text,title,page}]",
+  },
+  {
+    id: "system-storage-tool",
+    toolCode: "system_data_storage",
+    name: "数据存储工具",
+    category: "系统工具",
+    endpoint: "/system/data_storage",
+    description: "选择前置工具输出的指定路径，将结果写入 ES、对象存储、向量库或中间表，并返回 storageRef。",
+    detail: "由知识工程内置 MCP Server 提供，支持 dryRun、写入权限校验、幂等键和写入审计。",
+    inputs: [
+      { name: "payload", type: "对象", required: true, description: "前置工具输出对象" },
+      { name: "path", type: "文本", required: true, description: "需要写入存储的数据路径" },
+      { name: "storage_type", type: "文本", required: true, description: "存储方式，如 ES、对象存储、向量库、中间表" },
+      { name: "target", type: "文本", required: true, description: "存储目标，如 index、bucket、collection 或表名" },
+      { name: "dry_run", type: "布尔", description: "是否仅校验不写入", defaultValue: "true" },
+    ],
+    outputs: [
+      { name: "code", type: "数字", required: true, description: "状态码，0 表示正常", outputMapping: "执行状态" },
+      { name: "msg", type: "文本", description: "状态信息", outputMapping: "错误信息" },
+      { name: "storage_ref", type: "文本", description: "存储结果引用", outputMapping: "文件或中间产物" },
+      { name: "stored_count", type: "数字", description: "成功写入数量", outputMapping: "主要结果内容" },
+    ],
+    resultExample: "storage_ref=es://knowledge_chunks/project/file；stored_count=128",
+  },
+];
+
+function createSystemMcpTool(component: RagflowComponentSpec, index: number): ToolItem {
+  return {
+    ...createRagflowTool(component, index),
+    category: "系统工具",
+    mcpServiceName: "知识工程内置 MCP Server",
+    sourceType: "系统内置 MCP 工具",
+    owner: "知识工程平台组",
+    createdBy: "系统预置",
+    status: "enabled",
+  };
+}
+
+const SYSTEM_MCP_TOOLS: ToolItem[] = SYSTEM_MCP_COMPONENTS.map((component, index) => createSystemMcpTool(component, index + 90));
+const INITIAL_TOOLS: ToolItem[] = [
+  ...SYSTEM_MCP_TOOLS,
+  ...RAGFLOW_COMPONENTS.map(createRagflowTool),
+];
+
+function mergeSystemMcpTools(tools: ToolItem[]) {
+  const existingCodes = new Set(tools.filter((tool) => !tool.deleted).map((tool) => tool.toolCode));
+  const missing = SYSTEM_MCP_TOOLS.filter((tool) => !existingCodes.has(tool.toolCode));
+  return missing.length ? [...missing, ...tools] : tools;
+}
 
 function getToolMcpServiceName(tool: ToolItem, index = 0) {
   if (tool.mcpServiceName) return tool.mcpServiceName;
@@ -2765,25 +2844,27 @@ function loadTools(): ToolItem[] {
       detailedDescription: tool.detailedDescription ?? "待补充工具能力边界。",
       versions: (tool.versions ?? []).map((version) => normalizeVersion(version as ToolVersion, tool.name ?? "", tool.toolCode)),
     })) as ToolItem[];
-    return hydratedTools.map((tool, index) => ({
+    const normalizedTools = hydratedTools.map((tool, index) => ({
       ...tool,
       toolCode: ensureUniqueToolCode(tool.toolCode, hydratedTools.slice(0, index), tool.id),
     }));
+    return mergeSystemMcpTools(normalizedTools);
   } catch {
-    return INITIAL_TOOLS.map((tool) => ({
+    return mergeSystemMcpTools(INITIAL_TOOLS.map((tool) => ({
       ...tool,
       toolCode: tool.toolCode || buildToolCodeSeed(tool.name),
       capabilitySummary: tool.capabilitySummary || tool.description,
       detailedDescription: tool.detailedDescription || "待补充工具能力边界。",
       versions: tool.versions.map((version) => normalizeVersion(version, tool.name, tool.toolCode)),
-    }));
+    })));
   }
 }
 
 function loadCategories(): string[] {
   try {
     const saved = localStorage.getItem(CATEGORY_STORAGE_KEY);
-    return saved ? JSON.parse(saved) : INITIAL_CATEGORIES;
+    const parsed = saved ? JSON.parse(saved) : INITIAL_CATEGORIES;
+    return Array.from(new Set(["系统工具", ...parsed]));
   } catch {
     return INITIAL_CATEGORIES;
   }
