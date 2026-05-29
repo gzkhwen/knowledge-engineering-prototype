@@ -6,6 +6,7 @@ import {
   Link as LinkIcon,
   PlayArrow,
   Sync,
+  Visibility,
 } from "@mui/icons-material";
 import {
   Box,
@@ -52,6 +53,7 @@ interface McpServiceItem {
   status: McpServiceStatus;
   toolCount: number;
   toolNames: string[];
+  toolCategories?: Record<string, string>;
   lastSyncedAt: string;
   locked?: boolean;
 }
@@ -95,7 +97,11 @@ const initialServices: McpServiceItem[] = [
     status: "连接正常",
     toolCount: 2,
     toolNames: ["代码工具", "数据存储工具"],
-    lastSyncedAt: "系统预置",
+    toolCategories: {
+      代码工具: "系统工具",
+      数据存储工具: "系统工具",
+    },
+    lastSyncedAt: "2026-05-29 09:30",
     locked: true,
   },
   {
@@ -110,6 +116,16 @@ const initialServices: McpServiceItem[] = [
     status: "连接正常",
     toolCount: 8,
     toolNames: ["通用解析", "多模态解析", "通用分片", "自定义分隔符分片", "QA提取", "摘要总结", "文档图谱抽取", "表格深度解析"],
+    toolCategories: {
+      通用解析: "文档解析",
+      多模态解析: "文档解析",
+      通用分片: "内容处理",
+      自定义分隔符分片: "内容处理",
+      QA提取: "智能生成",
+      摘要总结: "智能生成",
+      文档图谱抽取: "智能生成",
+      表格深度解析: "文档解析",
+    },
     lastSyncedAt: "2026-05-27 10:18",
   },
   {
@@ -124,6 +140,13 @@ const initialServices: McpServiceItem[] = [
     status: "连接正常",
     toolCount: 5,
     toolNames: ["医保政策文件解析", "分隔符递归分片", "OCR解析专用分片", "医保政策文件分片", "关键词提取"],
+    toolCategories: {
+      医保政策文件解析: "文档解析",
+      分隔符递归分片: "内容处理",
+      OCR解析专用分片: "内容处理",
+      医保政策文件分片: "内容处理",
+      关键词提取: "智能生成",
+    },
     lastSyncedAt: "2026-05-27 09:42",
   },
   {
@@ -138,6 +161,10 @@ const initialServices: McpServiceItem[] = [
     status: "连接异常",
     toolCount: 2,
     toolNames: ["RAG质量评估", "问答一致性检查"],
+    toolCategories: {
+      RAG质量评估: "质量评估",
+      问答一致性检查: "质量评估",
+    },
     lastSyncedAt: "2026-05-26 17:30",
   },
 ];
@@ -156,6 +183,10 @@ function statusSx(status: McpServiceStatus) {
   return { bgcolor: "#f1f5f9", color: "#64748b" };
 }
 
+function getServerSourceType(service: McpServiceItem) {
+  return service.locked || service.serviceType === "系统内置" ? "系统内置" : "外部接入";
+}
+
 function toService(draft: McpServiceDraft, id = `svc-${Date.now()}`): McpServiceItem {
   return {
     id,
@@ -169,6 +200,7 @@ function toService(draft: McpServiceDraft, id = `svc-${Date.now()}`): McpService
     status: "连接正常",
     toolCount: id.startsWith("svc-") ? 0 : 3,
     toolNames: [],
+    toolCategories: {},
     lastSyncedAt: "-",
   };
 }
@@ -179,6 +211,7 @@ export function McpServiceManagementPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<McpServiceDraft>(defaultDraft);
   const [connectionTested, setConnectionTested] = useState(false);
+  const [detailService, setDetailService] = useState<McpServiceItem | null>(null);
 
   const openCreate = () => {
     setEditingId(null);
@@ -317,17 +350,18 @@ export function McpServiceManagementPage() {
           </Box>
         </Box>
         <TableContainer sx={{ flex: 1, overflow: "auto" }}>
-          <Table size="small" sx={{ tableLayout: "fixed", minWidth: 760 }}>
+          <Table size="small" sx={{ tableLayout: "fixed", minWidth: 1020 }}>
             <TableHead>
               <TableRow>
                 {[
                   ["服务名称", "190px"],
+                  ["Server类型", "110px"],
                   ["协议", "120px"],
-                  ["服务地址", "280px"],
+                  ["服务地址", "260px"],
                   ["状态", "100px"],
                   ["工具数", "90px"],
                   ["最近同步", "140px"],
-                  ["操作", "180px"],
+                  ["操作", "210px"],
                 ].map(([label, width]) => (
                   <TableCell key={label} sx={{ width, bgcolor: "#f8f9fb", fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, borderBottom: "1px solid #f0f0f0" }}>{label}</TableCell>
                 ))}
@@ -341,9 +375,21 @@ export function McpServiceManagementPage() {
                     <Typography sx={{ fontSize: "11px", color: "#64748b", mt: 0.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{service.description}</Typography>
                   </TableCell>
                   <TableCell>
+                    <Chip
+                      label={getServerSourceType(service)}
+                      size="small"
+                      sx={{
+                        height: 21,
+                        fontSize: 10.5,
+                        bgcolor: service.locked ? "#f5f3ff" : "#eff6ff",
+                        color: service.locked ? "#6d28d9" : "#2563eb",
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>
                     <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
-                      <Chip label={service.transport} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: service.locked ? "#f5f3ff" : "#eff6ff", color: service.locked ? "#6d28d9" : "#2563eb" }} />
-                      {service.locked && <Chip label="系统内置" size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#f1f5f9", color: "#475569" }} />}
+                      <Chip label={service.transport} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#eff6ff", color: "#2563eb" }} />
+                      <Chip label={service.serviceType} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#f1f5f9", color: "#475569" }} />
                     </Stack>
                   </TableCell>
                   <TableCell sx={{ fontSize: "12px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -371,6 +417,7 @@ export function McpServiceManagementPage() {
                   <TableCell sx={{ fontSize: "12px", color: "#64748b" }}>{service.lastSyncedAt}</TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={0.25}>
+                      <Tooltip title="查看详情"><IconButton size="small" onClick={() => setDetailService(service)} sx={{ color: BLUE }}><Visibility sx={{ fontSize: 16 }} /></IconButton></Tooltip>
                       <Tooltip title={service.locked ? "系统内置服务自动维护" : "同步工具"}><span><IconButton disabled={service.locked} size="small" onClick={() => syncService(service.id)} sx={{ color: BLUE }}><Sync sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
                       <Tooltip title={service.locked ? "系统内置服务不允许修改" : "编辑"}><span><IconButton disabled={service.locked} size="small" onClick={() => openEdit(service)} sx={{ color: "#64748b" }}><Edit sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
                       <Button disabled={service.locked} size="small" onClick={() => toggleService(service.id)} sx={{ minWidth: 44, px: 0.75, fontSize: 12, textTransform: "none", color: service.status === "已停用" ? "#16a34a" : "#64748b" }}>
@@ -437,6 +484,71 @@ export function McpServiceManagementPage() {
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={closeDialog} sx={{ textTransform: "none", color: "#64748b" }}>取消</Button>
           <Button variant="contained" onClick={saveService} sx={{ textTransform: "none", bgcolor: BLUE, boxShadow: "none" }}>{editingId ? "保存" : "确认接入"}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(detailService)} onClose={() => setDetailService(null)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontSize: "16px", fontWeight: 700, px: 3, pt: 2.25, pb: 1 }}>
+          MCP Server 详情
+        </DialogTitle>
+        {detailService ? (
+          <DialogContent sx={{ px: 3, pt: "8px !important", pb: 2 }}>
+            <Stack spacing={2}>
+              <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", p: 1.5 }}>
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.25 }}>
+                  <Typography sx={{ fontSize: "15px", fontWeight: 700, color: "#111827" }}>{detailService.name}</Typography>
+                  <Chip label={getServerSourceType(detailService)} size="small" sx={{ height: 22, fontSize: 11, bgcolor: detailService.locked ? "#f5f3ff" : "#eff6ff", color: detailService.locked ? "#6d28d9" : "#2563eb" }} />
+                  <Chip label={detailService.status} size="small" sx={{ height: 22, fontSize: 11, ...statusSx(detailService.status) }} />
+                  {detailService.locked && <Chip label="连接信息不可修改" size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#f1f5f9", color: "#475569" }} />}
+                </Stack>
+                <Box sx={{ display: "grid", gridTemplateColumns: "120px minmax(0, 1fr) 120px minmax(0, 1fr)", gap: 1, alignItems: "start" }}>
+                  {[
+                    ["服务类型", detailService.serviceType],
+                    ["协议", detailService.transport],
+                    ["服务版本", detailService.version],
+                    ["鉴权方式", detailService.authType],
+                    ["最近同步", detailService.lastSyncedAt],
+                    ["工具数量", `${detailService.toolCount} 个`],
+                    ["服务地址", detailService.endpoint],
+                    ["服务说明", detailService.description],
+                  ].map(([label, value], index) => (
+                    <Box key={`${label}-${index}`} sx={{ display: "contents" }}>
+                      <Typography sx={{ fontSize: "12px", color: "#64748b", fontWeight: 700 }}>{label}</Typography>
+                      <Typography sx={{ fontSize: "12px", color: "#111827", wordBreak: "break-all", gridColumn: label === "服务地址" || label === "服务说明" ? "span 3" : "auto" }}>{value}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Paper>
+
+              <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", overflow: "hidden" }}>
+                <Box sx={{ px: 1.5, py: 1.25, borderBottom: "1px solid #f0f0f0" }}>
+                  <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>同步工具列表</Typography>
+                </Box>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      {["工具名称", "默认分类", "来源", "状态"].map((label) => (
+                        <TableCell key={label} sx={{ bgcolor: "#f8f9fb", fontSize: "12px", fontWeight: 600, color: "#6b7280" }}>{label}</TableCell>
+                      ))}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {detailService.toolNames.map((toolName) => (
+                      <TableRow key={toolName}>
+                        <TableCell sx={{ fontSize: "12px", color: "#111827", fontWeight: 600 }}>{toolName}</TableCell>
+                        <TableCell><Chip label={detailService.toolCategories?.[toolName] || "未分类"} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#f5f3ff", color: "#6d28d9" }} /></TableCell>
+                        <TableCell sx={{ fontSize: "12px", color: "#64748b" }}>{detailService.name}</TableCell>
+                        <TableCell><Chip label="已同步" size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#f0fdf4", color: "#16a34a" }} /></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Paper>
+            </Stack>
+          </DialogContent>
+        ) : null}
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setDetailService(null)} variant="contained" sx={{ textTransform: "none", bgcolor: BLUE, boxShadow: "none" }}>关闭</Button>
         </DialogActions>
       </Dialog>
     </Box>
