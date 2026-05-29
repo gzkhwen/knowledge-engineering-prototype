@@ -445,13 +445,7 @@ export function McpServiceManagementPage() {
               {services.map((service, index) => (
                 <TableRow key={service.id} sx={{ bgcolor: index % 2 === 0 ? "#fff" : "#fafafa", "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
                   <TableCell sx={{ py: 1.5 }}>
-                    <Button
-                      variant="text"
-                      onClick={() => openDetail(service)}
-                      sx={{ minWidth: 0, p: 0, justifyContent: "flex-start", textTransform: "none", fontSize: "13px", fontWeight: 600, color: "#111827", "&:hover": { bgcolor: "transparent", color: BLUE } }}
-                    >
-                      {service.name}
-                    </Button>
+                    <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>{service.name}</Typography>
                   </TableCell>
                   <TableCell>
                     <Chip
@@ -487,21 +481,10 @@ export function McpServiceManagementPage() {
                     </Stack>
                   </TableCell>
                   <TableCell>
-                    <Tooltip
-                      arrow
-                      placement="top"
-                      title={(
-                        <Box>
-                          {service.toolNames.length ? service.toolNames.map((toolName) => (
-                            <Typography key={toolName} sx={{ fontSize: "12px", lineHeight: 1.7 }}>{toolName}</Typography>
-                          )) : (
-                            <Typography sx={{ fontSize: "12px" }}>暂无同步工具</Typography>
-                          )}
-                        </Box>
-                      )}
-                    >
-                      <Chip label={`${service.toolCount} 个`} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#eff6ff", color: "#2563eb" }} />
-                    </Tooltip>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <Typography sx={{ fontSize: "12px", color: "#111827" }}>{service.toolCount} 个</Typography>
+                      <Tooltip title="查看工具列表"><IconButton size="small" onClick={() => openDetail(service)} sx={{ color: BLUE, p: 0.4 }}><Visibility sx={{ fontSize: 15 }} /></IconButton></Tooltip>
+                    </Stack>
                   </TableCell>
                   <TableCell sx={{ fontSize: "12px", color: "#64748b" }}>{service.lastSyncedAt}</TableCell>
                   <TableCell>
@@ -517,7 +500,6 @@ export function McpServiceManagementPage() {
                           />
                         </span>
                       </Tooltip>
-                      <Tooltip title="查看详情"><IconButton size="small" onClick={() => openDetail(service)} sx={{ color: BLUE }}><Visibility sx={{ fontSize: 16 }} /></IconButton></Tooltip>
                       <Tooltip title={service.locked ? "系统内置服务不允许修改" : "编辑"}><span><IconButton disabled={service.locked} size="small" onClick={() => openEdit(service)} sx={{ color: "#64748b" }}><Edit sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
                       <Tooltip title={service.locked ? "系统内置服务不允许删除" : "删除"}><span><IconButton disabled={service.locked} size="small" onClick={() => deleteService(service.id)} sx={{ color: "#ef4444" }}><Delete sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
                     </Stack>
@@ -595,68 +577,37 @@ export function McpServiceManagementPage() {
           <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "#fff" }}>
             <Box sx={{ px: 3, py: 2.5, borderBottom: "1px solid #e8eaed", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 2 }}>
               <Box sx={{ minWidth: 0 }}>
-                <Typography sx={{ fontSize: "22px", fontWeight: 700, color: "#111827" }}>{detailService.name}</Typography>
+                <Typography sx={{ fontSize: "22px", fontWeight: 700, color: "#111827" }}>工具列表</Typography>
                 <Typography sx={{ mt: 0.5, fontSize: "13px", color: "#64748b" }}>
-                  {detailService.endpoint}
+                  {detailService.name} · 共 {detailService.toolCount} 个工具
                 </Typography>
               </Box>
               <IconButton onClick={() => setDetailService(null)} sx={{ color: "#64748b" }}><Close sx={{ fontSize: 20 }} /></IconButton>
             </Box>
 
             <Box sx={{ flex: 1, overflow: "auto", px: 3, py: 2.5, bgcolor: "#FBFCFF" }}>
-              <Stack spacing={2}>
-                <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", overflow: "hidden", bgcolor: "#fff" }}>
-                  <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid #f0f0f0" }}>
-                    <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>基本信息</Typography>
-                  </Box>
-                  <Stack spacing={1.25} sx={{ p: 2 }}>
-                    {[
-                      ["Server类型", getServerSourceType(detailService)],
-                      ["连接状态", detailService.status],
-                      ["服务类型", detailService.serviceType],
-                      ["协议", detailService.transport],
-                      ["鉴权方式", detailService.authType],
-                      ["工具数量", `${detailService.toolCount} 个`],
-                      ["最近同步", detailService.lastSyncedAt],
-                      ["服务地址", detailService.endpoint],
-                      ["服务说明", detailService.description],
-                    ].map(([label, value]) => (
-                      <Box key={label} sx={{ p: 1.25, border: "1px solid #eef2f7", borderRadius: "8px", bgcolor: "#f8fafc" }}>
-                        <Typography sx={{ fontSize: "11px", color: "#64748b", fontWeight: 700, mb: 0.6 }}>{label}</Typography>
-                        <Typography sx={{ fontSize: "13px", color: "#111827", wordBreak: "break-all", lineHeight: 1.6 }}>
-                          {label === "连接状态" ? <Chip label={value} size="small" sx={{ height: 21, fontSize: 10.5, ...statusSx(value as McpServiceStatus) }} /> : value}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </Paper>
-
-                <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", overflow: "hidden", bgcolor: "#fff" }}>
-                  <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid #f0f0f0" }}>
-                    <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>工具列表</Typography>
-                  </Box>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        {["工具名称", "工具描述", "状态"].map((label) => (
-                          <TableCell key={label} sx={{ bgcolor: "#f8f9fb", fontSize: "12px", fontWeight: 600, color: "#6b7280" }}>{label}</TableCell>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {detailService.tools.map((tool) => (
-                        <TableRow key={tool.name}>
-                          <TableCell sx={{ width: 160, fontSize: "12px", color: "#111827", fontWeight: 600 }}>{tool.name}</TableCell>
-                          <TableCell sx={{ fontSize: "12px", color: "#64748b", lineHeight: 1.6 }}>{tool.description}</TableCell>
-                          <TableCell sx={{ width: 120 }}>
-                            <Chip label={tool.enabled ? "启用" : "停用"} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: tool.enabled ? "#f0fdf4" : "#f1f5f9", color: tool.enabled ? "#16a34a" : "#64748b" }} />
-                          </TableCell>
-                        </TableRow>
+              <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", overflow: "hidden", bgcolor: "#fff" }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      {["工具名称", "工具描述", "状态"].map((label) => (
+                        <TableCell key={label} sx={{ bgcolor: "#f8f9fb", fontSize: "12px", fontWeight: 600, color: "#6b7280" }}>{label}</TableCell>
                       ))}
-                    </TableBody>
-                  </Table>
-                </Paper>
-              </Stack>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {detailService.tools.map((tool) => (
+                      <TableRow key={tool.name}>
+                        <TableCell sx={{ width: 160, fontSize: "12px", color: "#111827", fontWeight: 600 }}>{tool.name}</TableCell>
+                        <TableCell sx={{ fontSize: "12px", color: "#64748b", lineHeight: 1.6 }}>{tool.description}</TableCell>
+                        <TableCell sx={{ width: 120 }}>
+                          <Chip label={tool.enabled ? "启用" : "停用"} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: tool.enabled ? "#f0fdf4" : "#f1f5f9", color: tool.enabled ? "#16a34a" : "#64748b" }} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Paper>
             </Box>
           </Box>
         ) : null}
