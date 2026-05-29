@@ -213,6 +213,14 @@ function nowText() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
+function formatSyncTime(value: string) {
+  if (!value || value === "-") return "未同步";
+  const [datePart, timePart = ""] = value.split(" ");
+  const [year, month, day] = datePart.split("-");
+  if (!year || !month || !day) return value;
+  return `${year}年${Number(month)}月${Number(day)}日 ${timePart}`;
+}
+
 function statusSx(status: McpServiceStatus) {
   if (status === "连接正常") return { bgcolor: "#f0fdf4", color: "#16a34a" };
   if (status === "连接异常") return { bgcolor: "#fef2f2", color: "#dc2626" };
@@ -579,7 +587,7 @@ export function McpServiceManagementPage() {
               <Box sx={{ minWidth: 0 }}>
                 <Typography sx={{ fontSize: "22px", fontWeight: 700, color: "#111827" }}>工具列表</Typography>
                 <Typography sx={{ mt: 0.5, fontSize: "13px", color: "#64748b" }}>
-                  {detailService.name} · 共 {detailService.toolCount} 个工具
+                  {detailService.name} · 共 {detailService.toolCount} 个工具 · 最近同步于 {formatSyncTime(detailService.lastSyncedAt)}
                 </Typography>
               </Box>
               <IconButton onClick={() => setDetailService(null)} sx={{ color: "#64748b" }}><Close sx={{ fontSize: 20 }} /></IconButton>
