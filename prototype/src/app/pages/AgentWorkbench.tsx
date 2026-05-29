@@ -85,6 +85,8 @@ interface McpTool {
   name: string;
   category: string;
   sourceType?: "external" | "system";
+  serviceName: string;
+  serviceVersion: string;
   summary: string;
   status: "可用" | "不可用";
   params: ToolParam[];
@@ -114,14 +116,19 @@ interface ToolNode {
   outputs: ToolOutput[];
 }
 
-const mcpService: McpService = {
-  name: "nacos-knowledge-tool-mcp",
-  version: "V1.0.0",
-};
-
 const systemMcpService: McpService = {
   name: "知识工程内置 MCP Server",
   version: "V1.0.0",
+};
+
+const nacosMcpService: McpService = {
+  name: "Nacos 知识工程 MCP",
+  version: "V1.0.0",
+};
+
+const customerMcpService: McpService = {
+  name: "客户自建文档处理 MCP",
+  version: "V1.1.0",
 };
 
 const elevatedSelectMenuProps = {
@@ -352,20 +359,20 @@ function createOutput(id: string, label: string, desc: string, path: string): To
 }
 
 const toolCatalog: McpTool[] = [
-  { id: "document-parser", name: "通用解析", category: "解析", summary: "解析 Word、PDF、Excel 等主流文档，提取文本和版面布局。", status: "可用", input: "sampleFile", output: "rawText", params: commonParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含解析后的文本、版面、图片和表格信息。", "data.documentParseResult")] },
-  { id: "multimodal-parser", name: "多模态解析", category: "解析", summary: "使用多模态大模型对文档内容进行解析，效果好、速度慢。", status: "可用", input: "sampleFile", output: "rawText", params: multimodalParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含多模态解析后的文本、图片理解和版面信息。", "data.documentParseResult")] },
-  { id: "medical-policy-parser", name: "医保政策解析", category: "解析", summary: "适用于解析医保政策类文件。", status: "可用", input: "sampleFile", output: "rawText", params: policyParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含医保政策文档的条款、标题和正文结构。", "data.documentParseResult")] },
-  { id: "chunk-splitter", name: "通用分片", category: "分片", summary: "为纯文本文档提供灵活的分块和重叠设置。", status: "可用", input: "rawText", output: "cleanText", params: commonChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含分片文本、标题、来源和元数据。", "data.textChunkResult")] },
-  { id: "custom-separator-splitter", name: "自定义分隔符分片", category: "分片", summary: "沿用通用分片配置，并使用指定分隔符切分文本。", status: "可用", input: "rawText", output: "cleanText", params: customSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含按自定义分隔符切分后的文本片段。", "data.textChunkResult")] },
-  { id: "recursive-separator-splitter", name: "分隔符递归分片", category: "分片", summary: "按分隔符优先级依次切分，优先保留语义完整。", status: "可用", input: "rawText", output: "cleanText", params: recursiveSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含递归切分后的文本片段。", "data.textChunkResult")] },
-  { id: "ocr-splitter", name: "OCR解析专用分片", category: "分片", summary: "根据 OCR 识别的标题及段落进行切分、聚合。", status: "可用", input: "rawText", output: "cleanText", params: ocrChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含面向 OCR 结果聚合后的文本片段。", "data.textChunkResult")] },
-  { id: "medical-policy-splitter", name: "医保政策解析分片", category: "分片", summary: "适合医保政策类文件分片，页面上没有可配置参数。", status: "可用", input: "rawText", output: "cleanText", params: policyChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含医保政策文件分片结果。", "data.textChunkResult")] },
-  { id: "video-audio-sync-splitter", name: "视频声画同步分片", category: "分片", summary: "按声画同步结果切分视频文本片段。", status: "可用", input: "rawText", output: "cleanText", params: videoAudioSyncChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含视频声画同步分片结果。", "data.textChunkResult")] },
-  { id: "qa-extractor", name: "QA提取", category: "抽取", summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [createOutput("qaResult", "QA提取结果", "Array<json>，包含问题、答案和引用来源。", "data.qaResult")] },
-  { id: "summary", name: "摘要总结", category: "抽取", summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [createOutput("summaryResult", "摘要总结结果", "Array<json>，包含摘要内容和来源引用。", "data.summaryResult")] },
-  { id: "keyword-extractor", name: "关键词提取", category: "抽取", summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [createOutput("keywordResult", "关键词提取结果", "Array<json>，包含关键词和权重。", "data.keywordResult")] },
-  { id: "system-code", name: "代码工具", category: "系统工具", sourceType: "system", summary: "由知识工程内置 MCP Server 提供，接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。", status: "可用", input: "rawText", output: "cleanText", params: codeToolParams, outputs: [createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"), createOutput("cleanBlocks", "标准文本块", "Array<json>，可作为后置分片或抽取工具输入。", "data.cleanBlocks")], allowMultiple: true },
-  { id: "system-storage", name: "数据存储工具", category: "系统工具", sourceType: "system", summary: "由知识工程内置 MCP Server 提供，选择前置工具输出中的指定路径，将结果写入 ES、对象存储、向量库或中间表。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true },
+  { id: "document-parser", name: "通用解析", category: "文档解析", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "解析 Word、PDF、Excel 等主流文档，提取文本和版面布局。", status: "可用", input: "sampleFile", output: "rawText", params: commonParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含解析后的文本、版面、图片和表格信息。", "data.documentParseResult")] },
+  { id: "multimodal-parser", name: "多模态解析", category: "文档解析", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "使用多模态大模型对文档内容进行解析，效果好、速度慢。", status: "可用", input: "sampleFile", output: "rawText", params: multimodalParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含多模态解析后的文本、图片理解和版面信息。", "data.documentParseResult")] },
+  { id: "medical-policy-parser", name: "医保政策解析", category: "文档解析", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "适用于解析医保政策类文件。", status: "可用", input: "sampleFile", output: "rawText", params: policyParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含医保政策文档的条款、标题和正文结构。", "data.documentParseResult")] },
+  { id: "chunk-splitter", name: "通用分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "为纯文本文档提供灵活的分块和重叠设置。", status: "可用", input: "rawText", output: "cleanText", params: commonChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含分片文本、标题、来源和元数据。", "data.textChunkResult")] },
+  { id: "custom-separator-splitter", name: "自定义分隔符分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "沿用通用分片配置，并使用指定分隔符切分文本。", status: "可用", input: "rawText", output: "cleanText", params: customSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含按自定义分隔符切分后的文本片段。", "data.textChunkResult")] },
+  { id: "recursive-separator-splitter", name: "分隔符递归分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "按分隔符优先级依次切分，优先保留语义完整。", status: "可用", input: "rawText", output: "cleanText", params: recursiveSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含递归切分后的文本片段。", "data.textChunkResult")] },
+  { id: "ocr-splitter", name: "OCR解析专用分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "根据 OCR 识别的标题及段落进行切分、聚合。", status: "可用", input: "rawText", output: "cleanText", params: ocrChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含面向 OCR 结果聚合后的文本片段。", "data.textChunkResult")] },
+  { id: "medical-policy-splitter", name: "医保政策解析分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "适合医保政策类文件分片，页面上没有可配置参数。", status: "可用", input: "rawText", output: "cleanText", params: policyChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含医保政策文件分片结果。", "data.textChunkResult")] },
+  { id: "video-audio-sync-splitter", name: "视频声画同步分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "按声画同步结果切分视频文本片段。", status: "可用", input: "rawText", output: "cleanText", params: videoAudioSyncChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含视频声画同步分片结果。", "data.textChunkResult")] },
+  { id: "qa-extractor", name: "QA提取", category: "智能生成", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [createOutput("qaResult", "QA提取结果", "Array<json>，包含问题、答案和引用来源。", "data.qaResult")] },
+  { id: "summary", name: "摘要总结", category: "智能生成", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [createOutput("summaryResult", "摘要总结结果", "Array<json>，包含摘要内容和来源引用。", "data.summaryResult")] },
+  { id: "keyword-extractor", name: "关键词提取", category: "智能生成", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [createOutput("keywordResult", "关键词提取结果", "Array<json>，包含关键词和权重。", "data.keywordResult")] },
+  { id: "system-code", name: "代码工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "由知识工程内置 MCP Server 提供，接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。", status: "可用", input: "rawText", output: "cleanText", params: codeToolParams, outputs: [createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"), createOutput("cleanBlocks", "标准文本块", "Array<json>，可作为后置分片或抽取工具输入。", "data.cleanBlocks")], allowMultiple: true },
+  { id: "system-storage", name: "数据存储工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "由知识工程内置 MCP Server 提供，选择前置工具输出中的指定路径，将结果写入 ES、对象存储、向量库或中间表。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true },
 ];
 
 const initialPlanNodes: ToolNode[] = createInitialPlanNodes();
@@ -401,8 +408,8 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
     toolName: tool.name,
     category: tool.category,
     sourceType: tool.sourceType ?? "external",
-    serviceName: tool.sourceType === "system" ? systemMcpService.name : mcpService.name,
-    serviceVersion: tool.sourceType === "system" ? systemMcpService.version : mcpService.version,
+    serviceName: tool.serviceName,
+    serviceVersion: tool.serviceVersion,
     status: tool.status,
     summary: tool.summary,
     allowMultiple: tool.allowMultiple ?? false,
@@ -441,7 +448,7 @@ function getParamProblems(node: ToolNode, receivesExternalInput = false) {
 }
 
 function getPlanTitle(category: string) {
-  return `${category}方案`;
+  return category;
 }
 
 function getPriorNodes(nodes: ToolNode[], nodeId: string) {
@@ -520,7 +527,7 @@ function getCategorySections(nodes: ToolNode[]) {
 }
 
 function getCategoryOrder(category: string) {
-  const order = ["解析", "系统工具", "分片", "抽取"];
+  const order = ["文档解析", "内容处理", "系统工具", "智能生成", "质量评估"];
   const index = order.indexOf(category);
   return index >= 0 ? index : order.length;
 }
@@ -653,11 +660,12 @@ export function AgentWorkbench() {
   const addTool = () => {
     if (!canEdit || !currentTool || selectedToolAdded || selectedToolCategoryConfirmed) return;
     const upstreamNode = planNodes[planNodes.length - 1];
+    const inputSource: InputSource = currentTool.input === "sampleFile" || !upstreamNode
+      ? { type: "fixed" }
+      : { type: "upstream", sourceNodeId: upstreamNode.nodeId, outputPath: upstreamNode.outputs[0]?.path ?? "data.result" };
     const node = createNode(
       currentTool.id,
-      currentTool.sourceType === "system" && upstreamNode
-        ? { type: "upstream", sourceNodeId: upstreamNode.nodeId, outputPath: upstreamNode.outputs[0]?.path ?? "data.result" }
-        : { type: "fixed" },
+      inputSource,
     );
     setPlanNodes((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
     setHasManualEdits(true);
@@ -810,7 +818,7 @@ export function AgentWorkbench() {
           <Box sx={{ p: 2, flex: 1, overflow: "auto", bgcolor: "#FBFCFF" }}>
             <Box sx={{ maxWidth: 560, bgcolor: "#fff", border: "1px solid #E0E8F2", borderRadius: "12px", p: 2 }}>
               <Typography sx={{ fontSize: 13, color: "#374151", lineHeight: 1.7 }}>
-                已基于样例文件生成处理方案。右侧方案区统一展示接入知识工程的 MCP Server 工具，系统工具由知识工程内置 MCP Server 提供。
+                已基于样例文件生成处理方案。右侧方案区读取管理端维护的工具分类与工具目录，工具调用仍由对应 MCP Server 执行。
               </Typography>
             </Box>
           </Box>
@@ -897,7 +905,6 @@ export function AgentWorkbench() {
           setSelectedToolId(toolId);
         }}
         currentTool={currentTool}
-        service={mcpService}
         addedToolIds={addedToolIds}
         selectedToolAdded={selectedToolAdded}
         selectedToolCategoryConfirmed={selectedToolCategoryConfirmed}
@@ -1054,14 +1061,15 @@ function ToolNodeCard({
             {node.toolName}
           </Typography>
           <Chip
-            label={node.sourceType === "system" ? "系统" : "MCP"}
+            label={node.serviceName}
             size="small"
             sx={{
               height: 18,
+              maxWidth: 150,
               fontSize: 10,
               bgcolor: node.sourceType === "system" ? "#f5f3ff" : "#eff6ff",
               color: node.sourceType === "system" ? "#6d28d9" : "#2563eb",
-              "& .MuiChip-label": { px: 0.6 },
+              "& .MuiChip-label": { px: 0.6, overflow: "hidden", textOverflow: "ellipsis" },
             }}
           />
           <IconButton aria-label={node.expanded ? "收起工具配置" : "展开工具配置"} onClick={onExpand} size="small" sx={{ color: "#64748b", width: 24, height: 24, flex: "0 0 auto" }}>{node.expanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}</IconButton>
@@ -1094,11 +1102,9 @@ function ToolNodeCard({
                 </Stack>
               ) : <Typography sx={{ fontSize: 12, color: "#64748b" }}>无必填参数</Typography>}
             </ReadonlyConfigBlock>
-            {node.sourceType === "system" && (
-              <ReadonlyConfigBlock label="工具来源">
-                <ReadonlyKeyValue label="类型" value="知识工程内置 MCP Server 工具，管理端可见但服务不可修改" />
-              </ReadonlyConfigBlock>
-            )}
+            <ReadonlyConfigBlock label="工具来源">
+              <ReadonlyKeyValue label="MCP Server" value={`${node.serviceName} ${node.serviceVersion}`} />
+            </ReadonlyConfigBlock>
             <ReadonlyConfigBlock label="输出">
               <Stack spacing={0.5}>
                 {node.outputs.map((output) => (
@@ -1390,7 +1396,6 @@ function AddToolDialog({
   selectedToolId,
   onToolChange,
   currentTool,
-  service,
   addedToolIds,
   selectedToolAdded,
   selectedToolCategoryConfirmed,
@@ -1405,7 +1410,6 @@ function AddToolDialog({
   selectedToolId: string;
   onToolChange: (toolId: string) => void;
   currentTool: McpTool | null;
-  service: McpService;
   addedToolIds: Set<string>;
   selectedToolAdded: boolean;
   selectedToolCategoryConfirmed: boolean;
@@ -1418,10 +1422,7 @@ function AddToolDialog({
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <Box>
             <Typography sx={{ fontSize: 18, fontWeight: 700 }}>添加工具</Typography>
-            <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 1 }}>
-              <Chip label={`MCP 服务：${service.name}`} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#eff6ff", color: "#2563eb" }} />
-              <Chip label={`系统服务：${systemMcpService.name}`} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
-            </Stack>
+            <Typography sx={{ fontSize: 12, color: "#64748b", mt: 0.75 }}>工具分类与工具来源来自管理端配置</Typography>
           </Box>
           <IconButton onClick={onClose}><Close /></IconButton>
         </Box>
@@ -1452,7 +1453,7 @@ function AddToolDialog({
                 <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between">
                   <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{tool.name}</Typography>
                   <Stack direction="row" spacing={0.5} alignItems="center">
-                    <Chip label={tool.sourceType === "system" ? "系统" : "MCP"} size="small" sx={{ height: 18, fontSize: 10, bgcolor: tool.sourceType === "system" ? "#f5f3ff" : "#eff6ff", color: tool.sourceType === "system" ? "#6d28d9" : "#2563eb" }} />
+                    <Chip label={tool.serviceName} size="small" sx={{ height: 18, maxWidth: 136, fontSize: 10, bgcolor: tool.sourceType === "system" ? "#f5f3ff" : "#eff6ff", color: tool.sourceType === "system" ? "#6d28d9" : "#2563eb", "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }} />
                     {isAdded && <Chip label="已添加" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f1f5f9", color: "#64748b" }} />}
                   </Stack>
                 </Stack>
@@ -1464,6 +1465,10 @@ function AddToolDialog({
 
         <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1.25, minHeight: 0, overflow: "auto" }}>
           {currentTool ? <Stack spacing={1.25}>
+            <Box sx={{ p: 1, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #EEF2F7" }}>
+              <Typography sx={{ fontSize: 11, color: "#64748b", fontWeight: 700, mb: 0.4 }}>所属 MCP Server</Typography>
+              <Typography sx={{ fontSize: 12, color: "#111827", lineHeight: 1.5 }}>{currentTool.serviceName} {currentTool.serviceVersion}</Typography>
+            </Box>
             <Box>
               <Typography sx={{ fontSize: 13, color: "#111827", fontWeight: 800, mb: 0.75 }}>入参</Typography>
               <Stack spacing={0.75}>
