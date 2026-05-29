@@ -31,8 +31,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Tab,
-  Tabs,
   TextField,
   Tooltip,
   Typography,
@@ -52,19 +50,6 @@ interface McpToolSyncItem {
   enabled: boolean;
 }
 
-interface McpSyncLogItem {
-  id: string;
-  time: string;
-  trigger: string;
-  status: "成功" | "失败";
-  duration: string;
-  result: string;
-  added: number;
-  updated: number;
-  removed: number;
-  error?: string;
-}
-
 interface McpServiceItem {
   id: string;
   name: string;
@@ -79,7 +64,6 @@ interface McpServiceItem {
   toolNames: string[];
   tools: McpToolSyncItem[];
   toolCategories?: Record<string, string>;
-  syncLogs: McpSyncLogItem[];
   lastSyncedAt: string;
   locked?: boolean;
 }
@@ -132,9 +116,6 @@ const initialServices: McpServiceItem[] = [
       代码工具: "系统工具",
       数据存储工具: "系统工具",
     },
-    syncLogs: [
-      { id: "log-system-1", time: "2026-05-29 09:30", trigger: "系统初始化", status: "成功", duration: "0.6s", result: "同步系统工具 2 个", added: 2, updated: 0, removed: 0 },
-    ],
     lastSyncedAt: "2026-05-29 09:30",
     locked: true,
   },
@@ -170,10 +151,6 @@ const initialServices: McpServiceItem[] = [
       文档图谱抽取: "智能生成",
       表格深度解析: "文档解析",
     },
-    syncLogs: [
-      { id: "log-nacos-2", time: "2026-05-27 10:18", trigger: "管理员手动同步", status: "成功", duration: "2.4s", result: "同步工具 8 个，1 个工具状态变更", added: 0, updated: 1, removed: 0 },
-      { id: "log-nacos-1", time: "2026-05-26 18:10", trigger: "定时同步", status: "成功", duration: "2.1s", result: "新增工具 2 个，更新工具 6 个", added: 2, updated: 6, removed: 0 },
-    ],
     lastSyncedAt: "2026-05-27 10:18",
   },
   {
@@ -202,9 +179,6 @@ const initialServices: McpServiceItem[] = [
       医保政策文件分片: "内容处理",
       关键词提取: "智能生成",
     },
-    syncLogs: [
-      { id: "log-customer-1", time: "2026-05-27 09:42", trigger: "管理员手动同步", status: "成功", duration: "1.8s", result: "同步工具 5 个", added: 0, updated: 5, removed: 0 },
-    ],
     lastSyncedAt: "2026-05-27 09:42",
   },
   {
@@ -227,10 +201,6 @@ const initialServices: McpServiceItem[] = [
       RAG质量评估: "质量评估",
       问答一致性检查: "质量评估",
     },
-    syncLogs: [
-      { id: "log-quality-2", time: "2026-05-27 11:10", trigger: "定时同步", status: "失败", duration: "30.0s", result: "同步失败，保留上次成功工具列表", added: 0, updated: 0, removed: 0, error: "tools/list 请求超时" },
-      { id: "log-quality-1", time: "2026-05-26 17:30", trigger: "管理员手动同步", status: "成功", duration: "1.2s", result: "同步工具 2 个", added: 2, updated: 0, removed: 0 },
-    ],
     lastSyncedAt: "2026-05-26 17:30",
   },
 ];
@@ -247,11 +217,6 @@ function statusSx(status: McpServiceStatus) {
   if (status === "连接正常") return { bgcolor: "#f0fdf4", color: "#16a34a" };
   if (status === "连接异常") return { bgcolor: "#fef2f2", color: "#dc2626" };
   return { bgcolor: "#f1f5f9", color: "#64748b" };
-}
-
-function syncLogStatusSx(status: McpSyncLogItem["status"]) {
-  if (status === "成功") return { bgcolor: "#f0fdf4", color: "#16a34a" };
-  return { bgcolor: "#fef2f2", color: "#dc2626" };
 }
 
 function getServerSourceType(service: McpServiceItem) {
@@ -273,7 +238,6 @@ function toService(draft: McpServiceDraft, id = `svc-${Date.now()}`): McpService
     toolNames: [],
     tools: [],
     toolCategories: {},
-    syncLogs: [],
     lastSyncedAt: "-",
   };
 }
@@ -285,7 +249,6 @@ export function McpServiceManagementPage() {
   const [draft, setDraft] = useState<McpServiceDraft>(defaultDraft);
   const [connectionTested, setConnectionTested] = useState(false);
   const [detailService, setDetailService] = useState<McpServiceItem | null>(null);
-  const [detailTab, setDetailTab] = useState(0);
   const [pendingDisableService, setPendingDisableService] = useState<McpServiceItem | null>(null);
 
   const openCreate = () => {
@@ -318,7 +281,6 @@ export function McpServiceManagementPage() {
 
   const openDetail = (service: McpServiceItem) => {
     setDetailService(service);
-    setDetailTab(0);
   };
 
   const closeDialog = () => {
@@ -361,7 +323,6 @@ export function McpServiceManagementPage() {
               toolNames: item.toolNames,
               tools: item.tools,
               toolCategories: item.toolCategories,
-              syncLogs: item.syncLogs,
               lastSyncedAt: item.lastSyncedAt,
             }
           : item
@@ -388,10 +349,6 @@ export function McpServiceManagementPage() {
             toolCount: Math.max(item.toolCount, discoveredToolNames.length),
             toolNames: item.toolNames.length ? item.toolNames : discoveredToolNames,
             tools: item.tools.length ? item.tools : discoveredToolNames.map((name) => ({ name, description: "从 MCP Server 同步的工具，待管理员补充分组和说明。", enabled: true })),
-            syncLogs: [
-              { id: `log-${Date.now()}`, time: nowText(), trigger: "管理员手动同步", status: "成功", duration: "1.5s", result: `同步工具 ${Math.max(item.toolCount, discoveredToolNames.length)} 个`, added: item.toolNames.length ? 0 : discoveredToolNames.length, updated: item.toolNames.length ? item.toolNames.length : 0, removed: 0 },
-              ...item.syncLogs,
-            ],
             lastSyncedAt: nowText(),
           }
         : item
@@ -639,19 +596,13 @@ export function McpServiceManagementPage() {
               <IconButton onClick={() => setDetailService(null)} sx={{ color: "#64748b" }}><Close sx={{ fontSize: 20 }} /></IconButton>
             </Box>
 
-            <Box sx={{ px: 3, borderBottom: "1px solid #eef2f7" }}>
-              <Tabs value={detailTab} onChange={(_, value) => setDetailTab(value)}
-                sx={{ "& .MuiTab-root": { textTransform: "none", fontSize: "13px", minHeight: 44, px: 0, mr: 3 }, "& .MuiTabs-indicator": { bgcolor: BLUE } }}>
-                <Tab label="基本信息" />
-                <Tab label="工具列表" />
-                <Tab label="同步日志" />
-              </Tabs>
-            </Box>
-
             <Box sx={{ flex: 1, overflow: "auto", px: 3, py: 2.5, bgcolor: "#FBFCFF" }}>
-              {detailTab === 0 ? (
-                <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", p: 2, bgcolor: "#fff" }}>
-                  <Box sx={{ display: "grid", gridTemplateColumns: "120px minmax(0, 1fr) 120px minmax(0, 1fr)", gap: 1.25, alignItems: "start" }}>
+              <Stack spacing={2}>
+                <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", overflow: "hidden", bgcolor: "#fff" }}>
+                  <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid #f0f0f0" }}>
+                    <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>基本信息</Typography>
+                  </Box>
+                  <Box sx={{ px: 2, py: 0.75 }}>
                     {[
                       ["Server类型", getServerSourceType(detailService)],
                       ["连接状态", detailService.status],
@@ -663,23 +614,24 @@ export function McpServiceManagementPage() {
                       ["服务地址", detailService.endpoint],
                       ["服务说明", detailService.description],
                     ].map(([label, value], index) => (
-                      <Box key={`${label}-${index}`} sx={{ display: "contents" }}>
-                        <Typography sx={{ fontSize: "12px", color: "#64748b", fontWeight: 700 }}>{label}</Typography>
-                        <Typography sx={{ fontSize: "12px", color: "#111827", wordBreak: "break-all", gridColumn: label === "服务地址" || label === "服务说明" ? "span 3" : "auto" }}>
+                      <Box key={`${label}-${index}`} sx={{ display: "flex", gap: 2, py: 1.1, borderBottom: index < 8 ? "1px solid #f5f5f5" : "none" }}>
+                        <Typography sx={{ width: 110, flexShrink: 0, fontSize: "12px", color: "#64748b", fontWeight: 700 }}>{label}</Typography>
+                        <Typography sx={{ minWidth: 0, flex: 1, fontSize: "12px", color: "#111827", wordBreak: "break-all" }}>
                           {label === "连接状态" ? <Chip label={value} size="small" sx={{ height: 21, fontSize: 10.5, ...statusSx(value as McpServiceStatus) }} /> : value}
                         </Typography>
                       </Box>
                     ))}
                   </Box>
                 </Paper>
-              ) : null}
 
-              {detailTab === 1 ? (
                 <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", overflow: "hidden", bgcolor: "#fff" }}>
+                  <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid #f0f0f0" }}>
+                    <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>工具列表</Typography>
+                  </Box>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        {["工具名称", "工具描述", "启用/停用状态"].map((label) => (
+                        {["工具名称", "工具描述", "状态"].map((label) => (
                           <TableCell key={label} sx={{ bgcolor: "#f8f9fb", fontSize: "12px", fontWeight: 600, color: "#6b7280" }}>{label}</TableCell>
                         ))}
                       </TableRow>
@@ -697,30 +649,7 @@ export function McpServiceManagementPage() {
                     </TableBody>
                   </Table>
                 </Paper>
-              ) : null}
-
-              {detailTab === 2 ? (
-                <Stack spacing={1.25}>
-                  {detailService.syncLogs.map((log) => (
-                    <Paper key={log.id} variant="outlined" sx={{ borderColor: log.status === "失败" ? "#fecaca" : "#e8eaed", borderRadius: "10px", p: 1.5, bgcolor: "#fff" }}>
-                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                        <Chip label={log.status} size="small" sx={{ height: 22, fontSize: 11, ...syncLogStatusSx(log.status) }} />
-                        <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>{log.time}</Typography>
-                        <Typography sx={{ ml: "auto", fontSize: "12px", color: "#64748b" }}>{log.trigger} · {log.duration}</Typography>
-                      </Stack>
-                      <Typography sx={{ fontSize: "12px", color: "#334155", lineHeight: 1.7 }}>{log.result}</Typography>
-                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-                        <Chip label={`新增 ${log.added}`} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#eff6ff", color: "#2563eb" }} />
-                        <Chip label={`更新 ${log.updated}`} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
-                        <Chip label={`移除 ${log.removed}`} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#f8fafc", color: "#475569" }} />
-                      </Stack>
-                      {log.error ? (
-                        <Typography sx={{ mt: 1, fontSize: "12px", color: "#dc2626", lineHeight: 1.6 }}>失败原因：{log.error}</Typography>
-                      ) : null}
-                    </Paper>
-                  ))}
-                </Stack>
-              ) : null}
+              </Stack>
             </Box>
           </Box>
         ) : null}
