@@ -424,17 +424,11 @@ export function McpServiceManagementPage() {
         </Button>
       </Box>
 
-      <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", overflow: "hidden", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Box>
-            <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>服务列表</Typography>
-            <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.25 }}>共 {services.length} 个服务</Typography>
-          </Box>
-        </Box>
-        <TableContainer sx={{ flex: 1, overflow: "auto" }}>
-          <Table size="small" sx={{ tableLayout: "fixed", minWidth: 1020 }}>
+      <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", overflow: "hidden", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", width: "100%", maxWidth: "100%" }}>
+        <TableContainer sx={{ flex: 1, width: "100%", maxWidth: "100%", overflowX: "auto", overflowY: "auto", display: "block", WebkitOverflowScrolling: "touch", "&::-webkit-scrollbar": { height: 12 }, "&::-webkit-scrollbar-track": { bgcolor: "#f1f5f9" }, "&::-webkit-scrollbar-thumb": { bgcolor: "#cbd5e1", borderRadius: 999, border: "3px solid #f1f5f9" }, "&::-webkit-scrollbar-thumb:hover": { bgcolor: "#94a3b8" } }}>
+          <Table size="small" stickyHeader sx={{ tableLayout: "fixed", minWidth: 1020 }}>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ bgcolor: "#f8f9fb" }}>
                 {[
                   ["服务名称", "210px"],
                   ["Server类型", "110px"],
@@ -445,17 +439,17 @@ export function McpServiceManagementPage() {
                   ["最近同步", "140px"],
                   ["操作", "170px"],
                 ].map(([label, width]) => (
-                  <TableCell key={label} sx={{ width, bgcolor: "#f8f9fb", fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, borderBottom: "1px solid #f0f0f0" }}>{label}</TableCell>
+                  <TableCell key={label} sx={{ width, bgcolor: "#f8f9fb", fontSize: "12px", fontWeight: 600, color: "#6b7280", py: 1.5, px: 1.25, borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap" }}>{label}</TableCell>
                 ))}
               </TableRow>
             </TableHead>
             <TableBody>
               {services.map((service, index) => (
                 <TableRow key={service.id} sx={{ bgcolor: index % 2 === 0 ? "#fff" : "#fafafa", "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
-                  <TableCell sx={{ py: 1.5 }}>
+                  <TableCell sx={{ py: 1.5, px: 1.25, minWidth: 0 }}>
                     <Typography sx={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>{service.name}</Typography>
                   </TableCell>
-                  <TableCell>
+                  <TableCell sx={{ py: 1.5, px: 1.25 }}>
                     <Chip
                       label={getServerSourceType(service)}
                       size="small"
@@ -467,16 +461,16 @@ export function McpServiceManagementPage() {
                       }}
                     />
                   </TableCell>
-                  <TableCell>
+                  <TableCell sx={{ py: 1.5, px: 1.25 }}>
                     <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
                       <Chip label={service.transport} size="small" sx={{ height: 21, fontSize: 10.5, bgcolor: "#eff6ff", color: "#2563eb" }} />
                     </Stack>
                   </TableCell>
-                  <TableCell sx={{ fontSize: "12px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <TableCell sx={{ py: 1.5, px: 1.25, fontSize: "12px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <LinkIcon sx={{ fontSize: 13, color: "#94a3b8", mr: 0.5, verticalAlign: "-2px" }} />
                     {service.endpoint}
                   </TableCell>
-                  <TableCell>
+                  <TableCell sx={{ py: 1.5, px: 1.25 }}>
                     <Stack direction="row" spacing={0.5} alignItems="center">
                       <Chip label={service.status} size="small" sx={{ height: 21, fontSize: 10.5, ...statusSx(service.status) }} />
                       <Tooltip title={service.locked ? "系统内置服务自动维护" : "MCP Server同步"}>
@@ -488,14 +482,14 @@ export function McpServiceManagementPage() {
                       </Tooltip>
                     </Stack>
                   </TableCell>
-                  <TableCell>
+                  <TableCell sx={{ py: 1.5, px: 1.25 }}>
                     <Stack direction="row" spacing={0.5} alignItems="center">
                       <Typography sx={{ fontSize: "12px", color: "#111827" }}>{service.toolCount} 个</Typography>
                       <Tooltip title="查看工具列表"><IconButton size="small" onClick={() => openDetail(service)} sx={{ color: BLUE, p: 0.4 }}><Visibility sx={{ fontSize: 15 }} /></IconButton></Tooltip>
                     </Stack>
                   </TableCell>
-                  <TableCell sx={{ fontSize: "12px", color: "#64748b" }}>{service.lastSyncedAt}</TableCell>
-                  <TableCell>
+                  <TableCell sx={{ py: 1.5, px: 1.25, fontSize: "12px", color: "#64748b" }}>{service.lastSyncedAt}</TableCell>
+                  <TableCell sx={{ py: 1.5, px: 1.25 }}>
                     <Stack direction="row" spacing={0.25} alignItems="center">
                       <Tooltip title={service.locked ? "系统内置服务不允许停用" : service.status === "已停用" ? "启用服务" : "停用服务"}>
                         <span>
