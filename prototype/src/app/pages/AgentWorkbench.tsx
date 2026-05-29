@@ -371,8 +371,8 @@ const toolCatalog: McpTool[] = [
   { id: "qa-extractor", name: "QA提取", category: "智能生成", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [createOutput("qaResult", "QA提取结果", "Array<json>，包含问题、答案和引用来源。", "data.qaResult")] },
   { id: "summary", name: "摘要总结", category: "智能生成", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [createOutput("summaryResult", "摘要总结结果", "Array<json>，包含摘要内容和来源引用。", "data.summaryResult")] },
   { id: "keyword-extractor", name: "关键词提取", category: "智能生成", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [createOutput("keywordResult", "关键词提取结果", "Array<json>，包含关键词和权重。", "data.keywordResult")] },
-  { id: "system-code", name: "代码工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "由知识工程内置 MCP Server 提供，接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。", status: "可用", input: "rawText", output: "cleanText", params: codeToolParams, outputs: [createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"), createOutput("cleanBlocks", "标准文本块", "Array<json>，可作为后置分片或抽取工具输入。", "data.cleanBlocks")], allowMultiple: true },
-  { id: "system-storage", name: "数据存储工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "由知识工程内置 MCP Server 提供，选择前置工具输出中的指定路径，将结果写入 ES、对象存储、向量库或中间表。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true },
+  { id: "system-code", name: "代码工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。", status: "可用", input: "rawText", output: "cleanText", params: codeToolParams, outputs: [createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"), createOutput("cleanBlocks", "标准文本块", "Array<json>，可作为后置分片或抽取工具输入。", "data.cleanBlocks")], allowMultiple: true },
+  { id: "system-storage", name: "数据存储工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "选择前置工具输出中的指定路径，将结果写入 ES、对象存储、向量库或中间表。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true },
 ];
 
 const initialPlanNodes: ToolNode[] = createInitialPlanNodes();
@@ -670,7 +670,7 @@ export function AgentWorkbench() {
     setPlanNodes((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
     setHasManualEdits(true);
     setAddDialogOpen(false);
-    toast.success(`已添加${node.sourceType === "system" ? "系统工具" : "MCP工具"}，已归入${getPlanTitle(node.category)}`);
+    toast.success(`已添加工具，已归入${getPlanTitle(node.category)}`);
   };
 
   const removeNode = (nodeId: string) => {
@@ -818,7 +818,7 @@ export function AgentWorkbench() {
           <Box sx={{ p: 2, flex: 1, overflow: "auto", bgcolor: "#FBFCFF" }}>
             <Box sx={{ maxWidth: 560, bgcolor: "#fff", border: "1px solid #E0E8F2", borderRadius: "12px", p: 2 }}>
               <Typography sx={{ fontSize: 13, color: "#374151", lineHeight: 1.7 }}>
-                已基于样例文件生成处理方案。右侧方案区读取管理端维护的工具分类与工具目录，工具调用仍由对应 MCP Server 执行。
+                已基于样例文件生成处理方案。右侧方案区展示管理端维护的工具分类与可用工具。
               </Typography>
             </Box>
           </Box>
@@ -1061,7 +1061,7 @@ function ToolNodeCard({
             {node.toolName}
           </Typography>
           <Chip
-            label={node.serviceName}
+            label={node.status}
             size="small"
             sx={{
               height: 18,
@@ -1101,9 +1101,6 @@ function ToolNodeCard({
                   ))}
                 </Stack>
               ) : <Typography sx={{ fontSize: 12, color: "#64748b" }}>无必填参数</Typography>}
-            </ReadonlyConfigBlock>
-            <ReadonlyConfigBlock label="工具来源">
-              <ReadonlyKeyValue label="MCP Server" value={`${node.serviceName} ${node.serviceVersion}`} />
             </ReadonlyConfigBlock>
             <ReadonlyConfigBlock label="输出">
               <Stack spacing={0.5}>
@@ -1294,7 +1291,7 @@ function ToolEditDrawer({
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#111827" }}>{node.toolName}</Typography>
             <Typography sx={{ fontSize: 12, color: "#64748b" }}>
-              {getPlanTitle(node.category)} · {node.serviceName} ${node.serviceVersion}
+              {getPlanTitle(node.category)} · {node.status}
             </Typography>
           </Box>
           <IconButton onClick={onClose}><Close /></IconButton>
@@ -1422,7 +1419,7 @@ function AddToolDialog({
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <Box>
             <Typography sx={{ fontSize: 18, fontWeight: 700 }}>添加工具</Typography>
-            <Typography sx={{ fontSize: 12, color: "#64748b", mt: 0.75 }}>工具分类与工具来源来自管理端配置</Typography>
+            <Typography sx={{ fontSize: 12, color: "#64748b", mt: 0.75 }}>从管理端维护的工具分类中选择可用工具</Typography>
           </Box>
           <IconButton onClick={onClose}><Close /></IconButton>
         </Box>
@@ -1453,7 +1450,7 @@ function AddToolDialog({
                 <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between">
                   <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{tool.name}</Typography>
                   <Stack direction="row" spacing={0.5} alignItems="center">
-                    <Chip label={tool.serviceName} size="small" sx={{ height: 18, maxWidth: 136, fontSize: 10, bgcolor: tool.sourceType === "system" ? "#f5f3ff" : "#eff6ff", color: tool.sourceType === "system" ? "#6d28d9" : "#2563eb", "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }} />
+                    <Chip label={tool.status} size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f0fdf4", color: "#16a34a" }} />
                     {isAdded && <Chip label="已添加" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f1f5f9", color: "#64748b" }} />}
                   </Stack>
                 </Stack>
@@ -1466,8 +1463,8 @@ function AddToolDialog({
         <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1.25, minHeight: 0, overflow: "auto" }}>
           {currentTool ? <Stack spacing={1.25}>
             <Box sx={{ p: 1, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #EEF2F7" }}>
-              <Typography sx={{ fontSize: 11, color: "#64748b", fontWeight: 700, mb: 0.4 }}>所属 MCP Server</Typography>
-              <Typography sx={{ fontSize: 12, color: "#111827", lineHeight: 1.5 }}>{currentTool.serviceName} {currentTool.serviceVersion}</Typography>
+              <Typography sx={{ fontSize: 11, color: "#64748b", fontWeight: 700, mb: 0.4 }}>工具状态</Typography>
+              <Typography sx={{ fontSize: 12, color: "#111827", lineHeight: 1.5 }}>{currentTool.status}</Typography>
             </Box>
             <Box>
               <Typography sx={{ fontSize: 13, color: "#111827", fontWeight: 800, mb: 0.75 }}>入参</Typography>
