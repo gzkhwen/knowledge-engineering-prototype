@@ -602,7 +602,7 @@ export function McpServiceManagementPage() {
                   <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid #f0f0f0" }}>
                     <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>基本信息</Typography>
                   </Box>
-                  <Box sx={{ px: 2, py: 0.75 }}>
+                  <Stack spacing={1.25} sx={{ p: 2 }}>
                     {[
                       ["Server类型", getServerSourceType(detailService)],
                       ["连接状态", detailService.status],
@@ -613,15 +613,15 @@ export function McpServiceManagementPage() {
                       ["最近同步", detailService.lastSyncedAt],
                       ["服务地址", detailService.endpoint],
                       ["服务说明", detailService.description],
-                    ].map(([label, value], index) => (
-                      <Box key={`${label}-${index}`} sx={{ display: "flex", gap: 2, py: 1.1, borderBottom: index < 8 ? "1px solid #f5f5f5" : "none" }}>
-                        <Typography sx={{ width: 110, flexShrink: 0, fontSize: "12px", color: "#64748b", fontWeight: 700 }}>{label}</Typography>
-                        <Typography sx={{ minWidth: 0, flex: 1, fontSize: "12px", color: "#111827", wordBreak: "break-all" }}>
+                    ].map(([label, value]) => (
+                      <Box key={label} sx={{ p: 1.25, border: "1px solid #eef2f7", borderRadius: "8px", bgcolor: "#f8fafc" }}>
+                        <Typography sx={{ fontSize: "11px", color: "#64748b", fontWeight: 700, mb: 0.6 }}>{label}</Typography>
+                        <Typography sx={{ fontSize: "13px", color: "#111827", wordBreak: "break-all", lineHeight: 1.6 }}>
                           {label === "连接状态" ? <Chip label={value} size="small" sx={{ height: 21, fontSize: 10.5, ...statusSx(value as McpServiceStatus) }} /> : value}
                         </Typography>
                       </Box>
                     ))}
-                  </Box>
+                  </Stack>
                 </Paper>
 
                 <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", overflow: "hidden", bgcolor: "#fff" }}>
