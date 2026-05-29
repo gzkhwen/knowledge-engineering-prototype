@@ -341,6 +341,13 @@ export function McpServiceManagementPage() {
       toast.info("系统内置 MCP Server 由平台自动维护，无需手动同步");
       return;
     }
+    if (!target || target.status === "连接异常") {
+      setServices((items) => items.map((item) => (
+        item.id === serviceId ? { ...item, status: "连接异常" } : item
+      )));
+      toast.error("MCP Server同步失败");
+      return;
+    }
     setServices((items) => items.map((item) => (
       item.id === serviceId
         ? {
@@ -353,7 +360,7 @@ export function McpServiceManagementPage() {
           }
         : item
     )));
-    toast.success("已触发工具同步");
+    toast.success("MCP Server同步成功");
   };
 
   const toggleService = (serviceId: string, nextEnabled: boolean) => {
@@ -470,7 +477,7 @@ export function McpServiceManagementPage() {
                   <TableCell>
                     <Stack direction="row" spacing={0.5} alignItems="center">
                       <Chip label={service.status} size="small" sx={{ height: 21, fontSize: 10.5, ...statusSx(service.status) }} />
-                      <Tooltip title={service.locked ? "系统内置服务自动维护" : "同步工具"}>
+                      <Tooltip title={service.locked ? "系统内置服务自动维护" : "MCP Server同步"}>
                         <span>
                           <IconButton disabled={service.locked} size="small" onClick={() => syncService(service.id)} sx={{ color: BLUE, p: 0.4 }}>
                             <Sync sx={{ fontSize: 15 }} />
