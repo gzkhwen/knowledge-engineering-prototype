@@ -84,12 +84,14 @@ interface McpTool {
   id: string;
   name: string;
   category: string;
+  sourceType?: "mcp" | "builtin";
   summary: string;
   status: "可用" | "不可用";
   params: ToolParam[];
   outputs: ToolOutput[];
   input: ChainType;
   output: ChainType;
+  allowMultiple?: boolean;
 }
 
 interface ToolNode {
@@ -97,10 +99,12 @@ interface ToolNode {
   toolId: string;
   toolName: string;
   category: string;
+  sourceType: "mcp" | "builtin";
   serviceName: string;
   serviceVersion: string;
   status: McpTool["status"];
   summary: string;
+  allowMultiple: boolean;
   enabled: boolean;
   expanded: boolean;
   adjusted: boolean;
@@ -112,6 +116,11 @@ interface ToolNode {
 
 const mcpService: McpService = {
   name: "nacos-knowledge-tool-mcp",
+  version: "V1.0.0",
+};
+
+const builtinService: McpService = {
+  name: "平台内置工具",
   version: "V1.0.0",
 };
 
@@ -148,6 +157,28 @@ const extractionObjectParam: ToolParam = {
   desc: "待提取的对象，常用格式：Array<json>。",
   type: "textarea",
   format: "Array<json>",
+  value: "",
+  required: true,
+  editable: true,
+};
+
+const codeInputParam: ToolParam = {
+  id: "codeInput",
+  label: "脚本输入",
+  desc: "接收前置工具输出，作为代码脚本的输入对象。",
+  type: "textarea",
+  format: "json",
+  value: "",
+  required: true,
+  editable: true,
+};
+
+const storageObjectParam: ToolParam = {
+  id: "storageObject",
+  label: "待存储对象",
+  desc: "接收前置工具输出，作为本次写入的数据对象。",
+  type: "textarea",
+  format: "json",
   value: "",
   required: true,
   editable: true,
@@ -250,6 +281,72 @@ const keywordParams: ToolParam[] = [
   { id: "guidePrompt", label: "引导模板提示词", desc: "关键词提取引导模板提示词。", type: "textarea", value: "以上是原文信息，请理解以上信息后生成不超过5个关键词，记得按照要求的json格式回答。", editable: true },
 ];
 
+const codeToolParams: ToolParam[] = [
+  codeInputParam,
+  {
+    id: "script",
+    label: "代码脚本",
+    desc: "对输入对象做清洗、转换、过滤、合并，脚本返回值会作为工具输出。",
+    type: "textarea",
+    value: "function transform(input) {\n  return {\n    cleanBlocks: input.map(item => ({\n      text: item.text,\n      title: item.title,\n      page: item.page\n    }))\n  };\n}",
+    required: true,
+    editable: true,
+  },
+  {
+    id: "outputVariables",
+    label: "输出变量声明",
+    desc: "声明脚本返回结果中可被后置工具引用的变量。",
+    type: "textarea",
+    format: "Array<{name,type,path}>",
+    value: '[{ "name": "cleanBlocks", "type": "Array<json>", "path": "data.cleanBlocks" }]',
+    required: true,
+    editable: true,
+  },
+];
+
+const storageToolParams: ToolParam[] = [
+  storageObjectParam,
+  {
+    id: "storagePath",
+    label: "取值路径",
+    desc: "从输入对象中选择需要写入存储的数据路径。",
+    type: "text",
+    format: "path",
+    value: "data.textChunkResult",
+    required: true,
+    editable: true,
+  },
+  {
+    id: "storageMethod",
+    label: "存储方式",
+    desc: "选择结果写入的目标类型。",
+    type: "select",
+    value: "写入ES",
+    required: true,
+    editable: true,
+    options: ["写入ES", "对象存储", "向量库", "中间表"],
+  },
+  {
+    id: "storageTarget",
+    label: "存储目标",
+    desc: "填写索引、Bucket、Collection 或表名。",
+    type: "text",
+    value: "knowledge_chunks",
+    required: true,
+    editable: true,
+  },
+  {
+    id: "writeMode",
+    label: "写入模式",
+    desc: "选择重复数据的处理方式。",
+    type: "select",
+    value: "upsert",
+    required: true,
+    editable: true,
+    options: ["insert", "upsert", "overwrite"],
+  },
+];
+
 function createOutput(id: string, label: string, desc: string, path: string): ToolOutput {
   return { id, label, desc, path };
 }
@@ -267,6 +364,8 @@ const toolCatalog: McpTool[] = [
   { id: "qa-extractor", name: "QA提取", category: "抽取", summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [createOutput("qaResult", "QA提取结果", "Array<json>，包含问题、答案和引用来源。", "data.qaResult")] },
   { id: "summary", name: "摘要总结", category: "抽取", summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [createOutput("summaryResult", "摘要总结结果", "Array<json>，包含摘要内容和来源引用。", "data.summaryResult")] },
   { id: "keyword-extractor", name: "关键词提取", category: "抽取", summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [createOutput("keywordResult", "关键词提取结果", "Array<json>，包含关键词和权重。", "data.keywordResult")] },
+  { id: "builtin-code", name: "代码工具", category: "内置工具", sourceType: "builtin", summary: "接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。", status: "可用", input: "rawText", output: "cleanText", params: codeToolParams, outputs: [createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"), createOutput("cleanBlocks", "标准文本块", "Array<json>，可作为后置分片或抽取工具输入。", "data.cleanBlocks")], allowMultiple: true },
+  { id: "builtin-storage", name: "数据存储工具", category: "内置工具", sourceType: "builtin", summary: "选择前置工具输出中的指定路径，将结果写入 ES、对象存储、向量库或中间表。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true },
 ];
 
 const initialPlanNodes: ToolNode[] = createInitialPlanNodes();
@@ -301,10 +400,12 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
     toolId: tool.id,
     toolName: tool.name,
     category: tool.category,
-    serviceName: mcpService.name,
-    serviceVersion: mcpService.version,
+    sourceType: tool.sourceType ?? "mcp",
+    serviceName: tool.sourceType === "builtin" ? builtinService.name : mcpService.name,
+    serviceVersion: tool.sourceType === "builtin" ? builtinService.version : mcpService.version,
     status: tool.status,
     summary: tool.summary,
+    allowMultiple: tool.allowMultiple ?? false,
     enabled: true,
     expanded: false,
     adjusted: false,
@@ -317,9 +418,11 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
 
 function createInitialPlanNodes(): ToolNode[] {
   const parser = createNode("document-parser", { type: "fixed" });
-  const splitter = createNode("chunk-splitter", { type: "upstream", sourceNodeId: parser.nodeId, outputPath: "content[0].text" });
+  const code = createNode("builtin-code", { type: "upstream", sourceNodeId: parser.nodeId, outputPath: "data.documentParseResult" });
+  const splitter = createNode("chunk-splitter", { type: "upstream", sourceNodeId: code.nodeId, outputPath: "data.cleanBlocks" });
+  const storage = createNode("builtin-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "content[0].text" });
-  return [parser, splitter, qa];
+  return [parser, code, splitter, storage, qa];
 }
 
 function getParamProblems(node: ToolNode, receivesExternalInput = false) {
@@ -403,27 +506,29 @@ function isInputSourceInvalid(node: ToolNode, nodes: ToolNode[]) {
 }
 
 function getCategorySections(nodes: ToolNode[]) {
-  const sections: { category: string; nodes: ToolNode[] }[] = [];
-  const sectionMap = new Map<string, ToolNode[]>();
-
+  const sections: { sectionId: string; category: string; nodes: ToolNode[] }[] = [];
   nodes.forEach((node) => {
-    if (!sectionMap.has(node.category)) {
-      sectionMap.set(node.category, []);
-      sections.push({ category: node.category, nodes: sectionMap.get(node.category)! });
+    const lastSection = sections[sections.length - 1];
+    if (lastSection?.category === node.category) {
+      lastSection.nodes.push(node);
+      return;
     }
-    sectionMap.get(node.category)!.push(node);
+    sections.push({ sectionId: `${node.category}-${node.nodeId}`, category: node.category, nodes: [node] });
   });
 
   return sections;
 }
 
 function getCategoryOrder(category: string) {
-  const order = ["解析", "分片", "抽取"];
+  const order = ["解析", "内置工具", "分片", "抽取"];
   const index = order.indexOf(category);
   return index >= 0 ? index : order.length;
 }
 
 function insertNodeByCategory(nodes: ToolNode[], node: ToolNode) {
+  if (node.sourceType === "builtin") {
+    return [...nodes, node];
+  }
   const lastSameCategoryIndex = nodes.reduce((lastIndex, item, index) => (item.category === node.category ? index : lastIndex), -1);
   if (lastSameCategoryIndex >= 0) {
     const next = [...nodes];
@@ -516,21 +621,21 @@ export function AgentWorkbench() {
     ? toolCatalog
     : toolCatalog.filter((tool) => tool.category === selectedCategory);
   const currentTool = toolCatalog.find((tool) => tool.id === selectedToolId) ?? filteredTools[0] ?? null;
-  const selectedToolAdded = currentTool ? addedToolIds.has(currentTool.id) : false;
+  const selectedToolAdded = currentTool ? addedToolIds.has(currentTool.id) && !currentTool.allowMultiple : false;
   const selectedToolCategoryConfirmed = currentTool ? confirmedCategories.has(currentTool.category) : false;
-  const allCategoriesConfirmed = categorySections.length > 0 && categorySections.every((section) => confirmedCategories.has(section.category));
-  const firstUnconfirmedCategory = categorySections.find((section) => !confirmedCategories.has(section.category))?.category;
-  const canConfirmCategory = (category: string) => canEdit && firstUnconfirmedCategory === category;
-  const canReeditCategory = (category: string) => {
-    if (!canEdit || !confirmedCategories.has(category)) return false;
-    const index = categorySections.findIndex((section) => section.category === category);
+  const allCategoriesConfirmed = categorySections.length > 0 && categorySections.every((section) => confirmedCategories.has(section.sectionId));
+  const firstUnconfirmedSectionId = categorySections.find((section) => !confirmedCategories.has(section.sectionId))?.sectionId;
+  const canConfirmSection = (sectionId: string) => canEdit && firstUnconfirmedSectionId === sectionId;
+  const canReeditSection = (sectionId: string) => {
+    if (!canEdit || !confirmedCategories.has(sectionId)) return false;
+    const index = categorySections.findIndex((section) => section.sectionId === sectionId);
     const nextSection = categorySections[index + 1];
-    return !nextSection || !confirmedCategories.has(nextSection.category);
+    return !nextSection || !confirmedCategories.has(nextSection.sectionId);
   };
-  const isCategoryEditable = (category: string) => canEdit && !confirmedCategories.has(category);
+  const isSectionEditable = (sectionId: string) => canEdit && !confirmedCategories.has(sectionId);
   const isNodeEditable = (nodeId: string) => {
-    const node = planNodes.find((item) => item.nodeId === nodeId);
-    return Boolean(node && isCategoryEditable(node.category));
+    const section = categorySections.find((item) => item.nodes.some((node) => node.nodeId === nodeId));
+    return Boolean(section && isSectionEditable(section.sectionId));
   };
 
   const updateNode = (nodeId: string, updater: (node: ToolNode) => ToolNode) => {
@@ -545,11 +650,17 @@ export function AgentWorkbench() {
 
   const addTool = () => {
     if (!canEdit || !currentTool || selectedToolAdded || selectedToolCategoryConfirmed) return;
-    const node = createNode(currentTool.id);
+    const upstreamNode = planNodes[planNodes.length - 1];
+    const node = createNode(
+      currentTool.id,
+      currentTool.sourceType === "builtin" && upstreamNode
+        ? { type: "upstream", sourceNodeId: upstreamNode.nodeId, outputPath: upstreamNode.outputs[0]?.path ?? "data.result" }
+        : { type: "fixed" },
+    );
     setPlanNodes((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
     setHasManualEdits(true);
     setAddDialogOpen(false);
-    toast.success(`已添加工具，已归入${getPlanTitle(node.category)}`);
+    toast.success(`已添加${node.sourceType === "builtin" ? "内置工具" : "MCP工具"}，已归入${getPlanTitle(node.category)}`);
   };
 
   const removeNode = (nodeId: string) => {
@@ -582,33 +693,34 @@ export function AgentWorkbench() {
     toast.success("处理方案已保存");
   };
 
-  const confirmCategory = (category: string) => {
-    if (!canConfirmCategory(category)) {
+  const confirmCategory = (sectionId: string) => {
+    const section = categorySections.find((item) => item.sectionId === sectionId);
+    if (!section || !canConfirmSection(sectionId)) {
       toast.error("请按方案顺序依次确认");
       return;
     }
-    const section = categorySections.find((item) => item.category === category);
     const sectionProblems = section?.nodes.flatMap((node) => nodeWarnings[node.nodeId] ?? []) ?? [];
     if (sectionProblems.length > 0) {
-      toast.error(`${getPlanTitle(category)}存在校验问题`);
+      toast.error(`${getPlanTitle(section.category)}存在校验问题`);
       return;
     }
-    setConfirmedCategories((current) => new Set([...current, category]));
-    toast.success(`${getPlanTitle(category)}已确认`);
+    setConfirmedCategories((current) => new Set([...current, sectionId]));
+    toast.success(`${getPlanTitle(section.category)}已确认`);
   };
 
-  const reopenCategory = (category: string) => {
-    if (!canReeditCategory(category)) {
+  const reopenCategory = (sectionId: string) => {
+    const section = categorySections.find((item) => item.sectionId === sectionId);
+    if (!section || !canReeditSection(sectionId)) {
       toast.error("后续方案已确认，不能重新编辑当前方案");
       return;
     }
     setConfirmedCategories((current) => {
       const next = new Set(current);
-      next.delete(category);
+      next.delete(sectionId);
       return next;
     });
     setHasManualEdits(true);
-    toast.success(`${getPlanTitle(category)}已切换为可编辑`);
+    toast.success(`${getPlanTitle(section.category)}已切换为可编辑`);
   };
 
   const onDropNode = (targetId: string) => {
@@ -656,17 +768,15 @@ export function AgentWorkbench() {
     setHasManualEdits(true);
   };
 
-  const moveCategoryTo = (category: string, targetCategory: string) => {
-    if (!canEdit || category === targetCategory || confirmedCategories.has(category) || confirmedCategories.has(targetCategory)) return;
-    const categoriesInOrder = categorySections.map((section) => section.category);
-    const from = categoriesInOrder.indexOf(category);
-    const to = categoriesInOrder.indexOf(targetCategory);
+  const moveCategoryTo = (sectionId: string, targetSectionId: string) => {
+    if (!canEdit || sectionId === targetSectionId || confirmedCategories.has(sectionId) || confirmedCategories.has(targetSectionId)) return;
+    const from = categorySections.findIndex((section) => section.sectionId === sectionId);
+    const to = categorySections.findIndex((section) => section.sectionId === targetSectionId);
     if (from < 0 || to < 0) return;
-    const nextCategories = [...categoriesInOrder];
-    const [moved] = nextCategories.splice(from, 1);
-    nextCategories.splice(to, 0, moved);
-    const grouped = new Map(categorySections.map((section) => [section.category, section.nodes]));
-    setPlanNodes(nextCategories.flatMap((item) => grouped.get(item) ?? []));
+    const nextSections = [...categorySections];
+    const [moved] = nextSections.splice(from, 1);
+    nextSections.splice(to, 0, moved);
+    setPlanNodes(nextSections.flatMap((section) => section.nodes));
     setHasManualEdits(true);
     setDraggingCategory(null);
   };
@@ -698,7 +808,7 @@ export function AgentWorkbench() {
           <Box sx={{ p: 2, flex: 1, overflow: "auto", bgcolor: "#FBFCFF" }}>
             <Box sx={{ maxWidth: 560, bgcolor: "#fff", border: "1px solid #E0E8F2", borderRadius: "12px", p: 2 }}>
               <Typography sx={{ fontSize: 13, color: "#374151", lineHeight: 1.7 }}>
-                已基于样例文件生成处理方案。右侧方案区会按已添加的 MCP 工具分类自动生成对应方案框，请确认工具可用性、参数和执行顺序。
+                已基于样例文件生成处理方案。右侧方案区会按工具分类生成方案框，MCP 工具负责业务处理，内置工具负责代码适配和结果存储。
               </Typography>
             </Box>
           </Box>
@@ -735,21 +845,21 @@ export function AgentWorkbench() {
 
                 {categorySections.map((section) => (
                   <PlanSection
-                    key={section.category}
+                    key={section.sectionId}
                     category={section.category}
                     nodes={section.nodes}
                     allNodes={planNodes}
-                    canEdit={isCategoryEditable(section.category)}
+                    canEdit={isSectionEditable(section.sectionId)}
                     warnings={nodeWarnings}
-                    isConfirmed={confirmedCategories.has(section.category)}
-                    canConfirm={canConfirmCategory(section.category)}
-                    canDragCategory={isCategoryEditable(section.category) && categorySections.length > 1}
-                    onConfirm={() => confirmCategory(section.category)}
-                    canReedit={canReeditCategory(section.category)}
-                    onReedit={() => reopenCategory(section.category)}
-                    onCategoryDragStart={() => setDraggingCategory(section.category)}
+                    isConfirmed={confirmedCategories.has(section.sectionId)}
+                    canConfirm={canConfirmSection(section.sectionId)}
+                    canDragCategory={isSectionEditable(section.sectionId) && categorySections.length > 1}
+                    onConfirm={() => confirmCategory(section.sectionId)}
+                    canReedit={canReeditSection(section.sectionId)}
+                    onReedit={() => reopenCategory(section.sectionId)}
+                    onCategoryDragStart={() => setDraggingCategory(section.sectionId)}
                     onCategoryDrop={() => {
-                      if (draggingCategory) moveCategoryTo(draggingCategory, section.category);
+                      if (draggingCategory) moveCategoryTo(draggingCategory, section.sectionId);
                     }}
                     onRemove={removeNode}
                     onExpand={(nodeId) => updateNode(nodeId, (node) => ({ ...node, expanded: !node.expanded }))}
@@ -796,7 +906,7 @@ export function AgentWorkbench() {
         open={Boolean(editingNode)}
         node={editingNode}
         allNodes={planNodes}
-        canEdit={editingNode ? isCategoryEditable(editingNode.category) : false}
+        canEdit={editingNode ? isNodeEditable(editingNode.nodeId) : false}
         onClose={() => setEditingNodeId(null)}
         onInputParamChange={updateInputParam}
         onInputSourceChange={updateInputSource}
@@ -941,6 +1051,17 @@ function ToolNodeCard({
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {node.toolName}
           </Typography>
+          <Chip
+            label={node.sourceType === "builtin" ? "内置" : "MCP"}
+            size="small"
+            sx={{
+              height: 18,
+              fontSize: 10,
+              bgcolor: node.sourceType === "builtin" ? "#f5f3ff" : "#eff6ff",
+              color: node.sourceType === "builtin" ? "#6d28d9" : "#2563eb",
+              "& .MuiChip-label": { px: 0.6 },
+            }}
+          />
           <IconButton aria-label={node.expanded ? "收起工具配置" : "展开工具配置"} onClick={onExpand} size="small" sx={{ color: "#64748b", width: 24, height: 24, flex: "0 0 auto" }}>{node.expanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}</IconButton>
         </Box>
         {canEdit && <IconButton aria-label="编辑工具" onClick={onEdit} size="small" sx={{ color: "#801AEB" }}><EditOutlined fontSize="small" /></IconButton>}
@@ -971,6 +1092,11 @@ function ToolNodeCard({
                 </Stack>
               ) : <Typography sx={{ fontSize: 12, color: "#64748b" }}>无必填参数</Typography>}
             </ReadonlyConfigBlock>
+            {node.sourceType === "builtin" && (
+              <ReadonlyConfigBlock label="工具来源">
+                <ReadonlyKeyValue label="类型" value="平台内置工具，不在管理端 MCP 工具资产中展示" />
+              </ReadonlyConfigBlock>
+            )}
             <ReadonlyConfigBlock label="输出">
               <Stack spacing={0.5}>
                 {node.outputs.map((output) => (
@@ -1159,7 +1285,9 @@ function ToolEditDrawer({
           </Box>
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#111827" }}>{node.toolName}</Typography>
-            <Typography sx={{ fontSize: 12, color: "#64748b" }}>{getPlanTitle(node.category)}</Typography>
+            <Typography sx={{ fontSize: 12, color: "#64748b" }}>
+              {getPlanTitle(node.category)} · {node.sourceType === "builtin" ? "平台内置工具" : `${node.serviceName} ${node.serviceVersion}`}
+            </Typography>
           </Box>
           <IconButton onClick={onClose}><Close /></IconButton>
         </Box>
@@ -1216,7 +1344,7 @@ function ToolEditDrawer({
               </Stack>
             </ConfigBlock>
 
-            <ConfigBlock title="工具配置">
+            <ConfigBlock title={node.sourceType === "builtin" ? "内置工具配置" : "工具配置"}>
               <Stack spacing={1.25}>
                 {configurableParams.map((param) => (
                   <ParamField key={param.id} param={param} canEdit={canEdit && param.editable !== false && node.enabled} onChange={(value) => onParamChange(node.nodeId, param.id, value)} />
@@ -1230,6 +1358,7 @@ function ToolEditDrawer({
                   <Box key={output.id} sx={{ p: 1, borderRadius: "9px", bgcolor: "#fff", border: "1px solid #EEF2F7" }}>
                     <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{output.label}</Typography>
                     <Typography sx={{ fontSize: 11.5, color: "#64748b", mt: 0.35, lineHeight: 1.5 }}>{output.desc}</Typography>
+                    <Typography sx={{ fontSize: 11.5, color: "#475569", mt: 0.35, lineHeight: 1.5 }}>变量路径：{output.path}</Typography>
                   </Box>
                 ))}
               </Stack>
@@ -1288,8 +1417,8 @@ function AddToolDialog({
           <Box>
             <Typography sx={{ fontSize: 18, fontWeight: 700 }}>添加工具</Typography>
             <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 1 }}>
-              <Chip label={`MCP 服务：${service.name}`} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
-              <Chip label={service.version} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#eff6ff", color: "#2563eb" }} />
+              <Chip label={`MCP 服务：${service.name}`} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#eff6ff", color: "#2563eb" }} />
+              <Chip label="内置工具：代码工具 / 数据存储工具" size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
             </Stack>
           </Box>
           <IconButton onClick={onClose}><Close /></IconButton>
@@ -1311,16 +1440,19 @@ function AddToolDialog({
         </Paper>
 
         <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1, minHeight: 0, overflow: "auto" }}>
-          <Typography sx={{ fontSize: 12, color: "#64748b", fontWeight: 700, mb: 1 }}>MCP 工具</Typography>
+          <Typography sx={{ fontSize: 12, color: "#64748b", fontWeight: 700, mb: 1 }}>工具列表</Typography>
           <Stack spacing={0.75}>
             {tools.length === 0 && <Typography sx={{ fontSize: 12, color: "#94a3b8", p: 1 }}>当前分类下没有工具。</Typography>}
             {tools.map((tool) => {
-              const isAdded = addedToolIds.has(tool.id);
+              const isAdded = addedToolIds.has(tool.id) && !tool.allowMultiple;
               return (
               <Box key={tool.id} onClick={() => onToolChange(tool.id)} sx={{ p: 1, borderRadius: "10px", border: "1px solid", borderColor: selectedToolId === tool.id ? "#c4b5fd" : "#EEF2F7", bgcolor: selectedToolId === tool.id ? "#faf5ff" : "#fff", cursor: "pointer", opacity: isAdded ? 0.62 : 1 }}>
                 <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between">
                   <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{tool.name}</Typography>
-                  {isAdded && <Chip label="已添加" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f1f5f9", color: "#64748b" }} />}
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <Chip label={tool.sourceType === "builtin" ? "内置" : "MCP"} size="small" sx={{ height: 18, fontSize: 10, bgcolor: tool.sourceType === "builtin" ? "#f5f3ff" : "#eff6ff", color: tool.sourceType === "builtin" ? "#6d28d9" : "#2563eb" }} />
+                    {isAdded && <Chip label="已添加" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f1f5f9", color: "#64748b" }} />}
+                  </Stack>
                 </Stack>
                 <Typography sx={{ fontSize: 11, color: "#64748b", lineHeight: 1.5, mt: 0.5 }}>{tool.summary}</Typography>
               </Box>
