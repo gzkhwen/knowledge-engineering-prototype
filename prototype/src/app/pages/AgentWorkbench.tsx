@@ -631,23 +631,8 @@ export function AgentWorkbench() {
     : toolCatalog.filter((tool) => tool.category === selectedCategory);
   const currentTool = toolCatalog.find((tool) => tool.id === selectedToolId) ?? filteredTools[0] ?? null;
   const selectedToolAdded = currentTool ? addedToolIds.has(currentTool.id) && !currentTool.allowMultiple : false;
-  const selectedToolCategoryConfirmed = currentTool
-    ? categorySections.some((section) => section.category === currentTool.category && confirmedCategories.has(section.sectionId))
-    : false;
-  const allCategoriesConfirmed = categorySections.length > 0 && categorySections.every((section) => confirmedCategories.has(section.sectionId));
-  const firstUnconfirmedSectionId = categorySections.find((section) => !confirmedCategories.has(section.sectionId))?.sectionId;
-  const canConfirmSection = (sectionId: string) => canEdit && firstUnconfirmedSectionId === sectionId;
-  const canReeditSection = (sectionId: string) => {
-    if (!canEdit || !confirmedCategories.has(sectionId)) return false;
-    const index = categorySections.findIndex((section) => section.sectionId === sectionId);
-    const nextSection = categorySections[index + 1];
-    return !nextSection || !confirmedCategories.has(nextSection.sectionId);
-  };
-  const isSectionEditable = (sectionId: string) => canEdit && !confirmedCategories.has(sectionId);
-  const isNodeEditable = (nodeId: string) => {
-    const section = categorySections.find((item) => item.nodes.some((node) => node.nodeId === nodeId));
-    return Boolean(section && isSectionEditable(section.sectionId));
-  };
+  const selectedToolCategoryConfirmed = false;
+  const isNodeEditable = () => canEdit;
 
   const updateNode = (nodeId: string, updater: (node: ToolNode) => ToolNode) => {
     setPlanNodes((current) => current.map((node) => (node.nodeId === nodeId ? updater(node) : node)));
@@ -759,6 +744,18 @@ export function AgentWorkbench() {
     setHasManualEdits(true);
   };
 
+  const moveWorkflowNodeStep = (sectionId: string, direction: "up" | "down") => {
+    if (!canEdit) return;
+    const index = categorySections.findIndex((section) => section.sectionId === sectionId);
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || targetIndex < 0 || targetIndex >= categorySections.length) return;
+    const nextSections = [...categorySections];
+    const [moved] = nextSections.splice(index, 1);
+    nextSections.splice(targetIndex, 0, moved);
+    setPlanNodes(nextSections.flatMap((section) => section.nodes));
+    setHasManualEdits(true);
+  };
+
   const changeParam = (nodeId: string, paramId: string, value: ToolParam["value"]) => {
     if (!isNodeEditable(nodeId)) return;
     updateNode(nodeId, (node) => ({
@@ -853,6 +850,7 @@ export function AgentWorkbench() {
                 <Box sx={{ minWidth: 0 }}>
                   <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>{displayCategory} · {displayFormType}</Typography>
                   <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                    <Chip label={`${categorySections.length} 个流程节点`} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
                     <Chip label={`${planNodes.length} 个工具`} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#eff6ff", color: "#2563eb" }} />
                     <Chip label={confirmed ? "已保存" : allProblems.length ? "存在问题" : "待确认"} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: confirmed ? "#f0fdf4" : allProblems.length ? "#fef2f2" : "#f8fafc", color: confirmed ? "#16a34a" : allProblems.length ? "#dc2626" : "#64748b" }} />
                   </Stack>
@@ -867,20 +865,18 @@ export function AgentWorkbench() {
               </Box>
               <Box sx={{ p: 1.5, minHeight: 0, overflow: "auto", flex: 1 }}>
                 <Stack spacing={0}>
-                  {planNodes.map((node, index) => (
-                    <FlowStepCard
-                      key={node.nodeId}
+                  {categorySections.map((section, index) => (
+                    <WorkflowNodeCard
+                      key={section.sectionId}
                       index={index}
-                      total={planNodes.length}
-                      node={node}
-                      allNodes={planNodes}
+                      total={categorySections.length}
+                      section={section}
                       canEdit={canEdit}
-                      warnings={nodeWarnings[node.nodeId] ?? []}
-                      onEdit={() => setEditingNodeId(node.nodeId)}
-                      onRemove={() => removeNode(node.nodeId)}
-                      onMoveUp={() => moveNodeStep(node.nodeId, "up")}
-                      onMoveDown={() => moveNodeStep(node.nodeId, "down")}
-                      onToggleExpand={() => updateNode(node.nodeId, (item) => ({ ...item, expanded: !item.expanded }))}
+                      warnings={nodeWarnings}
+                      onEditTool={(nodeId) => setEditingNodeId(nodeId)}
+                      onRemoveTool={removeNode}
+                      onMoveUp={() => moveWorkflowNodeStep(section.sectionId, "up")}
+                      onMoveDown={() => moveWorkflowNodeStep(section.sectionId, "down")}
                     />
                   ))}
                 </Stack>
@@ -938,101 +934,75 @@ export function AgentWorkbench() {
   );
 }
 
-function FlowStepCard({
+function WorkflowNodeCard({
   index,
   total,
-  node,
-  allNodes,
+  section,
   canEdit,
   warnings,
-  onEdit,
-  onRemove,
+  onEditTool,
+  onRemoveTool,
   onMoveUp,
   onMoveDown,
-  onToggleExpand,
 }: {
   index: number;
   total: number;
-  node: ToolNode;
-  allNodes: ToolNode[];
+  section: { sectionId: string; category: string; nodes: ToolNode[] };
   canEdit: boolean;
-  warnings: string[];
-  onEdit: () => void;
-  onRemove: () => void;
+  warnings: Record<string, string[]>;
+  onEditTool: (nodeId: string) => void;
+  onRemoveTool: (nodeId: string) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
-  onToggleExpand: () => void;
 }) {
-  const inputParts = getInputSourceParts(node, allNodes);
-  const outputs = node.outputs.slice(0, node.expanded ? node.outputs.length : 1);
-  const configParams = node.params.filter((param) => param.id !== node.inputParamId && isParamVisible(node, param));
-  const keyParams = configParams.filter((param) => param.required).slice(0, node.expanded ? 4 : 2);
-  const hasInputWarning = warnings.includes("输入配置异常，请检查。");
-  const hasWarning = warnings.length > 0;
+  const nodeProblems = section.nodes.flatMap((node) => warnings[node.nodeId] ?? []);
+  const hasWarning = nodeProblems.length > 0;
 
   return (
-    <Box sx={{ display: "grid", gridTemplateColumns: "34px minmax(0, 1fr)", columnGap: 1.1, position: "relative" }}>
+    <Box sx={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr)", columnGap: 1.1 }}>
       <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <Box sx={{ width: 28, height: 28, borderRadius: "50%", bgcolor: hasWarning ? "#f97316" : "#801AEB", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800 }}>
+        <Box sx={{ width: 30, height: 30, borderRadius: "12px", bgcolor: hasWarning ? "#f97316" : "#111827", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16)" }}>
           {String(index + 1).padStart(2, "0")}
         </Box>
         {index < total - 1 && <Box sx={{ width: 2, flex: 1, minHeight: 24, bgcolor: "#e2e8f0", my: 0.5 }} />}
       </Box>
 
-      <Box sx={{ mb: index < total - 1 ? 1.25 : 0, border: "1px solid", borderColor: hasInputWarning ? "#ef4444" : hasWarning ? "#fed7aa" : "#E0E8F2", borderRadius: "10px", bgcolor: hasWarning ? "#fffaf0" : "#fff", overflow: "hidden" }}>
-        <Box sx={{ px: 1.25, py: 1, display: "flex", alignItems: "center", gap: 0.75, borderBottom: "1px solid #EEF2F7" }}>
+      <Box sx={{ mb: index < total - 1 ? 1.25 : 0, border: "1px solid", borderColor: hasWarning ? "#fed7aa" : "#e2e8f0", borderRadius: "14px", bgcolor: "#fff", overflow: "hidden", boxShadow: "0 10px 28px rgba(15, 23, 42, 0.06)" }}>
+        <Box sx={{ px: 1.4, py: 1.15, display: "flex", alignItems: "center", gap: 0.75, background: "linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)", borderBottom: "1px solid #EEF2F7" }}>
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Stack direction="row" spacing={0.6} alignItems="center" flexWrap="wrap" useFlexGap>
-              <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>{node.toolName}</Typography>
-              <Chip label={node.category} size="small" sx={{ height: 19, fontSize: 10, bgcolor: node.sourceType === "system" ? "#f5f3ff" : "#eff6ff", color: node.sourceType === "system" ? "#6d28d9" : "#2563eb" }} />
-              {hasWarning && <Chip label="需处理" size="small" sx={{ height: 19, fontSize: 10, bgcolor: "#fff7ed", color: "#c2410c" }} />}
-            </Stack>
+            <Typography sx={{ fontSize: 14, fontWeight: 900, color: "#0f172a", lineHeight: 1.3 }}>{section.category}节点</Typography>
+            <Typography sx={{ mt: 0.25, fontSize: 11.5, color: "#64748b" }}>{section.nodes.length} 个工具</Typography>
           </Box>
+          {hasWarning && <Chip label="需处理" size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#fff7ed", color: "#c2410c" }} />}
           <Tooltip title="上移"><span><IconButton disabled={!canEdit || index === 0} size="small" onClick={onMoveUp} sx={{ color: "#64748b", width: 24, height: 24 }}><ArrowUpward sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
           <Tooltip title="下移"><span><IconButton disabled={!canEdit || index === total - 1} size="small" onClick={onMoveDown} sx={{ color: "#64748b", width: 24, height: 24 }}><ArrowDownward sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
-          <Tooltip title="编辑"><span><IconButton disabled={!canEdit} size="small" onClick={onEdit} sx={{ color: "#801AEB", width: 24, height: 24 }}><EditOutlined sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
-          <Tooltip title="删除"><span><IconButton disabled={!canEdit} size="small" onClick={onRemove} sx={{ color: "#ef4444", width: 24, height: 24 }}><DeleteOutline sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
-          <IconButton size="small" onClick={onToggleExpand} sx={{ color: "#64748b", width: 24, height: 24 }}>{node.expanded ? <ExpandLess sx={{ fontSize: 17 }} /> : <ExpandMore sx={{ fontSize: 17 }} />}</IconButton>
         </Box>
 
-        <Stack spacing={0.85} sx={{ p: 1.25 }}>
-          {warnings.length > 0 && (
+        <Stack spacing={0.8} sx={{ p: 1.2 }}>
+          {nodeProblems.length > 0 && (
             <Stack spacing={0.5}>
-              {warnings.map((warning) => (
+              {nodeProblems.map((warning) => (
                 <Stack key={warning} direction="row" spacing={0.6} alignItems="flex-start">
-                  <WarningAmber sx={{ fontSize: 14, color: hasInputWarning ? "#dc2626" : "#c2410c", mt: "2px" }} />
-                  <Typography sx={{ fontSize: 11.5, color: hasInputWarning ? "#b91c1c" : "#9a3412", lineHeight: 1.5 }}>{warning}</Typography>
+                  <WarningAmber sx={{ fontSize: 14, color: "#c2410c", mt: "2px" }} />
+                  <Typography sx={{ fontSize: 11.5, color: "#9a3412", lineHeight: 1.5 }}>{warning}</Typography>
                 </Stack>
               ))}
             </Stack>
           )}
 
-          <Box>
-            <Typography sx={{ fontSize: 11, color: "#94a3b8", fontWeight: 800, mb: 0.3 }}>输入</Typography>
-            <Typography sx={{ fontSize: 12, color: hasInputWarning ? "#c2410c" : "#334155", lineHeight: 1.5, wordBreak: "break-word" }}>{inputParts.paramName}：{inputParts.source}</Typography>
-          </Box>
-
-          <Box>
-            <Typography sx={{ fontSize: 11, color: "#94a3b8", fontWeight: 800, mb: 0.3 }}>输出</Typography>
-            <Stack spacing={0.45}>
-              {outputs.map((output) => (
-                <Typography key={output.id} sx={{ fontSize: 12, color: "#334155", lineHeight: 1.5, wordBreak: "break-word" }}>{output.label}：{output.path}</Typography>
-              ))}
-            </Stack>
-          </Box>
-
-          <Box>
-            <Typography sx={{ fontSize: 11, color: "#94a3b8", fontWeight: 800, mb: 0.3 }}>关键参数</Typography>
-            {keyParams.length ? (
-              <Stack spacing={0.35}>
-                {keyParams.map((param) => (
-                  <Typography key={param.id} sx={{ fontSize: 12, color: "#334155", lineHeight: 1.5, wordBreak: "break-word" }}>{param.label}：{formatParamValue(param.value)}</Typography>
-                ))}
-              </Stack>
-            ) : (
-              <Typography sx={{ fontSize: 12, color: "#64748b" }}>无必填参数</Typography>
-            )}
-          </Box>
+          {section.nodes.map((node, toolIndex) => {
+            const toolWarnings = warnings[node.nodeId] ?? [];
+            return (
+              <Box key={node.nodeId} sx={{ px: 1, py: 0.9, borderRadius: "10px", bgcolor: toolWarnings.length ? "#fff7ed" : "#f8fafc", border: `1px solid ${toolWarnings.length ? "#fed7aa" : "#e2e8f0"}`, display: "flex", alignItems: "center", gap: 0.75 }}>
+                <Box sx={{ width: 22, height: 22, borderRadius: "8px", bgcolor: "#fff", color: "#475569", border: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
+                  {toolIndex + 1}
+                </Box>
+                <Typography sx={{ minWidth: 0, flex: 1, fontSize: 13, fontWeight: 700, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.toolName}</Typography>
+                <Tooltip title="编辑工具配置"><span><IconButton disabled={!canEdit} size="small" onClick={() => onEditTool(node.nodeId)} sx={{ color: "#801AEB", width: 24, height: 24 }}><EditOutlined sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
+                <Tooltip title="删除工具"><span><IconButton disabled={!canEdit} size="small" onClick={() => onRemoveTool(node.nodeId)} sx={{ color: "#ef4444", width: 24, height: 24 }}><DeleteOutline sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
+              </Box>
+            );
+          })}
         </Stack>
       </Box>
     </Box>
