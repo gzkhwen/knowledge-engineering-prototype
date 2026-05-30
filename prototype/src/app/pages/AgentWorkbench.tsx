@@ -884,6 +884,7 @@ export function AgentWorkbench() {
   const [selectedToolId, setSelectedToolId] = useState(toolCatalog[0].id);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [draggingCategory, setDraggingCategory] = useState<string | null>(null);
+  const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [sampleFiles, setSampleFiles] = useState<SampleFileItem[]>([]);
@@ -928,6 +929,18 @@ export function AgentWorkbench() {
 
   const updateAgentEvent = (id: string, patch: Partial<AgentEvent>) => {
     setAgentEvents((current) => current.map((event) => (event.id === id ? { ...event, ...patch } : event)));
+  };
+
+  const updatePlanNodesWithMotion = (updater: ToolNode[] | ((current: ToolNode[]) => ToolNode[])) => {
+    const applyUpdate = () => {
+      setPlanNodes((current) => (typeof updater === "function" ? updater(current) : updater));
+    };
+    const startViewTransition = (document as Document & { startViewTransition?: (callback: () => void) => void }).startViewTransition;
+    if (typeof startViewTransition === "function") {
+      startViewTransition.call(document, applyUpdate);
+      return;
+    }
+    applyUpdate();
   };
 
   const pushAgentEvent = (event: Omit<AgentEvent, "id">) => {
@@ -1025,7 +1038,7 @@ export function AgentWorkbench() {
       let selectEventId = "";
       let configEventId = "";
       step(1800, () => {
-        setPlanNodes(allNodes);
+        updatePlanNodesWithMotion(allNodes);
         setNodesRuntime(nodes, { status: "building" });
         buildEventId = pushAgentEvent({
           role: "thought",
@@ -1293,7 +1306,7 @@ export function AgentWorkbench() {
     }, 1500);
 
     setTimeout(() => {
-      setPlanNodes(adjustedNodes);
+      updatePlanNodesWithMotion(adjustedNodes);
       setConnectionStates({});
       setNodesRuntime(affectedAdjustedNodes, { status: "configuring", visibleParamCount: 2 });
     }, 2400);
@@ -1343,14 +1356,14 @@ export function AgentWorkbench() {
       currentTool.id,
       inputSource,
     );
-    setPlanNodes((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
+    updatePlanNodesWithMotion((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
     setAddDialogOpen(false);
     toast.success(`已添加工具，已归入${getPlanTitle(node.category)}`);
   };
 
   const removeNode = (nodeId: string) => {
     if (!isNodeEditable(nodeId)) return;
-    setPlanNodes((current) => current.filter((node) => node.nodeId !== nodeId));
+    updatePlanNodesWithMotion((current) => current.filter((node) => node.nodeId !== nodeId));
     setEditingNodeId((current) => (current === nodeId ? null : current));
     toast.success("已删除工具节点");
   };
@@ -1373,8 +1386,13 @@ export function AgentWorkbench() {
     const next = [...planNodes];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, { ...moved, adjusted: true });
-    setPlanNodes(next);
+    updatePlanNodesWithMotion(next);
     setDraggingNodeId(null);
+  };
+
+  const toggleToolExpanded = (nodeId: string) => {
+    if (isAgentRunning) return;
+    updateNode(nodeId, (node) => ({ ...node, expanded: !node.expanded }));
   };
 
   const changeParam = (nodeId: string, paramId: string, value: ToolParam["value"]) => {
@@ -1412,8 +1430,9 @@ export function AgentWorkbench() {
     const nextSections = [...categorySections];
     const [moved] = nextSections.splice(from, 1);
     nextSections.splice(to, 0, moved);
-    setPlanNodes(nextSections.flatMap((section) => section.nodes));
+    updatePlanNodesWithMotion(nextSections.flatMap((section) => section.nodes.map((node) => ({ ...node, adjusted: section.sectionId === sectionId ? true : node.adjusted }))));
     setDraggingCategory(null);
+    setDragOverCategory(null);
   };
 
   return (
@@ -1540,10 +1559,21 @@ export function AgentWorkbench() {
                           connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
                           runtimeStates={nodeRuntimeStates}
                           canEdit={canEdit}
+                          isDragging={draggingCategory === section.sectionId}
+                          isDragTarget={Boolean(draggingCategory && draggingCategory !== section.sectionId && dragOverCategory === section.sectionId)}
                           warnings={displayedNodeWarnings}
                           onEditTool={(nodeId) => setEditingNodeId(nodeId)}
                           onRemoveTool={removeNode}
-                          onNodeDragStart={() => setDraggingCategory(section.sectionId)}
+                          onToggleTool={toggleToolExpanded}
+                          onNodeDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = "move";
+                            setDraggingCategory(section.sectionId);
+                          }}
+                          onNodeDragOver={() => setDragOverCategory(section.sectionId)}
+                          onNodeDragEnd={() => {
+                            setDraggingCategory(null);
+                            setDragOverCategory(null);
+                          }}
                           onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId)}
                           onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
                           onToolDrop={onDropNode}
@@ -1783,6 +1813,8 @@ function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
           top: "50%",
           left: "50%",
           transform: "translate(-50%, -50%)",
+          opacity: status === "normal" ? 0 : 1,
+          scale: status === "normal" ? 0.72 : 1,
           width: 26,
           height: 26,
           borderRadius: "9px",
@@ -1793,6 +1825,13 @@ function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
           alignItems: "center",
           justifyContent: "center",
           boxShadow: "0 8px 18px rgba(15, 23, 42, 0.12)",
+          pointerEvents: status === "normal" ? "none" : "auto",
+          transition: "opacity 0.28s ease, scale 0.28s ease, background-color 0.24s ease, border-color 0.24s ease, color 0.24s ease",
+          animation: status === "normal" ? "none" : "connectionBadgeIn 0.28s ease-out both",
+          "@keyframes connectionBadgeIn": {
+            from: { opacity: 0, scale: 0.72 },
+            to: { opacity: 1, scale: 1 },
+          },
           "@keyframes spin": {
             from: { transform: "rotate(0deg)" },
             to: { transform: "rotate(360deg)" },
@@ -1812,10 +1851,15 @@ function WorkflowNodeCard({
   connectionStatus,
   runtimeStates,
   canEdit,
+  isDragging,
+  isDragTarget,
   warnings,
   onEditTool,
   onRemoveTool,
+  onToggleTool,
   onNodeDragStart,
+  onNodeDragOver,
+  onNodeDragEnd,
   onNodeDrop,
   onToolDragStart,
   onToolDrop,
@@ -1826,10 +1870,15 @@ function WorkflowNodeCard({
   connectionStatus: ConnectionStatus;
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
+  isDragging: boolean;
+  isDragTarget: boolean;
   warnings: Record<string, string[]>;
   onEditTool: (nodeId: string) => void;
   onRemoveTool: (nodeId: string) => void;
-  onNodeDragStart: () => void;
+  onToggleTool: (nodeId: string) => void;
+  onNodeDragStart: (event: DragEvent<HTMLDivElement>) => void;
+  onNodeDragOver: () => void;
+  onNodeDragEnd: () => void;
   onNodeDrop: () => void;
   onToolDragStart: (nodeId: string) => void;
   onToolDrop: (nodeId: string) => void;
@@ -1847,6 +1896,10 @@ function WorkflowNodeCard({
         gridTemplateColumns: "36px minmax(0, 1fr)",
         columnGap: 1.1,
         animation: "nodeCardEnter 0.38s ease-out both",
+        transition: "transform 0.28s ease, opacity 0.24s ease, filter 0.24s ease",
+        transform: isDragging ? "scale(0.985)" : "translateY(0)",
+        opacity: isDragging ? 0.52 : 1,
+        filter: isDragging ? "saturate(0.86)" : "none",
         transformOrigin: "center",
         "@keyframes nodeCardEnter": {
           from: { opacity: 0, transform: "translateY(8px) scale(0.985)" },
@@ -1896,11 +1949,27 @@ function WorkflowNodeCard({
               sx={{
                 width: 2,
                 height: "100%",
-                bgcolor: connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : "#e2e8f0",
+                bgcolor: "transparent",
+                background: connectionStatus === "error"
+                  ? "linear-gradient(180deg, #e2e8f0 0%, #fb923c 42%, #f97316 58%, #e2e8f0 100%)"
+                  : connectionStatus === "resolving"
+                    ? "linear-gradient(180deg, #e2e8f0 0%, #c084fc 42%, #a855f7 58%, #e2e8f0 100%)"
+                    : connectionStatus === "resolved"
+                      ? "linear-gradient(180deg, #e2e8f0 0%, #86efac 42%, #22c55e 58%, #e2e8f0 100%)"
+                      : "#e2e8f0",
+                backgroundSize: connectionStatus === "normal" ? "auto" : "100% 220%",
+                backgroundPosition: connectionStatus === "normal" ? "0 0" : "0 0",
                 borderRadius: 999,
+                boxShadow: connectionStatus === "normal" ? "none" : "0 0 12px rgba(128, 26, 235, 0.12)",
+                transition: "background 0.36s ease, box-shadow 0.36s ease",
+                animation: connectionStatus === "normal" ? "none" : "connectionStatusFlow 1.1s ease-in-out infinite",
+                "@keyframes connectionStatusFlow": {
+                  from: { backgroundPosition: "0 -80%" },
+                  to: { backgroundPosition: "0 120%" },
+                },
               }}
             />
-            {connectionStatus !== "normal" && <ConnectionStatusBadge status={connectionStatus} />}
+            <ConnectionStatusBadge status={connectionStatus} />
           </Box>
         )}
       </Box>
@@ -1908,18 +1977,21 @@ function WorkflowNodeCard({
       <Box
         draggable={canEdit}
         onDragStart={canEdit ? onNodeDragStart : undefined}
-        onDragOver={canEdit ? (event) => event.preventDefault() : undefined}
+        onDragOver={canEdit ? (event) => { event.preventDefault(); onNodeDragOver(); } : undefined}
+        onDragEnd={canEdit ? onNodeDragEnd : undefined}
         onDrop={canEdit ? onNodeDrop : undefined}
         sx={{
           mb: index < total - 1 ? 1.25 : 0,
           border: "1px solid",
-          borderColor: hasWarning ? "#fed7aa" : isCardBuilding ? "#c4b5fd" : "#e2e8f0",
+          borderColor: isDragTarget ? "#801AEB" : hasWarning ? "#fed7aa" : isCardBuilding ? "#c4b5fd" : "#e2e8f0",
           borderRadius: "14px",
-          bgcolor: "#fff",
+          bgcolor: isDragTarget ? "#faf5ff" : "#fff",
           overflow: "hidden",
-          boxShadow: isCardBuilding ? "0 0 0 5px rgba(128, 26, 235, 0.1), 0 14px 30px rgba(128, 26, 235, 0.12)" : "0 10px 28px rgba(15, 23, 42, 0.06)",
+          cursor: canEdit ? "grab" : "default",
+          boxShadow: isDragTarget ? "0 0 0 4px rgba(128, 26, 235, 0.1), 0 14px 30px rgba(128, 26, 235, 0.12)" : isCardBuilding ? "0 0 0 5px rgba(128, 26, 235, 0.1), 0 14px 30px rgba(128, 26, 235, 0.12)" : "0 10px 28px rgba(15, 23, 42, 0.06)",
           animation: isCardBuilding ? "pulseCard 1.6s ease-in-out infinite" : "none",
-          transition: "box-shadow 0.18s ease, border-color 0.18s ease",
+          transition: "box-shadow 0.22s ease, border-color 0.22s ease, background-color 0.22s ease, transform 0.22s ease",
+          "&:active": { cursor: canEdit ? "grabbing" : "default" },
           "@keyframes pulseCard": {
             "0%, 100%": { transform: "translateY(0)", boxShadow: "0 0 0 4px rgba(128, 26, 235, 0.08), 0 12px 26px rgba(128, 26, 235, 0.1)" },
             "50%": { transform: "translateY(-1px)", boxShadow: "0 0 0 8px rgba(128, 26, 235, 0.14), 0 18px 34px rgba(128, 26, 235, 0.16)" },
@@ -1961,6 +2033,7 @@ function WorkflowNodeCard({
                 runtimeState={runtimeState}
                 onEdit={() => onEditTool(node.nodeId)}
                 onRemove={() => onRemoveTool(node.nodeId)}
+                onToggleExpand={() => onToggleTool(node.nodeId)}
                 onDragStart={(event) => { event.stopPropagation(); onToolDragStart(node.nodeId); }}
                 onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
                 onDrop={(event) => { event.stopPropagation(); onToolDrop(node.nodeId); }}
@@ -2013,6 +2086,7 @@ function ToolRuntimeRow({
   runtimeState,
   onEdit,
   onRemove,
+  onToggleExpand,
   onDragStart,
   onDragOver,
   onDrop,
@@ -2024,16 +2098,19 @@ function ToolRuntimeRow({
   runtimeState?: NodeRuntimeState;
   onEdit: () => void;
   onRemove: () => void;
+  onToggleExpand: () => void;
   onDragStart: (event: DragEvent<HTMLDivElement>) => void;
   onDragOver: (event: DragEvent<HTMLDivElement>) => void;
   onDrop: (event: DragEvent<HTMLDivElement>) => void;
 }) {
   const status = runtimeState?.status ?? "done";
-  const isExpanded = status === "configuring" || status === "configured";
+  const runtimeExpanded = status === "configuring" || status === "configured";
+  const isExpanded = runtimeExpanded || node.expanded;
   const isConfigured = status === "configured";
   const isActive = ["configuring", "configured", "running"].includes(status);
   const visibleParamCount = runtimeState?.visibleParamCount ?? 0;
-  const visibleParams = node.params.filter((param) => isParamVisible(node, param)).slice(0, Math.max(visibleParamCount, 0));
+  const allVisibleParams = node.params.filter((param) => isParamVisible(node, param));
+  const visibleParams = runtimeExpanded ? allVisibleParams.slice(0, Math.max(visibleParamCount, 0)) : allVisibleParams;
   const statusText = {
     building: "创建节点中",
     selectingTool: "选择工具中",
@@ -2059,6 +2136,7 @@ function ToolRuntimeRow({
       onDragStart={canDrag ? onDragStart : undefined}
       onDragOver={canDrag ? onDragOver : undefined}
       onDrop={canDrag ? onDrop : undefined}
+      onClick={onToggleExpand}
       sx={{
         px: 1,
         py: 0.9,
@@ -2067,7 +2145,9 @@ function ToolRuntimeRow({
         border: `1px solid ${warnings.length ? "#fed7aa" : isConfigured || status === "success" ? "#bbf7d0" : isActive ? "#ddd6fe" : "#e2e8f0"}`,
         boxShadow: isActive ? isConfigured ? "0 8px 20px rgba(22, 163, 74, 0.1)" : "0 8px 20px rgba(128, 26, 235, 0.08)" : "none",
         animation: "fadeInTool 0.32s ease-out both",
-        transition: "background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease",
+        cursor: "pointer",
+        transition: "background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.18s ease",
+        "&:hover": { transform: "translateY(-1px)" },
         "&:hover .tool-actions": { opacity: 1, pointerEvents: "auto" },
         "@keyframes fadeInTool": {
           from: { opacity: 0, transform: "translateY(5px)" },
@@ -2087,8 +2167,13 @@ function ToolRuntimeRow({
         </Box>
         {status === "configuring" && <CircularProgress size={16} sx={{ color: "#c2410c" }} />}
         {isConfigured && <CheckCircleOutline sx={{ fontSize: 16, color: "#16a34a" }} />}
+        {!runtimeExpanded && (
+          <Typography sx={{ fontSize: 11, color: "#94a3b8", width: 38, textAlign: "right" }}>
+            {isExpanded ? "收起" : "展开"}
+          </Typography>
+        )}
         {canEdit && (
-          <Stack className="tool-actions" direction="row" spacing={0.25} sx={{ opacity: 0, pointerEvents: "none", transition: "opacity 0.16s ease" }}>
+          <Stack className="tool-actions" direction="row" spacing={0.25} onClick={(event) => event.stopPropagation()} sx={{ opacity: 0, pointerEvents: "none", transition: "opacity 0.16s ease" }}>
             <Tooltip title="编辑工具配置"><span><IconButton disabled={!canEdit} size="small" onClick={onEdit} sx={{ color: "#801AEB", width: 24, height: 24 }}><EditOutlined sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
             <Tooltip title="删除工具"><span><IconButton disabled={!canEdit} size="small" onClick={onRemove} sx={{ color: "#ef4444", width: 24, height: 24 }}><DeleteOutline sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
           </Stack>
@@ -2103,11 +2188,11 @@ function ToolRuntimeRow({
           transition: "max-height 0.34s ease, opacity 0.22s ease, margin-top 0.34s ease",
         }}
       >
-        <Box sx={{ p: 1, borderRadius: "9px", bgcolor: "#fff", border: `1px solid ${isConfigured ? "#bbf7d0" : "#fed7aa"}`, boxShadow: isConfigured ? "0 0 0 3px rgba(34, 197, 94, 0.1)" : "none", transition: "border-color 0.2s ease, box-shadow 0.2s ease" }}>
+        <Box sx={{ p: 1, borderRadius: "9px", bgcolor: "#fff", border: `1px solid ${isConfigured ? "#bbf7d0" : runtimeExpanded ? "#fed7aa" : "#e2e8f0"}`, boxShadow: isConfigured ? "0 0 0 3px rgba(34, 197, 94, 0.1)" : "none", transition: "border-color 0.2s ease, box-shadow 0.2s ease" }}>
           <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mb: 0.75 }}>
-            {isConfigured ? <CheckCircleOutline sx={{ fontSize: 14, color: "#16a34a" }} /> : <CircularProgress size={12} sx={{ color: "#c2410c" }} />}
-            <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: isConfigured ? "#15803d" : "#9a3412" }}>
-              {isConfigured ? "工具参数配置完成" : "正在写入工具参数"}
+            {isConfigured ? <CheckCircleOutline sx={{ fontSize: 14, color: "#16a34a" }} /> : runtimeExpanded ? <CircularProgress size={12} sx={{ color: "#c2410c" }} /> : <Handyman sx={{ fontSize: 13, color: "#64748b" }} />}
+            <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: isConfigured ? "#15803d" : runtimeExpanded ? "#9a3412" : "#334155" }}>
+              {isConfigured ? "工具参数配置完成" : runtimeExpanded ? "正在写入工具参数" : "工具参数配置"}
             </Typography>
           </Stack>
           <Stack spacing={0.55}>
