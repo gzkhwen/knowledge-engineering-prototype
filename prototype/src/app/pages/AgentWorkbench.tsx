@@ -52,6 +52,7 @@ type AgentEventStatus = "done" | "running" | "pending";
 type AgentEventKind = "message" | "toolCall" | "flow";
 type ConnectionStatus = "normal" | "error" | "resolving" | "resolved";
 type NodeRuntimeStatus = "building" | "selectingTool" | "configuring" | "configured" | "done" | "running" | "success";
+type InsertPosition = "before" | "after";
 
 interface SampleFileItem {
   id: string;
@@ -891,7 +892,7 @@ export function AgentWorkbench() {
   const [selectedToolId, setSelectedToolId] = useState(toolCatalog[0].id);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [draggingCategory, setDraggingCategory] = useState<string | null>(null);
-  const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
+  const [dragInsertTarget, setDragInsertTarget] = useState<{ sectionId: string; position: InsertPosition } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [sampleFiles, setSampleFiles] = useState<SampleFileItem[]>([]);
@@ -1429,17 +1430,23 @@ export function AgentWorkbench() {
     }));
   };
 
-  const moveCategoryTo = (sectionId: string, targetSectionId: string) => {
-    if (!canEdit || sectionId === targetSectionId) return;
+  const moveCategoryTo = (sectionId: string, targetSectionId: string, position: InsertPosition) => {
+    if (!canEdit) return;
+    if (sectionId === targetSectionId) {
+      setDraggingCategory(null);
+      setDragInsertTarget(null);
+      return;
+    }
     const from = categorySections.findIndex((section) => section.sectionId === sectionId);
-    const to = categorySections.findIndex((section) => section.sectionId === targetSectionId);
-    if (from < 0 || to < 0) return;
+    if (from < 0) return;
     const nextSections = [...categorySections];
     const [moved] = nextSections.splice(from, 1);
-    nextSections.splice(to, 0, moved);
+    const targetIndex = nextSections.findIndex((section) => section.sectionId === targetSectionId);
+    if (targetIndex < 0) return;
+    nextSections.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, moved);
     updatePlanNodesWithMotion(nextSections.flatMap((section) => section.nodes.map((node) => ({ ...node, adjusted: section.sectionId === sectionId ? true : node.adjusted }))));
     setDraggingCategory(null);
-    setDragOverCategory(null);
+    setDragInsertTarget(null);
   };
 
   return (
@@ -1567,7 +1574,7 @@ export function AgentWorkbench() {
                           runtimeStates={nodeRuntimeStates}
                           canEdit={canEdit}
                           isDragging={draggingCategory === section.sectionId}
-                          isDragTarget={Boolean(draggingCategory && draggingCategory !== section.sectionId && dragOverCategory === section.sectionId)}
+                          insertPosition={dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : null}
                           warnings={displayedNodeWarnings}
                           onEditTool={(nodeId) => setEditingNodeId(nodeId)}
                           onRemoveTool={removeNode}
@@ -1576,12 +1583,24 @@ export function AgentWorkbench() {
                             event.dataTransfer.effectAllowed = "move";
                             setDraggingCategory(section.sectionId);
                           }}
-                          onNodeDragOver={() => setDragOverCategory(section.sectionId)}
+                          onNodeDragOver={(event) => {
+                            if (!draggingCategory || draggingCategory === section.sectionId) {
+                              setDragInsertTarget(null);
+                              return;
+                            }
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                            setDragInsertTarget((current) => (
+                              current?.sectionId === section.sectionId && current.position === position
+                                ? current
+                                : { sectionId: section.sectionId, position }
+                            ));
+                          }}
                           onNodeDragEnd={() => {
                             setDraggingCategory(null);
-                            setDragOverCategory(null);
+                            setDragInsertTarget(null);
                           }}
-                          onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId)}
+                          onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId, dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : "before")}
                           onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
                           onToolDrop={onDropNode}
                         />
@@ -1859,7 +1878,7 @@ function WorkflowNodeCard({
   runtimeStates,
   canEdit,
   isDragging,
-  isDragTarget,
+  insertPosition,
   warnings,
   onEditTool,
   onRemoveTool,
@@ -1878,13 +1897,13 @@ function WorkflowNodeCard({
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
   isDragging: boolean;
-  isDragTarget: boolean;
+  insertPosition: InsertPosition | null;
   warnings: Record<string, string[]>;
   onEditTool: (nodeId: string) => void;
   onRemoveTool: (nodeId: string) => void;
   onToggleTool: (nodeId: string) => void;
   onNodeDragStart: (event: DragEvent<HTMLDivElement>) => void;
-  onNodeDragOver: () => void;
+  onNodeDragOver: (event: DragEvent<HTMLDivElement>) => void;
   onNodeDragEnd: () => void;
   onNodeDrop: () => void;
   onToolDragStart: (nodeId: string) => void;
@@ -1907,6 +1926,7 @@ function WorkflowNodeCard({
         transform: isDragging ? "scale(0.985)" : "translateY(0)",
         opacity: isDragging ? 0.52 : 1,
         filter: isDragging ? "saturate(0.86)" : "none",
+        position: "relative",
         transformOrigin: "center",
         "@keyframes nodeCardEnter": {
           from: { opacity: 0, transform: "translateY(8px) scale(0.985)" },
@@ -1981,21 +2001,54 @@ function WorkflowNodeCard({
         )}
       </Box>
 
+      {insertPosition && (
+        <Box
+          sx={{
+            position: "absolute",
+            left: 46,
+            right: 4,
+            top: insertPosition === "before" ? -7 : "auto",
+            bottom: insertPosition === "after" ? -7 : "auto",
+            height: 0,
+            borderTop: "2px solid #801AEB",
+            zIndex: 5,
+            pointerEvents: "none",
+            boxShadow: "0 0 10px rgba(128, 26, 235, 0.28)",
+            animation: "insertLineIn 0.16s ease-out both",
+            "&::before": {
+              content: '""',
+              position: "absolute",
+              left: -5,
+              top: -5,
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              bgcolor: "#801AEB",
+              boxShadow: "0 0 0 4px rgba(128, 26, 235, 0.12)",
+            },
+            "@keyframes insertLineIn": {
+              from: { opacity: 0, transform: "scaleX(0.92)" },
+              to: { opacity: 1, transform: "scaleX(1)" },
+            },
+          }}
+        />
+      )}
+
       <Box
         draggable={canEdit}
         onDragStart={canEdit ? onNodeDragStart : undefined}
-        onDragOver={canEdit ? (event) => { event.preventDefault(); onNodeDragOver(); } : undefined}
+        onDragOver={canEdit ? (event) => { event.preventDefault(); onNodeDragOver(event); } : undefined}
         onDragEnd={canEdit ? onNodeDragEnd : undefined}
         onDrop={canEdit ? onNodeDrop : undefined}
         sx={{
           mb: index < total - 1 ? 1.25 : 0,
           border: "1px solid",
-          borderColor: isDragTarget ? "#801AEB" : hasWarning ? "#fed7aa" : isCardBuilding ? "#c4b5fd" : "#e2e8f0",
+          borderColor: hasWarning ? "#fed7aa" : isCardBuilding ? "#c4b5fd" : "#e2e8f0",
           borderRadius: "14px",
-          bgcolor: isDragTarget ? "#faf5ff" : "#fff",
+          bgcolor: "#fff",
           overflow: "hidden",
           cursor: canEdit ? "grab" : "default",
-          boxShadow: isDragTarget ? "0 0 0 4px rgba(128, 26, 235, 0.1), 0 14px 30px rgba(128, 26, 235, 0.12)" : isCardBuilding ? "0 0 0 5px rgba(128, 26, 235, 0.1), 0 14px 30px rgba(128, 26, 235, 0.12)" : "0 10px 28px rgba(15, 23, 42, 0.06)",
+          boxShadow: isCardBuilding ? "0 0 0 5px rgba(128, 26, 235, 0.1), 0 14px 30px rgba(128, 26, 235, 0.12)" : "0 10px 28px rgba(15, 23, 42, 0.06)",
           animation: isCardBuilding ? "pulseCard 1.6s ease-in-out infinite" : "none",
           transition: "box-shadow 0.22s ease, border-color 0.22s ease, background-color 0.22s ease, transform 0.22s ease",
           "&:active": { cursor: canEdit ? "grabbing" : "default" },
