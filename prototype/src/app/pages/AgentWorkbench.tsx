@@ -1266,8 +1266,7 @@ export function AgentWorkbench() {
                   </Box>
                 ) : (
                   <Box sx={{ position: "relative" }}>
-                    {isReviewScanning && <FlowReviewScanOverlay />}
-                    <Stack spacing={0} sx={{ position: "relative", zIndex: 1 }}>
+                    <Stack spacing={0}>
                       {categorySections.map((section, index) => (
                         <WorkflowNodeCard
                           key={section.sectionId}
@@ -1275,6 +1274,7 @@ export function AgentWorkbench() {
                           total={categorySections.length}
                           section={section}
                           connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
+                          isReviewScanning={isReviewScanning}
                           runtimeStates={nodeRuntimeStates}
                           canEdit={canEdit}
                           warnings={displayedNodeWarnings}
@@ -1459,60 +1459,12 @@ function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
   );
 }
 
-function FlowReviewScanOverlay() {
-  return (
-    <Box
-      sx={{
-        position: "absolute",
-        top: -10,
-        bottom: -10,
-        left: -6,
-        width: 54,
-        zIndex: 2,
-        pointerEvents: "none",
-        overflow: "hidden",
-        borderRadius: "16px",
-        "&::before": {
-          content: '""',
-          position: "absolute",
-          top: 0,
-          left: 3,
-          right: 3,
-          height: 142,
-          borderRadius: "999px",
-          background: "linear-gradient(180deg, rgba(128, 26, 235, 0) 0%, rgba(128, 26, 235, 0.18) 22%, rgba(255, 255, 255, 0.94) 46%, rgba(128, 26, 235, 0.78) 52%, rgba(34, 197, 94, 0.24) 60%, rgba(128, 26, 235, 0.12) 76%, rgba(128, 26, 235, 0) 100%)",
-          filter: "blur(0.5px)",
-          boxShadow: "0 0 18px rgba(128, 26, 235, 0.55), 0 0 38px rgba(128, 26, 235, 0.32), 0 0 52px rgba(34, 197, 94, 0.18)",
-          animation: "reviewLightSweep 2.45s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite",
-        },
-        "&::after": {
-          content: '""',
-          position: "absolute",
-          left: 21,
-          top: 0,
-          width: 10,
-          height: 96,
-          borderRadius: "999px",
-          background: "linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 48%, rgba(255,255,255,0) 100%)",
-          filter: "blur(1px)",
-          animation: "reviewLightSweep 2.45s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite",
-        },
-        "@keyframes reviewLightSweep": {
-          "0%": { transform: "translateY(-150px)", opacity: 0 },
-          "10%": { opacity: 1 },
-          "78%": { opacity: 1 },
-          "100%": { transform: "translateY(calc(100% + 150px))", opacity: 0 },
-        },
-      }}
-    />
-  );
-}
-
 function WorkflowNodeCard({
   index,
   total,
   section,
   connectionStatus,
+  isReviewScanning,
   runtimeStates,
   canEdit,
   warnings,
@@ -1527,6 +1479,7 @@ function WorkflowNodeCard({
   total: number;
   section: { sectionId: string; category: string; nodes: ToolNode[] };
   connectionStatus: ConnectionStatus;
+  isReviewScanning: boolean;
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
   warnings: Record<string, string[]>;
@@ -1542,6 +1495,9 @@ function WorkflowNodeCard({
   const isCardBuilding = section.nodes.some((node) => ["building", "selectingTool", "configuring"].includes(runtimeStates[node.nodeId]?.status ?? ""));
   const isSectionRunning = section.nodes.some((node) => runtimeStates[node.nodeId]?.status === "running");
   const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : "#111827";
+  const reviewDelay = `${index * 320}ms`;
+  const reviewLineDelay = `${index * 320 + 160}ms`;
+  const canShineConnection = isReviewScanning && connectionStatus === "normal";
 
   return (
     <Box
@@ -1569,10 +1525,83 @@ function WorkflowNodeCard({
             justifyContent: "center",
             fontSize: 12,
             fontWeight: 800,
-            boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16)",
+            position: "relative",
+            overflow: "hidden",
+            boxShadow: isReviewScanning ? "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 18px rgba(128, 26, 235, 0.18)" : "0 8px 18px rgba(17, 24, 39, 0.16)",
+            animation: isReviewScanning ? "sequenceSelfGlow 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite" : "none",
+            animationDelay: reviewDelay,
+            "&::after": isReviewScanning
+              ? {
+                  content: '""',
+                  position: "absolute",
+                  inset: -10,
+                  background: "linear-gradient(115deg, rgba(255,255,255,0) 28%, rgba(255,255,255,0.96) 48%, rgba(196,181,253,0.72) 55%, rgba(255,255,255,0) 72%)",
+                  transform: "translateX(-120%)",
+                  mixBlendMode: "screen",
+                  animation: "sequenceBlockShine 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite",
+                  animationDelay: reviewDelay,
+                }
+              : undefined,
+            "@keyframes sequenceSelfGlow": {
+              "0%, 20%, 62%, 100%": {
+                backgroundColor: sequenceBg,
+                boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 0 rgba(128, 26, 235, 0)",
+              },
+              "36%": {
+                backgroundColor: "#6d28d9",
+                boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 20px rgba(128, 26, 235, 0.46)",
+              },
+              "46%": {
+                backgroundColor: "#8b5cf6",
+                boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 24px rgba(128, 26, 235, 0.55)",
+              },
+            },
+            "@keyframes sequenceBlockShine": {
+              "0%": { transform: "translateX(-120%)", opacity: 0 },
+              "18%": { opacity: 0 },
+              "30%": { opacity: 1 },
+              "46%": { opacity: 1 },
+              "58%": { transform: "translateX(120%)", opacity: 0 },
+              "100%": { transform: "translateX(120%)", opacity: 0 },
+            },
           }}
         >
-          {isSectionRunning ? <CircularProgress size={14} color="inherit" /> : String(index + 1).padStart(2, "0")}
+          {isSectionRunning ? (
+            <CircularProgress size={14} color="inherit" />
+          ) : (
+            <Typography
+              component="span"
+              sx={{
+                position: "relative",
+                zIndex: 1,
+                fontSize: 12,
+                fontWeight: 900,
+                lineHeight: 1,
+                color: "#fff",
+                ...(isReviewScanning
+                  ? {
+                      backgroundImage: "linear-gradient(90deg, #ffffff 0%, #ffffff 34%, #fef08a 45%, #ddd6fe 54%, #ffffff 68%, #ffffff 100%)",
+                      backgroundSize: "240% 100%",
+                      backgroundPosition: "120% 0",
+                      WebkitBackgroundClip: "text",
+                      backgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      animation: "sequenceTextShine 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite",
+                      animationDelay: reviewDelay,
+                      textShadow: "0 0 10px rgba(255, 255, 255, 0.4)",
+                    }
+                  : {}),
+                "@keyframes sequenceTextShine": {
+                  "0%": { backgroundPosition: "120% 0" },
+                  "22%": { backgroundPosition: "120% 0" },
+                  "48%": { backgroundPosition: "-120% 0" },
+                  "100%": { backgroundPosition: "-120% 0" },
+                },
+              }}
+            >
+              {String(index + 1).padStart(2, "0")}
+            </Typography>
+          )}
         </Box>
         {index < total - 1 && (
           <Box sx={{ position: "relative", width: 24, flex: 1, minHeight: 32, my: 0.5, display: "flex", justifyContent: "center" }}>
@@ -1580,8 +1609,20 @@ function WorkflowNodeCard({
               sx={{
                 width: 2,
                 height: "100%",
-                bgcolor: connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : "#e2e8f0",
+                bgcolor: canShineConnection ? "transparent" : connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : "#e2e8f0",
+                backgroundImage: canShineConnection ? "linear-gradient(180deg, #e2e8f0 0%, #e2e8f0 28%, #ffffff 42%, #a855f7 49%, #22c55e 54%, #e2e8f0 68%, #e2e8f0 100%)" : "none",
+                backgroundSize: canShineConnection ? "100% 260%" : "auto",
+                backgroundPosition: canShineConnection ? "0 -130%" : "0 0",
                 borderRadius: 999,
+                boxShadow: canShineConnection ? "0 0 10px rgba(128, 26, 235, 0.16)" : "none",
+                animation: canShineConnection ? "connectionLineShine 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite" : "none",
+                animationDelay: reviewLineDelay,
+                "@keyframes connectionLineShine": {
+                  "0%": { backgroundPosition: "0 -130%", boxShadow: "0 0 0 rgba(128, 26, 235, 0)" },
+                  "18%": { backgroundPosition: "0 -130%", boxShadow: "0 0 0 rgba(128, 26, 235, 0)" },
+                  "48%": { backgroundPosition: "0 130%", boxShadow: "0 0 12px rgba(128, 26, 235, 0.32)" },
+                  "100%": { backgroundPosition: "0 130%", boxShadow: "0 0 0 rgba(128, 26, 235, 0)" },
+                },
               }}
             />
             {connectionStatus !== "normal" && <ConnectionStatusBadge status={connectionStatus} />}
