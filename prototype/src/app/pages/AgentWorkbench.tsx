@@ -183,6 +183,8 @@ const customerMcpService: McpService = {
   version: "V1.1.0",
 };
 
+const inputSourceWarningText = "输入配置异常，请检查。";
+
 const demoSampleFile: SampleFileItem = {
   id: "demo-policy-sample",
   name: "医保政策样例.pdf",
@@ -860,11 +862,27 @@ function getNodeWarnings(nodes: ToolNode[]) {
       warnings[node.nodeId] = [...(warnings[node.nodeId] ?? []), `${node.toolName} 当前不可用于新处理方案`];
     }
     if (isInputSourceInvalid(node, nodes)) {
-      warnings[node.nodeId] = [...(warnings[node.nodeId] ?? []), "输入配置异常，请检查。"];
+      warnings[node.nodeId] = [...(warnings[node.nodeId] ?? []), inputSourceWarningText];
     }
   });
 
   return warnings;
+}
+
+function getNodeDisplayWarnings(warnings: Record<string, string[]>) {
+  return Object.fromEntries(
+    Object.entries(warnings)
+      .map(([nodeId, nodeWarnings]) => [nodeId, nodeWarnings.filter((warning) => warning !== inputSourceWarningText)] as const)
+      .filter(([, nodeWarnings]) => nodeWarnings.length > 0),
+  );
+}
+
+function getNodeInputIssueMap(nodes: ToolNode[]) {
+  return Object.fromEntries(nodes.map((node) => [node.nodeId, isInputSourceInvalid(node, nodes)]));
+}
+
+function sectionHasInputIssue(section: { nodes: ToolNode[] }, inputIssueMap: Record<string, boolean>) {
+  return section.nodes.some((node) => inputIssueMap[node.nodeId]);
 }
 
 function getPlanProblems(nodes: ToolNode[]) {
@@ -906,7 +924,8 @@ export function AgentWorkbench() {
   const categories = useMemo(() => ["全部", ...Array.from(new Set(toolCatalog.map((tool) => tool.category)))], []);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
   const nodeWarnings = useMemo(() => getNodeWarnings(planNodes), [planNodes]);
-  const displayedNodeWarnings = isAgentRunning ? {} : nodeWarnings;
+  const inputIssueMap = useMemo(() => getNodeInputIssueMap(planNodes), [planNodes]);
+  const displayedNodeWarnings = useMemo(() => (isAgentRunning ? {} : getNodeDisplayWarnings(nodeWarnings)), [isAgentRunning, nodeWarnings]);
   const allProblems = getPlanProblems(planNodes);
   const visibleProblems = isAgentRunning || planNodes.length === 0 ? [] : allProblems;
   const canEdit = !confirmed && !isAgentRunning;
@@ -1564,47 +1583,55 @@ export function AgentWorkbench() {
                 ) : (
                   <Box sx={{ position: "relative" }}>
                     <Stack spacing={0}>
-                      {categorySections.map((section, index) => (
-                        <WorkflowNodeCard
-                          key={section.sectionId}
-                          index={index}
-                          total={categorySections.length}
-                          section={section}
-                          connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
-                          runtimeStates={nodeRuntimeStates}
-                          canEdit={canEdit}
-                          isDragging={draggingCategory === section.sectionId}
-                          insertPosition={dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : null}
-                          warnings={displayedNodeWarnings}
-                          onEditTool={(nodeId) => setEditingNodeId(nodeId)}
-                          onRemoveTool={removeNode}
-                          onToggleTool={toggleToolExpanded}
-                          onNodeDragStart={(event) => {
-                            event.dataTransfer.effectAllowed = "move";
-                            setDraggingCategory(section.sectionId);
-                          }}
-                          onNodeDragOver={(event) => {
-                            if (!draggingCategory || draggingCategory === section.sectionId) {
+                      {categorySections.map((section, index) => {
+                        const nextSection = categorySections[index + 1];
+                        const connectionKey = nextSection ? getConnectionKey(section.category, nextSection.category) : "";
+                        const connectionStatus = nextSection
+                          ? connectionStates[connectionKey] ?? (!isAgentRunning && sectionHasInputIssue(nextSection, inputIssueMap) ? "error" : "normal")
+                          : "normal";
+                        return (
+                          <WorkflowNodeCard
+                            key={section.sectionId}
+                            index={index}
+                            total={categorySections.length}
+                            section={section}
+                            connectionStatus={connectionStatus}
+                            hasInputIssue={!isAgentRunning && sectionHasInputIssue(section, inputIssueMap)}
+                            runtimeStates={nodeRuntimeStates}
+                            canEdit={canEdit}
+                            isDragging={draggingCategory === section.sectionId}
+                            insertPosition={dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : null}
+                            warnings={displayedNodeWarnings}
+                            onEditTool={(nodeId) => setEditingNodeId(nodeId)}
+                            onRemoveTool={removeNode}
+                            onToggleTool={toggleToolExpanded}
+                            onNodeDragStart={(event) => {
+                              event.dataTransfer.effectAllowed = "move";
+                              setDraggingCategory(section.sectionId);
+                            }}
+                            onNodeDragOver={(event) => {
+                              if (!draggingCategory || draggingCategory === section.sectionId) {
+                                setDragInsertTarget(null);
+                                return;
+                              }
+                              const rect = event.currentTarget.getBoundingClientRect();
+                              const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                              setDragInsertTarget((current) => (
+                                current?.sectionId === section.sectionId && current.position === position
+                                  ? current
+                                  : { sectionId: section.sectionId, position }
+                              ));
+                            }}
+                            onNodeDragEnd={() => {
+                              setDraggingCategory(null);
                               setDragInsertTarget(null);
-                              return;
-                            }
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-                            setDragInsertTarget((current) => (
-                              current?.sectionId === section.sectionId && current.position === position
-                                ? current
-                                : { sectionId: section.sectionId, position }
-                            ));
-                          }}
-                          onNodeDragEnd={() => {
-                            setDraggingCategory(null);
-                            setDragInsertTarget(null);
-                          }}
-                          onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId, dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : "before")}
-                          onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
-                          onToolDrop={onDropNode}
-                        />
-                      ))}
+                            }}
+                            onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId, dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : "before")}
+                            onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
+                            onToolDrop={onDropNode}
+                          />
+                        );
+                      })}
                     </Stack>
                   </Box>
                 )}
@@ -1825,7 +1852,7 @@ function ToolRunResultCard({ toolRun }: { toolRun: ToolRunResult }) {
 
 function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
   const config = {
-    error: { title: "衔接异常", color: "#f97316", bgcolor: "#fff7ed", border: "#fed7aa", icon: <ErrorOutline sx={{ fontSize: 15 }} /> },
+    error: { title: "输入承接异常", color: "#f97316", bgcolor: "#fff7ed", border: "#fed7aa", icon: <ErrorOutline sx={{ fontSize: 15 }} /> },
     resolving: { title: "解决中", color: "#7c3aed", bgcolor: "#f5f3ff", border: "#ddd6fe", icon: <Sync sx={{ fontSize: 15, animation: "spin 1.1s linear infinite" }} /> },
     resolved: { title: "已解决", color: "#16a34a", bgcolor: "#f0fdf4", border: "#bbf7d0", icon: <CheckCircleOutline sx={{ fontSize: 15 }} /> },
     normal: { title: "", color: "#64748b", bgcolor: "#fff", border: "#e2e8f0", icon: null },
@@ -1875,6 +1902,7 @@ function WorkflowNodeCard({
   total,
   section,
   connectionStatus,
+  hasInputIssue,
   runtimeStates,
   canEdit,
   isDragging,
@@ -1894,6 +1922,7 @@ function WorkflowNodeCard({
   total: number;
   section: { sectionId: string; category: string; nodes: ToolNode[] };
   connectionStatus: ConnectionStatus;
+  hasInputIssue: boolean;
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
   isDragging: boolean;
@@ -1913,7 +1942,7 @@ function WorkflowNodeCard({
   const hasWarning = nodeProblems.length > 0;
   const isCardBuilding = section.nodes.some((node) => ["building", "selectingTool", "configuring"].includes(runtimeStates[node.nodeId]?.status ?? ""));
   const isSectionRunning = section.nodes.some((node) => runtimeStates[node.nodeId]?.status === "running");
-  const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : "#111827";
+  const sequenceBg = isSectionRunning ? "#7c3aed" : "#111827";
 
   return (
     <Box
@@ -2062,7 +2091,8 @@ function WorkflowNodeCard({
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography sx={{ fontSize: 14, fontWeight: 900, color: "#0f172a", lineHeight: 1.3 }}>{section.category}</Typography>
           </Box>
-          {hasWarning && <Chip label="需处理" size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#fff7ed", color: "#c2410c" }} />}
+          {hasInputIssue && <Chip label="输入异常" size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#fff7ed", color: "#c2410c" }} />}
+          {hasWarning && <Chip label="需处理" size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#fef2f2", color: "#dc2626" }} />}
         </Box>
 
         <Stack spacing={0.8} sx={{ p: 1.2 }}>
