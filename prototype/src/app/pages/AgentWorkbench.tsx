@@ -27,6 +27,8 @@ import {
 } from "@mui/material";
 import {
   Add,
+  ArrowDownward,
+  ArrowUpward,
   AutoAwesome,
   Close,
   DeleteOutline,
@@ -691,10 +693,6 @@ export function AgentWorkbench() {
   };
 
   const confirmPlan = () => {
-    if (!allCategoriesConfirmed) {
-      toast.error("请先确认所有分类方案");
-      return;
-    }
     if (allProblems.length > 0) {
       toast.error("当前方案仍存在校验问题");
       return;
@@ -745,6 +743,20 @@ export function AgentWorkbench() {
     setPlanNodes(next);
     setHasManualEdits(true);
     setDraggingNodeId(null);
+  };
+
+  const moveNodeStep = (nodeId: string, direction: "up" | "down") => {
+    if (!canEdit) return;
+    setPlanNodes((current) => {
+      const index = current.findIndex((node) => node.nodeId === nodeId);
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (index < 0 || targetIndex < 0 || targetIndex >= current.length) return current;
+      const next = [...current];
+      const [moved] = next.splice(index, 1);
+      next.splice(targetIndex, 0, { ...moved, adjusted: true });
+      return next;
+    });
+    setHasManualEdits(true);
   };
 
   const changeParam = (nodeId: string, paramId: string, value: ToolParam["value"]) => {
@@ -836,53 +848,53 @@ export function AgentWorkbench() {
           </Tabs>
 
           {rightTab === 1 ? (
-            <Box sx={{ p: 1.5, minHeight: 0, overflow: "auto", flex: 1 }}>
-              <Stack spacing={1.2}>
-	                <Box>
-	                  <Stack direction="row" spacing={1} alignItems="flex-start" justifyContent="space-between">
-	                    <Box sx={{ minWidth: 0 }}>
-	                      <Typography sx={{ fontSize: 12, color: "#64748b" }}>末级类目：{displayCategory} · {displayFormType}</Typography>
-	                    </Box>
-                    <Tooltip title="添加工具">
-                      <span>
-                        <IconButton size="small" aria-label="添加工具" disabled={!canEdit || allCategoriesConfirmed} onClick={openAddTool} sx={{ width: 30, height: 30, bgcolor: "#801AEB", color: "#fff", borderRadius: "8px", "&:hover": { bgcolor: "#6D16C9" }, "&.Mui-disabled": { bgcolor: "#e5e7eb", color: "#9ca3af" } }}>
-                          <Add fontSize="small" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
+            <Box sx={{ minHeight: 0, display: "flex", flexDirection: "column", flex: 1 }}>
+              <Box sx={{ px: 1.5, py: 1.25, borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>{displayCategory} · {displayFormType}</Typography>
+                  <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                    <Chip label={`${planNodes.length} 个工具`} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#eff6ff", color: "#2563eb" }} />
+                    <Chip label={confirmed ? "已保存" : allProblems.length ? "存在问题" : "待确认"} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: confirmed ? "#f0fdf4" : allProblems.length ? "#fef2f2" : "#f8fafc", color: confirmed ? "#16a34a" : allProblems.length ? "#dc2626" : "#64748b" }} />
                   </Stack>
                 </Box>
-
-                {categorySections.map((section) => (
-                  <PlanSection
-                    key={section.sectionId}
-                    category={section.category}
-                    nodes={section.nodes}
-                    allNodes={planNodes}
-                    canEdit={isSectionEditable(section.sectionId)}
-                    warnings={nodeWarnings}
-                    isConfirmed={confirmedCategories.has(section.sectionId)}
-                    canConfirm={canConfirmSection(section.sectionId)}
-                    canDragCategory={isSectionEditable(section.sectionId) && categorySections.length > 1}
-                    onConfirm={() => confirmCategory(section.sectionId)}
-                    canReedit={canReeditSection(section.sectionId)}
-                    onReedit={() => reopenCategory(section.sectionId)}
-                    onCategoryDragStart={() => setDraggingCategory(section.sectionId)}
-                    onCategoryDrop={() => {
-                      if (draggingCategory) moveCategoryTo(draggingCategory, section.sectionId);
-                    }}
-                    onRemove={removeNode}
-                    onExpand={(nodeId) => updateNode(nodeId, (node) => ({ ...node, expanded: !node.expanded }))}
-                    onEdit={(nodeId) => setEditingNodeId(nodeId)}
-                    onDragStart={setDraggingNodeId}
-                    onDrop={onDropNode}
-                  />
-                ))}
-
-                <Button startIcon={<FactCheck />} onClick={confirmPlan} disabled={!canEdit || !allCategoriesConfirmed || allProblems.length > 0} variant="contained" sx={{ mt: 1, bgcolor: (!allCategoriesConfirmed || allProblems.length) ? "#cbd5e1" : "#801AEB", borderRadius: "10px", textTransform: "none", "&:hover": { bgcolor: (!allCategoriesConfirmed || allProblems.length) ? "#cbd5e1" : "#6D16C9" } }}>
+                <Tooltip title="添加工具">
+                  <span>
+                    <IconButton size="small" aria-label="添加工具" disabled={!canEdit} onClick={openAddTool} sx={{ width: 30, height: 30, bgcolor: "#801AEB", color: "#fff", borderRadius: "8px", "&:hover": { bgcolor: "#6D16C9" }, "&.Mui-disabled": { bgcolor: "#e5e7eb", color: "#9ca3af" } }}>
+                      <Add fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              </Box>
+              <Box sx={{ p: 1.5, minHeight: 0, overflow: "auto", flex: 1 }}>
+                <Stack spacing={0}>
+                  {planNodes.map((node, index) => (
+                    <FlowStepCard
+                      key={node.nodeId}
+                      index={index}
+                      total={planNodes.length}
+                      node={node}
+                      allNodes={planNodes}
+                      canEdit={canEdit}
+                      warnings={nodeWarnings[node.nodeId] ?? []}
+                      onEdit={() => setEditingNodeId(node.nodeId)}
+                      onRemove={() => removeNode(node.nodeId)}
+                      onMoveUp={() => moveNodeStep(node.nodeId, "up")}
+                      onMoveDown={() => moveNodeStep(node.nodeId, "down")}
+                      onToggleExpand={() => updateNode(node.nodeId, (item) => ({ ...item, expanded: !item.expanded }))}
+                    />
+                  ))}
+                </Stack>
+              </Box>
+              <Box sx={{ p: 1.5, borderTop: "1px solid #EEF2F7", bgcolor: "#fff" }}>
+                {allProblems.length > 0 && (
+                  <Box sx={{ mb: 1, p: 1, borderRadius: "8px", bgcolor: "#fef2f2", border: "1px solid #fecaca" }}>
+                    <Typography sx={{ fontSize: 12, color: "#b91c1c" }}>当前方案存在 {allProblems.length} 个校验问题，请处理后保存。</Typography>
+                  </Box>
+                )}
+                <Button fullWidth startIcon={<FactCheck />} onClick={confirmPlan} disabled={!canEdit || allProblems.length > 0} variant="contained" sx={{ bgcolor: allProblems.length ? "#cbd5e1" : "#801AEB", borderRadius: "10px", textTransform: "none", "&:hover": { bgcolor: allProblems.length ? "#cbd5e1" : "#6D16C9" } }}>
                   保存为处理方案
                 </Button>
-              </Stack>
+              </Box>
             </Box>
           ) : (
             <Box sx={{ p: 2, color: "#94a3b8", fontSize: 13 }}>暂无待展示内容。</Box>
@@ -922,6 +934,107 @@ export function AgentWorkbench() {
         onParamChange={changeParam}
         onToggleShowOnPage={toggleParamShowOnPage}
       />
+    </Box>
+  );
+}
+
+function FlowStepCard({
+  index,
+  total,
+  node,
+  allNodes,
+  canEdit,
+  warnings,
+  onEdit,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
+  onToggleExpand,
+}: {
+  index: number;
+  total: number;
+  node: ToolNode;
+  allNodes: ToolNode[];
+  canEdit: boolean;
+  warnings: string[];
+  onEdit: () => void;
+  onRemove: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onToggleExpand: () => void;
+}) {
+  const inputParts = getInputSourceParts(node, allNodes);
+  const outputs = node.outputs.slice(0, node.expanded ? node.outputs.length : 1);
+  const configParams = node.params.filter((param) => param.id !== node.inputParamId && isParamVisible(node, param));
+  const keyParams = configParams.filter((param) => param.required).slice(0, node.expanded ? 4 : 2);
+  const hasInputWarning = warnings.includes("输入配置异常，请检查。");
+  const hasWarning = warnings.length > 0;
+
+  return (
+    <Box sx={{ display: "grid", gridTemplateColumns: "34px minmax(0, 1fr)", columnGap: 1.1, position: "relative" }}>
+      <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <Box sx={{ width: 28, height: 28, borderRadius: "50%", bgcolor: hasWarning ? "#f97316" : "#801AEB", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800 }}>
+          {String(index + 1).padStart(2, "0")}
+        </Box>
+        {index < total - 1 && <Box sx={{ width: 2, flex: 1, minHeight: 24, bgcolor: "#e2e8f0", my: 0.5 }} />}
+      </Box>
+
+      <Box sx={{ mb: index < total - 1 ? 1.25 : 0, border: "1px solid", borderColor: hasInputWarning ? "#ef4444" : hasWarning ? "#fed7aa" : "#E0E8F2", borderRadius: "10px", bgcolor: hasWarning ? "#fffaf0" : "#fff", overflow: "hidden" }}>
+        <Box sx={{ px: 1.25, py: 1, display: "flex", alignItems: "center", gap: 0.75, borderBottom: "1px solid #EEF2F7" }}>
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Stack direction="row" spacing={0.6} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>{node.toolName}</Typography>
+              <Chip label={node.category} size="small" sx={{ height: 19, fontSize: 10, bgcolor: node.sourceType === "system" ? "#f5f3ff" : "#eff6ff", color: node.sourceType === "system" ? "#6d28d9" : "#2563eb" }} />
+              {hasWarning && <Chip label="需处理" size="small" sx={{ height: 19, fontSize: 10, bgcolor: "#fff7ed", color: "#c2410c" }} />}
+            </Stack>
+          </Box>
+          <Tooltip title="上移"><span><IconButton disabled={!canEdit || index === 0} size="small" onClick={onMoveUp} sx={{ color: "#64748b", width: 24, height: 24 }}><ArrowUpward sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
+          <Tooltip title="下移"><span><IconButton disabled={!canEdit || index === total - 1} size="small" onClick={onMoveDown} sx={{ color: "#64748b", width: 24, height: 24 }}><ArrowDownward sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
+          <Tooltip title="编辑"><span><IconButton disabled={!canEdit} size="small" onClick={onEdit} sx={{ color: "#801AEB", width: 24, height: 24 }}><EditOutlined sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+          <Tooltip title="删除"><span><IconButton disabled={!canEdit} size="small" onClick={onRemove} sx={{ color: "#ef4444", width: 24, height: 24 }}><DeleteOutline sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+          <IconButton size="small" onClick={onToggleExpand} sx={{ color: "#64748b", width: 24, height: 24 }}>{node.expanded ? <ExpandLess sx={{ fontSize: 17 }} /> : <ExpandMore sx={{ fontSize: 17 }} />}</IconButton>
+        </Box>
+
+        <Stack spacing={0.85} sx={{ p: 1.25 }}>
+          {warnings.length > 0 && (
+            <Stack spacing={0.5}>
+              {warnings.map((warning) => (
+                <Stack key={warning} direction="row" spacing={0.6} alignItems="flex-start">
+                  <WarningAmber sx={{ fontSize: 14, color: hasInputWarning ? "#dc2626" : "#c2410c", mt: "2px" }} />
+                  <Typography sx={{ fontSize: 11.5, color: hasInputWarning ? "#b91c1c" : "#9a3412", lineHeight: 1.5 }}>{warning}</Typography>
+                </Stack>
+              ))}
+            </Stack>
+          )}
+
+          <Box>
+            <Typography sx={{ fontSize: 11, color: "#94a3b8", fontWeight: 800, mb: 0.3 }}>输入</Typography>
+            <Typography sx={{ fontSize: 12, color: hasInputWarning ? "#c2410c" : "#334155", lineHeight: 1.5, wordBreak: "break-word" }}>{inputParts.paramName}：{inputParts.source}</Typography>
+          </Box>
+
+          <Box>
+            <Typography sx={{ fontSize: 11, color: "#94a3b8", fontWeight: 800, mb: 0.3 }}>输出</Typography>
+            <Stack spacing={0.45}>
+              {outputs.map((output) => (
+                <Typography key={output.id} sx={{ fontSize: 12, color: "#334155", lineHeight: 1.5, wordBreak: "break-word" }}>{output.label}：{output.path}</Typography>
+              ))}
+            </Stack>
+          </Box>
+
+          <Box>
+            <Typography sx={{ fontSize: 11, color: "#94a3b8", fontWeight: 800, mb: 0.3 }}>关键参数</Typography>
+            {keyParams.length ? (
+              <Stack spacing={0.35}>
+                {keyParams.map((param) => (
+                  <Typography key={param.id} sx={{ fontSize: 12, color: "#334155", lineHeight: 1.5, wordBreak: "break-word" }}>{param.label}：{formatParamValue(param.value)}</Typography>
+                ))}
+              </Stack>
+            ) : (
+              <Typography sx={{ fontSize: 12, color: "#64748b" }}>无必填参数</Typography>
+            )}
+          </Box>
+        </Stack>
+      </Box>
     </Box>
   );
 }
