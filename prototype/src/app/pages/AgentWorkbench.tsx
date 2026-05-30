@@ -2167,11 +2167,6 @@ function ToolRuntimeRow({
         </Box>
         {status === "configuring" && <CircularProgress size={16} sx={{ color: "#c2410c" }} />}
         {isConfigured && <CheckCircleOutline sx={{ fontSize: 16, color: "#16a34a" }} />}
-        {!runtimeExpanded && (
-          <Typography sx={{ fontSize: 11, color: "#94a3b8", width: 38, textAlign: "right" }}>
-            {isExpanded ? "收起" : "展开"}
-          </Typography>
-        )}
         {canEdit && (
           <Stack className="tool-actions" direction="row" spacing={0.25} onClick={(event) => event.stopPropagation()} sx={{ opacity: 0, pointerEvents: "none", transition: "opacity 0.16s ease" }}>
             <Tooltip title="编辑工具配置"><span><IconButton disabled={!canEdit} size="small" onClick={onEdit} sx={{ color: "#801AEB", width: 24, height: 24 }}><EditOutlined sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
