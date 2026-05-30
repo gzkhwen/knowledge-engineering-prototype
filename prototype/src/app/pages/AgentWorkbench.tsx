@@ -32,7 +32,6 @@ import {
   CheckCircleOutline,
   Close,
   DeleteOutline,
-  DragIndicator,
   EditOutlined,
   ErrorOutline,
   FactCheck,
@@ -1492,8 +1491,7 @@ function WorkflowNodeCard({
   const isCardBuilding = section.nodes.some((node) => ["building", "selectingTool", "configuring"].includes(runtimeStates[node.nodeId]?.status ?? ""));
   const isReviewing = isReviewScanActive;
   const isSectionRunning = section.nodes.some((node) => runtimeStates[node.nodeId]?.status === "running");
-  const isSectionSuccess = section.nodes.length > 0 && section.nodes.every((node) => runtimeStates[node.nodeId]?.status === "success");
-  const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : isSectionSuccess ? "#16a34a" : isReviewing ? "#801AEB" : "#111827";
+  const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : isReviewing ? "#801AEB" : "#111827";
 
   return (
     <Box sx={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr)", columnGap: 1.1 }}>
@@ -1519,7 +1517,7 @@ function WorkflowNodeCard({
             },
           }}
         >
-          {isSectionRunning ? <CircularProgress size={14} color="inherit" /> : isSectionSuccess ? <CheckCircleOutline sx={{ fontSize: 16 }} /> : String(index + 1).padStart(2, "0")}
+          {isSectionRunning ? <CircularProgress size={14} color="inherit" /> : String(index + 1).padStart(2, "0")}
         </Box>
         {index < total - 1 && (
           <Box sx={{ position: "relative", width: 24, flex: 1, minHeight: 32, my: 0.5, display: "flex", justifyContent: "center" }}>
@@ -1564,10 +1562,8 @@ function WorkflowNodeCard({
         }}
       >
         <Box sx={{ px: 1.4, py: 1.15, display: "flex", alignItems: "center", gap: 0.75, background: "linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)", borderBottom: "1px solid #EEF2F7" }}>
-          {canEdit && <DragIndicator sx={{ color: "#94a3b8", cursor: "grab", fontSize: 19, flexShrink: 0 }} />}
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography sx={{ fontSize: 14, fontWeight: 900, color: "#0f172a", lineHeight: 1.3 }}>{section.category}节点</Typography>
-            <Typography sx={{ mt: 0.25, fontSize: 11.5, color: "#64748b" }}>{section.nodes.length} 个工具</Typography>
           </Box>
           {hasWarning && <Chip label="需处理" size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#fff7ed", color: "#c2410c" }} />}
         </Box>
@@ -1586,6 +1582,10 @@ function WorkflowNodeCard({
 
           {section.nodes.map((node, toolIndex) => {
             const toolWarnings = warnings[node.nodeId] ?? [];
+            const runtimeState = runtimeStates[node.nodeId];
+            if (runtimeState?.status === "building" || runtimeState?.status === "selectingTool") {
+              return <ToolPendingRow key={node.nodeId} status={runtimeState.status} />;
+            }
             return (
               <ToolRuntimeRow
                 key={node.nodeId}
@@ -1594,7 +1594,7 @@ function WorkflowNodeCard({
                 canEdit={canEdit}
                 canDrag={canEdit && section.nodes.length > 1}
                 warnings={toolWarnings}
-                runtimeState={runtimeStates[node.nodeId]}
+                runtimeState={runtimeState}
                 onEdit={() => onEditTool(node.nodeId)}
                 onRemove={() => onRemoveTool(node.nodeId)}
                 onDragStart={(event) => { event.stopPropagation(); onToolDragStart(node.nodeId); }}
@@ -1604,6 +1604,38 @@ function WorkflowNodeCard({
             );
           })}
         </Stack>
+      </Box>
+    </Box>
+  );
+}
+
+function ToolPendingRow({ status }: { status: "building" | "selectingTool" }) {
+  return (
+    <Box
+      sx={{
+        px: 1,
+        py: 0.95,
+        borderRadius: "10px",
+        bgcolor: "#fbf7ff",
+        border: "1px dashed #c4b5fd",
+        display: "flex",
+        alignItems: "center",
+        gap: 0.8,
+        animation: "fadeInTool 0.28s ease-out both",
+        "@keyframes fadeInTool": {
+          from: { opacity: 0, transform: "translateY(4px)" },
+          to: { opacity: 1, transform: "translateY(0)" },
+        },
+      }}
+    >
+      <CircularProgress size={14} sx={{ color: "#801AEB" }} />
+      <Box sx={{ minWidth: 0 }}>
+        <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>
+          {status === "building" ? "正在创建节点..." : "正在选择工具..."}
+        </Typography>
+        <Typography sx={{ mt: 0.15, fontSize: 11, color: "#7c3aed" }}>
+          {status === "building" ? "Agent 正在确定节点位置" : "工具选择完成后显示工具模块"}
+        </Typography>
       </Box>
     </Box>
   );
@@ -1636,7 +1668,7 @@ function ToolRuntimeRow({
 }) {
   const status = runtimeState?.status ?? "done";
   const isExpanded = status === "configuring";
-  const isActive = ["building", "selectingTool", "configuring", "running"].includes(status);
+  const isActive = ["configuring", "running"].includes(status);
   const visibleParamCount = runtimeState?.visibleParamCount ?? 0;
   const visibleParams = node.params.filter((param) => isParamVisible(node, param)).slice(0, Math.max(visibleParamCount, 0));
   const statusText = {
@@ -1669,10 +1701,16 @@ function ToolRuntimeRow({
         bgcolor: warnings.length ? "#fff7ed" : isActive ? "#fbf7ff" : status === "success" ? "#f0fdf4" : "#f8fafc",
         border: `1px solid ${warnings.length ? "#fed7aa" : isActive ? "#ddd6fe" : status === "success" ? "#bbf7d0" : "#e2e8f0"}`,
         boxShadow: isActive ? "0 8px 20px rgba(128, 26, 235, 0.08)" : "none",
+        animation: "fadeInTool 0.32s ease-out both",
+        transition: "background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease",
+        "&:hover .tool-actions": { opacity: 1, pointerEvents: "auto" },
+        "@keyframes fadeInTool": {
+          from: { opacity: 0, transform: "translateY(5px)" },
+          to: { opacity: 1, transform: "translateY(0)" },
+        },
       }}
     >
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-        {canDrag && <DragIndicator sx={{ color: "#94a3b8", cursor: "grab", fontSize: 17, flexShrink: 0 }} />}
         <Box sx={{ width: 22, height: 22, borderRadius: "8px", bgcolor: "#fff", color: statusColor, border: `1px solid ${isActive ? "#ddd6fe" : "#e2e8f0"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
           {status === "running" ? <CircularProgress size={12} color="inherit" /> : status === "success" ? <CheckCircleOutline sx={{ fontSize: 14 }} /> : index + 1}
         </Box>
@@ -1683,11 +1721,23 @@ function ToolRuntimeRow({
           {statusText && <Typography sx={{ mt: 0.15, fontSize: 11, color: statusColor }}>{statusText}</Typography>}
         </Box>
         {status === "configuring" && <CircularProgress size={16} sx={{ color: "#c2410c" }} />}
-        {canEdit && status !== "building" && status !== "selectingTool" && <Tooltip title="编辑工具配置"><span><IconButton disabled={!canEdit} size="small" onClick={onEdit} sx={{ color: "#801AEB", width: 24, height: 24 }}><EditOutlined sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>}
-        {canEdit && <Tooltip title="删除工具"><span><IconButton disabled={!canEdit} size="small" onClick={onRemove} sx={{ color: "#ef4444", width: 24, height: 24 }}><DeleteOutline sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>}
+        {canEdit && (
+          <Stack className="tool-actions" direction="row" spacing={0.25} sx={{ opacity: 0, pointerEvents: "none", transition: "opacity 0.16s ease" }}>
+            <Tooltip title="编辑工具配置"><span><IconButton disabled={!canEdit} size="small" onClick={onEdit} sx={{ color: "#801AEB", width: 24, height: 24 }}><EditOutlined sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
+            <Tooltip title="删除工具"><span><IconButton disabled={!canEdit} size="small" onClick={onRemove} sx={{ color: "#ef4444", width: 24, height: 24 }}><DeleteOutline sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
+          </Stack>
+        )}
       </Box>
-      {isExpanded && (
-        <Box sx={{ mt: 1, p: 1, borderRadius: "9px", bgcolor: "#fff", border: "1px solid #fed7aa" }}>
+      <Box
+        sx={{
+          maxHeight: isExpanded ? 220 : 0,
+          opacity: isExpanded ? 1 : 0,
+          overflow: "hidden",
+          mt: isExpanded ? 1 : 0,
+          transition: "max-height 0.34s ease, opacity 0.22s ease, margin-top 0.34s ease",
+        }}
+      >
+        <Box sx={{ p: 1, borderRadius: "9px", bgcolor: "#fff", border: "1px solid #fed7aa" }}>
           <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: "#9a3412", mb: 0.75 }}>正在写入工具参数</Typography>
           <Stack spacing={0.55}>
             {visibleParams.length === 0 ? (
@@ -1700,7 +1750,7 @@ function ToolRuntimeRow({
             ))}
           </Stack>
         </Box>
-      )}
+      </Box>
     </Box>
   );
 }
