@@ -1,10 +1,11 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import {
   Box,
   Button,
   Checkbox,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -27,15 +28,11 @@ import {
 } from "@mui/material";
 import {
   Add,
-  ArrowDownward,
-  ArrowUpward,
   AutoAwesome,
   Close,
   DeleteOutline,
   DragIndicator,
   EditOutlined,
-  ExpandLess,
-  ExpandMore,
   FactCheck,
   Send,
   UploadFile,
@@ -46,6 +43,33 @@ import { dataStore } from "../store/DataStore";
 
 type ParamType = "text" | "textarea" | "number" | "select" | "multiSelect" | "switch" | "tags";
 type ChainType = "sampleFile" | "documentFile" | "rawText" | "cleanText" | "qaPairs";
+type SampleStatus = "已上传" | "已发送" | "试跑中" | "已完成";
+type AgentEventRole = "agent" | "user" | "thought";
+type AgentEventStatus = "done" | "running" | "pending";
+
+interface SampleFileItem {
+  id: string;
+  name: string;
+  type: string;
+  size: string;
+  status: SampleStatus;
+}
+
+interface SampleProcessResult {
+  fileId: string;
+  structure: string;
+  parserResult: string;
+  adapterResult: string;
+  storageTarget: string;
+}
+
+interface AgentEvent {
+  id: string;
+  role: AgentEventRole;
+  title: string;
+  content: string;
+  status?: AgentEventStatus;
+}
 
 interface ToolParam {
   id: string;
@@ -132,6 +156,34 @@ const customerMcpService: McpService = {
   name: "客户自建文档处理 MCP",
   version: "V1.1.0",
 };
+
+const demoSampleFile: SampleFileItem = {
+  id: "demo-policy-sample",
+  name: "医保政策样例.pdf",
+  type: "PDF",
+  size: "2.4 MB",
+  status: "已上传",
+};
+
+const initialAgentEvents: AgentEvent[] = [
+  {
+    id: "welcome",
+    role: "agent",
+    title: "处理方案生成助手",
+    content: "请上传样例文件并发送给我。我会读取样例、调研可用工具、试跑工具结果，并生成可落地为 Workflow DSL 的处理方案。",
+    status: "done",
+  },
+];
+
+function createSampleResult(file: SampleFileItem): SampleProcessResult {
+  return {
+    fileId: file.id,
+    structure: "识别到政策标题、适用范围、办理条件、材料清单、问答式说明等结构。",
+    parserResult: "客户自建解析工具返回 sections[].content，未声明标准 outputSchema。",
+    adapterResult: "已使用代码工具将 sections[].content 适配为 data.cleanBlocks，供分片工具继续处理。",
+    storageTarget: "分片结果写入 ES 索引 knowledge_chunks，返回 data.storageRef。",
+  };
+}
 
 const elevatedSelectMenuProps = {
   sx: { zIndex: 1600 },
@@ -431,7 +483,28 @@ function createInitialPlanNodes(): ToolNode[] {
   const splitter = createNode("chunk-splitter", { type: "upstream", sourceNodeId: code.nodeId, outputPath: "data.cleanBlocks" });
   const storage = createNode("system-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "content[0].text" });
-  return [parser, code, splitter, storage, qa];
+  const summary = createNode("summary", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+  return [parser, code, splitter, storage, qa, summary];
+}
+
+function createAgentDemoPlanNodes(): ToolNode[] {
+  const parser = createNode("medical-policy-parser", { type: "fixed" });
+  const adapter = createNode("system-code", { type: "upstream", sourceNodeId: parser.nodeId, outputPath: "sections" });
+  const splitter = createNode("recursive-separator-splitter", { type: "upstream", sourceNodeId: adapter.nodeId, outputPath: "data.cleanBlocks" });
+  const storage = createNode("system-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+  const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+  const summary = createNode("summary", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+  return [parser, adapter, splitter, storage, qa, summary].map((node) => ({ ...node, adjusted: true }));
+}
+
+function createAgentOptimizedPlanNodes(): ToolNode[] {
+  const parser = createNode("medical-policy-parser", { type: "fixed" });
+  const adapter = createNode("system-code", { type: "upstream", sourceNodeId: parser.nodeId, outputPath: "sections" });
+  const splitter = createNode("medical-policy-splitter", { type: "upstream", sourceNodeId: adapter.nodeId, outputPath: "data.cleanBlocks" });
+  const storage = createNode("system-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+  const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+  const keyword = createNode("keyword-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+  return [parser, adapter, splitter, storage, qa, keyword].map((node) => ({ ...node, adjusted: true }));
 }
 
 function getParamProblems(node: ToolNode, receivesExternalInput = false) {
@@ -475,29 +548,12 @@ function getInputSourceLabel(node: ToolNode, nodes: ToolNode[]) {
   const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
   return `${inputParam.label} <- ${sourceNode?.toolName ?? "来源已失效"} / ${node.inputSource.outputPath || "未配置取值路径"}`;
 }
-function getInputSourceParts(node: ToolNode, nodes: ToolNode[]) {
-  const inputParam = getToolInputParam(node);
-  if (!inputParam) return { paramName: "未指定输入参数", source: "未指定来源" };
-  if (node.inputSource.type !== "upstream") return { paramName: inputParam.label, source: getFixedInputSourceText(node, nodes) };
-  const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
-  return { paramName: inputParam.label, source: `${sourceNode?.toolName ?? "来源已失效"} / ${node.inputSource.outputPath || "未配置取值路径"}` };
-}
-
 function getOutputFormat(output: ToolOutput) {
   return output.desc.split(/[，,]/)[0] || "未知格式";
 }
 
 function getParamFormat(param: ToolParam) {
   return param.format ?? param.type;
-}
-
-function formatParamValue(value: ToolParam["value"]) {
-  if (Array.isArray(value)) return value.length ? value.join("、") : "未选择";
-  if (typeof value === "boolean") return value ? "开启" : "关闭";
-  if (typeof value === "number") return String(value);
-  const trimmed = value.trim();
-  if (!trimmed) return "未填写";
-  return trimmed.length > 48 ? `${trimmed.slice(0, 48)}...` : trimmed;
 }
 
 function isValidOutputPath(path?: string) {
@@ -599,6 +655,7 @@ function getPlanProblems(nodes: ToolNode[]) {
 
 export function AgentWorkbench() {
   const { projectId, categoryId, formType } = useParams<{ projectId: string; categoryId: string; formType: string }>();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const displayFormType = formType ? decodeURIComponent(formType) : "问答库";
   const displayCategory = useMemo(() => {
     if (!projectId || !categoryId) return "常见问题";
@@ -614,9 +671,12 @@ export function AgentWorkbench() {
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [draggingCategory, setDraggingCategory] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
-  const [confirmedCategories, setConfirmedCategories] = useState<Set<string>>(new Set());
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
-  const [hasManualEdits, setHasManualEdits] = useState(false);
+  const [sampleFiles, setSampleFiles] = useState<SampleFileItem[]>([]);
+  const [sampleResults, setSampleResults] = useState<SampleProcessResult[]>([]);
+  const [agentEvents, setAgentEvents] = useState<AgentEvent[]>(initialAgentEvents);
+  const [agentInput, setAgentInput] = useState("");
+  const [isAgentRunning, setIsAgentRunning] = useState(false);
 
   const categories = useMemo(() => ["全部", ...Array.from(new Set(toolCatalog.map((tool) => tool.category)))], []);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
@@ -633,6 +693,114 @@ export function AgentWorkbench() {
   const selectedToolAdded = currentTool ? addedToolIds.has(currentTool.id) && !currentTool.allowMultiple : false;
   const selectedToolCategoryConfirmed = false;
   const isNodeEditable = () => canEdit;
+
+  const appendAgentEvent = (event: Omit<AgentEvent, "id">) => {
+    const id = `${event.role}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setAgentEvents((current) => [...current, { ...event, id }]);
+    return id;
+  };
+
+  const updateAgentEvent = (id: string, patch: Partial<AgentEvent>) => {
+    setAgentEvents((current) => current.map((event) => (event.id === id ? { ...event, ...patch } : event)));
+  };
+
+  const addDemoSample = () => {
+    setSampleFiles((current) => (current.some((file) => file.id === demoSampleFile.id) ? current : [demoSampleFile, ...current]));
+    toast.success("已添加演示样例文件");
+  };
+
+  const handleSampleFileChange = (files: FileList | null) => {
+    if (!files?.length) return;
+    const nextFiles = Array.from(files).map((file) => ({
+      id: `${file.name}-${file.lastModified}`,
+      name: file.name,
+      type: file.name.split(".").pop()?.toUpperCase() || "FILE",
+      size: `${Math.max(file.size / 1024 / 1024, 0.01).toFixed(2)} MB`,
+      status: "已上传" as SampleStatus,
+    }));
+    setSampleFiles((current) => [...nextFiles, ...current.filter((file) => !nextFiles.some((nextFile) => nextFile.id === file.id))]);
+    toast.success(`已上传 ${nextFiles.length} 个样例文件`);
+  };
+
+  const sendSamplesToAgent = () => {
+    if (sampleFiles.length === 0) {
+      toast.error("请先上传或添加样例文件");
+      return;
+    }
+    setIsAgentRunning(true);
+    setRightTab(0);
+    setSampleFiles((current) => current.map((file) => ({ ...file, status: "已发送" })));
+    appendAgentEvent({
+      role: "user",
+      title: "发送样例文件",
+      content: `已发送 ${sampleFiles.length} 个样例文件，请生成正式的知识处理方案。`,
+      status: "done",
+    });
+    const readEventId = appendAgentEvent({
+      role: "thought",
+      title: "读取样例文件",
+      content: "解析文件类型、正文结构、标题层级和可抽取字段。",
+      status: "running",
+    });
+    setTimeout(() => {
+      updateAgentEvent(readEventId, { status: "done", content: "样例结构已识别：政策条款、办理条件、材料清单、问答说明。" });
+      setSampleFiles((current) => current.map((file) => ({ ...file, status: "试跑中" })));
+      const toolEventId = appendAgentEvent({
+        role: "thought",
+        title: "调研并试跑工具",
+        content: "从管理端工具分类中选择客户自建解析工具、系统代码工具、分片工具和数据存储工具。",
+        status: "running",
+      });
+      setTimeout(() => {
+        updateAgentEvent(toolEventId, { status: "done", content: "发现客户自建解析工具无标准输出声明，已通过代码工具建立 sections[].content 到 data.cleanBlocks 的适配。" });
+        const generatedPlan = createAgentDemoPlanNodes();
+        setPlanNodes(generatedPlan);
+        setConfirmed(false);
+        setSampleFiles((current) => current.map((file) => ({ ...file, status: "已完成" })));
+        setSampleResults(sampleFiles.map(createSampleResult));
+        setRightTab(1);
+        appendAgentEvent({
+          role: "agent",
+          title: "已生成处理方案",
+          content: "方案已同步到右侧：解析节点使用客户自建工具，系统工具节点包含代码适配与数据存储，后续节点可继续引用标准变量。",
+          status: "done",
+        });
+        setIsAgentRunning(false);
+        toast.success("Agent 已生成处理方案");
+      }, 900);
+    }, 900);
+  };
+
+  const sendAgentInstruction = () => {
+    const instruction = agentInput.trim();
+    if (!instruction) return;
+    setAgentInput("");
+    setIsAgentRunning(true);
+    appendAgentEvent({ role: "user", title: "调整意见", content: instruction, status: "done" });
+    const optimizeEventId = appendAgentEvent({
+      role: "thought",
+      title: "重新评估方案",
+      content: "根据新的处理目标重新检查工具链、变量承接和存储位置。",
+      status: "running",
+    });
+    setTimeout(() => {
+      setPlanNodes(createAgentOptimizedPlanNodes());
+      setConfirmed(false);
+      setRightTab(1);
+      updateAgentEvent(optimizeEventId, {
+        status: "done",
+        content: "已将分片工具调整为医保政策解析分片，并保留代码工具作为客户自建工具输出适配层。",
+      });
+      appendAgentEvent({
+        role: "agent",
+        title: "方案已调整",
+        content: "右侧流程已同步更新。代码工具继续输出 data.cleanBlocks，分片结果写入数据存储工具指定的 ES 目标。",
+        status: "done",
+      });
+      setIsAgentRunning(false);
+      toast.success("Agent 已调整处理方案");
+    }, 850);
+  };
 
   const updateNode = (nodeId: string, updater: (node: ToolNode) => ToolNode) => {
     setPlanNodes((current) => current.map((node) => (node.nodeId === nodeId ? updater(node) : node)));
@@ -655,7 +823,6 @@ export function AgentWorkbench() {
       inputSource,
     );
     setPlanNodes((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
-    setHasManualEdits(true);
     setAddDialogOpen(false);
     toast.success(`已添加工具，已归入${getPlanTitle(node.category)}`);
   };
@@ -664,17 +831,7 @@ export function AgentWorkbench() {
     if (!isNodeEditable(nodeId)) return;
     setPlanNodes((current) => current.filter((node) => node.nodeId !== nodeId));
     setEditingNodeId((current) => (current === nodeId ? null : current));
-    setHasManualEdits(true);
     toast.success("已删除工具节点");
-  };
-
-  const regenerateByAgent = () => {
-    if (!canEdit) return;
-    setPlanNodes(cloneNodes(initialPlanNodes));
-    setConfirmedCategories(new Set());
-    setEditingNodeId(null);
-    setHasManualEdits(false);
-    toast.success("已使用 Agent 最新生成方案覆盖当前编辑内容");
   };
 
   const confirmPlan = () => {
@@ -684,36 +841,6 @@ export function AgentWorkbench() {
     }
     setConfirmed(true);
     toast.success("处理方案已保存");
-  };
-
-  const confirmCategory = (sectionId: string) => {
-    const section = categorySections.find((item) => item.sectionId === sectionId);
-    if (!section || !canConfirmSection(sectionId)) {
-      toast.error("请按方案顺序依次确认");
-      return;
-    }
-    const sectionProblems = section?.nodes.flatMap((node) => nodeWarnings[node.nodeId] ?? []) ?? [];
-    if (sectionProblems.length > 0) {
-      toast.error(`${getPlanTitle(section.category)}存在校验问题`);
-      return;
-    }
-    setConfirmedCategories((current) => new Set([...current, sectionId]));
-    toast.success(`${getPlanTitle(section.category)}已确认`);
-  };
-
-  const reopenCategory = (sectionId: string) => {
-    const section = categorySections.find((item) => item.sectionId === sectionId);
-    if (!section || !canReeditSection(sectionId)) {
-      toast.error("后续方案已确认，不能重新编辑当前方案");
-      return;
-    }
-    setConfirmedCategories((current) => {
-      const next = new Set(current);
-      next.delete(sectionId);
-      return next;
-    });
-    setHasManualEdits(true);
-    toast.success(`${getPlanTitle(section.category)}已切换为可编辑`);
   };
 
   const onDropNode = (targetId: string) => {
@@ -726,34 +853,7 @@ export function AgentWorkbench() {
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, { ...moved, adjusted: true });
     setPlanNodes(next);
-    setHasManualEdits(true);
     setDraggingNodeId(null);
-  };
-
-  const moveNodeStep = (nodeId: string, direction: "up" | "down") => {
-    if (!canEdit) return;
-    setPlanNodes((current) => {
-      const index = current.findIndex((node) => node.nodeId === nodeId);
-      const targetIndex = direction === "up" ? index - 1 : index + 1;
-      if (index < 0 || targetIndex < 0 || targetIndex >= current.length) return current;
-      const next = [...current];
-      const [moved] = next.splice(index, 1);
-      next.splice(targetIndex, 0, { ...moved, adjusted: true });
-      return next;
-    });
-    setHasManualEdits(true);
-  };
-
-  const moveWorkflowNodeStep = (sectionId: string, direction: "up" | "down") => {
-    if (!canEdit) return;
-    const index = categorySections.findIndex((section) => section.sectionId === sectionId);
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (index < 0 || targetIndex < 0 || targetIndex >= categorySections.length) return;
-    const nextSections = [...categorySections];
-    const [moved] = nextSections.splice(index, 1);
-    nextSections.splice(targetIndex, 0, moved);
-    setPlanNodes(nextSections.flatMap((section) => section.nodes));
-    setHasManualEdits(true);
   };
 
   const changeParam = (nodeId: string, paramId: string, value: ToolParam["value"]) => {
@@ -763,19 +863,16 @@ export function AgentWorkbench() {
       adjusted: true,
       params: node.params.map((param) => (param.id === paramId ? { ...param, value } : param)),
     }));
-    setHasManualEdits(true);
   };
 
   const updateInputParam = (nodeId: string, inputParamId: string) => {
     if (!isNodeEditable(nodeId)) return;
     updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputParamId }));
-    setHasManualEdits(true);
   };
 
   const updateInputSource = (nodeId: string, source: InputSource) => {
     if (!isNodeEditable(nodeId)) return;
     updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputSource: source }));
-    setHasManualEdits(true);
   };
 
   const toggleParamShowOnPage = (nodeId: string, paramId: string) => {
@@ -784,11 +881,10 @@ export function AgentWorkbench() {
       ...node,
       params: node.params.map((param) => (param.id === paramId ? { ...param, showOnPage: !param.showOnPage } : param)),
     }));
-    setHasManualEdits(true);
   };
 
   const moveCategoryTo = (sectionId: string, targetSectionId: string) => {
-    if (!canEdit || sectionId === targetSectionId || confirmedCategories.has(sectionId) || confirmedCategories.has(targetSectionId)) return;
+    if (!canEdit || sectionId === targetSectionId) return;
     const from = categorySections.findIndex((section) => section.sectionId === sectionId);
     const to = categorySections.findIndex((section) => section.sectionId === targetSectionId);
     if (from < 0 || to < 0) return;
@@ -796,7 +892,6 @@ export function AgentWorkbench() {
     const [moved] = nextSections.splice(from, 1);
     nextSections.splice(to, 0, moved);
     setPlanNodes(nextSections.flatMap((section) => section.nodes));
-    setHasManualEdits(true);
     setDraggingCategory(null);
   };
 
@@ -805,17 +900,43 @@ export function AgentWorkbench() {
       <Box sx={{ display: "grid", gridTemplateColumns: "248px minmax(360px, 1fr) 420px", gap: 2, minHeight: 0, flex: 1 }}>
         <Paper elevation={0} sx={{ border: "1px solid #E0E8F2", borderRadius: "12px", bgcolor: "#fff", p: 1.5, minHeight: 0 }}>
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#374151", mb: 1 }}>样例文件上传</Typography>
-          <Box sx={{ border: "1px dashed #d8dce5", borderRadius: "10px", bgcolor: "#FBFCFF", p: 2, textAlign: "center" }}>
-            <UploadFile sx={{ color: "#9ca3af", mb: 0.5 }} />
-            <Typography sx={{ fontSize: 12, color: "#64748b" }}>点击上传或拖拽文件</Typography>
-            <Typography sx={{ fontSize: 11, color: "#9ca3af", mt: 0.5 }}>支持 PDF、Word、Excel</Typography>
+          <input
+            ref={fileInputRef}
+            hidden
+            multiple
+            type="file"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.txt"
+            onChange={(event) => handleSampleFileChange(event.target.files)}
+          />
+          <Box
+            onClick={() => fileInputRef.current?.click()}
+            sx={{ border: "1px dashed #cbd5e1", borderRadius: "12px", bgcolor: "#FBFCFF", p: 2, textAlign: "center", cursor: "pointer", transition: "0.18s", "&:hover": { borderColor: "#801AEB", bgcolor: "#faf5ff" } }}
+          >
+            <UploadFile sx={{ color: "#801AEB", mb: 0.5 }} />
+            <Typography sx={{ fontSize: 12, color: "#475569", fontWeight: 700 }}>点击上传样例文件</Typography>
+            <Typography sx={{ fontSize: 11, color: "#94a3b8", mt: 0.5 }}>支持 PDF、Word、Excel、TXT</Typography>
           </Box>
+          <Button fullWidth variant="text" onClick={addDemoSample} sx={{ mt: 0.75, fontSize: 12, color: "#801AEB", textTransform: "none" }}>导入演示样例</Button>
+          <Stack spacing={0.75} sx={{ mt: 1.25, maxHeight: 190, overflow: "auto" }}>
+            {sampleFiles.length === 0 ? (
+              <Box sx={{ bgcolor: "#F8FAFC", borderRadius: "10px", p: 1.25, color: "#94a3b8", fontSize: 12 }}>暂无样例文件</Box>
+            ) : sampleFiles.map((file) => (
+              <Box key={file.id} sx={{ p: 1, border: "1px solid #E2E8F0", borderRadius: "10px", bgcolor: "#fff", display: "flex", gap: 0.8, alignItems: "center" }}>
+                <Box sx={{ width: 30, height: 30, borderRadius: "8px", bgcolor: "#f1f5f9", color: "#475569", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800 }}>{file.type}</Box>
+                <Box sx={{ minWidth: 0, flex: 1 }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 700, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</Typography>
+                  <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>{file.size}</Typography>
+                </Box>
+                <Chip label={file.status} size="small" sx={{ height: 20, fontSize: 10, bgcolor: file.status === "已完成" ? "#f0fdf4" : file.status === "试跑中" ? "#fff7ed" : "#f8fafc", color: file.status === "已完成" ? "#16a34a" : file.status === "试跑中" ? "#c2410c" : "#64748b" }} />
+              </Box>
+            ))}
+          </Stack>
           <Divider sx={{ my: 2 }} />
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#374151", mb: 1 }}>已标记问题</Typography>
-          <Box sx={{ bgcolor: "#F8FAFC", borderRadius: "10px", p: 1.5, color: "#94a3b8", fontSize: 12 }}>当前暂无可发送问题</Box>
+          <Box sx={{ bgcolor: "#F8FAFC", borderRadius: "10px", p: 1.5, color: "#64748b", fontSize: 12, lineHeight: 1.5 }}>客户自建解析工具可能不声明输出，需要验证后置工具承接。</Box>
           <Stack spacing={1} sx={{ mt: 2 }}>
-            <Button disabled startIcon={<Send />} variant="contained" sx={{ textTransform: "none", bgcolor: "#ede9fe", color: "#8b5cf6" }}>发送所选文件给智能体</Button>
-            <Button disabled startIcon={<Send />} variant="outlined" sx={{ textTransform: "none" }}>发送所选问题给智能体</Button>
+            <Button disabled={sampleFiles.length === 0 || isAgentRunning} onClick={sendSamplesToAgent} startIcon={isAgentRunning ? <CircularProgress size={14} color="inherit" /> : <Send />} variant="contained" sx={{ textTransform: "none", bgcolor: "#801AEB", "&:hover": { bgcolor: "#6D16C9" }, "&.Mui-disabled": { bgcolor: "#ede9fe", color: "#8b5cf6" } }}>发送所选文件给智能体</Button>
+            <Button disabled={sampleFiles.length === 0 || isAgentRunning} onClick={sendSamplesToAgent} startIcon={<Send />} variant="outlined" sx={{ textTransform: "none", color: "#801AEB", borderColor: "#ddd6fe" }}>发送所选问题给智能体</Button>
           </Stack>
         </Paper>
 
@@ -825,15 +946,27 @@ export function AgentWorkbench() {
             <Typography sx={{ fontSize: 14, fontWeight: 700, color: "#1f2937" }}>处理方案生成助手</Typography>
           </Box>
           <Box sx={{ p: 2, flex: 1, overflow: "auto", bgcolor: "#FBFCFF" }}>
-            <Box sx={{ maxWidth: 560, bgcolor: "#fff", border: "1px solid #E0E8F2", borderRadius: "12px", p: 2 }}>
-              <Typography sx={{ fontSize: 13, color: "#374151", lineHeight: 1.7 }}>
-                已基于样例文件生成处理方案。右侧方案区展示管理端维护的工具分类与可用工具。
-              </Typography>
-            </Box>
+            <Stack spacing={1.1}>
+              {agentEvents.map((event) => <AgentEventCard key={event.id} event={event} />)}
+            </Stack>
           </Box>
           <Box sx={{ p: 1.5, borderTop: "1px solid #EEF2F7", display: "flex", gap: 1 }}>
-            <TextField fullWidth size="small" placeholder="输入问题或调整意见…" sx={{ "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 13 } }} />
-            <IconButton onClick={regenerateByAgent} disabled={!canEdit} sx={{ bgcolor: "#f5f3ff", color: "#801AEB", "&:hover": { bgcolor: "#ede9fe" } }}><Send /></IconButton>
+            <TextField
+              fullWidth
+              size="small"
+              value={agentInput}
+              placeholder="输入问题或调整意见，例如：政策条款要优先保留层级…"
+              onChange={(event) => setAgentInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.shiftKey) return;
+                event.preventDefault();
+                sendAgentInstruction();
+              }}
+              sx={{ "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 13 } }}
+            />
+            <IconButton onClick={sendAgentInstruction} disabled={!canEdit || isAgentRunning || !agentInput.trim()} sx={{ bgcolor: "#f5f3ff", color: "#801AEB", "&:hover": { bgcolor: "#ede9fe" }, "&.Mui-disabled": { bgcolor: "#f1f5f9", color: "#94a3b8" } }}>
+              {isAgentRunning ? <CircularProgress size={18} color="inherit" /> : <Send />}
+            </IconButton>
           </Box>
         </Paper>
 
@@ -844,7 +977,9 @@ export function AgentWorkbench() {
             <Tab label="历史版本" />
           </Tabs>
 
-          {rightTab === 1 ? (
+          {rightTab === 0 ? (
+            <SampleResultPanel files={sampleFiles} results={sampleResults} />
+          ) : rightTab === 1 ? (
             <Box sx={{ minHeight: 0, display: "flex", flexDirection: "column", flex: 1 }}>
               <Box sx={{ px: 1.5, py: 1.25, borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
                 <Box sx={{ minWidth: 0 }}>
@@ -875,8 +1010,10 @@ export function AgentWorkbench() {
                       warnings={nodeWarnings}
                       onEditTool={(nodeId) => setEditingNodeId(nodeId)}
                       onRemoveTool={removeNode}
-                      onMoveUp={() => moveWorkflowNodeStep(section.sectionId, "up")}
-                      onMoveDown={() => moveWorkflowNodeStep(section.sectionId, "down")}
+                      onNodeDragStart={() => setDraggingCategory(section.sectionId)}
+                      onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId)}
+                      onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
+                      onToolDrop={onDropNode}
                     />
                   ))}
                 </Stack>
@@ -893,7 +1030,7 @@ export function AgentWorkbench() {
               </Box>
             </Box>
           ) : (
-            <Box sx={{ p: 2, color: "#94a3b8", fontSize: 13 }}>暂无待展示内容。</Box>
+            <Box sx={{ p: 2, color: "#94a3b8", fontSize: 13 }}>暂无历史版本。</Box>
           )}
         </Paper>
       </Box>
@@ -934,6 +1071,72 @@ export function AgentWorkbench() {
   );
 }
 
+function AgentEventCard({ event }: { event: AgentEvent }) {
+  const isUser = event.role === "user";
+  const isThought = event.role === "thought";
+  return (
+    <Box sx={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start" }}>
+      <Box sx={{ maxWidth: isUser ? 520 : 580, p: 1.35, borderRadius: "13px", bgcolor: isUser ? "#801AEB" : isThought ? "#fff7ed" : "#fff", color: isUser ? "#fff" : "#111827", border: isUser ? "none" : `1px solid ${isThought ? "#fed7aa" : "#E0E8F2"}`, boxShadow: isUser ? "0 10px 22px rgba(128, 26, 235, 0.16)" : "0 8px 20px rgba(15, 23, 42, 0.04)" }}>
+        <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.45 }}>
+          {event.status === "running" ? <CircularProgress size={13} color="inherit" /> : isThought ? <AutoAwesome sx={{ fontSize: 15, color: "#c2410c" }} /> : null}
+          <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: isUser ? "#fff" : isThought ? "#9a3412" : "#111827" }}>{event.title}</Typography>
+          {event.status === "done" && isThought && <Chip label="完成" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#ffedd5", color: "#c2410c" }} />}
+        </Stack>
+        <Typography sx={{ fontSize: 13, lineHeight: 1.7, color: isUser ? "rgba(255,255,255,0.92)" : isThought ? "#7c2d12" : "#374151" }}>{event.content}</Typography>
+      </Box>
+    </Box>
+  );
+}
+
+function SampleResultPanel({ files, results }: { files: SampleFileItem[]; results: SampleProcessResult[] }) {
+  return (
+    <Box sx={{ p: 1.5, minHeight: 0, overflow: "auto", flex: 1 }}>
+      {files.length === 0 ? (
+        <Box sx={{ height: "100%", minHeight: 220, border: "1px dashed #d8dce5", borderRadius: "12px", bgcolor: "#FBFCFF", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", px: 3 }}>
+          <Box>
+            <UploadFile sx={{ color: "#94a3b8", mb: 1 }} />
+            <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#475569" }}>还没有样例文件</Typography>
+            <Typography sx={{ mt: 0.5, fontSize: 12, color: "#94a3b8" }}>上传并发送给 Agent 后，这里会展示试跑结果。</Typography>
+          </Box>
+        </Box>
+      ) : (
+        <Stack spacing={1}>
+          {files.map((file) => {
+            const result = results.find((item) => item.fileId === file.id);
+            return (
+              <Box key={file.id} sx={{ border: "1px solid #E0E8F2", borderRadius: "12px", bgcolor: "#fff", overflow: "hidden" }}>
+                <Box sx={{ px: 1.25, py: 1, bgcolor: "#FBFCFF", borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", gap: 0.8 }}>
+                  <Box sx={{ width: 28, height: 28, borderRadius: "8px", bgcolor: "#f1f5f9", color: "#475569", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800 }}>{file.type}</Box>
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</Typography>
+                    <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>{file.size}</Typography>
+                  </Box>
+                  <Chip label={file.status} size="small" sx={{ height: 20, fontSize: 10, bgcolor: file.status === "已完成" ? "#f0fdf4" : file.status === "试跑中" ? "#fff7ed" : "#f8fafc", color: file.status === "已完成" ? "#16a34a" : file.status === "试跑中" ? "#c2410c" : "#64748b" }} />
+                </Box>
+                <Stack spacing={0.8} sx={{ p: 1.25 }}>
+                  <ResultLine label="结构识别" value={result?.structure ?? "等待 Agent 试跑样例文件。"} />
+                  <ResultLine label="解析结果" value={result?.parserResult ?? "待生成"} />
+                  <ResultLine label="连接适配" value={result?.adapterResult ?? "待判断是否需要适配"} highlight={Boolean(result?.adapterResult)} />
+                  <ResultLine label="存储策略" value={result?.storageTarget ?? "待生成"} />
+                </Stack>
+              </Box>
+            );
+          })}
+        </Stack>
+      )}
+    </Box>
+  );
+}
+
+function ResultLine({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <Box sx={{ display: "grid", gridTemplateColumns: "64px minmax(0, 1fr)", columnGap: 1, alignItems: "start" }}>
+      <Typography sx={{ fontSize: 11.5, color: "#94a3b8", fontWeight: 800 }}>{label}</Typography>
+      <Typography sx={{ fontSize: 12.5, color: highlight ? "#6d28d9" : "#374151", lineHeight: 1.55 }}>{value}</Typography>
+    </Box>
+  );
+}
+
 function WorkflowNodeCard({
   index,
   total,
@@ -942,8 +1145,10 @@ function WorkflowNodeCard({
   warnings,
   onEditTool,
   onRemoveTool,
-  onMoveUp,
-  onMoveDown,
+  onNodeDragStart,
+  onNodeDrop,
+  onToolDragStart,
+  onToolDrop,
 }: {
   index: number;
   total: number;
@@ -952,8 +1157,10 @@ function WorkflowNodeCard({
   warnings: Record<string, string[]>;
   onEditTool: (nodeId: string) => void;
   onRemoveTool: (nodeId: string) => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
+  onNodeDragStart: () => void;
+  onNodeDrop: () => void;
+  onToolDragStart: (nodeId: string) => void;
+  onToolDrop: (nodeId: string) => void;
 }) {
   const nodeProblems = section.nodes.flatMap((node) => warnings[node.nodeId] ?? []);
   const hasWarning = nodeProblems.length > 0;
@@ -967,15 +1174,20 @@ function WorkflowNodeCard({
         {index < total - 1 && <Box sx={{ width: 2, flex: 1, minHeight: 24, bgcolor: "#e2e8f0", my: 0.5 }} />}
       </Box>
 
-      <Box sx={{ mb: index < total - 1 ? 1.25 : 0, border: "1px solid", borderColor: hasWarning ? "#fed7aa" : "#e2e8f0", borderRadius: "14px", bgcolor: "#fff", overflow: "hidden", boxShadow: "0 10px 28px rgba(15, 23, 42, 0.06)" }}>
+      <Box
+        draggable={canEdit}
+        onDragStart={canEdit ? onNodeDragStart : undefined}
+        onDragOver={canEdit ? (event) => event.preventDefault() : undefined}
+        onDrop={canEdit ? onNodeDrop : undefined}
+        sx={{ mb: index < total - 1 ? 1.25 : 0, border: "1px solid", borderColor: hasWarning ? "#fed7aa" : "#e2e8f0", borderRadius: "14px", bgcolor: "#fff", overflow: "hidden", boxShadow: "0 10px 28px rgba(15, 23, 42, 0.06)" }}
+      >
         <Box sx={{ px: 1.4, py: 1.15, display: "flex", alignItems: "center", gap: 0.75, background: "linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)", borderBottom: "1px solid #EEF2F7" }}>
+          {canEdit && <DragIndicator sx={{ color: "#94a3b8", cursor: "grab", fontSize: 19, flexShrink: 0 }} />}
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography sx={{ fontSize: 14, fontWeight: 900, color: "#0f172a", lineHeight: 1.3 }}>{section.category}节点</Typography>
             <Typography sx={{ mt: 0.25, fontSize: 11.5, color: "#64748b" }}>{section.nodes.length} 个工具</Typography>
           </Box>
           {hasWarning && <Chip label="需处理" size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#fff7ed", color: "#c2410c" }} />}
-          <Tooltip title="上移"><span><IconButton disabled={!canEdit || index === 0} size="small" onClick={onMoveUp} sx={{ color: "#64748b", width: 24, height: 24 }}><ArrowUpward sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
-          <Tooltip title="下移"><span><IconButton disabled={!canEdit || index === total - 1} size="small" onClick={onMoveDown} sx={{ color: "#64748b", width: 24, height: 24 }}><ArrowDownward sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
         </Box>
 
         <Stack spacing={0.8} sx={{ p: 1.2 }}>
@@ -993,7 +1205,15 @@ function WorkflowNodeCard({
           {section.nodes.map((node, toolIndex) => {
             const toolWarnings = warnings[node.nodeId] ?? [];
             return (
-              <Box key={node.nodeId} sx={{ px: 1, py: 0.9, borderRadius: "10px", bgcolor: toolWarnings.length ? "#fff7ed" : "#f8fafc", border: `1px solid ${toolWarnings.length ? "#fed7aa" : "#e2e8f0"}`, display: "flex", alignItems: "center", gap: 0.75 }}>
+              <Box
+                key={node.nodeId}
+                draggable={canEdit && section.nodes.length > 1}
+                onDragStart={canEdit && section.nodes.length > 1 ? (event) => { event.stopPropagation(); onToolDragStart(node.nodeId); } : undefined}
+                onDragOver={canEdit && section.nodes.length > 1 ? (event) => { event.preventDefault(); event.stopPropagation(); } : undefined}
+                onDrop={canEdit && section.nodes.length > 1 ? (event) => { event.stopPropagation(); onToolDrop(node.nodeId); } : undefined}
+                sx={{ px: 1, py: 0.9, borderRadius: "10px", bgcolor: toolWarnings.length ? "#fff7ed" : "#f8fafc", border: `1px solid ${toolWarnings.length ? "#fed7aa" : "#e2e8f0"}`, display: "flex", alignItems: "center", gap: 0.75 }}
+              >
+                {canEdit && section.nodes.length > 1 && <DragIndicator sx={{ color: "#94a3b8", cursor: "grab", fontSize: 17, flexShrink: 0 }} />}
                 <Box sx={{ width: 22, height: 22, borderRadius: "8px", bgcolor: "#fff", color: "#475569", border: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
                   {toolIndex + 1}
                 </Box>
@@ -1006,216 +1226,6 @@ function WorkflowNodeCard({
         </Stack>
       </Box>
     </Box>
-  );
-}
-
-function PlanSection({
-  category,
-  nodes,
-  allNodes,
-  canEdit,
-  warnings,
-  isConfirmed,
-  canConfirm,
-  canDragCategory,
-  canReedit,
-  onConfirm,
-  onReedit,
-  onCategoryDragStart,
-  onCategoryDrop,
-  onRemove,
-  onExpand,
-  onEdit,
-  onDragStart,
-  onDrop,
-}: {
-  category: string;
-  nodes: ToolNode[];
-  allNodes: ToolNode[];
-  canEdit: boolean;
-  warnings: Record<string, string[]>;
-  isConfirmed: boolean;
-  canConfirm: boolean;
-  canDragCategory: boolean;
-  canReedit: boolean;
-  onConfirm: () => void;
-  onReedit: () => void;
-  onCategoryDragStart: () => void;
-  onCategoryDrop: () => void;
-  onRemove: (nodeId: string) => void;
-  onExpand: (nodeId: string) => void;
-  onEdit: (nodeId: string) => void;
-  onDragStart: (nodeId: string) => void;
-  onDrop: (nodeId: string) => void;
-}) {
-  const title = getPlanTitle(category);
-  return (
-    <Box
-      draggable={canDragCategory}
-      onDragStart={canDragCategory ? onCategoryDragStart : undefined}
-      onDragOver={canDragCategory ? (event) => event.preventDefault() : undefined}
-      onDrop={canDragCategory ? onCategoryDrop : undefined}
-      sx={{ border: "1px solid #E0E8F2", borderRadius: "12px", overflow: "hidden" }}
-    >
-      <Box sx={{ px: 1.5, py: 1.25, bgcolor: "#FBFCFF", borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
-        <Box sx={{ minWidth: 0, display: "flex", alignItems: "center", gap: 0.75 }}>
-          {canDragCategory && <DragIndicator sx={{ color: "#9ca3af", cursor: "grab", fontSize: 18 }} />}
-          <Typography sx={{ fontSize: 14, fontWeight: 700, color: "#1f2937" }}>{title}</Typography>
-          {isConfirmed && <Chip label="已确认" size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#f0fdf4", color: "#16a34a", fontWeight: 700 }} />}
-        </Box>
-        {isConfirmed ? (
-          <Button size="small" variant="outlined" disabled={!canReedit} onClick={onReedit} sx={{ height: 26, minWidth: 72, px: 1, borderRadius: "8px", fontSize: 11, textTransform: "none", color: "#801AEB", borderColor: "#ddd6fe" }}>
-            重新编辑
-          </Button>
-        ) : (
-          <Button size="small" variant="contained" disabled={!canConfirm} onClick={onConfirm} sx={{ height: 26, minWidth: 72, px: 1, borderRadius: "8px", fontSize: 11, textTransform: "none", bgcolor: "#801AEB", color: "#fff", "&:hover": { bgcolor: "#6D16C9" } }}>
-            确认方案
-          </Button>
-        )}
-      </Box>
-      <Stack spacing={1} sx={{ p: 1 }}>
-        {nodes.map((node) => (
-          <ToolNodeCard
-            key={node.nodeId}
-            node={node}
-            allNodes={allNodes}
-            canEdit={canEdit}
-            canDrag={canEdit && nodes.length > 1}
-            warnings={warnings[node.nodeId] ?? []}
-            onRemove={() => onRemove(node.nodeId)}
-            onExpand={() => onExpand(node.nodeId)}
-            onEdit={() => onEdit(node.nodeId)}
-            onDragStart={() => onDragStart(node.nodeId)}
-            onDrop={() => onDrop(node.nodeId)}
-          />
-        ))}
-      </Stack>
-    </Box>
-  );
-}
-
-function ToolNodeCard({
-  node,
-  allNodes,
-  canEdit,
-  canDrag,
-  warnings,
-  onRemove,
-  onExpand,
-  onEdit,
-  onDragStart,
-  onDrop,
-}: {
-  node: ToolNode;
-  allNodes: ToolNode[];
-  canEdit: boolean;
-  canDrag: boolean;
-  warnings: string[];
-  onRemove: () => void;
-  onExpand: () => void;
-  onEdit: () => void;
-  onDragStart: () => void;
-  onDrop: () => void;
-}) {
-  const hasWarning = warnings.length > 0;
-  const hasInputWarning = warnings.includes("输入配置异常，请检查。");
-  const inputParts = getInputSourceParts(node, allNodes);
-  const configParams = node.params.filter((param) => param.id !== node.inputParamId && isParamVisible(node, param));
-  const requiredParams = configParams.filter((param) => param.required);
-  return (
-    <Box
-      draggable={canDrag}
-      onDragStart={canDrag ? onDragStart : undefined}
-      onDragOver={canDrag ? (event) => event.preventDefault() : undefined}
-      onDrop={canDrag ? onDrop : undefined}
-      sx={{
-        border: "1px solid",
-        borderColor: hasInputWarning ? "#ef4444" : hasWarning ? "#fed7aa" : "#E0E8F2",
-        borderRadius: "10px",
-        bgcolor: hasWarning ? "#fffaf0" : node.enabled ? "#fff" : "#F8FAFC",
-        opacity: node.enabled ? 1 : 0.7,
-        overflow: "hidden",
-      }}
-    >
-      <Box sx={{ px: 1, py: 1, display: "flex", alignItems: "center", gap: 0.75 }}>
-        {canDrag && <DragIndicator sx={{ color: "#9ca3af", cursor: "grab", fontSize: 18 }} />}
-        <Box sx={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 0.35 }}>
-          <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {node.toolName}
-          </Typography>
-          <Chip
-            label={node.status}
-            size="small"
-            sx={{
-              height: 18,
-              maxWidth: 150,
-              fontSize: 10,
-              bgcolor: node.sourceType === "system" ? "#f5f3ff" : "#eff6ff",
-              color: node.sourceType === "system" ? "#6d28d9" : "#2563eb",
-              "& .MuiChip-label": { px: 0.6, overflow: "hidden", textOverflow: "ellipsis" },
-            }}
-          />
-          <IconButton aria-label={node.expanded ? "收起工具配置" : "展开工具配置"} onClick={onExpand} size="small" sx={{ color: "#64748b", width: 24, height: 24, flex: "0 0 auto" }}>{node.expanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}</IconButton>
-        </Box>
-        {canEdit && <IconButton aria-label="编辑工具" onClick={onEdit} size="small" sx={{ color: "#801AEB" }}><EditOutlined fontSize="small" /></IconButton>}
-        {canEdit && <IconButton onClick={onRemove} size="small" sx={{ color: "#ef4444", "&:hover": { bgcolor: "#fef2f2" } }}><DeleteOutline fontSize="small" /></IconButton>}
-      </Box>
-      {warnings.length > 0 && (
-        <Box sx={{ mx: 1, mb: 1, p: 1, borderRadius: "8px", bgcolor: hasInputWarning ? "#fef2f2" : "#fff7ed", border: `1px solid ${hasInputWarning ? "#fecaca" : "#fed7aa"}` }}>
-          {warnings.map((warning) => (
-            <Stack key={warning} direction="row" spacing={0.75} alignItems="flex-start">
-              <WarningAmber sx={{ fontSize: 15, color: hasInputWarning ? "#dc2626" : "#c2410c", mt: "1px" }} />
-              <Typography sx={{ fontSize: 11, color: hasInputWarning ? "#b91c1c" : "#9a3412", lineHeight: 1.5 }}>{warning}</Typography>
-            </Stack>
-          ))}
-        </Box>
-      )}
-      {node.expanded && (
-        <Box sx={{ borderTop: "1px solid #EEF2F7", p: 1.25, bgcolor: "#FBFCFF" }}>
-          <Stack spacing={1.1}>
-            <ReadonlyConfigBlock label="输入">
-              <ReadonlyKeyValue label={inputParts.paramName} value={inputParts.source} warning={isInputSourceInvalid(node, allNodes)} />
-            </ReadonlyConfigBlock>
-            <ReadonlyConfigBlock label="参数配置">
-              {requiredParams.length > 0 ? (
-                <Stack spacing={0.5}>
-                  {requiredParams.map((param) => (
-                    <ReadonlyKeyValue key={param.id} label={param.label} value={formatParamValue(param.value)} />
-                  ))}
-                </Stack>
-              ) : <Typography sx={{ fontSize: 12, color: "#64748b" }}>无必填参数</Typography>}
-            </ReadonlyConfigBlock>
-            <ReadonlyConfigBlock label="输出">
-              <Stack spacing={0.5}>
-                {node.outputs.map((output) => (
-                  <Stack key={output.id} direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
-                    <Typography sx={{ fontSize: 12, color: "#374151" }}>{output.label}</Typography>
-                    <Chip label={getOutputFormat(output)} size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#eef2ff", color: "#4338ca" }} />
-                  </Stack>
-                ))}
-              </Stack>
-            </ReadonlyConfigBlock>
-          </Stack>
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-function ReadonlyConfigBlock({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <Box sx={{ display: "grid", gridTemplateColumns: "64px minmax(0, 1fr)", columnGap: 1, alignItems: "start" }}>
-      <Typography sx={{ fontSize: 11, color: "#94a3b8", fontWeight: 700 }}>{label}</Typography>
-      <Box sx={{ minWidth: 0 }}>{children}</Box>
-    </Box>
-  );
-}
-
-function ReadonlyKeyValue({ label, value, warning = false }: { label: string; value: string; warning?: boolean }) {
-  return (
-    <Typography sx={{ fontSize: 12, color: warning ? "#c2410c" : "#1f2937", lineHeight: 1.5, wordBreak: "break-word" }}>
-      <Box component="span" sx={{ color: "#64748b" }}>{label}：</Box>{value}
-    </Typography>
   );
 }
 
