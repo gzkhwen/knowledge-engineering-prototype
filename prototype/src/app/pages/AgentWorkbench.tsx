@@ -698,7 +698,7 @@ export function AgentWorkbench() {
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionStatus>>({});
   const [nodeRuntimeStates, setNodeRuntimeStates] = useState<Record<string, NodeRuntimeState>>({});
   const [reviewScanStep, setReviewScanStep] = useState<ReviewScanStep>(null);
-  const [isSuccessWaving, setIsSuccessWaving] = useState(false);
+  const [successWaveIndex, setSuccessWaveIndex] = useState<number | null>(null);
 
   const categories = useMemo(() => ["全部", ...Array.from(new Set(toolCatalog.map((tool) => tool.category)))], []);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
@@ -801,6 +801,15 @@ export function AgentWorkbench() {
     };
   };
 
+  const startSuccessWave = (nodes: ToolNode[]) => {
+    const total = Math.max(getCategorySections(nodes).length, 1);
+    setSuccessWaveIndex(null);
+    Array.from({ length: total }).forEach((_, index) => {
+      window.setTimeout(() => setSuccessWaveIndex(index), 40 + index * 620);
+    });
+    window.setTimeout(() => setSuccessWaveIndex(null), 40 + total * 620 + 220);
+  };
+
   const addDemoSample = () => {
     setSampleFiles((current) => (current.some((file) => file.id === demoSampleFile.id) ? current : [demoSampleFile, ...current]));
     toast.success("已添加演示样例文件");
@@ -835,7 +844,7 @@ export function AgentWorkbench() {
     setConnectionStates({});
     setNodeRuntimeStates({});
     setReviewScanStep(null);
-    setIsSuccessWaving(false);
+    setSuccessWaveIndex(null);
     setSampleResults([]);
     setSampleFiles((current) => current.map((file) => ({ ...file, status: "已发送" })));
     pushAgentEvent({
@@ -1066,7 +1075,7 @@ export function AgentWorkbench() {
         status: "done",
         content: "方案执行完成：所有节点执行成功，分片结果已写入 ES，问答和摘要结果已生成。",
       });
-      setIsSuccessWaving(true);
+      startSuccessWave(finalNodes);
       successWaveEventId = pushAgentEvent({
         role: "thought",
         title: "方案生成成功",
@@ -1075,7 +1084,7 @@ export function AgentWorkbench() {
       });
     });
     step(3400, () => {
-      setIsSuccessWaving(false);
+      setSuccessWaveIndex(null);
       setNodesRuntime(finalNodes, { status: "done" });
       updateAgentEvent(successWaveEventId, {
         status: "done",
@@ -1337,12 +1346,12 @@ export function AgentWorkbench() {
                         <WorkflowNodeCard
                           key={section.sectionId}
                           index={index}
-                        total={categorySections.length}
-                        section={section}
-                        connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
-                        reviewScanStep={reviewScanStep}
-                        isSuccessWaving={isSuccessWaving}
-                        runtimeStates={nodeRuntimeStates}
+                          total={categorySections.length}
+                          section={section}
+                          connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
+                          reviewScanStep={reviewScanStep}
+                          isSuccessWaving={successWaveIndex === index}
+                          runtimeStates={nodeRuntimeStates}
                           canEdit={canEdit}
                           warnings={displayedNodeWarnings}
                           onEditTool={(nodeId) => setEditingNodeId(nodeId)}
@@ -1564,7 +1573,6 @@ function WorkflowNodeCard({
   const isCardBuilding = section.nodes.some((node) => ["building", "selectingTool", "configuring"].includes(runtimeStates[node.nodeId]?.status ?? ""));
   const isSectionRunning = section.nodes.some((node) => runtimeStates[node.nodeId]?.status === "running");
   const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : "#111827";
-  const successDelay = `${index * 220}ms`;
   const isReviewNodeActive = reviewScanStep?.phase === "node" && reviewScanStep.index === index;
   const isReviewLineActive = reviewScanStep?.phase === "line" && reviewScanStep.index === index && connectionStatus === "normal";
   const isSuccessCardWaving = isSuccessWaving;
@@ -1575,8 +1583,7 @@ function WorkflowNodeCard({
         display: "grid",
         gridTemplateColumns: "36px minmax(0, 1fr)",
         columnGap: 1.1,
-        animation: isSuccessCardWaving ? "workflowCardSuccessWave 1.25s cubic-bezier(0.2, 0.9, 0.22, 1.18) both" : "nodeCardEnter 0.38s ease-out both",
-        animationDelay: isSuccessCardWaving ? successDelay : "0ms",
+        animation: isSuccessCardWaving ? "workflowCardSuccessWave 0.62s cubic-bezier(0.2, 0.9, 0.22, 1.18) both" : "nodeCardEnter 0.38s ease-out both",
         transformOrigin: "center",
         willChange: isSuccessCardWaving ? "transform" : "auto",
         "@keyframes nodeCardEnter": {
