@@ -1428,18 +1428,49 @@ export function AgentWorkbench() {
 
 function AgentEventCard({ event }: { event: AgentEvent }) {
   const isUser = event.role === "user";
-  const isThought = event.role === "thought";
   const isToolCall = event.kind === "toolCall";
+  const containerSx = isUser
+    ? {
+        maxWidth: 520,
+        p: 1.35,
+        borderRadius: "13px",
+        bgcolor: "#801AEB",
+        color: "#fff",
+        border: "none",
+        boxShadow: "0 10px 22px rgba(128, 26, 235, 0.16)",
+      }
+    : isToolCall
+      ? {
+          maxWidth: 580,
+          p: 1.25,
+          borderRadius: "12px",
+          bgcolor: "#fbf7ff",
+          color: "#111827",
+          border: "1px solid #ddd6fe",
+          boxShadow: "0 8px 18px rgba(128, 26, 235, 0.08)",
+        }
+      : {
+          maxWidth: 580,
+          px: 0.25,
+          py: 0.35,
+          borderRadius: 0,
+          bgcolor: "transparent",
+          color: "#111827",
+          border: "none",
+          boxShadow: "none",
+        };
+  const titleColor = isUser ? "#fff" : isToolCall ? "#5b21b6" : "#111827";
+  const contentColor = isUser ? "rgba(255,255,255,0.92)" : isToolCall ? "#4c1d95" : "#374151";
   return (
     <Box sx={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start" }}>
-      <Box sx={{ maxWidth: isUser ? 520 : 580, p: 1.35, borderRadius: "13px", bgcolor: isUser ? "#801AEB" : isThought ? "#fff7ed" : "#fff", color: isUser ? "#fff" : "#111827", border: isUser ? "none" : `1px solid ${isThought ? "#fed7aa" : "#E0E8F2"}`, boxShadow: isUser ? "0 10px 22px rgba(128, 26, 235, 0.16)" : "0 8px 20px rgba(15, 23, 42, 0.04)" }}>
+      <Box sx={containerSx}>
         <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.45 }}>
-          {event.status === "running" ? <CircularProgress size={13} color="inherit" /> : isThought ? <AutoAwesome sx={{ fontSize: 15, color: "#c2410c" }} /> : null}
-          <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: isUser ? "#fff" : isThought ? "#9a3412" : "#111827" }}>{event.title}</Typography>
+          {event.status === "running" ? <CircularProgress size={13} color="inherit" /> : isToolCall ? <AutoAwesome sx={{ fontSize: 15, color: "#7c3aed" }} /> : null}
+          <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: titleColor }}>{event.title}</Typography>
           {isToolCall && <Chip label="ToolCall" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#eef2ff", color: "#4338ca" }} />}
-          {event.status === "done" && isThought && <Chip label="完成" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#ffedd5", color: "#c2410c" }} />}
+          {event.status === "done" && isToolCall && <Chip label="完成" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f0fdf4", color: "#16a34a" }} />}
         </Stack>
-        <Typography sx={{ fontSize: 13, lineHeight: 1.7, color: isUser ? "rgba(255,255,255,0.92)" : isThought ? "#7c2d12" : "#374151" }}>{event.content}</Typography>
+        <Typography sx={{ fontSize: 13, lineHeight: 1.7, color: contentColor }}>{event.content}</Typography>
         {event.flowSteps?.length ? (
           <Stack direction="row" spacing={0.6} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
             {event.flowSteps.map((step, index) => (
