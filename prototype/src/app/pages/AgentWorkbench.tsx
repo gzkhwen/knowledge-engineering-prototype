@@ -1064,34 +1064,40 @@ export function AgentWorkbench() {
       let buildEventId = "";
       let selectEventId = "";
       let configEventId = "";
+      const nodeTitle = title.replace("节点", "");
+      const toolNames = nodes.map((node) => node.toolName).join("、");
+      const paramSummary = nodes
+        .flatMap((node) => visibleParams(node).map((param) => param.label))
+        .slice(0, 5)
+        .join("、");
       step(1800, () => {
         updatePlanNodesWithMotion(allNodes);
         setNodesRuntime(nodes, { status: "building" });
         buildEventId = pushAgentEvent({
           role: "thought",
           title: `开始搭建方案：${title}`,
-          content: "正在创建流程节点，并确定它在处理链路中的位置。",
+          content: `正在创建${nodeTitle}流程节点，并确定它在文档处理链路中的位置。`,
           status: "running",
         });
       });
       step(2300, () => {
-        updateAgentEvent(buildEventId, { status: "done", content: `${title}已创建，开始为该节点选择可执行工具。` });
+        updateAgentEvent(buildEventId, { status: "done", content: `${nodeTitle}流程节点已创建。接下来会从工具目录中为该节点绑定可执行工具。` });
         setNodesRuntime(nodes, { status: "selectingTool" });
         selectEventId = pushAgentEvent({
           role: "thought",
-          title: "选择工具",
-          content: toolText,
+          title: "绑定工具",
+          content: `${toolText} 待绑定工具：${toolNames}。`,
           status: "running",
           kind: "toolCall",
         });
       });
       step(2300, () => {
-        updateAgentEvent(selectEventId, { status: "done", content: `${nodes.map((node) => node.toolName).join("、")} 已选中。` });
+        updateAgentEvent(selectEventId, { status: "done", content: `工具绑定完成：${toolNames} 已写入${nodeTitle}节点。` });
         setNodesRuntime(nodes, { status: "configuring", visibleParamCount: 0 });
         configEventId = pushAgentEvent({
           role: "thought",
-          title: "配置工具参数",
-          content: "正在根据样例试跑结果、工具 inputSchema 和上游输出路径生成本次执行参数。",
+          title: "写入执行参数",
+          content: `正在根据工具 inputSchema、样例分析结果和上游输出路径写入参数：${paramSummary}。`,
           status: "running",
           kind: "toolCall",
         });
@@ -1103,7 +1109,7 @@ export function AgentWorkbench() {
         setNodesRuntime(nodes, { status: "configured", visibleParamCount: 4 });
         updateAgentEvent(configEventId, {
           status: "done",
-          content: `${nodes.map((node) => node.toolName).join("、")} 参数配置完成，工具模块即将收起为标准执行契约。`,
+          content: `执行参数写入完成：${toolNames} 已形成本次 Workflow Step 执行契约。`,
         });
       });
       step(1100, () => setNodesRuntime(nodes, { status: "done" }));
@@ -1141,14 +1147,14 @@ export function AgentWorkbench() {
       setSampleFiles((current) => current.map((file) => ({ ...file, status: "试跑中" })));
       queryEventId = pushAgentEvent({
         role: "thought",
-        title: "查询可用工具",
-        content: "正在从管理端工具分类中查询可用于文档解析、分片、存储和智能生成的 MCP 工具。",
+        title: "查询工具目录",
+        content: "正在读取管理端已启用的工具分类和工具清单，筛选可用于当前知识处理目标的 MCP 工具。",
         status: "running",
         kind: "toolCall",
       });
     });
     step(3000, () => {
-      updateAgentEvent(queryEventId, { status: "done", content: "查询到 14 个可用工具，其中 2 个系统工具、12 个外部接入工具。" });
+      updateAgentEvent(queryEventId, { status: "done", content: "工具目录查询完成：命中 14 个可用工具，其中系统工具 2 个，外部接入工具 12 个。" });
       designEventId = pushAgentEvent({
         role: "thought",
         title: "开始设计处理方案",
@@ -1245,7 +1251,7 @@ export function AgentWorkbench() {
       executeEventId = pushAgentEvent({
         role: "thought",
         title: "执行方案处理样例文件",
-        content: "正在用最终方案执行样例文件，验证每个节点的工具调用结果。",
+        content: "正在按最终 Workflow Step 顺序执行样例文件，并收集每个工具的输入参数、完整输出和执行状态。",
         status: "running",
         kind: "toolCall",
       });
@@ -1263,7 +1269,7 @@ export function AgentWorkbench() {
       setNodesRuntime(finalNodes, { status: "success" });
       updateAgentEvent(executeEventId, {
         status: "done",
-        content: "方案执行完成：所有节点执行成功，分片结果已写入 ES，问答和摘要结果已生成。",
+        content: "样例执行完成：所有工具执行成功，分片结果已写入 ES，问答和摘要结果已生成。",
       });
     });
     step(1200, () => {
@@ -1325,7 +1331,7 @@ export function AgentWorkbench() {
     setTimeout(() => {
       adjustEventId = appendAgentEvent({
         role: "thought",
-        title: "局部调整方案",
+        title: "更新方案契约",
         content: "正在复用现有解析、代码适配、存储和 QA 提取配置，只替换受影响工具并重新计算下游引用。",
         status: "running",
         kind: "toolCall",
@@ -1346,7 +1352,7 @@ export function AgentWorkbench() {
       setNodesRuntime(affectedAdjustedNodes, { status: "configured", visibleParamCount: 4 });
       updateAgentEvent(adjustEventId, {
         status: "done",
-        content: "局部调整完成：分片工具已切换为医保政策解析分片，摘要总结已替换为关键词提取，其他节点配置保持不变。",
+        content: "方案契约更新完成：分片工具已切换为医保政策解析分片，摘要总结已替换为关键词提取，其他节点配置保持不变。",
       });
     }, 4300);
 
@@ -1718,12 +1724,14 @@ function AgentEventCard({ event }: { event: AgentEvent }) {
     : isToolCall
       ? {
           maxWidth: 580,
-          p: 1.25,
+          px: 1.25,
+          py: 1.05,
           borderRadius: "12px",
-          bgcolor: "#fbf7ff",
+          bgcolor: "#F8FAFC",
           color: "#111827",
-          border: "1px solid #ddd6fe",
-          boxShadow: "0 8px 18px rgba(128, 26, 235, 0.08)",
+          border: "1px solid #DBEAFE",
+          borderLeft: "3px solid #3B82F6",
+          boxShadow: "0 8px 18px rgba(59, 130, 246, 0.08)",
         }
       : {
           maxWidth: 580,
@@ -1735,13 +1743,13 @@ function AgentEventCard({ event }: { event: AgentEvent }) {
           border: "none",
           boxShadow: "none",
         };
-  const titleColor = isUser ? "#fff" : isToolCall ? "#5b21b6" : "#111827";
-  const contentColor = isUser ? "rgba(255,255,255,0.92)" : isToolCall ? "#4c1d95" : "#374151";
+  const titleColor = isUser ? "#fff" : isToolCall ? "#1D4ED8" : "#111827";
+  const contentColor = isUser ? "rgba(255,255,255,0.92)" : isToolCall ? "#334155" : "#374151";
   return (
     <Box sx={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start" }}>
       <Box sx={containerSx}>
         <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.45 }}>
-          {event.status === "running" ? <CircularProgress size={13} color="inherit" /> : isToolCall ? <AutoAwesome sx={{ fontSize: 15, color: "#7c3aed" }} /> : null}
+          {event.status === "running" ? <CircularProgress size={13} color="inherit" /> : isToolCall ? <Handyman sx={{ fontSize: 15, color: "#2563EB" }} /> : null}
           <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: titleColor }}>{event.title}</Typography>
         </Stack>
         <Typography sx={{ fontSize: 13, lineHeight: 1.7, color: contentColor }}>{event.content}</Typography>
