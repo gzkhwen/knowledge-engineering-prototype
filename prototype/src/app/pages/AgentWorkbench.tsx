@@ -50,7 +50,7 @@ type SampleStatus = "已上传" | "已发送" | "试跑中" | "已完成";
 type AgentEventRole = "agent" | "user" | "thought";
 type AgentEventStatus = "done" | "running" | "pending";
 type AgentEventKind = "message" | "toolCall" | "flow";
-type ConnectionStatus = "normal" | "error" | "resolving" | "resolved" | "checking" | "running" | "success";
+type ConnectionStatus = "normal" | "error" | "resolving" | "resolved";
 type NodeRuntimeStatus = "building" | "selectingTool" | "configuring" | "done" | "running" | "success";
 
 interface SampleFileItem {
@@ -697,10 +697,12 @@ export function AgentWorkbench() {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionStatus>>({});
   const [nodeRuntimeStates, setNodeRuntimeStates] = useState<Record<string, NodeRuntimeState>>({});
+  const [reviewScanIndex, setReviewScanIndex] = useState<number | null>(null);
 
   const categories = useMemo(() => ["全部", ...Array.from(new Set(toolCatalog.map((tool) => tool.category)))], []);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
   const nodeWarnings = useMemo(() => getNodeWarnings(planNodes), [planNodes]);
+  const displayedNodeWarnings = isAgentRunning ? {} : nodeWarnings;
   const allProblems = getPlanProblems(planNodes);
   const visibleProblems = isAgentRunning ? [] : allProblems;
   const canEdit = !confirmed && !isAgentRunning;
@@ -760,12 +762,6 @@ export function AgentWorkbench() {
     }));
   };
 
-  const setConnectionStatuses = (nodes: ToolNode[], status: ConnectionStatus) => {
-    const sections = getCategorySections(nodes);
-    const nextEntries = sections.slice(0, -1).map((section, index) => [getConnectionKey(section.category, sections[index + 1].category), status]);
-    setConnectionStates((current) => ({ ...current, ...Object.fromEntries(nextEntries) }));
-  };
-
   const clearConnectionStatuses = (nodes: ToolNode[]) => {
     const sections = getCategorySections(nodes);
     setConnectionStates((current) => {
@@ -775,6 +771,16 @@ export function AgentWorkbench() {
       });
       return next;
     });
+  };
+
+  const startReviewScan = (nodes: ToolNode[]) => {
+    const count = Math.max(getCategorySections(nodes).length, 1);
+    let nextIndex = 0;
+    setReviewScanIndex(0);
+    return window.setInterval(() => {
+      nextIndex = (nextIndex + 1) % count;
+      setReviewScanIndex(nextIndex);
+    }, 720);
   };
 
   const addDemoSample = () => {
@@ -883,6 +889,8 @@ export function AgentWorkbench() {
     let resolveEventId = "";
     let recheckEventId = "";
     let executeEventId = "";
+    let reviewTimer: number | null = null;
+    let recheckTimer: number | null = null;
 
     step(800, () => {
       analyzeEventId = pushAgentEvent({
@@ -942,9 +950,11 @@ export function AgentWorkbench() {
         content: "正在从上到下检查每个节点的输入、输出、变量路径和存储位置。",
         status: "running",
       });
-      setConnectionStatuses(draftNodes, "checking");
+      reviewTimer = startReviewScan(draftNodes);
     });
-    step(3600, () => {
+    step(7200, () => {
+      if (reviewTimer) window.clearInterval(reviewTimer);
+      setReviewScanIndex(null);
       clearConnectionStatuses(draftNodes);
       setConnectionStatus(parser.category, splitter.category, "error");
       updateAgentEvent(checkEventId, {
@@ -979,9 +989,11 @@ export function AgentWorkbench() {
         content: "正在重新检查完整方案的节点顺序、输入输出映射和执行契约。",
         status: "running",
       });
-      setConnectionStatuses(finalNodes, "checking");
+      recheckTimer = startReviewScan(finalNodes);
     });
-    step(3600, () => {
+    step(6800, () => {
+      if (recheckTimer) window.clearInterval(recheckTimer);
+      setReviewScanIndex(null);
       clearConnectionStatuses(finalNodes);
       updateAgentEvent(recheckEventId, {
         status: "done",
@@ -1260,11 +1272,11 @@ export function AgentWorkbench() {
                       index={index}
                       total={categorySections.length}
                       section={section}
-                      previousConnectionStatus={index > 0 ? connectionStates[getConnectionKey(categorySections[index - 1].category, section.category)] ?? "normal" : "normal"}
                       connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
+                      isReviewScanActive={reviewScanIndex === index}
                       runtimeStates={nodeRuntimeStates}
                       canEdit={canEdit}
-                      warnings={nodeWarnings}
+                      warnings={displayedNodeWarnings}
                       onEditTool={(nodeId) => setEditingNodeId(nodeId)}
                       onRemoveTool={removeNode}
                       onNodeDragStart={() => setDraggingCategory(section.sectionId)}
@@ -1411,9 +1423,6 @@ function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
     error: { title: "衔接异常", color: "#f97316", bgcolor: "#fff7ed", border: "#fed7aa", icon: <ErrorOutline sx={{ fontSize: 15 }} /> },
     resolving: { title: "解决中", color: "#7c3aed", bgcolor: "#f5f3ff", border: "#ddd6fe", icon: <Sync sx={{ fontSize: 15, animation: "spin 1.1s linear infinite" }} /> },
     resolved: { title: "已解决", color: "#16a34a", bgcolor: "#f0fdf4", border: "#bbf7d0", icon: <CheckCircleOutline sx={{ fontSize: 15 }} /> },
-    checking: { title: "链路检查中", color: "#2563eb", bgcolor: "#eff6ff", border: "#bfdbfe", icon: <Sync sx={{ fontSize: 15, animation: "spin 1.1s linear infinite" }} /> },
-    running: { title: "节点执行中", color: "#7c3aed", bgcolor: "#f5f3ff", border: "#ddd6fe", icon: <CircularProgress size={13} color="inherit" /> },
-    success: { title: "执行成功", color: "#16a34a", bgcolor: "#f0fdf4", border: "#bbf7d0", icon: <CheckCircleOutline sx={{ fontSize: 15 }} /> },
     normal: { title: "", color: "#64748b", bgcolor: "#fff", border: "#e2e8f0", icon: null },
   }[status];
 
@@ -1451,8 +1460,8 @@ function WorkflowNodeCard({
   index,
   total,
   section,
-  previousConnectionStatus,
   connectionStatus,
+  isReviewScanActive,
   runtimeStates,
   canEdit,
   warnings,
@@ -1466,8 +1475,8 @@ function WorkflowNodeCard({
   index: number;
   total: number;
   section: { sectionId: string; category: string; nodes: ToolNode[] };
-  previousConnectionStatus: ConnectionStatus;
   connectionStatus: ConnectionStatus;
+  isReviewScanActive: boolean;
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
   warnings: Record<string, string[]>;
@@ -1481,7 +1490,7 @@ function WorkflowNodeCard({
   const nodeProblems = section.nodes.flatMap((node) => warnings[node.nodeId] ?? []);
   const hasWarning = nodeProblems.length > 0;
   const isCardBuilding = section.nodes.some((node) => ["building", "selectingTool", "configuring"].includes(runtimeStates[node.nodeId]?.status ?? ""));
-  const isReviewing = previousConnectionStatus === "checking" || connectionStatus === "checking";
+  const isReviewing = isReviewScanActive;
   const isSectionRunning = section.nodes.some((node) => runtimeStates[node.nodeId]?.status === "running");
   const isSectionSuccess = section.nodes.length > 0 && section.nodes.every((node) => runtimeStates[node.nodeId]?.status === "success");
   const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : isSectionSuccess ? "#16a34a" : isReviewing ? "#801AEB" : "#111827";
@@ -1501,12 +1510,12 @@ function WorkflowNodeCard({
             justifyContent: "center",
             fontSize: 12,
             fontWeight: 800,
-            boxShadow: isReviewing ? "0 0 0 5px rgba(128, 26, 235, 0.12), 0 10px 22px rgba(128, 26, 235, 0.2)" : "0 8px 18px rgba(17, 24, 39, 0.16)",
+            boxShadow: isReviewing ? "0 0 0 8px rgba(128, 26, 235, 0.2), 0 12px 26px rgba(128, 26, 235, 0.28)" : "0 8px 18px rgba(17, 24, 39, 0.16)",
             animation: isReviewing ? "reviewNodeScan 1.8s ease-in-out infinite" : "none",
             animationDelay: `${index * 180}ms`,
             "@keyframes reviewNodeScan": {
-              "0%, 100%": { boxShadow: "0 0 0 0 rgba(128, 26, 235, 0.05), 0 8px 18px rgba(17, 24, 39, 0.12)" },
-              "45%": { boxShadow: "0 0 0 7px rgba(128, 26, 235, 0.2), 0 12px 24px rgba(128, 26, 235, 0.22)" },
+              "0%, 100%": { boxShadow: "0 0 0 2px rgba(128, 26, 235, 0.08), 0 8px 18px rgba(17, 24, 39, 0.12)" },
+              "45%": { boxShadow: "0 0 0 10px rgba(128, 26, 235, 0.24), 0 14px 28px rgba(128, 26, 235, 0.28)" },
             },
           }}
         >
@@ -1518,14 +1527,14 @@ function WorkflowNodeCard({
               sx={{
                 width: 2,
                 height: "100%",
-                bgcolor: connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" || connectionStatus === "success" ? "#22c55e" : connectionStatus === "checking" ? "#2563eb" : connectionStatus === "running" ? "#7c3aed" : "#e2e8f0",
+                bgcolor: connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : isReviewScanActive ? "#801AEB" : "#e2e8f0",
                 borderRadius: 999,
-                boxShadow: connectionStatus === "checking" || connectionStatus === "running" ? "0 0 0 4px rgba(128, 26, 235, 0.08)" : "none",
-                animation: connectionStatus === "checking" ? "scanLine 1.8s ease-in-out infinite" : "none",
+                boxShadow: isReviewScanActive ? "0 0 0 6px rgba(128, 26, 235, 0.16)" : "none",
+                animation: isReviewScanActive ? "scanLine 1.2s ease-in-out infinite" : "none",
                 animationDelay: `${index * 180 + 100}ms`,
                 "@keyframes scanLine": {
                   "0%, 100%": { opacity: 0.25, boxShadow: "none" },
-                  "45%": { opacity: 1, boxShadow: "0 0 0 5px rgba(128, 26, 235, 0.14)" },
+                  "45%": { opacity: 1, boxShadow: "0 0 0 8px rgba(128, 26, 235, 0.2)" },
                 },
               }}
             />
@@ -1635,8 +1644,8 @@ function ToolRuntimeRow({
     selectingTool: "选择工具中",
     configuring: "配置参数中",
     done: "",
-    running: "执行中",
-    success: "执行成功",
+    running: "",
+    success: "",
   }[status];
   const statusColor = {
     building: "#801AEB",
