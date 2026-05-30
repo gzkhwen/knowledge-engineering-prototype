@@ -1,4 +1,4 @@
-import { type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import {
   Box,
@@ -1589,47 +1589,60 @@ export function AgentWorkbench() {
                         const connectionStatus = nextSection
                           ? connectionStates[connectionKey] ?? (!isAgentRunning && sectionHasInputIssue(nextSection, inputIssueMap) ? "error" : "normal")
                           : "normal";
+                        const insertPosition = dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : null;
                         return (
-                          <WorkflowNodeCard
-                            key={section.sectionId}
-                            index={index}
-                            total={categorySections.length}
-                            section={section}
-                            connectionStatus={connectionStatus}
-                            hasInputIssue={!isAgentRunning && sectionHasInputIssue(section, inputIssueMap)}
-                            runtimeStates={nodeRuntimeStates}
-                            canEdit={canEdit}
-                            isDragging={draggingCategory === section.sectionId}
-                            insertPosition={dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : null}
-                            warnings={displayedNodeWarnings}
-                            onEditTool={(nodeId) => setEditingNodeId(nodeId)}
-                            onRemoveTool={removeNode}
-                            onToggleTool={toggleToolExpanded}
-                            onNodeDragStart={(event) => {
-                              event.dataTransfer.effectAllowed = "move";
-                              setDraggingCategory(section.sectionId);
-                            }}
-                            onNodeDragOver={(event) => {
-                              if (!draggingCategory || draggingCategory === section.sectionId) {
+                          <Fragment key={section.sectionId}>
+                            {insertPosition === "before" && (
+                              <WorkflowDropIndicator
+                                onDragOver={() => setDragInsertTarget({ sectionId: section.sectionId, position: "before" })}
+                                onDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId, "before")}
+                              />
+                            )}
+                            <WorkflowNodeCard
+                              index={index}
+                              total={categorySections.length}
+                              section={section}
+                              connectionStatus={connectionStatus}
+                              hasInputIssue={!isAgentRunning && sectionHasInputIssue(section, inputIssueMap)}
+                              runtimeStates={nodeRuntimeStates}
+                              canEdit={canEdit}
+                              isDragging={draggingCategory === section.sectionId}
+                              warnings={displayedNodeWarnings}
+                              onEditTool={(nodeId) => setEditingNodeId(nodeId)}
+                              onRemoveTool={removeNode}
+                              onToggleTool={toggleToolExpanded}
+                              onNodeDragStart={(event) => {
+                                event.dataTransfer.effectAllowed = "move";
+                                setDraggingCategory(section.sectionId);
+                              }}
+                              onNodeDragOver={(event) => {
+                                if (!draggingCategory || draggingCategory === section.sectionId) {
+                                  setDragInsertTarget(null);
+                                  return;
+                                }
+                                const rect = event.currentTarget.getBoundingClientRect();
+                                const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                                setDragInsertTarget((current) => (
+                                  current?.sectionId === section.sectionId && current.position === position
+                                    ? current
+                                    : { sectionId: section.sectionId, position }
+                                ));
+                              }}
+                              onNodeDragEnd={() => {
+                                setDraggingCategory(null);
                                 setDragInsertTarget(null);
-                                return;
-                              }
-                              const rect = event.currentTarget.getBoundingClientRect();
-                              const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-                              setDragInsertTarget((current) => (
-                                current?.sectionId === section.sectionId && current.position === position
-                                  ? current
-                                  : { sectionId: section.sectionId, position }
-                              ));
-                            }}
-                            onNodeDragEnd={() => {
-                              setDraggingCategory(null);
-                              setDragInsertTarget(null);
-                            }}
-                            onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId, dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : "before")}
-                            onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
-                            onToolDrop={onDropNode}
-                          />
+                              }}
+                              onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId, dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : "before")}
+                              onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
+                              onToolDrop={onDropNode}
+                            />
+                            {insertPosition === "after" && (
+                              <WorkflowDropIndicator
+                                onDragOver={() => setDragInsertTarget({ sectionId: section.sectionId, position: "after" })}
+                                onDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId, "after")}
+                              />
+                            )}
+                          </Fragment>
                         );
                       })}
                     </Stack>
@@ -1897,6 +1910,54 @@ function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
   );
 }
 
+function WorkflowDropIndicator({ onDragOver, onDrop }: { onDragOver: () => void; onDrop: () => void }) {
+  return (
+    <Box
+      onDragOver={(event) => {
+        event.preventDefault();
+        onDragOver();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop();
+      }}
+      sx={{
+        display: "grid",
+        gridTemplateColumns: "36px minmax(0, 1fr)",
+        columnGap: 1.1,
+        height: 18,
+        alignItems: "center",
+        animation: "dropIndicatorIn 0.16s ease-out both",
+        "@keyframes dropIndicatorIn": {
+          from: { opacity: 0, transform: "scaleY(0.8)" },
+          to: { opacity: 1, transform: "scaleY(1)" },
+        },
+      }}
+    >
+      <Box />
+      <Box
+        sx={{
+          position: "relative",
+          height: 0,
+          borderTop: "2px solid #801AEB",
+          boxShadow: "0 0 10px rgba(128, 26, 235, 0.28)",
+          "&::before": {
+            content: '""',
+            position: "absolute",
+            left: -5,
+            top: -5,
+            width: 8,
+            height: 8,
+            borderRadius: 999,
+            bgcolor: "#801AEB",
+            boxShadow: "0 0 0 4px rgba(128, 26, 235, 0.12)",
+          },
+        }}
+      />
+    </Box>
+  );
+}
+
 function WorkflowNodeCard({
   index,
   total,
@@ -1906,7 +1967,6 @@ function WorkflowNodeCard({
   runtimeStates,
   canEdit,
   isDragging,
-  insertPosition,
   warnings,
   onEditTool,
   onRemoveTool,
@@ -1926,7 +1986,6 @@ function WorkflowNodeCard({
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
   isDragging: boolean;
-  insertPosition: InsertPosition | null;
   warnings: Record<string, string[]>;
   onEditTool: (nodeId: string) => void;
   onRemoveTool: (nodeId: string) => void;
@@ -2029,39 +2088,6 @@ function WorkflowNodeCard({
           </Box>
         )}
       </Box>
-
-      {insertPosition && (
-        <Box
-          sx={{
-            position: "absolute",
-            left: 46,
-            right: 4,
-            top: insertPosition === "before" ? -7 : "auto",
-            bottom: insertPosition === "after" ? -7 : "auto",
-            height: 0,
-            borderTop: "2px solid #801AEB",
-            zIndex: 5,
-            pointerEvents: "none",
-            boxShadow: "0 0 10px rgba(128, 26, 235, 0.28)",
-            animation: "insertLineIn 0.16s ease-out both",
-            "&::before": {
-              content: '""',
-              position: "absolute",
-              left: -5,
-              top: -5,
-              width: 8,
-              height: 8,
-              borderRadius: 999,
-              bgcolor: "#801AEB",
-              boxShadow: "0 0 0 4px rgba(128, 26, 235, 0.12)",
-            },
-            "@keyframes insertLineIn": {
-              from: { opacity: 0, transform: "scaleX(0.92)" },
-              to: { opacity: 1, transform: "scaleX(1)" },
-            },
-          }}
-        />
-      )}
 
       <Box
         draggable={canEdit}
