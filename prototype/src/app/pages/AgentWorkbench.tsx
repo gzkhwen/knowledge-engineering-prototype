@@ -29,12 +29,15 @@ import {
 import {
   Add,
   AutoAwesome,
+  CheckCircleOutline,
   Close,
   DeleteOutline,
   DragIndicator,
   EditOutlined,
+  ErrorOutline,
   FactCheck,
   Send,
+  Sync,
   UploadFile,
   WarningAmber,
 } from "@mui/icons-material";
@@ -46,6 +49,7 @@ type ChainType = "sampleFile" | "documentFile" | "rawText" | "cleanText" | "qaPa
 type SampleStatus = "已上传" | "已发送" | "试跑中" | "已完成";
 type AgentEventRole = "agent" | "user" | "thought";
 type AgentEventStatus = "done" | "running" | "pending";
+type ConnectionStatus = "normal" | "error" | "resolving" | "resolved";
 
 interface SampleFileItem {
   id: string;
@@ -584,6 +588,10 @@ function getCategorySections(nodes: ToolNode[]) {
   return sections;
 }
 
+function getConnectionKey(fromCategory: string, toCategory: string) {
+  return `${fromCategory}->${toCategory}`;
+}
+
 function getCategoryOrder(category: string) {
   const order = ["文档解析", "内容处理", "系统工具", "智能生成", "质量评估"];
   const index = order.indexOf(category);
@@ -677,11 +685,13 @@ export function AgentWorkbench() {
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>(initialAgentEvents);
   const [agentInput, setAgentInput] = useState("");
   const [isAgentRunning, setIsAgentRunning] = useState(false);
+  const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionStatus>>({});
 
   const categories = useMemo(() => ["全部", ...Array.from(new Set(toolCatalog.map((tool) => tool.category)))], []);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
   const nodeWarnings = useMemo(() => getNodeWarnings(planNodes), [planNodes]);
   const allProblems = getPlanProblems(planNodes);
+  const visibleProblems = isAgentRunning ? [] : allProblems;
   const canEdit = !confirmed;
   const editingNode = planNodes.find((node) => node.nodeId === editingNodeId) ?? null;
   const addedToolIds = useMemo(() => new Set(planNodes.map((node) => node.toolId)), [planNodes]);
@@ -702,6 +712,24 @@ export function AgentWorkbench() {
 
   const updateAgentEvent = (id: string, patch: Partial<AgentEvent>) => {
     setAgentEvents((current) => current.map((event) => (event.id === id ? { ...event, ...patch } : event)));
+  };
+
+  const pushAgentEvent = (event: Omit<AgentEvent, "id">) => {
+    const id = `${event.role}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setAgentEvents((current) => [...current, { ...event, id }]);
+    return id;
+  };
+
+  const setConnectionStatus = (fromCategory: string, toCategory: string, status: ConnectionStatus) => {
+    const key = getConnectionKey(fromCategory, toCategory);
+    setConnectionStates((current) => {
+      if (status === "normal") {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      }
+      return { ...current, [key]: status };
+    });
   };
 
   const addDemoSample = () => {
@@ -727,48 +755,152 @@ export function AgentWorkbench() {
       toast.error("请先上传或添加样例文件");
       return;
     }
+    const filesSnapshot = [...sampleFiles];
+    const [parser, adapter, splitter, storage, qa, summary] = createAgentDemoPlanNodes();
     setIsAgentRunning(true);
-    setRightTab(0);
+    setConfirmed(false);
+    setRightTab(1);
+    setPlanNodes([]);
+    setConnectionStates({});
+    setSampleResults([]);
     setSampleFiles((current) => current.map((file) => ({ ...file, status: "已发送" })));
-    appendAgentEvent({
+    pushAgentEvent({
       role: "user",
       title: "发送样例文件",
-      content: `已发送 ${sampleFiles.length} 个样例文件，请生成正式的知识处理方案。`,
+      content: `已发送 ${filesSnapshot.length} 个样例文件，请生成正式的知识处理方案。`,
       status: "done",
     });
-    const readEventId = appendAgentEvent({
-      role: "thought",
-      title: "读取样例文件",
-      content: "解析文件类型、正文结构、标题层级和可抽取字段。",
-      status: "running",
-    });
-    setTimeout(() => {
-      updateAgentEvent(readEventId, { status: "done", content: "样例结构已识别：政策条款、办理条件、材料清单、问答说明。" });
-      setSampleFiles((current) => current.map((file) => ({ ...file, status: "试跑中" })));
-      const toolEventId = appendAgentEvent({
+
+    const schedule = (delay: number, action: () => void) => window.setTimeout(action, delay);
+    let readEventId = "";
+    let toolEventId = "";
+    let adapterEventId = "";
+    let orderEventId = "";
+    let confirmEventId = "";
+
+    schedule(500, () => {
+      readEventId = pushAgentEvent({
         role: "thought",
-        title: "调研并试跑工具",
-        content: "从管理端工具分类中选择客户自建解析工具、系统代码工具、分片工具和数据存储工具。",
+        title: "Agent 思考：读取样例文件",
+        content: "正在解析文件类型、正文结构、标题层级和可抽取字段。",
         status: "running",
       });
-      setTimeout(() => {
-        updateAgentEvent(toolEventId, { status: "done", content: "发现客户自建解析工具无标准输出声明，已通过代码工具建立 sections[].content 到 data.cleanBlocks 的适配。" });
-        const generatedPlan = createAgentDemoPlanNodes();
-        setPlanNodes(generatedPlan);
-        setConfirmed(false);
-        setSampleFiles((current) => current.map((file) => ({ ...file, status: "已完成" })));
-        setSampleResults(sampleFiles.map(createSampleResult));
-        setRightTab(1);
-        appendAgentEvent({
-          role: "agent",
-          title: "已生成处理方案",
-          content: "方案已同步到右侧：解析节点使用客户自建工具，系统工具节点包含代码适配与数据存储，后续节点可继续引用标准变量。",
-          status: "done",
-        });
-        setIsAgentRunning(false);
-        toast.success("Agent 已生成处理方案");
-      }, 900);
-    }, 900);
+    });
+    schedule(1700, () => {
+      updateAgentEvent(readEventId, { status: "done", content: "样例结构已识别：政策条款、办理条件、材料清单、问答说明。" });
+      setSampleFiles((current) => current.map((file) => ({ ...file, status: "试跑中" })));
+      setPlanNodes([parser]);
+      pushAgentEvent({
+        role: "agent",
+        title: "生成文档解析节点",
+        content: `已选择工具：${parser.toolName}。该工具适合医保政策类样例文件解析。`,
+        status: "done",
+      });
+    });
+    schedule(3000, () => {
+      toolEventId = pushAgentEvent({
+        role: "thought",
+        title: "Agent 思考：调研后置工具",
+        content: "正在基于解析结果试跑分片工具，检查上游输出是否能直接接入下游输入。",
+        status: "running",
+      });
+    });
+    schedule(4300, () => {
+      setPlanNodes([parser, splitter]);
+      setConnectionStatus(parser.category, splitter.category, "error");
+      updateAgentEvent(toolEventId, {
+        status: "done",
+        content: "已生成内容处理节点，但发现解析工具返回 sections[].content，无法直接写入分片工具的 chunkObject。",
+      });
+      pushAgentEvent({
+        role: "agent",
+        title: "生成内容处理节点",
+        content: `已选择工具：${splitter.toolName}。右侧连线标记了当前衔接异常。`,
+        status: "done",
+      });
+    });
+    schedule(5600, () => {
+      adapterEventId = pushAgentEvent({
+        role: "thought",
+        title: "Agent 思考：解决节点衔接适配",
+        content: "正在生成适配步骤，将客户自建工具输出转换为平台后置工具可消费的标准变量。",
+        status: "running",
+      });
+      setConnectionStatus(parser.category, splitter.category, "resolving");
+    });
+    schedule(7200, () => {
+      setPlanNodes([parser, adapter, splitter]);
+      setConnectionStatus(parser.category, adapter.category, "resolved");
+      setConnectionStatus(adapter.category, splitter.category, "resolved");
+      updateAgentEvent(adapterEventId, {
+        status: "done",
+        content: "已插入系统工具节点：代码工具。sections[].content 已适配为 data.cleanBlocks。",
+      });
+      pushAgentEvent({
+        role: "agent",
+        title: "生成系统工具节点",
+        content: `已选择工具：${adapter.toolName}。该工具负责连接适配，不需要运营用户理解底层 MCP Server。`,
+        status: "done",
+      });
+    });
+    schedule(8500, () => {
+      setConnectionStatus(parser.category, adapter.category, "normal");
+      setConnectionStatus(adapter.category, splitter.category, "normal");
+      setPlanNodes([parser, adapter, splitter, qa, summary]);
+      pushAgentEvent({
+        role: "agent",
+        title: "生成智能生成节点",
+        content: `已加入 ${qa.toolName}、${summary.toolName}，用于从分片结果生成问答和摘要。`,
+        status: "done",
+      });
+    });
+    schedule(9800, () => {
+      orderEventId = pushAgentEvent({
+        role: "thought",
+        title: "Agent 思考：调整节点顺序",
+        content: "发现批量处理时分片结果需要先持久化，再供后续生成和追溯引用，准备调整流程顺序。",
+        status: "running",
+      });
+    });
+    schedule(11100, () => {
+      setPlanNodes([parser, adapter, splitter, storage, qa, summary]);
+      setConnectionStatus(splitter.category, storage.category, "resolved");
+      updateAgentEvent(orderEventId, {
+        status: "done",
+        content: "已将数据存储工具放到分片之后，智能生成之前，保证中间结果可追溯、可复用。",
+      });
+      pushAgentEvent({
+        role: "agent",
+        title: "生成数据存储节点",
+        content: `已选择工具：${storage.toolName}。分片结果将写入 ES，并返回 data.storageRef。`,
+        status: "done",
+      });
+    });
+    schedule(12400, () => {
+      setConnectionStatus(splitter.category, storage.category, "normal");
+      confirmEventId = pushAgentEvent({
+        role: "thought",
+        title: "Agent 思考：最终校验",
+        content: "正在检查节点顺序、工具输入输出、连接适配、存储策略和 Workflow DSL 可执行性。",
+        status: "running",
+      });
+    });
+    schedule(13800, () => {
+      updateAgentEvent(confirmEventId, {
+        status: "done",
+        content: "校验完成：所有节点已具备执行契约，工具输出可被后置节点引用。",
+      });
+      setSampleFiles((current) => current.map((file) => ({ ...file, status: "已完成" })));
+      setSampleResults(filesSnapshot.map(createSampleResult));
+      pushAgentEvent({
+        role: "agent",
+        title: "处理方案生成完成",
+        content: "右侧方案已完成：解析、代码适配、分片、数据存储、智能生成均已落为可执行流程节点。",
+        status: "done",
+      });
+      setIsAgentRunning(false);
+      toast.success("Agent 已完成方案生成和校验");
+    });
   };
 
   const sendAgentInstruction = () => {
@@ -987,7 +1119,7 @@ export function AgentWorkbench() {
                   <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
                     <Chip label={`${categorySections.length} 个流程节点`} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
                     <Chip label={`${planNodes.length} 个工具`} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#eff6ff", color: "#2563eb" }} />
-                    <Chip label={confirmed ? "已保存" : allProblems.length ? "存在问题" : "待确认"} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: confirmed ? "#f0fdf4" : allProblems.length ? "#fef2f2" : "#f8fafc", color: confirmed ? "#16a34a" : allProblems.length ? "#dc2626" : "#64748b" }} />
+                    <Chip label={isAgentRunning ? "生成中" : confirmed ? "已保存" : visibleProblems.length ? "存在问题" : "待确认"} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: isAgentRunning ? "#fff7ed" : confirmed ? "#f0fdf4" : visibleProblems.length ? "#fef2f2" : "#f8fafc", color: isAgentRunning ? "#c2410c" : confirmed ? "#16a34a" : visibleProblems.length ? "#dc2626" : "#64748b" }} />
                   </Stack>
                 </Box>
                 <Tooltip title="添加工具">
@@ -1006,6 +1138,7 @@ export function AgentWorkbench() {
                       index={index}
                       total={categorySections.length}
                       section={section}
+                      connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
                       canEdit={canEdit}
                       warnings={nodeWarnings}
                       onEditTool={(nodeId) => setEditingNodeId(nodeId)}
@@ -1019,12 +1152,12 @@ export function AgentWorkbench() {
                 </Stack>
               </Box>
               <Box sx={{ p: 1.5, borderTop: "1px solid #EEF2F7", bgcolor: "#fff" }}>
-                {allProblems.length > 0 && (
+                {visibleProblems.length > 0 && (
                   <Box sx={{ mb: 1, p: 1, borderRadius: "8px", bgcolor: "#fef2f2", border: "1px solid #fecaca" }}>
-                    <Typography sx={{ fontSize: 12, color: "#b91c1c" }}>当前方案存在 {allProblems.length} 个校验问题，请处理后保存。</Typography>
+                    <Typography sx={{ fontSize: 12, color: "#b91c1c" }}>当前方案存在 {visibleProblems.length} 个校验问题，请处理后保存。</Typography>
                   </Box>
                 )}
-                <Button fullWidth startIcon={<FactCheck />} onClick={confirmPlan} disabled={!canEdit || allProblems.length > 0} variant="contained" sx={{ bgcolor: allProblems.length ? "#cbd5e1" : "#801AEB", borderRadius: "10px", textTransform: "none", "&:hover": { bgcolor: allProblems.length ? "#cbd5e1" : "#6D16C9" } }}>
+                <Button fullWidth startIcon={<FactCheck />} onClick={confirmPlan} disabled={!canEdit || isAgentRunning || visibleProblems.length > 0} variant="contained" sx={{ bgcolor: isAgentRunning || visibleProblems.length ? "#cbd5e1" : "#801AEB", borderRadius: "10px", textTransform: "none", "&:hover": { bgcolor: isAgentRunning || visibleProblems.length ? "#cbd5e1" : "#6D16C9" } }}>
                   保存为处理方案
                 </Button>
               </Box>
@@ -1137,10 +1270,49 @@ function ResultLine({ label, value, highlight = false }: { label: string; value:
   );
 }
 
+function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
+  const config = {
+    error: { title: "衔接异常", color: "#f97316", bgcolor: "#fff7ed", border: "#fed7aa", icon: <ErrorOutline sx={{ fontSize: 15 }} /> },
+    resolving: { title: "解决中", color: "#7c3aed", bgcolor: "#f5f3ff", border: "#ddd6fe", icon: <Sync sx={{ fontSize: 15, animation: "spin 1.1s linear infinite" }} /> },
+    resolved: { title: "已解决", color: "#16a34a", bgcolor: "#f0fdf4", border: "#bbf7d0", icon: <CheckCircleOutline sx={{ fontSize: 15 }} /> },
+    normal: { title: "", color: "#64748b", bgcolor: "#fff", border: "#e2e8f0", icon: null },
+  }[status];
+
+  return (
+    <Tooltip title={config.title}>
+      <Box
+        sx={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 26,
+          height: 26,
+          borderRadius: "9px",
+          bgcolor: config.bgcolor,
+          border: `1px solid ${config.border}`,
+          color: config.color,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 8px 18px rgba(15, 23, 42, 0.12)",
+          "@keyframes spin": {
+            from: { transform: "rotate(0deg)" },
+            to: { transform: "rotate(360deg)" },
+          },
+        }}
+      >
+        {config.icon}
+      </Box>
+    </Tooltip>
+  );
+}
+
 function WorkflowNodeCard({
   index,
   total,
   section,
+  connectionStatus,
   canEdit,
   warnings,
   onEditTool,
@@ -1153,6 +1325,7 @@ function WorkflowNodeCard({
   index: number;
   total: number;
   section: { sectionId: string; category: string; nodes: ToolNode[] };
+  connectionStatus: ConnectionStatus;
   canEdit: boolean;
   warnings: Record<string, string[]>;
   onEditTool: (nodeId: string) => void;
@@ -1171,7 +1344,12 @@ function WorkflowNodeCard({
         <Box sx={{ width: 30, height: 30, borderRadius: "12px", bgcolor: hasWarning ? "#f97316" : "#111827", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16)" }}>
           {String(index + 1).padStart(2, "0")}
         </Box>
-        {index < total - 1 && <Box sx={{ width: 2, flex: 1, minHeight: 24, bgcolor: "#e2e8f0", my: 0.5 }} />}
+        {index < total - 1 && (
+          <Box sx={{ position: "relative", width: 24, flex: 1, minHeight: 32, my: 0.5, display: "flex", justifyContent: "center" }}>
+            <Box sx={{ width: 2, height: "100%", bgcolor: connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : "#e2e8f0", borderRadius: 999 }} />
+            {connectionStatus !== "normal" && <ConnectionStatusBadge status={connectionStatus} />}
+          </Box>
+        )}
       </Box>
 
       <Box
