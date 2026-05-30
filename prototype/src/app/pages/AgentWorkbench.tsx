@@ -28,6 +28,7 @@ import {
 } from "@mui/material";
 import {
   Add,
+  AccountTree,
   AutoAwesome,
   CheckCircleOutline,
   Close,
@@ -35,6 +36,7 @@ import {
   EditOutlined,
   ErrorOutline,
   FactCheck,
+  Handyman,
   Send,
   Sync,
   UploadFile,
@@ -50,8 +52,7 @@ type AgentEventRole = "agent" | "user" | "thought";
 type AgentEventStatus = "done" | "running" | "pending";
 type AgentEventKind = "message" | "toolCall" | "flow";
 type ConnectionStatus = "normal" | "error" | "resolving" | "resolved";
-type NodeRuntimeStatus = "building" | "selectingTool" | "configuring" | "done" | "running" | "success";
-type ReviewScanStep = { phase: "node" | "line"; index: number } | null;
+type NodeRuntimeStatus = "building" | "selectingTool" | "configuring" | "configured" | "done" | "running" | "success";
 
 interface SampleFileItem {
   id: string;
@@ -67,6 +68,17 @@ interface SampleProcessResult {
   parserResult: string;
   adapterResult: string;
   storageTarget: string;
+  toolRuns: ToolRunResult[];
+}
+
+interface ToolRunResult {
+  toolName: string;
+  category: string;
+  inputPath: string;
+  inputPreview: string;
+  outputPath: string;
+  outputPreview: string;
+  status: "成功" | "已适配" | "已存储";
 }
 
 interface AgentEvent {
@@ -195,6 +207,62 @@ function createSampleResult(file: SampleFileItem): SampleProcessResult {
     parserResult: "客户自建解析工具返回 sections[].content，未声明标准 outputSchema。",
     adapterResult: "已使用代码工具将 sections[].content 适配为 data.cleanBlocks，供分片工具继续处理。",
     storageTarget: "分片结果写入 ES 索引 knowledge_chunks，返回 data.storageRef。",
+    toolRuns: [
+      {
+        toolName: "医保政策解析",
+        category: "文档解析",
+        inputPath: "sample.file",
+        inputPreview: `${file.name}，PDF，2.4 MB`,
+        outputPath: "sections",
+        outputPreview: "解析出 18 个政策段落，包含标题、页码、正文和条款类型。",
+        status: "成功",
+      },
+      {
+        toolName: "代码工具",
+        category: "系统工具",
+        inputPath: "sections",
+        inputPreview: "sections[].content，客户自建工具原始返回。",
+        outputPath: "data.cleanBlocks",
+        outputPreview: "生成 18 个 cleanBlocks，字段统一为 title/text/page/source。",
+        status: "已适配",
+      },
+      {
+        toolName: "分隔符递归分片",
+        category: "内容处理",
+        inputPath: "data.cleanBlocks",
+        inputPreview: "18 个标准文本块，按标题和段落边界保留顺序。",
+        outputPath: "data.textChunkResult",
+        outputPreview: "生成 42 个文本分片，平均 486 字，保留来源页码。",
+        status: "成功",
+      },
+      {
+        toolName: "数据存储工具",
+        category: "系统工具",
+        inputPath: "data.textChunkResult",
+        inputPreview: "42 个分片对象，含 text/title/page/source。",
+        outputPath: "data.storageRef",
+        outputPreview: "写入 ES 索引 knowledge_chunks，storedCount=42。",
+        status: "已存储",
+      },
+      {
+        toolName: "QA提取",
+        category: "智能生成",
+        inputPath: "data.textChunkResult",
+        inputPreview: "42 个政策分片，按来源文档顺序输入。",
+        outputPath: "data.qaResult",
+        outputPreview: "生成 9 组问答，包含办理条件、材料清单和适用范围。",
+        status: "成功",
+      },
+      {
+        toolName: "摘要总结",
+        category: "智能生成",
+        inputPath: "data.textChunkResult",
+        inputPreview: "42 个政策分片，合并上下文窗口后输入模型。",
+        outputPath: "data.summaryResult",
+        outputPreview: "生成 3 条摘要，覆盖政策目的、适用对象和办理要求。",
+        status: "成功",
+      },
+    ],
   };
 }
 
@@ -697,7 +765,6 @@ export function AgentWorkbench() {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionStatus>>({});
   const [nodeRuntimeStates, setNodeRuntimeStates] = useState<Record<string, NodeRuntimeState>>({});
-  const [reviewScanStep, setReviewScanStep] = useState<ReviewScanStep>(null);
 
   const categories = useMemo(() => ["全部", ...Array.from(new Set(toolCatalog.map((tool) => tool.category)))], []);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
@@ -774,32 +841,6 @@ export function AgentWorkbench() {
     });
   };
 
-  const startReviewScan = (nodes: ToolNode[]) => {
-    const total = Math.max(getCategorySections(nodes).length, 1);
-    const sequence = Array.from({ length: total }, (_, index) => (
-      index < total - 1
-        ? [{ phase: "node" as const, index }, { phase: "line" as const, index }]
-        : [{ phase: "node" as const, index }]
-    )).flat();
-    let active = true;
-    let cursor = 0;
-    let timer: number | null = null;
-    const run = () => {
-      if (!active) return;
-      const step = sequence[cursor % sequence.length];
-      setReviewScanStep(step);
-      cursor += 1;
-      timer = window.setTimeout(run, step.phase === "node" ? 620 : 920);
-    };
-    setReviewScanStep(null);
-    timer = window.setTimeout(run, 20);
-    return () => {
-      active = false;
-      if (timer) window.clearTimeout(timer);
-      setReviewScanStep(null);
-    };
-  };
-
   const addDemoSample = () => {
     setSampleFiles((current) => (current.some((file) => file.id === demoSampleFile.id) ? current : [demoSampleFile, ...current]));
     toast.success("已添加演示样例文件");
@@ -833,7 +874,6 @@ export function AgentWorkbench() {
     setPlanNodes([]);
     setConnectionStates({});
     setNodeRuntimeStates({});
-    setReviewScanStep(null);
     setSampleResults([]);
     setSampleFiles((current) => current.map((file) => ({ ...file, status: "已发送" })));
     pushAgentEvent({
@@ -890,13 +930,14 @@ export function AgentWorkbench() {
       [1, 2, 3, 4].forEach((count) => {
         step(900, () => setNodesRuntime(nodes, { status: "configuring", visibleParamCount: count }));
       });
-      step(1600, () => {
-        setNodesRuntime(nodes, { status: "done" });
+      step(900, () => {
+        setNodesRuntime(nodes, { status: "configured", visibleParamCount: 4 });
         updateAgentEvent(configEventId, {
           status: "done",
-          content: `${nodes.map((node) => node.toolName).join("、")} 参数配置完成，工具模块已收起为标准执行契约。`,
+          content: `${nodes.map((node) => node.toolName).join("、")} 参数配置完成，工具模块即将收起为标准执行契约。`,
         });
       });
+      step(1100, () => setNodesRuntime(nodes, { status: "done" }));
     };
 
     let analyzeEventId = "";
@@ -908,8 +949,6 @@ export function AgentWorkbench() {
     let resolveEventId = "";
     let recheckEventId = "";
     let executeEventId = "";
-    let stopReviewScan: (() => void) | null = null;
-    let stopRecheckScan: (() => void) | null = null;
 
     step(800, () => {
       analyzeEventId = pushAgentEvent({
@@ -969,11 +1008,8 @@ export function AgentWorkbench() {
         content: "正在从上到下检查每个节点的输入、输出、变量路径和存储位置。",
         status: "running",
       });
-      stopReviewScan = startReviewScan(draftNodes);
     });
     step(7200, () => {
-      stopReviewScan?.();
-      stopReviewScan = null;
       clearConnectionStatuses(draftNodes);
       setConnectionStatus(parser.category, splitter.category, "error");
       updateAgentEvent(checkEventId, {
@@ -1028,11 +1064,8 @@ export function AgentWorkbench() {
         content: "正在重新检查完整方案的节点顺序、输入输出映射和执行契约。",
         status: "running",
       });
-      stopRecheckScan = startReviewScan(finalNodes);
     });
     step(6800, () => {
-      stopRecheckScan?.();
-      stopRecheckScan = null;
       clearConnectionStatuses(finalNodes);
       updateAgentEvent(recheckEventId, {
         status: "done",
@@ -1325,7 +1358,6 @@ export function AgentWorkbench() {
                           total={categorySections.length}
                           section={section}
                           connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
-                          reviewScanStep={reviewScanStep}
                           runtimeStates={nodeRuntimeStates}
                           canEdit={canEdit}
                           warnings={displayedNodeWarnings}
@@ -1448,17 +1480,64 @@ function SampleResultPanel({ files, results }: { files: SampleFileItem[]; result
                   </Box>
                   <Chip label={file.status} size="small" sx={{ height: 20, fontSize: 10, bgcolor: file.status === "已完成" ? "#f0fdf4" : file.status === "试跑中" ? "#fff7ed" : "#f8fafc", color: file.status === "已完成" ? "#16a34a" : file.status === "试跑中" ? "#c2410c" : "#64748b" }} />
                 </Box>
-                <Stack spacing={0.8} sx={{ p: 1.25 }}>
-                  <ResultLine label="结构识别" value={result?.structure ?? "等待 Agent 试跑样例文件。"} />
-                  <ResultLine label="解析结果" value={result?.parserResult ?? "待生成"} />
-                  <ResultLine label="连接适配" value={result?.adapterResult ?? "待判断是否需要适配"} highlight={Boolean(result?.adapterResult)} />
-                  <ResultLine label="存储策略" value={result?.storageTarget ?? "待生成"} />
+                <Stack spacing={1} sx={{ p: 1.25 }}>
+                  <Box sx={{ p: 1, borderRadius: "10px", bgcolor: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                    <ResultLine label="结构识别" value={result?.structure ?? "等待 Agent 试跑样例文件。"} />
+                    <ResultLine label="执行结果" value={result ? `${result.parserResult}；${result.adapterResult}；${result.storageTarget}` : "待生成工具输入输出。"} highlight={Boolean(result)} />
+                  </Box>
+                  {result ? (
+                    <Stack spacing={0.85}>
+                      {result.toolRuns.map((toolRun) => (
+                        <ToolRunResultCard key={`${file.id}-${toolRun.toolName}`} toolRun={toolRun} />
+                      ))}
+                    </Stack>
+                  ) : (
+                    <Box sx={{ p: 1.2, borderRadius: "10px", border: "1px dashed #cbd5e1", bgcolor: "#fbfcff", display: "flex", alignItems: "center", gap: 0.8 }}>
+                      <Handyman sx={{ fontSize: 16, color: "#94a3b8" }} />
+                      <Typography sx={{ fontSize: 12.5, color: "#64748b" }}>Agent 执行方案后，将按工具展示本次调用的输入和输出。</Typography>
+                    </Box>
+                  )}
                 </Stack>
               </Box>
             );
           })}
         </Stack>
       )}
+    </Box>
+  );
+}
+
+function ToolRunResultCard({ toolRun }: { toolRun: ToolRunResult }) {
+  const statusColor = toolRun.status === "已存储" ? "#2563eb" : toolRun.status === "已适配" ? "#7c3aed" : "#16a34a";
+  const statusBg = toolRun.status === "已存储" ? "#eff6ff" : toolRun.status === "已适配" ? "#f5f3ff" : "#f0fdf4";
+  return (
+    <Box sx={{ border: "1px solid #E0E8F2", borderRadius: "11px", bgcolor: "#fff", overflow: "hidden" }}>
+      <Box sx={{ px: 1, py: 0.8, display: "flex", alignItems: "center", gap: 0.7, borderBottom: "1px solid #EEF2F7", bgcolor: "#FBFCFF" }}>
+        <Box sx={{ width: 24, height: 24, borderRadius: "8px", bgcolor: "#eef2ff", color: "#4f46e5", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Handyman sx={{ fontSize: 14 }} />
+        </Box>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography sx={{ fontSize: 12.5, fontWeight: 850, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{toolRun.toolName}</Typography>
+          <Typography sx={{ mt: 0.1, fontSize: 10.5, color: "#94a3b8" }}>{toolRun.category}</Typography>
+        </Box>
+        <Chip label={toolRun.status} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: statusBg, color: statusColor, fontWeight: 700 }} />
+      </Box>
+      <Stack spacing={0.65} sx={{ p: 1 }}>
+        <ToolIOPreview label="输入" path={toolRun.inputPath} preview={toolRun.inputPreview} color="#7c3aed" />
+        <ToolIOPreview label="输出" path={toolRun.outputPath} preview={toolRun.outputPreview} color="#16a34a" />
+      </Stack>
+    </Box>
+  );
+}
+
+function ToolIOPreview({ label, path, preview, color }: { label: string; path: string; preview: string; color: string }) {
+  return (
+    <Box sx={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr)", columnGap: 0.75, alignItems: "start" }}>
+      <Typography sx={{ fontSize: 11.5, color, fontWeight: 900, lineHeight: "22px" }}>{label}</Typography>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography sx={{ display: "inline-flex", maxWidth: "100%", px: 0.65, py: 0.25, borderRadius: "6px", bgcolor: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 11, color: "#475569", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</Typography>
+        <Typography sx={{ mt: 0.35, fontSize: 11.5, color: "#334155", lineHeight: 1.55 }}>{preview}</Typography>
+      </Box>
     </Box>
   );
 }
@@ -1515,7 +1594,6 @@ function WorkflowNodeCard({
   total,
   section,
   connectionStatus,
-  reviewScanStep,
   runtimeStates,
   canEdit,
   warnings,
@@ -1530,7 +1608,6 @@ function WorkflowNodeCard({
   total: number;
   section: { sectionId: string; category: string; nodes: ToolNode[] };
   connectionStatus: ConnectionStatus;
-  reviewScanStep: ReviewScanStep;
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
   warnings: Record<string, string[]>;
@@ -1546,8 +1623,6 @@ function WorkflowNodeCard({
   const isCardBuilding = section.nodes.some((node) => ["building", "selectingTool", "configuring"].includes(runtimeStates[node.nodeId]?.status ?? ""));
   const isSectionRunning = section.nodes.some((node) => runtimeStates[node.nodeId]?.status === "running");
   const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : "#111827";
-  const isReviewNodeActive = reviewScanStep?.phase === "node" && reviewScanStep.index === index;
-  const isReviewLineActive = reviewScanStep?.phase === "line" && reviewScanStep.index === index && connectionStatus === "normal";
 
   return (
     <Box
@@ -1578,48 +1653,7 @@ function WorkflowNodeCard({
             fontWeight: 800,
             position: "relative",
             overflow: "hidden",
-            boxShadow: isReviewNodeActive
-              ? "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 22px rgba(128, 26, 235, 0.42)"
-              : "0 8px 18px rgba(17, 24, 39, 0.16)",
-            animation: isReviewNodeActive
-                ? "sequenceSelfGlow 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite"
-                : "none",
-            "&::after": isReviewNodeActive
-              ? {
-                  content: '""',
-                  position: "absolute",
-                  left: -8,
-                  right: -8,
-                  top: -16,
-                  bottom: -16,
-                  background: "linear-gradient(180deg, rgba(255,255,255,0) 20%, rgba(255,255,255,0.96) 44%, rgba(196,181,253,0.72) 54%, rgba(255,255,255,0) 76%)",
-                  transform: "translateY(-120%)",
-                  mixBlendMode: "screen",
-                  animation: "sequenceBlockShine 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite",
-                }
-              : undefined,
-            "@keyframes sequenceSelfGlow": {
-              "0%, 20%, 62%, 100%": {
-                backgroundColor: sequenceBg,
-                boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 0 rgba(128, 26, 235, 0)",
-              },
-              "36%": {
-                backgroundColor: "#6d28d9",
-                boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 20px rgba(128, 26, 235, 0.46)",
-              },
-              "46%": {
-                backgroundColor: "#8b5cf6",
-                boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 24px rgba(128, 26, 235, 0.55)",
-              },
-            },
-            "@keyframes sequenceBlockShine": {
-              "0%": { transform: "translateY(-120%)", opacity: 0 },
-              "18%": { opacity: 0 },
-              "30%": { opacity: 1 },
-              "46%": { opacity: 1 },
-              "58%": { transform: "translateY(120%)", opacity: 0 },
-              "100%": { transform: "translateY(120%)", opacity: 0 },
-            },
+            boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16)",
           }}
         >
           {isSectionRunning ? (
@@ -1634,24 +1668,6 @@ function WorkflowNodeCard({
                 fontWeight: 900,
                 lineHeight: 1,
                 color: "#fff",
-                ...(isReviewNodeActive
-                  ? {
-                      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #ffffff 30%, #fef08a 44%, #ddd6fe 54%, #ffffff 70%, #ffffff 100%)",
-                      backgroundSize: "100% 260%",
-                      backgroundPosition: "0 -130%",
-                      WebkitBackgroundClip: "text",
-                      backgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      animation: "sequenceTextShine 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite",
-                      textShadow: "0 0 10px rgba(255, 255, 255, 0.4)",
-                    }
-                  : {}),
-                "@keyframes sequenceTextShine": {
-                  "0%": { backgroundPosition: "0 -130%" },
-                  "22%": { backgroundPosition: "0 -130%" },
-                  "48%": { backgroundPosition: "0 130%" },
-                  "100%": { backgroundPosition: "0 130%" },
-                },
               }}
             >
               {String(index + 1).padStart(2, "0")}
@@ -1664,18 +1680,8 @@ function WorkflowNodeCard({
               sx={{
                 width: 2,
                 height: "100%",
-                bgcolor: isReviewLineActive ? "transparent" : connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : "#e2e8f0",
-                backgroundImage: isReviewLineActive ? "linear-gradient(180deg, #e2e8f0 0%, #e2e8f0 28%, #ffffff 42%, #a855f7 49%, #22c55e 54%, #e2e8f0 68%, #e2e8f0 100%)" : "none",
-                backgroundSize: isReviewLineActive ? "100% 260%" : "auto",
-                backgroundPosition: isReviewLineActive ? "0 -130%" : "0 0",
+                bgcolor: connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : "#e2e8f0",
                 borderRadius: 999,
-                boxShadow: isReviewLineActive ? "0 0 10px rgba(128, 26, 235, 0.16)" : "none",
-                animation: isReviewLineActive ? "connectionLineShine 0.92s cubic-bezier(0.34, 0.04, 0.36, 0.98) both" : "none",
-                "@keyframes connectionLineShine": {
-                  "0%": { backgroundPosition: "0 -130%", boxShadow: "0 0 0 rgba(128, 26, 235, 0)" },
-                  "50%": { backgroundPosition: "0 0%", boxShadow: "0 0 12px rgba(128, 26, 235, 0.32)" },
-                  "100%": { backgroundPosition: "0 130%", boxShadow: "0 0 0 rgba(128, 26, 235, 0)" },
-                },
               }}
             />
             {connectionStatus !== "normal" && <ConnectionStatusBadge status={connectionStatus} />}
@@ -1705,8 +1711,11 @@ function WorkflowNodeCard({
         }}
       >
         <Box sx={{ px: 1.4, py: 1.15, display: "flex", alignItems: "center", gap: 0.75, background: "linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)", borderBottom: "1px solid #EEF2F7" }}>
+          <Box sx={{ width: 26, height: 26, borderRadius: "9px", bgcolor: "#eef2ff", color: "#4f46e5", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <AccountTree sx={{ fontSize: 16 }} />
+          </Box>
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography sx={{ fontSize: 14, fontWeight: 900, color: "#0f172a", lineHeight: 1.3 }}>{section.category}节点</Typography>
+            <Typography sx={{ fontSize: 14, fontWeight: 900, color: "#0f172a", lineHeight: 1.3 }}>{section.category}</Typography>
           </Box>
           {hasWarning && <Chip label="需处理" size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#fff7ed", color: "#c2410c" }} />}
         </Box>
@@ -1723,7 +1732,7 @@ function WorkflowNodeCard({
             </Stack>
           )}
 
-          {section.nodes.map((node, toolIndex) => {
+          {section.nodes.map((node) => {
             const toolWarnings = warnings[node.nodeId] ?? [];
             const runtimeState = runtimeStates[node.nodeId];
             if (runtimeState?.status === "building" || runtimeState?.status === "selectingTool") {
@@ -1733,7 +1742,6 @@ function WorkflowNodeCard({
               <ToolRuntimeRow
                 key={node.nodeId}
                 node={node}
-                index={toolIndex}
                 canEdit={canEdit}
                 canDrag={canEdit && section.nodes.length > 1}
                 warnings={toolWarnings}
@@ -1786,7 +1794,6 @@ function ToolPendingRow({ status }: { status: "building" | "selectingTool" }) {
 
 function ToolRuntimeRow({
   node,
-  index,
   canEdit,
   canDrag,
   warnings,
@@ -1798,7 +1805,6 @@ function ToolRuntimeRow({
   onDrop,
 }: {
   node: ToolNode;
-  index: number;
   canEdit: boolean;
   canDrag: boolean;
   warnings: string[];
@@ -1810,14 +1816,16 @@ function ToolRuntimeRow({
   onDrop: (event: DragEvent<HTMLDivElement>) => void;
 }) {
   const status = runtimeState?.status ?? "done";
-  const isExpanded = status === "configuring";
-  const isActive = ["configuring", "running"].includes(status);
+  const isExpanded = status === "configuring" || status === "configured";
+  const isConfigured = status === "configured";
+  const isActive = ["configuring", "configured", "running"].includes(status);
   const visibleParamCount = runtimeState?.visibleParamCount ?? 0;
   const visibleParams = node.params.filter((param) => isParamVisible(node, param)).slice(0, Math.max(visibleParamCount, 0));
   const statusText = {
     building: "创建节点中",
     selectingTool: "选择工具中",
     configuring: "配置参数中",
+    configured: "配置完成",
     done: "",
     running: "",
     success: "",
@@ -1826,6 +1834,7 @@ function ToolRuntimeRow({
     building: "#801AEB",
     selectingTool: "#2563eb",
     configuring: "#c2410c",
+    configured: "#16a34a",
     done: "#64748b",
     running: "#7c3aed",
     success: "#16a34a",
@@ -1841,9 +1850,9 @@ function ToolRuntimeRow({
         px: 1,
         py: 0.9,
         borderRadius: "10px",
-        bgcolor: warnings.length ? "#fff7ed" : isActive ? "#fbf7ff" : status === "success" ? "#f0fdf4" : "#f8fafc",
-        border: `1px solid ${warnings.length ? "#fed7aa" : isActive ? "#ddd6fe" : status === "success" ? "#bbf7d0" : "#e2e8f0"}`,
-        boxShadow: isActive ? "0 8px 20px rgba(128, 26, 235, 0.08)" : "none",
+        bgcolor: warnings.length ? "#fff7ed" : isConfigured || status === "success" ? "#f0fdf4" : isActive ? "#fbf7ff" : "#f8fafc",
+        border: `1px solid ${warnings.length ? "#fed7aa" : isConfigured || status === "success" ? "#bbf7d0" : isActive ? "#ddd6fe" : "#e2e8f0"}`,
+        boxShadow: isActive ? isConfigured ? "0 8px 20px rgba(22, 163, 74, 0.1)" : "0 8px 20px rgba(128, 26, 235, 0.08)" : "none",
         animation: "fadeInTool 0.32s ease-out both",
         transition: "background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease",
         "&:hover .tool-actions": { opacity: 1, pointerEvents: "auto" },
@@ -1854,8 +1863,8 @@ function ToolRuntimeRow({
       }}
     >
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-        <Box sx={{ width: 22, height: 22, borderRadius: "8px", bgcolor: "#fff", color: statusColor, border: `1px solid ${isActive ? "#ddd6fe" : "#e2e8f0"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
-          {status === "running" ? <CircularProgress size={12} color="inherit" /> : status === "success" ? <CheckCircleOutline sx={{ fontSize: 14 }} /> : index + 1}
+        <Box sx={{ width: 22, height: 22, borderRadius: "8px", bgcolor: "#fff", color: statusColor, border: `1px solid ${isConfigured || status === "success" ? "#bbf7d0" : isActive ? "#ddd6fe" : "#e2e8f0"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
+          {status === "running" ? <CircularProgress size={12} color="inherit" /> : isConfigured || status === "success" ? <CheckCircleOutline sx={{ fontSize: 14 }} /> : <Handyman sx={{ fontSize: 14 }} />}
         </Box>
         <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1864,6 +1873,7 @@ function ToolRuntimeRow({
           {statusText && <Typography sx={{ mt: 0.15, fontSize: 11, color: statusColor }}>{statusText}</Typography>}
         </Box>
         {status === "configuring" && <CircularProgress size={16} sx={{ color: "#c2410c" }} />}
+        {isConfigured && <CheckCircleOutline sx={{ fontSize: 16, color: "#16a34a" }} />}
         {canEdit && (
           <Stack className="tool-actions" direction="row" spacing={0.25} sx={{ opacity: 0, pointerEvents: "none", transition: "opacity 0.16s ease" }}>
             <Tooltip title="编辑工具配置"><span><IconButton disabled={!canEdit} size="small" onClick={onEdit} sx={{ color: "#801AEB", width: 24, height: 24 }}><EditOutlined sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
@@ -1880,8 +1890,13 @@ function ToolRuntimeRow({
           transition: "max-height 0.34s ease, opacity 0.22s ease, margin-top 0.34s ease",
         }}
       >
-        <Box sx={{ p: 1, borderRadius: "9px", bgcolor: "#fff", border: "1px solid #fed7aa" }}>
-          <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: "#9a3412", mb: 0.75 }}>正在写入工具参数</Typography>
+        <Box sx={{ p: 1, borderRadius: "9px", bgcolor: "#fff", border: `1px solid ${isConfigured ? "#bbf7d0" : "#fed7aa"}`, boxShadow: isConfigured ? "0 0 0 3px rgba(34, 197, 94, 0.1)" : "none", transition: "border-color 0.2s ease, box-shadow 0.2s ease" }}>
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mb: 0.75 }}>
+            {isConfigured ? <CheckCircleOutline sx={{ fontSize: 14, color: "#16a34a" }} /> : <CircularProgress size={12} sx={{ color: "#c2410c" }} />}
+            <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: isConfigured ? "#15803d" : "#9a3412" }}>
+              {isConfigured ? "工具参数配置完成" : "正在写入工具参数"}
+            </Typography>
+          </Stack>
           <Stack spacing={0.55}>
             {visibleParams.length === 0 ? (
               <Typography sx={{ fontSize: 12, color: "#94a3b8" }}>等待 Agent 生成参数...</Typography>
