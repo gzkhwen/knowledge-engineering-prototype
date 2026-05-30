@@ -696,7 +696,7 @@ export function AgentWorkbench() {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionStatus>>({});
   const [nodeRuntimeStates, setNodeRuntimeStates] = useState<Record<string, NodeRuntimeState>>({});
-  const [reviewScanIndex, setReviewScanIndex] = useState<number | null>(null);
+  const [isReviewScanning, setIsReviewScanning] = useState(false);
 
   const categories = useMemo(() => ["全部", ...Array.from(new Set(toolCatalog.map((tool) => tool.category)))], []);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
@@ -773,14 +773,9 @@ export function AgentWorkbench() {
     });
   };
 
-  const startReviewScan = (nodes: ToolNode[]) => {
-    const count = Math.max(getCategorySections(nodes).length, 1);
-    let nextIndex = 0;
-    setReviewScanIndex(0);
-    return window.setInterval(() => {
-      nextIndex = (nextIndex + 1) % count;
-      setReviewScanIndex(nextIndex);
-    }, 720);
+  const startReviewScan = () => {
+    setIsReviewScanning(false);
+    window.setTimeout(() => setIsReviewScanning(true), 20);
   };
 
   const addDemoSample = () => {
@@ -889,8 +884,6 @@ export function AgentWorkbench() {
     let resolveEventId = "";
     let recheckEventId = "";
     let executeEventId = "";
-    let reviewTimer: number | null = null;
-    let recheckTimer: number | null = null;
 
     step(800, () => {
       analyzeEventId = pushAgentEvent({
@@ -950,11 +943,10 @@ export function AgentWorkbench() {
         content: "正在从上到下检查每个节点的输入、输出、变量路径和存储位置。",
         status: "running",
       });
-      reviewTimer = startReviewScan(draftNodes);
+      startReviewScan();
     });
     step(7200, () => {
-      if (reviewTimer) window.clearInterval(reviewTimer);
-      setReviewScanIndex(null);
+      setIsReviewScanning(false);
       clearConnectionStatuses(draftNodes);
       setConnectionStatus(parser.category, splitter.category, "error");
       updateAgentEvent(checkEventId, {
@@ -989,11 +981,10 @@ export function AgentWorkbench() {
         content: "正在重新检查完整方案的节点顺序、输入输出映射和执行契约。",
         status: "running",
       });
-      recheckTimer = startReviewScan(finalNodes);
+      startReviewScan();
     });
     step(6800, () => {
-      if (recheckTimer) window.clearInterval(recheckTimer);
-      setReviewScanIndex(null);
+      setIsReviewScanning(false);
       clearConnectionStatuses(finalNodes);
       updateAgentEvent(recheckEventId, {
         status: "done",
@@ -1274,27 +1265,29 @@ export function AgentWorkbench() {
                     </Box>
                   </Box>
                 ) : (
-                  <Stack spacing={0}>
-                    {categorySections.map((section, index) => (
-                      <WorkflowNodeCard
-                        key={section.sectionId}
-                        index={index}
-                        total={categorySections.length}
-                        section={section}
-                        connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
-                        isReviewScanActive={reviewScanIndex === index}
-                        runtimeStates={nodeRuntimeStates}
-                        canEdit={canEdit}
-                        warnings={displayedNodeWarnings}
-                        onEditTool={(nodeId) => setEditingNodeId(nodeId)}
-                        onRemoveTool={removeNode}
-                        onNodeDragStart={() => setDraggingCategory(section.sectionId)}
-                        onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId)}
-                        onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
-                        onToolDrop={onDropNode}
-                      />
-                    ))}
-                  </Stack>
+                  <Box sx={{ position: "relative" }}>
+                    {isReviewScanning && <FlowReviewScanOverlay />}
+                    <Stack spacing={0} sx={{ position: "relative", zIndex: 1 }}>
+                      {categorySections.map((section, index) => (
+                        <WorkflowNodeCard
+                          key={section.sectionId}
+                          index={index}
+                          total={categorySections.length}
+                          section={section}
+                          connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
+                          runtimeStates={nodeRuntimeStates}
+                          canEdit={canEdit}
+                          warnings={displayedNodeWarnings}
+                          onEditTool={(nodeId) => setEditingNodeId(nodeId)}
+                          onRemoveTool={removeNode}
+                          onNodeDragStart={() => setDraggingCategory(section.sectionId)}
+                          onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId)}
+                          onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
+                          onToolDrop={onDropNode}
+                        />
+                      ))}
+                    </Stack>
+                  </Box>
                 )}
               </Box>
               <Box sx={{ p: 1.5, borderTop: "1px solid #EEF2F7", bgcolor: "#fff" }}>
@@ -1466,12 +1459,60 @@ function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
   );
 }
 
+function FlowReviewScanOverlay() {
+  return (
+    <Box
+      sx={{
+        position: "absolute",
+        top: -10,
+        bottom: -10,
+        left: -6,
+        width: 54,
+        zIndex: 2,
+        pointerEvents: "none",
+        overflow: "hidden",
+        borderRadius: "16px",
+        "&::before": {
+          content: '""',
+          position: "absolute",
+          top: 0,
+          left: 3,
+          right: 3,
+          height: 142,
+          borderRadius: "999px",
+          background: "linear-gradient(180deg, rgba(128, 26, 235, 0) 0%, rgba(128, 26, 235, 0.18) 22%, rgba(255, 255, 255, 0.94) 46%, rgba(128, 26, 235, 0.78) 52%, rgba(34, 197, 94, 0.24) 60%, rgba(128, 26, 235, 0.12) 76%, rgba(128, 26, 235, 0) 100%)",
+          filter: "blur(0.5px)",
+          boxShadow: "0 0 18px rgba(128, 26, 235, 0.55), 0 0 38px rgba(128, 26, 235, 0.32), 0 0 52px rgba(34, 197, 94, 0.18)",
+          animation: "reviewLightSweep 2.45s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite",
+        },
+        "&::after": {
+          content: '""',
+          position: "absolute",
+          left: 21,
+          top: 0,
+          width: 10,
+          height: 96,
+          borderRadius: "999px",
+          background: "linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 48%, rgba(255,255,255,0) 100%)",
+          filter: "blur(1px)",
+          animation: "reviewLightSweep 2.45s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite",
+        },
+        "@keyframes reviewLightSweep": {
+          "0%": { transform: "translateY(-150px)", opacity: 0 },
+          "10%": { opacity: 1 },
+          "78%": { opacity: 1 },
+          "100%": { transform: "translateY(calc(100% + 150px))", opacity: 0 },
+        },
+      }}
+    />
+  );
+}
+
 function WorkflowNodeCard({
   index,
   total,
   section,
   connectionStatus,
-  isReviewScanActive,
   runtimeStates,
   canEdit,
   warnings,
@@ -1486,7 +1527,6 @@ function WorkflowNodeCard({
   total: number;
   section: { sectionId: string; category: string; nodes: ToolNode[] };
   connectionStatus: ConnectionStatus;
-  isReviewScanActive: boolean;
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
   warnings: Record<string, string[]>;
@@ -1500,9 +1540,8 @@ function WorkflowNodeCard({
   const nodeProblems = section.nodes.flatMap((node) => warnings[node.nodeId] ?? []);
   const hasWarning = nodeProblems.length > 0;
   const isCardBuilding = section.nodes.some((node) => ["building", "selectingTool", "configuring"].includes(runtimeStates[node.nodeId]?.status ?? ""));
-  const isReviewing = isReviewScanActive;
   const isSectionRunning = section.nodes.some((node) => runtimeStates[node.nodeId]?.status === "running");
-  const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : isReviewing ? "#801AEB" : "#111827";
+  const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : "#111827";
 
   return (
     <Box
@@ -1530,13 +1569,7 @@ function WorkflowNodeCard({
             justifyContent: "center",
             fontSize: 12,
             fontWeight: 800,
-            boxShadow: isReviewing ? "0 0 0 8px rgba(128, 26, 235, 0.2), 0 12px 26px rgba(128, 26, 235, 0.28)" : "0 8px 18px rgba(17, 24, 39, 0.16)",
-            animation: isReviewing ? "reviewNodeScan 1.8s ease-in-out infinite" : "none",
-            animationDelay: `${index * 180}ms`,
-            "@keyframes reviewNodeScan": {
-              "0%, 100%": { boxShadow: "0 0 0 2px rgba(128, 26, 235, 0.08), 0 8px 18px rgba(17, 24, 39, 0.12)" },
-              "45%": { boxShadow: "0 0 0 10px rgba(128, 26, 235, 0.24), 0 14px 28px rgba(128, 26, 235, 0.28)" },
-            },
+            boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16)",
           }}
         >
           {isSectionRunning ? <CircularProgress size={14} color="inherit" /> : String(index + 1).padStart(2, "0")}
@@ -1547,15 +1580,8 @@ function WorkflowNodeCard({
               sx={{
                 width: 2,
                 height: "100%",
-                bgcolor: connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : isReviewScanActive ? "#801AEB" : "#e2e8f0",
+                bgcolor: connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : "#e2e8f0",
                 borderRadius: 999,
-                boxShadow: isReviewScanActive ? "0 0 0 6px rgba(128, 26, 235, 0.16)" : "none",
-                animation: isReviewScanActive ? "scanLine 1.2s ease-in-out infinite" : "none",
-                animationDelay: `${index * 180 + 100}ms`,
-                "@keyframes scanLine": {
-                  "0%, 100%": { opacity: 0.25, boxShadow: "none" },
-                  "45%": { opacity: 1, boxShadow: "0 0 0 8px rgba(128, 26, 235, 0.2)" },
-                },
               }}
             />
             {connectionStatus !== "normal" && <ConnectionStatusBadge status={connectionStatus} />}
