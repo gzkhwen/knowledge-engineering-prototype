@@ -674,6 +674,7 @@ export function AgentWorkbench() {
   const { projectId, categoryId, formType } = useParams<{ projectId: string; categoryId: string; formType: string }>();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const agentStreamRef = useRef<HTMLDivElement | null>(null);
+  const planFlowRef = useRef<HTMLDivElement | null>(null);
   const displayFormType = formType ? decodeURIComponent(formType) : "问答库";
   const displayCategory = useMemo(() => {
     if (!projectId || !categoryId) return "常见问题";
@@ -698,7 +699,6 @@ export function AgentWorkbench() {
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionStatus>>({});
   const [nodeRuntimeStates, setNodeRuntimeStates] = useState<Record<string, NodeRuntimeState>>({});
   const [reviewScanStep, setReviewScanStep] = useState<ReviewScanStep>(null);
-  const [successWaveIndex, setSuccessWaveIndex] = useState<number | null>(null);
 
   const categories = useMemo(() => ["全部", ...Array.from(new Set(toolCatalog.map((tool) => tool.category)))], []);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
@@ -803,11 +803,27 @@ export function AgentWorkbench() {
 
   const startSuccessWave = (nodes: ToolNode[]) => {
     const total = Math.max(getCategorySections(nodes).length, 1);
-    setSuccessWaveIndex(null);
-    Array.from({ length: total }).forEach((_, index) => {
-      window.setTimeout(() => setSuccessWaveIndex(index), 40 + index * 620);
+    window.requestAnimationFrame(() => {
+      const root = planFlowRef.current;
+      if (!root) return;
+      const cards = Array.from(root.querySelectorAll<HTMLElement>("[data-flow-card]")).slice(0, total);
+      const run = async () => {
+        for (const card of cards) {
+          const animation = card.animate(
+            [
+              { transform: "translateY(0) scale(1)", boxShadow: "0 10px 28px rgba(15, 23, 42, 0.06)", borderColor: "#e2e8f0" },
+              { transform: "translateY(-10px) scale(1.018)", boxShadow: "0 24px 42px rgba(34, 197, 94, 0.22)", borderColor: "#86efac", offset: 0.34 },
+              { transform: "translateY(4px) scale(0.996)", boxShadow: "0 10px 22px rgba(34, 197, 94, 0.12)", borderColor: "#bbf7d0", offset: 0.54 },
+              { transform: "translateY(-2px) scale(1.006)", boxShadow: "0 16px 28px rgba(34, 197, 94, 0.16)", borderColor: "#bbf7d0", offset: 0.74 },
+              { transform: "translateY(0) scale(1)", boxShadow: "0 10px 28px rgba(15, 23, 42, 0.06)", borderColor: "#e2e8f0" },
+            ],
+            { duration: 620, easing: "cubic-bezier(0.2, 0.9, 0.22, 1.18)", fill: "none" },
+          );
+          await animation.finished.catch(() => undefined);
+        }
+      };
+      void run();
     });
-    window.setTimeout(() => setSuccessWaveIndex(null), 40 + total * 620 + 220);
   };
 
   const addDemoSample = () => {
@@ -844,7 +860,6 @@ export function AgentWorkbench() {
     setConnectionStates({});
     setNodeRuntimeStates({});
     setReviewScanStep(null);
-    setSuccessWaveIndex(null);
     setSampleResults([]);
     setSampleFiles((current) => current.map((file) => ({ ...file, status: "已发送" })));
     pushAgentEvent({
@@ -1084,7 +1099,6 @@ export function AgentWorkbench() {
       });
     });
     step(3400, () => {
-      setSuccessWaveIndex(null);
       setNodesRuntime(finalNodes, { status: "done" });
       updateAgentEvent(successWaveEventId, {
         status: "done",
@@ -1340,7 +1354,7 @@ export function AgentWorkbench() {
                     </Box>
                   </Box>
                 ) : (
-                  <Box sx={{ position: "relative" }}>
+                  <Box ref={planFlowRef} sx={{ position: "relative" }}>
                     <Stack spacing={0}>
                       {categorySections.map((section, index) => (
                         <WorkflowNodeCard
@@ -1350,7 +1364,6 @@ export function AgentWorkbench() {
                           section={section}
                           connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
                           reviewScanStep={reviewScanStep}
-                          isSuccessWaving={successWaveIndex === index}
                           runtimeStates={nodeRuntimeStates}
                           canEdit={canEdit}
                           warnings={displayedNodeWarnings}
@@ -1541,7 +1554,6 @@ function WorkflowNodeCard({
   section,
   connectionStatus,
   reviewScanStep,
-  isSuccessWaving,
   runtimeStates,
   canEdit,
   warnings,
@@ -1557,7 +1569,6 @@ function WorkflowNodeCard({
   section: { sectionId: string; category: string; nodes: ToolNode[] };
   connectionStatus: ConnectionStatus;
   reviewScanStep: ReviewScanStep;
-  isSuccessWaving: boolean;
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
   warnings: Record<string, string[]>;
@@ -1575,7 +1586,6 @@ function WorkflowNodeCard({
   const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : "#111827";
   const isReviewNodeActive = reviewScanStep?.phase === "node" && reviewScanStep.index === index;
   const isReviewLineActive = reviewScanStep?.phase === "line" && reviewScanStep.index === index && connectionStatus === "normal";
-  const isSuccessCardWaving = isSuccessWaving;
 
   return (
     <Box
@@ -1583,20 +1593,11 @@ function WorkflowNodeCard({
         display: "grid",
         gridTemplateColumns: "36px minmax(0, 1fr)",
         columnGap: 1.1,
-        animation: isSuccessCardWaving ? "workflowCardSuccessWave 0.62s cubic-bezier(0.2, 0.9, 0.22, 1.18) both" : "nodeCardEnter 0.38s ease-out both",
+        animation: "nodeCardEnter 0.38s ease-out both",
         transformOrigin: "center",
-        willChange: isSuccessCardWaving ? "transform" : "auto",
         "@keyframes nodeCardEnter": {
           from: { opacity: 0, transform: "translateY(8px) scale(0.985)" },
           to: { opacity: 1, transform: "translateY(0) scale(1)" },
-        },
-        "@keyframes workflowCardSuccessWave": {
-          "0%": { transform: "translateY(0) scale(1)" },
-          "24%": { transform: "translateY(-7px) scale(1.018)" },
-          "44%": { transform: "translateY(3px) scale(0.996)" },
-          "64%": { transform: "translateY(-2px) scale(1.006)" },
-          "82%": { transform: "translateY(1px) scale(0.999)" },
-          "100%": { transform: "translateY(0) scale(1)" },
         },
       }}
     >
@@ -1721,6 +1722,7 @@ function WorkflowNodeCard({
       </Box>
 
       <Box
+        data-flow-card={index}
         draggable={canEdit}
         onDragStart={canEdit ? onNodeDragStart : undefined}
         onDragOver={canEdit ? (event) => event.preventDefault() : undefined}
@@ -1732,7 +1734,7 @@ function WorkflowNodeCard({
           borderRadius: "14px",
           bgcolor: "#fff",
           overflow: "hidden",
-          boxShadow: isSuccessCardWaving ? "0 16px 34px rgba(34, 197, 94, 0.14)" : isCardBuilding ? "0 0 0 5px rgba(128, 26, 235, 0.1), 0 14px 30px rgba(128, 26, 235, 0.12)" : "0 10px 28px rgba(15, 23, 42, 0.06)",
+          boxShadow: isCardBuilding ? "0 0 0 5px rgba(128, 26, 235, 0.1), 0 14px 30px rgba(128, 26, 235, 0.12)" : "0 10px 28px rgba(15, 23, 42, 0.06)",
           animation: isCardBuilding ? "pulseCard 1.6s ease-in-out infinite" : "none",
           transition: "box-shadow 0.18s ease, border-color 0.18s ease",
           "@keyframes pulseCard": {
