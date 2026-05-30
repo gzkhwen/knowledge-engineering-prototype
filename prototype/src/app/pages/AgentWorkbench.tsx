@@ -28,7 +28,6 @@ import {
 } from "@mui/material";
 import {
   Add,
-  AccountTree,
   AutoAwesome,
   CheckCircleOutline,
   Close,
@@ -588,6 +587,57 @@ function createAgentOptimizedPlanNodes(): ToolNode[] {
   return [parser, adapter, splitter, storage, qa, keyword].map((node) => ({ ...node, adjusted: true }));
 }
 
+function replaceToolKeepingStep(currentNode: ToolNode | undefined, toolId: string, inputSource: InputSource) {
+  const replacement = createNode(toolId, inputSource);
+  if (!currentNode) return { ...replacement, adjusted: true };
+  return {
+    ...replacement,
+    nodeId: currentNode.nodeId,
+    expanded: currentNode.expanded,
+    enabled: currentNode.enabled,
+    adjusted: true,
+  };
+}
+
+function createAgentAdjustedPlanNodes(currentNodes: ToolNode[]): ToolNode[] {
+  if (currentNodes.length === 0) return createAgentOptimizedPlanNodes();
+
+  const next = cloneNodes(currentNodes);
+  const parser = next.find((node) => node.category === "文档解析");
+  const adapter = next.find((node) => node.toolId === "system-code");
+  const upstream = adapter ?? parser;
+  const splitterIndex = next.findIndex((node) => node.category === "内容处理");
+  const currentSplitter = splitterIndex >= 0 ? next[splitterIndex] : undefined;
+  const splitterInputSource: InputSource = upstream
+    ? { type: "upstream", sourceNodeId: upstream.nodeId, outputPath: adapter ? "data.cleanBlocks" : "data.documentParseResult" }
+    : { type: "fixed" };
+  const adjustedSplitter = replaceToolKeepingStep(currentSplitter, "medical-policy-splitter", splitterInputSource);
+
+  if (splitterIndex >= 0) {
+    next[splitterIndex] = adjustedSplitter;
+  } else {
+    const insertIndex = Math.max(next.findIndex((node) => node.nodeId === upstream?.nodeId) + 1, 0);
+    next.splice(insertIndex, 0, adjustedSplitter);
+  }
+
+  next.forEach((node) => {
+    if (node.nodeId === adjustedSplitter.nodeId) return;
+    if (node.toolId === "system-storage" || node.category === "智能生成") {
+      node.inputSource = { type: "upstream", sourceNodeId: adjustedSplitter.nodeId, outputPath: "data.textChunkResult" };
+    }
+  });
+
+  const summaryIndex = next.findIndex((node) => node.toolId === "summary");
+  const keywordInputSource: InputSource = { type: "upstream", sourceNodeId: adjustedSplitter.nodeId, outputPath: "data.textChunkResult" };
+  if (summaryIndex >= 0) {
+    next[summaryIndex] = replaceToolKeepingStep(next[summaryIndex], "keyword-extractor", keywordInputSource);
+  } else if (!next.some((node) => node.toolId === "keyword-extractor")) {
+    next.push(replaceToolKeepingStep(undefined, "keyword-extractor", keywordInputSource));
+  }
+
+  return next;
+}
+
 function getParamProblems(node: ToolNode, receivesExternalInput = false) {
   if (!node.enabled) return [];
   return node.params.flatMap((param) => {
@@ -773,6 +823,7 @@ export function AgentWorkbench() {
   const allProblems = getPlanProblems(planNodes);
   const visibleProblems = isAgentRunning || planNodes.length === 0 ? [] : allProblems;
   const canEdit = !confirmed && !isAgentRunning;
+  const canSendAgentMessage = !isAgentRunning && Boolean(agentInput.trim()) && (planNodes.length > 0 || sampleFiles.length > 0);
   const canSavePlan = canEdit && planNodes.length > 0 && visibleProblems.length === 0;
   const editingNode = planNodes.find((node) => node.nodeId === editingNodeId) ?? null;
   const addedToolIds = useMemo(() => new Set(planNodes.map((node) => node.toolId)), [planNodes]);
@@ -1116,31 +1167,82 @@ export function AgentWorkbench() {
     const instruction = agentInput.trim();
     if (!instruction) return;
     setAgentInput("");
-    setIsAgentRunning(true);
     appendAgentEvent({ role: "user", title: "调整意见", content: instruction, status: "done" });
+
+    if (planNodes.length === 0) {
+      appendAgentEvent({
+        role: "agent",
+        title: "等待样例处理",
+        content: "当前还没有可调整的处理方案。请先发送样例文件，我生成初版方案后，可以继续基于现有方案做局部调整。",
+        status: "done",
+      });
+      return;
+    }
+
+    const currentNodes = planNodes;
+    const adjustedNodes = createAgentAdjustedPlanNodes(currentNodes);
+    const affectedNodeIds = new Set(["medical-policy-splitter", "recursive-separator-splitter", "summary", "keyword-extractor"]);
+    const affectedCurrentNodes = currentNodes.filter((node) => affectedNodeIds.has(node.toolId));
+    const affectedAdjustedNodes = adjustedNodes.filter((node) => affectedNodeIds.has(node.toolId));
+    setIsAgentRunning(true);
+    setConfirmed(false);
+    setRightTab(1);
+
     const optimizeEventId = appendAgentEvent({
       role: "thought",
-      title: "重新评估方案",
-      content: "根据新的处理目标重新检查工具链、变量承接和存储位置。",
+      title: "理解调整意见",
+      content: "正在基于当前方案识别需要调整的节点，不重新生成完整链路。",
       status: "running",
     });
+
     setTimeout(() => {
-      setPlanNodes(createAgentOptimizedPlanNodes());
-      setConfirmed(false);
-      setRightTab(1);
       updateAgentEvent(optimizeEventId, {
         status: "done",
-        content: "已将分片工具调整为医保政策解析分片，并保留代码工具作为客户自建工具输出适配层。",
+        content: "已定位到需要局部调整的工具：内容处理节点的分片工具，以及智能生成节点中的补充生成工具。",
       });
+      setNodesRuntime(affectedCurrentNodes, { status: "configuring", visibleParamCount: 0 });
+    }, 900);
+
+    let adjustEventId = "";
+    setTimeout(() => {
+      adjustEventId = appendAgentEvent({
+        role: "thought",
+        title: "ToolCall · 局部调整方案",
+        content: "正在复用现有解析、代码适配、存储和 QA 提取配置，只替换受影响工具并重新计算下游引用。",
+        status: "running",
+        kind: "toolCall",
+      });
+    }, 1500);
+
+    setTimeout(() => {
+      setPlanNodes(adjustedNodes);
+      setConnectionStates({});
+      setNodesRuntime(affectedAdjustedNodes, { status: "configuring", visibleParamCount: 2 });
+    }, 2400);
+
+    setTimeout(() => {
+      setNodesRuntime(affectedAdjustedNodes, { status: "configuring", visibleParamCount: 4 });
+    }, 3300);
+
+    setTimeout(() => {
+      setNodesRuntime(affectedAdjustedNodes, { status: "configured", visibleParamCount: 4 });
+      updateAgentEvent(adjustEventId, {
+        status: "done",
+        content: "局部调整完成：分片工具已切换为医保政策解析分片，摘要总结已替换为关键词提取，其他节点配置保持不变。",
+      });
+    }, 4300);
+
+    setTimeout(() => {
+      setNodesRuntime(affectedAdjustedNodes, { status: "done" });
       appendAgentEvent({
         role: "agent",
         title: "方案已调整",
-        content: "右侧流程已同步更新。代码工具继续输出 data.cleanBlocks，分片结果写入数据存储工具指定的 ES 目标。",
+        content: "右侧流程已按现有方案局部更新。代码工具仍输出 data.cleanBlocks，存储工具继续写入原 ES 目标，后续节点引用已同步到新的分片结果。",
         status: "done",
       });
       setIsAgentRunning(false);
       toast.success("Agent 已调整处理方案");
-    }, 850);
+    }, 5400);
   };
 
   const updateNode = (nodeId: string, updater: (node: ToolNode) => ToolNode) => {
@@ -1305,7 +1407,7 @@ export function AgentWorkbench() {
               }}
               sx={{ "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 13 } }}
             />
-            <IconButton onClick={sendAgentInstruction} disabled={!canEdit || isAgentRunning || !agentInput.trim()} sx={{ bgcolor: "#f5f3ff", color: "#801AEB", "&:hover": { bgcolor: "#ede9fe" }, "&.Mui-disabled": { bgcolor: "#f1f5f9", color: "#94a3b8" } }}>
+            <IconButton onClick={sendAgentInstruction} disabled={!canSendAgentMessage} sx={{ bgcolor: "#f5f3ff", color: "#801AEB", "&:hover": { bgcolor: "#ede9fe" }, "&.Mui-disabled": { bgcolor: "#f1f5f9", color: "#94a3b8" } }}>
               {isAgentRunning ? <CircularProgress size={18} color="inherit" /> : <Send />}
             </IconButton>
           </Box>
@@ -1741,10 +1843,7 @@ function WorkflowNodeCard({
           },
         }}
       >
-        <Box sx={{ px: 1.4, py: 1.15, display: "flex", alignItems: "center", gap: 0.75, background: "linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)", borderBottom: "1px solid #EEF2F7" }}>
-          <Box sx={{ width: 26, height: 26, borderRadius: "9px", bgcolor: "#eef2ff", color: "#4f46e5", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <AccountTree sx={{ fontSize: 16 }} />
-          </Box>
+        <Box sx={{ px: 1.4, pt: 1.15, pb: 0.3, display: "flex", alignItems: "center", gap: 0.75 }}>
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography sx={{ fontSize: 14, fontWeight: 900, color: "#0f172a", lineHeight: 1.3 }}>{section.category}</Typography>
           </Box>
