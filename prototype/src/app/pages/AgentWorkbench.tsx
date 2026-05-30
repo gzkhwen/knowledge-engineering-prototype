@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useRef, useState } from "react";
+import { type DragEvent, type ReactNode, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import {
   Box,
@@ -49,7 +49,9 @@ type ChainType = "sampleFile" | "documentFile" | "rawText" | "cleanText" | "qaPa
 type SampleStatus = "已上传" | "已发送" | "试跑中" | "已完成";
 type AgentEventRole = "agent" | "user" | "thought";
 type AgentEventStatus = "done" | "running" | "pending";
-type ConnectionStatus = "normal" | "error" | "resolving" | "resolved";
+type AgentEventKind = "message" | "toolCall" | "flow";
+type ConnectionStatus = "normal" | "error" | "resolving" | "resolved" | "checking" | "running" | "success";
+type NodeRuntimeStatus = "building" | "selectingTool" | "configuring" | "done" | "running" | "success";
 
 interface SampleFileItem {
   id: string;
@@ -73,6 +75,13 @@ interface AgentEvent {
   title: string;
   content: string;
   status?: AgentEventStatus;
+  kind?: AgentEventKind;
+  flowSteps?: string[];
+}
+
+interface NodeRuntimeState {
+  status: NodeRuntimeStatus;
+  visibleParamCount?: number;
 }
 
 interface ToolParam {
@@ -686,13 +695,14 @@ export function AgentWorkbench() {
   const [agentInput, setAgentInput] = useState("");
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionStatus>>({});
+  const [nodeRuntimeStates, setNodeRuntimeStates] = useState<Record<string, NodeRuntimeState>>({});
 
   const categories = useMemo(() => ["全部", ...Array.from(new Set(toolCatalog.map((tool) => tool.category)))], []);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
   const nodeWarnings = useMemo(() => getNodeWarnings(planNodes), [planNodes]);
   const allProblems = getPlanProblems(planNodes);
   const visibleProblems = isAgentRunning ? [] : allProblems;
-  const canEdit = !confirmed;
+  const canEdit = !confirmed && !isAgentRunning;
   const editingNode = planNodes.find((node) => node.nodeId === editingNodeId) ?? null;
   const addedToolIds = useMemo(() => new Set(planNodes.map((node) => node.toolId)), [planNodes]);
 
@@ -732,6 +742,34 @@ export function AgentWorkbench() {
     });
   };
 
+  const setNodeRuntime = (node: ToolNode, state: NodeRuntimeState) => {
+    setNodeRuntimeStates((current) => ({ ...current, [node.nodeId]: state }));
+  };
+
+  const setNodesRuntime = (nodes: ToolNode[], state: NodeRuntimeState) => {
+    setNodeRuntimeStates((current) => ({
+      ...current,
+      ...Object.fromEntries(nodes.map((node) => [node.nodeId, state])),
+    }));
+  };
+
+  const setConnectionStatuses = (nodes: ToolNode[], status: ConnectionStatus) => {
+    const sections = getCategorySections(nodes);
+    const nextEntries = sections.slice(0, -1).map((section, index) => [getConnectionKey(section.category, sections[index + 1].category), status]);
+    setConnectionStates((current) => ({ ...current, ...Object.fromEntries(nextEntries) }));
+  };
+
+  const clearConnectionStatuses = (nodes: ToolNode[]) => {
+    const sections = getCategorySections(nodes);
+    setConnectionStates((current) => {
+      const next = { ...current };
+      sections.slice(0, -1).forEach((section, index) => {
+        delete next[getConnectionKey(section.category, sections[index + 1].category)];
+      });
+      return next;
+    });
+  };
+
   const addDemoSample = () => {
     setSampleFiles((current) => (current.some((file) => file.id === demoSampleFile.id) ? current : [demoSampleFile, ...current]));
     toast.success("已添加演示样例文件");
@@ -757,11 +795,14 @@ export function AgentWorkbench() {
     }
     const filesSnapshot = [...sampleFiles];
     const [parser, adapter, splitter, storage, qa, summary] = createAgentDemoPlanNodes();
+    const draftNodes = [parser, splitter, storage, qa, summary];
+    const finalNodes = [parser, adapter, splitter, storage, qa, summary];
     setIsAgentRunning(true);
     setConfirmed(false);
     setRightTab(1);
     setPlanNodes([]);
     setConnectionStates({});
+    setNodeRuntimeStates({});
     setSampleResults([]);
     setSampleFiles((current) => current.map((file) => ({ ...file, status: "已发送" })));
     pushAgentEvent({
@@ -772,134 +813,210 @@ export function AgentWorkbench() {
     });
 
     const schedule = (delay: number, action: () => void) => window.setTimeout(action, delay);
-    let readEventId = "";
-    let toolEventId = "";
-    let adapterEventId = "";
-    let orderEventId = "";
-    let confirmEventId = "";
+    let cursor = 0;
+    const step = (delay: number, action: () => void) => {
+      cursor += delay;
+      schedule(cursor, action);
+    };
+    const visibleParams = (node: ToolNode) => node.params.filter((param) => isParamVisible(node, param)).slice(0, 4);
 
-    schedule(500, () => {
-      readEventId = pushAgentEvent({
+    const buildToolNode = (nodes: ToolNode[], allNodes: ToolNode[], title: string, toolText: string) => {
+      let buildEventId = "";
+      let selectEventId = "";
+      let configEventId = "";
+      step(1800, () => {
+        setPlanNodes(allNodes);
+        setNodesRuntime(nodes, { status: "building" });
+        buildEventId = pushAgentEvent({
+          role: "thought",
+          title: `开始搭建方案：${title}`,
+          content: "正在创建流程节点，并确定它在处理链路中的位置。",
+          status: "running",
+        });
+      });
+      step(2300, () => {
+        updateAgentEvent(buildEventId, { status: "done", content: `${title}已创建，开始为该节点选择可执行工具。` });
+        setNodesRuntime(nodes, { status: "selectingTool" });
+        selectEventId = pushAgentEvent({
+          role: "thought",
+          title: "ToolCall · 选择工具",
+          content: toolText,
+          status: "running",
+          kind: "toolCall",
+        });
+      });
+      step(2300, () => {
+        updateAgentEvent(selectEventId, { status: "done", content: `${nodes.map((node) => node.toolName).join("、")} 已选中。` });
+        setNodesRuntime(nodes, { status: "configuring", visibleParamCount: 0 });
+        configEventId = pushAgentEvent({
+          role: "thought",
+          title: "ToolCall · 配置工具参数",
+          content: "正在根据样例试跑结果、工具 inputSchema 和上游输出路径生成本次执行参数。",
+          status: "running",
+          kind: "toolCall",
+        });
+      });
+      [1, 2, 3, 4].forEach((count) => {
+        step(900, () => setNodesRuntime(nodes, { status: "configuring", visibleParamCount: count }));
+      });
+      step(1600, () => {
+        setNodesRuntime(nodes, { status: "done" });
+        updateAgentEvent(configEventId, {
+          status: "done",
+          content: `${nodes.map((node) => node.toolName).join("、")} 参数配置完成，工具模块已收起为标准执行契约。`,
+        });
+      });
+    };
+
+    let analyzeEventId = "";
+    let parseEventId = "";
+    let queryEventId = "";
+    let designEventId = "";
+    let checkEventId = "";
+    let resolveEventId = "";
+    let recheckEventId = "";
+    let executeEventId = "";
+
+    step(800, () => {
+      analyzeEventId = pushAgentEvent({
         role: "thought",
-        title: "Agent 思考：读取样例文件",
-        content: "正在解析文件类型、正文结构、标题层级和可抽取字段。",
+        title: "分析文档内容",
+        content: "正在读取样例文件的基础信息、页数、格式和可能的内容结构。",
         status: "running",
       });
     });
-    schedule(1700, () => {
-      updateAgentEvent(readEventId, { status: "done", content: "样例结构已识别：政策条款、办理条件、材料清单、问答说明。" });
+    step(2800, () => {
+      updateAgentEvent(analyzeEventId, { status: "done", content: "样例文件基础信息读取完成：PDF，医保政策类文档，包含条款和问答式说明。" });
+      parseEventId = pushAgentEvent({
+        role: "thought",
+        title: "开始分析文档",
+        content: "正在抽取目录层级、段落结构、表格区域和可用于分片的边界信号。",
+        status: "running",
+      });
+    });
+    step(3200, () => {
+      updateAgentEvent(parseEventId, { status: "done", content: "文档分析完成：识别到政策标题、适用范围、办理条件、材料清单、问答说明。" });
       setSampleFiles((current) => current.map((file) => ({ ...file, status: "试跑中" })));
-      setPlanNodes([parser]);
-      pushAgentEvent({
-        role: "agent",
-        title: "生成文档解析节点",
-        content: `已选择工具：${parser.toolName}。该工具适合医保政策类样例文件解析。`,
-        status: "done",
+      queryEventId = pushAgentEvent({
+        role: "thought",
+        title: "ToolCall · 查询可用工具",
+        content: "正在从管理端工具分类中查询可用于文档解析、分片、存储和智能生成的 MCP 工具。",
+        status: "running",
+        kind: "toolCall",
       });
     });
-    schedule(3000, () => {
-      toolEventId = pushAgentEvent({
+    step(3000, () => {
+      updateAgentEvent(queryEventId, { status: "done", content: "查询到 14 个可用工具，其中 2 个系统工具、12 个外部接入工具。" });
+      designEventId = pushAgentEvent({
         role: "thought",
-        title: "Agent 思考：调研后置工具",
-        content: "正在基于解析结果试跑分片工具，检查上游输出是否能直接接入下游输入。",
+        title: "开始设计处理方案",
+        content: "正在根据用户目标、样例结构和工具能力设计文档处理链路。",
         status: "running",
       });
     });
-    schedule(4300, () => {
-      setPlanNodes([parser, splitter]);
-      setConnectionStatus(parser.category, splitter.category, "error");
-      updateAgentEvent(toolEventId, {
+    step(3300, () => {
+      updateAgentEvent(designEventId, {
         status: "done",
-        content: "已生成内容处理节点，但发现解析工具返回 sections[].content，无法直接写入分片工具的 chunkObject。",
-      });
-      pushAgentEvent({
-        role: "agent",
-        title: "生成内容处理节点",
-        content: `已选择工具：${splitter.toolName}。右侧连线标记了当前衔接异常。`,
-        status: "done",
+        content: "方案设计完成。先搭建主链路，再检查工具输出与下游入参是否需要适配。",
+        kind: "flow",
+        flowSteps: ["文档解析", "文本分片", "数据存储", "智能生成"],
       });
     });
-    schedule(5600, () => {
-      adapterEventId = pushAgentEvent({
+
+    buildToolNode([parser], [parser], "文档解析节点", "正在比对通用解析、多模态解析、医保政策解析，优先选择对政策条款结构更稳定的工具。");
+    buildToolNode([splitter], [parser, splitter], "内容处理节点", "正在比对通用分片、递归分片、医保政策分片，先选择递归分片进行样例试跑。");
+    buildToolNode([storage], [parser, splitter, storage], "数据存储节点", "正在选择可持久化中间结果的系统工具，目标为 ES 索引写入。");
+    buildToolNode([qa, summary], draftNodes, "智能生成节点", "正在选择问答提取和摘要工具，作为同一智能生成节点下的两个处理工具。");
+
+    step(2200, () => {
+      checkEventId = pushAgentEvent({
         role: "thought",
-        title: "Agent 思考：解决节点衔接适配",
-        content: "正在生成适配步骤，将客户自建工具输出转换为平台后置工具可消费的标准变量。",
+        title: "开始检查完整链路",
+        content: "正在从上到下检查每个节点的输入、输出、变量路径和存储位置。",
+        status: "running",
+      });
+      setConnectionStatuses(draftNodes, "checking");
+    });
+    step(3600, () => {
+      clearConnectionStatuses(draftNodes);
+      setConnectionStatus(parser.category, splitter.category, "error");
+      updateAgentEvent(checkEventId, {
+        status: "done",
+        content: "发现适配问题：医保政策解析返回 sections[].content，分片工具需要 data.cleanBlocks。",
+      });
+      resolveEventId = pushAgentEvent({
+        role: "thought",
+        title: "开始处理适配问题",
+        content: "正在准备插入代码节点，把客户自建工具输出转换为平台标准变量。",
         status: "running",
       });
       setConnectionStatus(parser.category, splitter.category, "resolving");
     });
-    schedule(7200, () => {
-      setPlanNodes([parser, adapter, splitter]);
+
+    buildToolNode([adapter], finalNodes, "代码适配节点", "正在选择系统代码工具，用于将 sections[].content 转换为 data.cleanBlocks。");
+
+    step(2000, () => {
       setConnectionStatus(parser.category, adapter.category, "resolved");
       setConnectionStatus(adapter.category, splitter.category, "resolved");
-      updateAgentEvent(adapterEventId, {
+      updateAgentEvent(resolveEventId, {
         status: "done",
-        content: "已插入系统工具节点：代码工具。sections[].content 已适配为 data.cleanBlocks。",
-      });
-      pushAgentEvent({
-        role: "agent",
-        title: "生成系统工具节点",
-        content: `已选择工具：${adapter.toolName}。该工具负责连接适配，不需要运营用户理解底层 MCP Server。`,
-        status: "done",
+        content: "适配问题已解决：代码工具输出 data.cleanBlocks，分片工具可直接引用。",
       });
     });
-    schedule(8500, () => {
+    step(2200, () => {
       setConnectionStatus(parser.category, adapter.category, "normal");
       setConnectionStatus(adapter.category, splitter.category, "normal");
-      setPlanNodes([parser, adapter, splitter, qa, summary]);
-      pushAgentEvent({
-        role: "agent",
-        title: "生成智能生成节点",
-        content: `已加入 ${qa.toolName}、${summary.toolName}，用于从分片结果生成问答和摘要。`,
-        status: "done",
-      });
-    });
-    schedule(9800, () => {
-      orderEventId = pushAgentEvent({
+      recheckEventId = pushAgentEvent({
         role: "thought",
-        title: "Agent 思考：调整节点顺序",
-        content: "发现批量处理时分片结果需要先持久化，再供后续生成和追溯引用，准备调整流程顺序。",
+        title: "检查完整方案",
+        content: "正在重新检查完整方案的节点顺序、输入输出映射和执行契约。",
         status: "running",
       });
+      setConnectionStatuses(finalNodes, "checking");
     });
-    schedule(11100, () => {
-      setPlanNodes([parser, adapter, splitter, storage, qa, summary]);
-      setConnectionStatus(splitter.category, storage.category, "resolved");
-      updateAgentEvent(orderEventId, {
+    step(3600, () => {
+      clearConnectionStatuses(finalNodes);
+      updateAgentEvent(recheckEventId, {
         status: "done",
-        content: "已将数据存储工具放到分片之后，智能生成之前，保证中间结果可追溯、可复用。",
-      });
-      pushAgentEvent({
-        role: "agent",
-        title: "生成数据存储节点",
-        content: `已选择工具：${storage.toolName}。分片结果将写入 ES，并返回 data.storageRef。`,
-        status: "done",
+        content: "方案检查通过：节点顺序、工具参数、变量承接和存储策略均可执行。",
       });
     });
-    schedule(12400, () => {
-      setConnectionStatus(splitter.category, storage.category, "normal");
-      confirmEventId = pushAgentEvent({
+    step(1800, () => {
+      executeEventId = pushAgentEvent({
         role: "thought",
-        title: "Agent 思考：最终校验",
-        content: "正在检查节点顺序、工具输入输出、连接适配、存储策略和 Workflow DSL 可执行性。",
+        title: "执行方案处理样例文件",
+        content: "正在用最终方案执行样例文件，验证每个节点的工具调用结果。",
         status: "running",
+        kind: "toolCall",
       });
     });
-    schedule(13800, () => {
-      updateAgentEvent(confirmEventId, {
+    finalNodes.forEach((node, index) => {
+      step(1700, () => {
+        setNodeRuntime(node, { status: "running" });
+        if (index > 0) setConnectionStatus(finalNodes[index - 1].category, node.category, "running");
+      });
+      step(1200, () => {
+        setNodeRuntime(node, { status: "success" });
+        if (index > 0) setConnectionStatus(finalNodes[index - 1].category, node.category, "success");
+      });
+    });
+    step(2000, () => {
+      clearConnectionStatuses(finalNodes);
+      setNodesRuntime(finalNodes, { status: "success" });
+      updateAgentEvent(executeEventId, {
         status: "done",
-        content: "校验完成：所有节点已具备执行契约，工具输出可被后置节点引用。",
+        content: "方案执行完成：所有节点执行成功，分片结果已写入 ES，问答和摘要结果已生成。",
       });
       setSampleFiles((current) => current.map((file) => ({ ...file, status: "已完成" })));
       setSampleResults(filesSnapshot.map(createSampleResult));
       pushAgentEvent({
         role: "agent",
-        title: "处理方案生成完成",
-        content: "右侧方案已完成：解析、代码适配、分片、数据存储、智能生成均已落为可执行流程节点。",
+        title: "方案生成与样例执行完成",
+        content: "已完成方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。",
         status: "done",
       });
       setIsAgentRunning(false);
-      toast.success("Agent 已完成方案生成和校验");
+      toast.success("Agent 已完成方案生成和样例执行");
     });
   };
 
@@ -1139,6 +1256,7 @@ export function AgentWorkbench() {
                       total={categorySections.length}
                       section={section}
                       connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
+                      runtimeStates={nodeRuntimeStates}
                       canEdit={canEdit}
                       warnings={nodeWarnings}
                       onEditTool={(nodeId) => setEditingNodeId(nodeId)}
@@ -1207,15 +1325,27 @@ export function AgentWorkbench() {
 function AgentEventCard({ event }: { event: AgentEvent }) {
   const isUser = event.role === "user";
   const isThought = event.role === "thought";
+  const isToolCall = event.kind === "toolCall";
   return (
     <Box sx={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start" }}>
       <Box sx={{ maxWidth: isUser ? 520 : 580, p: 1.35, borderRadius: "13px", bgcolor: isUser ? "#801AEB" : isThought ? "#fff7ed" : "#fff", color: isUser ? "#fff" : "#111827", border: isUser ? "none" : `1px solid ${isThought ? "#fed7aa" : "#E0E8F2"}`, boxShadow: isUser ? "0 10px 22px rgba(128, 26, 235, 0.16)" : "0 8px 20px rgba(15, 23, 42, 0.04)" }}>
         <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.45 }}>
           {event.status === "running" ? <CircularProgress size={13} color="inherit" /> : isThought ? <AutoAwesome sx={{ fontSize: 15, color: "#c2410c" }} /> : null}
           <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: isUser ? "#fff" : isThought ? "#9a3412" : "#111827" }}>{event.title}</Typography>
+          {isToolCall && <Chip label="ToolCall" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#eef2ff", color: "#4338ca" }} />}
           {event.status === "done" && isThought && <Chip label="完成" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#ffedd5", color: "#c2410c" }} />}
         </Stack>
         <Typography sx={{ fontSize: 13, lineHeight: 1.7, color: isUser ? "rgba(255,255,255,0.92)" : isThought ? "#7c2d12" : "#374151" }}>{event.content}</Typography>
+        {event.flowSteps?.length ? (
+          <Stack direction="row" spacing={0.6} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+            {event.flowSteps.map((step, index) => (
+              <Stack key={step} direction="row" spacing={0.6} alignItems="center">
+                <Chip label={step} size="small" sx={{ height: 22, fontSize: 11, bgcolor: "#f5f3ff", color: "#6d28d9", fontWeight: 700 }} />
+                {index < (event.flowSteps?.length ?? 0) - 1 && <Typography sx={{ fontSize: 12, color: "#a78bfa" }}>→</Typography>}
+              </Stack>
+            ))}
+          </Stack>
+        ) : null}
       </Box>
     </Box>
   );
@@ -1275,6 +1405,9 @@ function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
     error: { title: "衔接异常", color: "#f97316", bgcolor: "#fff7ed", border: "#fed7aa", icon: <ErrorOutline sx={{ fontSize: 15 }} /> },
     resolving: { title: "解决中", color: "#7c3aed", bgcolor: "#f5f3ff", border: "#ddd6fe", icon: <Sync sx={{ fontSize: 15, animation: "spin 1.1s linear infinite" }} /> },
     resolved: { title: "已解决", color: "#16a34a", bgcolor: "#f0fdf4", border: "#bbf7d0", icon: <CheckCircleOutline sx={{ fontSize: 15 }} /> },
+    checking: { title: "链路检查中", color: "#2563eb", bgcolor: "#eff6ff", border: "#bfdbfe", icon: <Sync sx={{ fontSize: 15, animation: "spin 1.1s linear infinite" }} /> },
+    running: { title: "节点执行中", color: "#7c3aed", bgcolor: "#f5f3ff", border: "#ddd6fe", icon: <CircularProgress size={13} color="inherit" /> },
+    success: { title: "执行成功", color: "#16a34a", bgcolor: "#f0fdf4", border: "#bbf7d0", icon: <CheckCircleOutline sx={{ fontSize: 15 }} /> },
     normal: { title: "", color: "#64748b", bgcolor: "#fff", border: "#e2e8f0", icon: null },
   }[status];
 
@@ -1313,6 +1446,7 @@ function WorkflowNodeCard({
   total,
   section,
   connectionStatus,
+  runtimeStates,
   canEdit,
   warnings,
   onEditTool,
@@ -1326,6 +1460,7 @@ function WorkflowNodeCard({
   total: number;
   section: { sectionId: string; category: string; nodes: ToolNode[] };
   connectionStatus: ConnectionStatus;
+  runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
   warnings: Record<string, string[]>;
   onEditTool: (nodeId: string) => void;
@@ -1337,16 +1472,30 @@ function WorkflowNodeCard({
 }) {
   const nodeProblems = section.nodes.flatMap((node) => warnings[node.nodeId] ?? []);
   const hasWarning = nodeProblems.length > 0;
+  const isSectionActive = section.nodes.some((node) => ["building", "selectingTool", "configuring", "running"].includes(runtimeStates[node.nodeId]?.status ?? ""));
 
   return (
     <Box sx={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr)", columnGap: 1.1 }}>
       <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <Box sx={{ width: 30, height: 30, borderRadius: "12px", bgcolor: hasWarning ? "#f97316" : "#111827", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16)" }}>
+        <Box sx={{ width: 30, height: 30, borderRadius: "12px", bgcolor: hasWarning ? "#f97316" : isSectionActive ? "#801AEB" : "#111827", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, boxShadow: isSectionActive ? "0 0 0 6px rgba(128, 26, 235, 0.12), 0 10px 22px rgba(128, 26, 235, 0.2)" : "0 8px 18px rgba(17, 24, 39, 0.16)", animation: isSectionActive ? "pulseNode 1.4s ease-in-out infinite" : "none", "@keyframes pulseNode": { "0%, 100%": { transform: "scale(1)" }, "50%": { transform: "scale(1.08)" } } }}>
           {String(index + 1).padStart(2, "0")}
         </Box>
         {index < total - 1 && (
           <Box sx={{ position: "relative", width: 24, flex: 1, minHeight: 32, my: 0.5, display: "flex", justifyContent: "center" }}>
-            <Box sx={{ width: 2, height: "100%", bgcolor: connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : "#e2e8f0", borderRadius: 999 }} />
+            <Box
+              sx={{
+                width: 2,
+                height: "100%",
+                bgcolor: connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" || connectionStatus === "success" ? "#22c55e" : connectionStatus === "checking" ? "#2563eb" : connectionStatus === "running" ? "#7c3aed" : "#e2e8f0",
+                borderRadius: 999,
+                boxShadow: connectionStatus === "checking" || connectionStatus === "running" ? "0 0 0 4px rgba(128, 26, 235, 0.08)" : "none",
+                animation: connectionStatus === "checking" ? "scanLine 1.1s ease-in-out infinite" : "none",
+                "@keyframes scanLine": {
+                  "0%, 100%": { opacity: 0.35 },
+                  "50%": { opacity: 1 },
+                },
+              }}
+            />
             {connectionStatus !== "normal" && <ConnectionStatusBadge status={connectionStatus} />}
           </Box>
         )}
@@ -1383,28 +1532,131 @@ function WorkflowNodeCard({
           {section.nodes.map((node, toolIndex) => {
             const toolWarnings = warnings[node.nodeId] ?? [];
             return (
-              <Box
+              <ToolRuntimeRow
                 key={node.nodeId}
-                draggable={canEdit && section.nodes.length > 1}
-                onDragStart={canEdit && section.nodes.length > 1 ? (event) => { event.stopPropagation(); onToolDragStart(node.nodeId); } : undefined}
-                onDragOver={canEdit && section.nodes.length > 1 ? (event) => { event.preventDefault(); event.stopPropagation(); } : undefined}
-                onDrop={canEdit && section.nodes.length > 1 ? (event) => { event.stopPropagation(); onToolDrop(node.nodeId); } : undefined}
-                sx={{ px: 1, py: 0.9, borderRadius: "10px", bgcolor: toolWarnings.length ? "#fff7ed" : "#f8fafc", border: `1px solid ${toolWarnings.length ? "#fed7aa" : "#e2e8f0"}`, display: "flex", alignItems: "center", gap: 0.75 }}
-              >
-                {canEdit && section.nodes.length > 1 && <DragIndicator sx={{ color: "#94a3b8", cursor: "grab", fontSize: 17, flexShrink: 0 }} />}
-                <Box sx={{ width: 22, height: 22, borderRadius: "8px", bgcolor: "#fff", color: "#475569", border: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
-                  {toolIndex + 1}
-                </Box>
-                <Typography sx={{ minWidth: 0, flex: 1, fontSize: 13, fontWeight: 700, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.toolName}</Typography>
-                <Tooltip title="编辑工具配置"><span><IconButton disabled={!canEdit} size="small" onClick={() => onEditTool(node.nodeId)} sx={{ color: "#801AEB", width: 24, height: 24 }}><EditOutlined sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
-                <Tooltip title="删除工具"><span><IconButton disabled={!canEdit} size="small" onClick={() => onRemoveTool(node.nodeId)} sx={{ color: "#ef4444", width: 24, height: 24 }}><DeleteOutline sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>
-              </Box>
+                node={node}
+                index={toolIndex}
+                canEdit={canEdit}
+                canDrag={canEdit && section.nodes.length > 1}
+                warnings={toolWarnings}
+                runtimeState={runtimeStates[node.nodeId]}
+                onEdit={() => onEditTool(node.nodeId)}
+                onRemove={() => onRemoveTool(node.nodeId)}
+                onDragStart={(event) => { event.stopPropagation(); onToolDragStart(node.nodeId); }}
+                onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                onDrop={(event) => { event.stopPropagation(); onToolDrop(node.nodeId); }}
+              />
             );
           })}
         </Stack>
       </Box>
     </Box>
   );
+}
+
+function ToolRuntimeRow({
+  node,
+  index,
+  canEdit,
+  canDrag,
+  warnings,
+  runtimeState,
+  onEdit,
+  onRemove,
+  onDragStart,
+  onDragOver,
+  onDrop,
+}: {
+  node: ToolNode;
+  index: number;
+  canEdit: boolean;
+  canDrag: boolean;
+  warnings: string[];
+  runtimeState?: NodeRuntimeState;
+  onEdit: () => void;
+  onRemove: () => void;
+  onDragStart: (event: DragEvent<HTMLDivElement>) => void;
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop: (event: DragEvent<HTMLDivElement>) => void;
+}) {
+  const status = runtimeState?.status ?? "done";
+  const isExpanded = status === "configuring";
+  const isActive = ["building", "selectingTool", "configuring", "running"].includes(status);
+  const visibleParamCount = runtimeState?.visibleParamCount ?? 0;
+  const visibleParams = node.params.filter((param) => isParamVisible(node, param)).slice(0, Math.max(visibleParamCount, 0));
+  const statusText = {
+    building: "创建节点中",
+    selectingTool: "选择工具中",
+    configuring: "配置参数中",
+    done: "",
+    running: "执行中",
+    success: "执行成功",
+  }[status];
+  const statusColor = {
+    building: "#801AEB",
+    selectingTool: "#2563eb",
+    configuring: "#c2410c",
+    done: "#64748b",
+    running: "#7c3aed",
+    success: "#16a34a",
+  }[status];
+
+  return (
+    <Box
+      draggable={canDrag}
+      onDragStart={canDrag ? onDragStart : undefined}
+      onDragOver={canDrag ? onDragOver : undefined}
+      onDrop={canDrag ? onDrop : undefined}
+      sx={{
+        px: 1,
+        py: 0.9,
+        borderRadius: "10px",
+        bgcolor: warnings.length ? "#fff7ed" : isActive ? "#fbf7ff" : status === "success" ? "#f0fdf4" : "#f8fafc",
+        border: `1px solid ${warnings.length ? "#fed7aa" : isActive ? "#ddd6fe" : status === "success" ? "#bbf7d0" : "#e2e8f0"}`,
+        boxShadow: isActive ? "0 8px 20px rgba(128, 26, 235, 0.08)" : "none",
+      }}
+    >
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+        {canDrag && <DragIndicator sx={{ color: "#94a3b8", cursor: "grab", fontSize: 17, flexShrink: 0 }} />}
+        <Box sx={{ width: 22, height: 22, borderRadius: "8px", bgcolor: "#fff", color: statusColor, border: `1px solid ${isActive ? "#ddd6fe" : "#e2e8f0"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
+          {status === "running" ? <CircularProgress size={12} color="inherit" /> : status === "success" ? <CheckCircleOutline sx={{ fontSize: 14 }} /> : index + 1}
+        </Box>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {status === "building" ? "正在创建工具模块..." : status === "selectingTool" ? "正在选择工具..." : node.toolName}
+          </Typography>
+          {statusText && <Typography sx={{ mt: 0.15, fontSize: 11, color: statusColor }}>{statusText}</Typography>}
+        </Box>
+        {status === "configuring" && <CircularProgress size={16} sx={{ color: "#c2410c" }} />}
+        {canEdit && status !== "building" && status !== "selectingTool" && <Tooltip title="编辑工具配置"><span><IconButton disabled={!canEdit} size="small" onClick={onEdit} sx={{ color: "#801AEB", width: 24, height: 24 }}><EditOutlined sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>}
+        {canEdit && <Tooltip title="删除工具"><span><IconButton disabled={!canEdit} size="small" onClick={onRemove} sx={{ color: "#ef4444", width: 24, height: 24 }}><DeleteOutline sx={{ fontSize: 15 }} /></IconButton></span></Tooltip>}
+      </Box>
+      {isExpanded && (
+        <Box sx={{ mt: 1, p: 1, borderRadius: "9px", bgcolor: "#fff", border: "1px solid #fed7aa" }}>
+          <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: "#9a3412", mb: 0.75 }}>正在写入工具参数</Typography>
+          <Stack spacing={0.55}>
+            {visibleParams.length === 0 ? (
+              <Typography sx={{ fontSize: 12, color: "#94a3b8" }}>等待 Agent 生成参数...</Typography>
+            ) : visibleParams.map((param) => (
+              <Box key={param.id} sx={{ display: "grid", gridTemplateColumns: "92px minmax(0, 1fr)", gap: 0.75, alignItems: "start" }}>
+                <Typography sx={{ fontSize: 11.5, color: "#64748b", fontWeight: 700 }}>{param.label}</Typography>
+                <Typography sx={{ fontSize: 11.5, color: "#111827", lineHeight: 1.45, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getParamPreview(param)}</Typography>
+              </Box>
+            ))}
+          </Stack>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function getParamPreview(param: ToolParam) {
+  if (Array.isArray(param.value)) return param.value.length ? param.value.join("、") : "按样例结果自动生成";
+  if (typeof param.value === "boolean") return param.value ? "开启" : "关闭";
+  if (typeof param.value === "number") return `${param.value}${param.unit ?? ""}`;
+  const value = param.value.trim();
+  if (!value) return "引用上游工具输出";
+  return value.length > 42 ? `${value.slice(0, 42)}...` : value;
 }
 
 function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: boolean; onChange: (value: ToolParam["value"]) => void }) {
