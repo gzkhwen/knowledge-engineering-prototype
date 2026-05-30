@@ -63,21 +63,21 @@ interface SampleFileItem {
 
 interface SampleProcessResult {
   fileId: string;
-  structure: string;
-  parserResult: string;
-  adapterResult: string;
-  storageTarget: string;
   toolRuns: ToolRunResult[];
 }
 
 interface ToolRunResult {
   toolName: string;
   category: string;
-  inputPath: string;
-  inputPreview: string;
   outputPath: string;
-  outputPreview: string;
+  parameters: ToolRunParameter[];
+  outputFull: string;
   status: "成功" | "已适配" | "已存储";
+}
+
+interface ToolRunParameter {
+  name: string;
+  value: string;
 }
 
 interface AgentEvent {
@@ -202,63 +202,141 @@ const initialAgentEvents: AgentEvent[] = [
 function createSampleResult(file: SampleFileItem): SampleProcessResult {
   return {
     fileId: file.id,
-    structure: "识别到政策标题、适用范围、办理条件、材料清单、问答式说明等结构。",
-    parserResult: "客户自建解析工具返回 sections[].content，未声明标准 outputSchema。",
-    adapterResult: "已使用代码工具将 sections[].content 适配为 data.cleanBlocks，供分片工具继续处理。",
-    storageTarget: "分片结果写入 ES 索引 knowledge_chunks，返回 data.storageRef。",
     toolRuns: [
       {
         toolName: "医保政策解析",
         category: "文档解析",
-        inputPath: "sample.file",
-        inputPreview: `${file.name}，PDF，2.4 MB`,
         outputPath: "sections",
-        outputPreview: "解析出 18 个政策段落，包含标题、页码、正文和条款类型。",
+        parameters: [
+          { name: "file", value: `${file.name} · ${file.size}` },
+          { name: "parse_mode", value: "policy_clause" },
+          { name: "ocr_enabled", value: "false" },
+          { name: "table_strategy", value: "preserve_markdown" },
+          { name: "language", value: "zh-CN" },
+          { name: "max_pages", value: "20" },
+        ],
+        outputFull: JSON.stringify({
+          sections: [
+            { id: "sec-001", title: "适用范围", page: 1, type: "scope", content: "本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。" },
+            { id: "sec-002", title: "办理条件", page: 2, type: "condition", content: "参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可申请备案。" },
+            { id: "sec-003", title: "材料清单", page: 3, type: "material", content: "申请人需提交身份证明、医保电子凭证或社保卡、异地就医备案申请表。" },
+          ],
+          metadata: { pageCount: 4, sectionCount: 3, parser: "medical-policy-parser", outputSchemaDeclared: false },
+        }, null, 2),
         status: "成功",
       },
       {
         toolName: "代码工具",
         category: "系统工具",
-        inputPath: "sections",
-        inputPreview: "sections[].content，客户自建工具原始返回。",
         outputPath: "data.cleanBlocks",
-        outputPreview: "生成 18 个 cleanBlocks，字段统一为 title/text/page/source。",
+        parameters: [
+          { name: "input", value: "sections" },
+          { name: "script_language", value: "javascript" },
+          { name: "script", value: "return { cleanBlocks: sections.map(s => ({ title: s.title, text: s.content, page: s.page, source: file.name })) }" },
+          { name: "output_path", value: "data.cleanBlocks" },
+          { name: "fail_strategy", value: "stop_workflow" },
+        ],
+        outputFull: JSON.stringify({
+          data: {
+            cleanBlocks: [
+              { title: "适用范围", text: "本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。", page: 1, source: file.name },
+              { title: "办理条件", text: "参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可申请备案。", page: 2, source: file.name },
+              { title: "材料清单", text: "申请人需提交身份证明、医保电子凭证或社保卡、异地就医备案申请表。", page: 3, source: file.name },
+            ],
+          },
+          scriptResult: { normalizedCount: 3, droppedCount: 0 },
+        }, null, 2),
         status: "已适配",
       },
       {
         toolName: "分隔符递归分片",
         category: "内容处理",
-        inputPath: "data.cleanBlocks",
-        inputPreview: "18 个标准文本块，按标题和段落边界保留顺序。",
         outputPath: "data.textChunkResult",
-        outputPreview: "生成 42 个文本分片，平均 486 字，保留来源页码。",
+        parameters: [
+          { name: "input", value: "data.cleanBlocks" },
+          { name: "chunk_size", value: "500" },
+          { name: "overlap", value: "80" },
+          { name: "separators", value: "标题 > 段落 > 句号 > 逗号" },
+          { name: "keep_title", value: "true" },
+          { name: "output_path", value: "data.textChunkResult" },
+        ],
+        outputFull: JSON.stringify({
+          data: {
+            textChunkResult: [
+              { chunkId: "chunk-001", title: "适用范围", text: "本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。", page: 1, tokenCount: 48 },
+              { chunkId: "chunk-002", title: "办理条件", text: "参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可申请备案。", page: 2, tokenCount: 52 },
+              { chunkId: "chunk-003", title: "材料清单", text: "申请人需提交身份证明、医保电子凭证或社保卡、异地就医备案申请表。", page: 3, tokenCount: 45 },
+            ],
+          },
+          stats: { chunkCount: 3, avgTokenCount: 48, overlap: 80 },
+        }, null, 2),
         status: "成功",
       },
       {
         toolName: "数据存储工具",
         category: "系统工具",
-        inputPath: "data.textChunkResult",
-        inputPreview: "42 个分片对象，含 text/title/page/source。",
         outputPath: "data.storageRef",
-        outputPreview: "写入 ES 索引 knowledge_chunks，storedCount=42。",
+        parameters: [
+          { name: "input", value: "data.textChunkResult" },
+          { name: "storage_type", value: "Elasticsearch" },
+          { name: "storage_target", value: "knowledge_chunks" },
+          { name: "write_mode", value: "upsert" },
+          { name: "id_field", value: "chunkId" },
+        ],
+        outputFull: JSON.stringify({
+          data: {
+            storageRef: "es://knowledge_chunks/demo-policy-sample",
+            storedCount: 3,
+            ids: ["chunk-001", "chunk-002", "chunk-003"],
+          },
+          writeResult: { acknowledged: true, failedCount: 0, writeMode: "upsert" },
+        }, null, 2),
         status: "已存储",
       },
       {
         toolName: "QA提取",
         category: "智能生成",
-        inputPath: "data.textChunkResult",
-        inputPreview: "42 个政策分片，按来源文档顺序输入。",
         outputPath: "data.qaResult",
-        outputPreview: "生成 9 组问答，包含办理条件、材料清单和适用范围。",
+        parameters: [
+          { name: "input", value: "data.textChunkResult" },
+          { name: "question_style", value: "policy_service" },
+          { name: "max_questions_per_chunk", value: "2" },
+          { name: "answer_with_source", value: "true" },
+          { name: "output_path", value: "data.qaResult" },
+        ],
+        outputFull: JSON.stringify({
+          data: {
+            qaResult: [
+              { question: "异地就医备案政策适用于哪些人？", answer: "适用于本市基本医疗保险参保人员异地就医备案与费用结算。", sourceChunkId: "chunk-001" },
+              { question: "什么情况下可以申请异地就医备案？", answer: "长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。", sourceChunkId: "chunk-002" },
+              { question: "办理异地就医备案需要哪些材料？", answer: "需要身份证明、医保电子凭证或社保卡、异地就医备案申请表。", sourceChunkId: "chunk-003" },
+            ],
+          },
+          stats: { questionCount: 3, withSourceCount: 3 },
+        }, null, 2),
         status: "成功",
       },
       {
         toolName: "摘要总结",
         category: "智能生成",
-        inputPath: "data.textChunkResult",
-        inputPreview: "42 个政策分片，合并上下文窗口后输入模型。",
         outputPath: "data.summaryResult",
-        outputPreview: "生成 3 条摘要，覆盖政策目的、适用对象和办理要求。",
+        parameters: [
+          { name: "input", value: "data.textChunkResult" },
+          { name: "summary_type", value: "policy_brief" },
+          { name: "max_summary_items", value: "3" },
+          { name: "include_source", value: "true" },
+          { name: "output_path", value: "data.summaryResult" },
+        ],
+        outputFull: JSON.stringify({
+          data: {
+            summaryResult: [
+              { title: "适用对象", content: "本政策面向本市医保参保人员。", sourceChunkIds: ["chunk-001"] },
+              { title: "办理场景", content: "长期居住、转诊转院、急诊抢救等异地就医场景可申请备案。", sourceChunkIds: ["chunk-002"] },
+              { title: "材料要求", content: "需提供身份证明、医保凭证或社保卡、备案申请表。", sourceChunkIds: ["chunk-003"] },
+            ],
+          },
+          stats: { summaryCount: 3 },
+        }, null, 2),
         status: "成功",
       },
     ],
@@ -961,7 +1039,7 @@ export function AgentWorkbench() {
         setNodesRuntime(nodes, { status: "selectingTool" });
         selectEventId = pushAgentEvent({
           role: "thought",
-          title: "ToolCall · 选择工具",
+          title: "选择工具",
           content: toolText,
           status: "running",
           kind: "toolCall",
@@ -972,7 +1050,7 @@ export function AgentWorkbench() {
         setNodesRuntime(nodes, { status: "configuring", visibleParamCount: 0 });
         configEventId = pushAgentEvent({
           role: "thought",
-          title: "ToolCall · 配置工具参数",
+          title: "配置工具参数",
           content: "正在根据样例试跑结果、工具 inputSchema 和上游输出路径生成本次执行参数。",
           status: "running",
           kind: "toolCall",
@@ -1023,7 +1101,7 @@ export function AgentWorkbench() {
       setSampleFiles((current) => current.map((file) => ({ ...file, status: "试跑中" })));
       queryEventId = pushAgentEvent({
         role: "thought",
-        title: "ToolCall · 查询可用工具",
+        title: "查询可用工具",
         content: "正在从管理端工具分类中查询可用于文档解析、分片、存储和智能生成的 MCP 工具。",
         status: "running",
         kind: "toolCall",
@@ -1207,7 +1285,7 @@ export function AgentWorkbench() {
     setTimeout(() => {
       adjustEventId = appendAgentEvent({
         role: "thought",
-        title: "ToolCall · 局部调整方案",
+        title: "局部调整方案",
         content: "正在复用现有解析、代码适配、存储和 QA 提取配置，只替换受影响工具并重新计算下游引用。",
         status: "running",
         kind: "toolCall",
@@ -1569,8 +1647,6 @@ function AgentEventCard({ event }: { event: AgentEvent }) {
         <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.45 }}>
           {event.status === "running" ? <CircularProgress size={13} color="inherit" /> : isToolCall ? <AutoAwesome sx={{ fontSize: 15, color: "#7c3aed" }} /> : null}
           <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: titleColor }}>{event.title}</Typography>
-          {isToolCall && <Chip label="ToolCall" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#eef2ff", color: "#4338ca" }} />}
-          {event.status === "done" && isToolCall && <Chip label="完成" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f0fdf4", color: "#16a34a" }} />}
         </Stack>
         <Typography sx={{ fontSize: 13, lineHeight: 1.7, color: contentColor }}>{event.content}</Typography>
         {event.flowSteps?.length ? (
@@ -1600,12 +1676,12 @@ function SampleResultPanel({ files, results }: { files: SampleFileItem[]; result
           </Box>
         </Box>
       ) : (
-        <Stack spacing={1}>
+        <Stack spacing={1.4}>
           {files.map((file) => {
             const result = results.find((item) => item.fileId === file.id);
             return (
-              <Box key={file.id} sx={{ border: "1px solid #E0E8F2", borderRadius: "12px", bgcolor: "#fff", overflow: "hidden" }}>
-                <Box sx={{ px: 1.25, py: 1, bgcolor: "#FBFCFF", borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", gap: 0.8 }}>
+              <Stack key={file.id} spacing={1}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.8 }}>
                   <Box sx={{ width: 28, height: 28, borderRadius: "8px", bgcolor: "#f1f5f9", color: "#475569", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800 }}>{file.type}</Box>
                   <Box sx={{ minWidth: 0, flex: 1 }}>
                     <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</Typography>
@@ -1613,25 +1689,19 @@ function SampleResultPanel({ files, results }: { files: SampleFileItem[]; result
                   </Box>
                   <Chip label={file.status} size="small" sx={{ height: 20, fontSize: 10, bgcolor: file.status === "已完成" ? "#f0fdf4" : file.status === "试跑中" ? "#fff7ed" : "#f8fafc", color: file.status === "已完成" ? "#16a34a" : file.status === "试跑中" ? "#c2410c" : "#64748b" }} />
                 </Box>
-                <Stack spacing={1} sx={{ p: 1.25 }}>
-                  <Box sx={{ p: 1, borderRadius: "10px", bgcolor: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                    <ResultLine label="结构识别" value={result?.structure ?? "等待 Agent 试跑样例文件。"} />
-                    <ResultLine label="执行结果" value={result ? `${result.parserResult}；${result.adapterResult}；${result.storageTarget}` : "待生成工具输入输出。"} highlight={Boolean(result)} />
+                {result ? (
+                  <Stack spacing={0.9}>
+                    {result.toolRuns.map((toolRun) => (
+                      <ToolRunResultCard key={`${file.id}-${toolRun.toolName}`} toolRun={toolRun} />
+                    ))}
+                  </Stack>
+                ) : (
+                  <Box sx={{ p: 1.2, borderRadius: "10px", border: "1px dashed #cbd5e1", bgcolor: "#fbfcff", display: "flex", alignItems: "center", gap: 0.8 }}>
+                    <Handyman sx={{ fontSize: 16, color: "#94a3b8" }} />
+                    <Typography sx={{ fontSize: 12.5, color: "#64748b" }}>Agent 执行方案后，将按工具展示本次调用的参数配置和完整输出。</Typography>
                   </Box>
-                  {result ? (
-                    <Stack spacing={0.85}>
-                      {result.toolRuns.map((toolRun) => (
-                        <ToolRunResultCard key={`${file.id}-${toolRun.toolName}`} toolRun={toolRun} />
-                      ))}
-                    </Stack>
-                  ) : (
-                    <Box sx={{ p: 1.2, borderRadius: "10px", border: "1px dashed #cbd5e1", bgcolor: "#fbfcff", display: "flex", alignItems: "center", gap: 0.8 }}>
-                      <Handyman sx={{ fontSize: 16, color: "#94a3b8" }} />
-                      <Typography sx={{ fontSize: 12.5, color: "#64748b" }}>Agent 执行方案后，将按工具展示本次调用的输入和输出。</Typography>
-                    </Box>
-                  )}
-                </Stack>
-              </Box>
+                )}
+              </Stack>
             );
           })}
         </Stack>
@@ -1655,31 +1725,44 @@ function ToolRunResultCard({ toolRun }: { toolRun: ToolRunResult }) {
         </Box>
         <Chip label={toolRun.status} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: statusBg, color: statusColor, fontWeight: 700 }} />
       </Box>
-      <Stack spacing={0.65} sx={{ p: 1 }}>
-        <ToolIOPreview label="输入" path={toolRun.inputPath} preview={toolRun.inputPreview} color="#7c3aed" />
-        <ToolIOPreview label="输出" path={toolRun.outputPath} preview={toolRun.outputPreview} color="#16a34a" />
+      <Stack spacing={0.9} sx={{ p: 1 }}>
+        <Box>
+          <Typography sx={{ fontSize: 11.5, color: "#64748b", fontWeight: 900, mb: 0.55 }}>参数配置</Typography>
+          <Stack spacing={0.45}>
+            {toolRun.parameters.map((param) => (
+              <Box key={`${toolRun.toolName}-${param.name}`} sx={{ display: "grid", gridTemplateColumns: "118px minmax(0, 1fr)", columnGap: 0.75, alignItems: "start" }}>
+                <Typography sx={{ fontSize: 11.5, color: "#64748b", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>{param.name}</Typography>
+                <Typography sx={{ fontSize: 11.5, color: "#111827", lineHeight: 1.5, wordBreak: "break-word" }}>{param.value}</Typography>
+              </Box>
+            ))}
+          </Stack>
+        </Box>
+        <Box>
+          <Stack direction="row" spacing={0.65} alignItems="center" sx={{ mb: 0.55 }}>
+            <Typography sx={{ fontSize: 11.5, color: "#64748b", fontWeight: 900 }}>完整输出</Typography>
+            <Typography sx={{ px: 0.55, py: 0.2, borderRadius: "6px", bgcolor: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 10.5, color: "#475569", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>{toolRun.outputPath}</Typography>
+          </Stack>
+          <Box
+            component="pre"
+            sx={{
+              m: 0,
+              maxHeight: 260,
+              overflow: "auto",
+              p: 1,
+              borderRadius: "9px",
+              bgcolor: "#0f172a",
+              color: "#dbeafe",
+              fontSize: 11,
+              lineHeight: 1.55,
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {toolRun.outputFull}
+          </Box>
+        </Box>
       </Stack>
-    </Box>
-  );
-}
-
-function ToolIOPreview({ label, path, preview, color }: { label: string; path: string; preview: string; color: string }) {
-  return (
-    <Box sx={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr)", columnGap: 0.75, alignItems: "start" }}>
-      <Typography sx={{ fontSize: 11.5, color, fontWeight: 900, lineHeight: "22px" }}>{label}</Typography>
-      <Box sx={{ minWidth: 0 }}>
-        <Typography sx={{ display: "inline-flex", maxWidth: "100%", px: 0.65, py: 0.25, borderRadius: "6px", bgcolor: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 11, color: "#475569", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</Typography>
-        <Typography sx={{ mt: 0.35, fontSize: 11.5, color: "#334155", lineHeight: 1.55 }}>{preview}</Typography>
-      </Box>
-    </Box>
-  );
-}
-
-function ResultLine({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
-  return (
-    <Box sx={{ display: "grid", gridTemplateColumns: "64px minmax(0, 1fr)", columnGap: 1, alignItems: "start" }}>
-      <Typography sx={{ fontSize: 11.5, color: "#94a3b8", fontWeight: 800 }}>{label}</Typography>
-      <Typography sx={{ fontSize: 12.5, color: highlight ? "#6d28d9" : "#374151", lineHeight: 1.55 }}>{value}</Typography>
     </Box>
   );
 }
