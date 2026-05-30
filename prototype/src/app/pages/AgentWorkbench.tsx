@@ -1,4 +1,4 @@
-import { type DragEvent, type ReactNode, useMemo, useRef, useState } from "react";
+import { type DragEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import {
   Box,
@@ -673,6 +673,7 @@ function getPlanProblems(nodes: ToolNode[]) {
 export function AgentWorkbench() {
   const { projectId, categoryId, formType } = useParams<{ projectId: string; categoryId: string; formType: string }>();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const agentStreamRef = useRef<HTMLDivElement | null>(null);
   const displayFormType = formType ? decodeURIComponent(formType) : "问答库";
   const displayCategory = useMemo(() => {
     if (!projectId || !categoryId) return "常见问题";
@@ -713,6 +714,12 @@ export function AgentWorkbench() {
   const selectedToolAdded = currentTool ? addedToolIds.has(currentTool.id) && !currentTool.allowMultiple : false;
   const selectedToolCategoryConfirmed = false;
   const isNodeEditable = () => canEdit;
+
+  useEffect(() => {
+    const container = agentStreamRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+  }, [agentEvents]);
 
   const appendAgentEvent = (event: Omit<AgentEvent, "id">) => {
     const id = `${event.role}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -993,11 +1000,9 @@ export function AgentWorkbench() {
     finalNodes.forEach((node, index) => {
       step(1700, () => {
         setNodeRuntime(node, { status: "running" });
-        if (index > 0) setConnectionStatus(finalNodes[index - 1].category, node.category, "running");
       });
       step(1200, () => {
         setNodeRuntime(node, { status: "success" });
-        if (index > 0) setConnectionStatus(finalNodes[index - 1].category, node.category, "success");
       });
     });
     step(2000, () => {
@@ -1194,7 +1199,7 @@ export function AgentWorkbench() {
             <AutoAwesome sx={{ color: "#801AEB", fontSize: 20 }} />
             <Typography sx={{ fontSize: 14, fontWeight: 700, color: "#1f2937" }}>处理方案生成助手</Typography>
           </Box>
-          <Box sx={{ p: 2, flex: 1, overflow: "auto", bgcolor: "#FBFCFF" }}>
+          <Box ref={agentStreamRef} sx={{ p: 2, flex: 1, overflow: "auto", bgcolor: "#FBFCFF" }}>
             <Stack spacing={1.1}>
               {agentEvents.map((event) => <AgentEventCard key={event.id} event={event} />)}
             </Stack>
@@ -1255,6 +1260,7 @@ export function AgentWorkbench() {
                       index={index}
                       total={categorySections.length}
                       section={section}
+                      previousConnectionStatus={index > 0 ? connectionStates[getConnectionKey(categorySections[index - 1].category, section.category)] ?? "normal" : "normal"}
                       connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
                       runtimeStates={nodeRuntimeStates}
                       canEdit={canEdit}
@@ -1445,6 +1451,7 @@ function WorkflowNodeCard({
   index,
   total,
   section,
+  previousConnectionStatus,
   connectionStatus,
   runtimeStates,
   canEdit,
@@ -1459,6 +1466,7 @@ function WorkflowNodeCard({
   index: number;
   total: number;
   section: { sectionId: string; category: string; nodes: ToolNode[] };
+  previousConnectionStatus: ConnectionStatus;
   connectionStatus: ConnectionStatus;
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
@@ -1472,13 +1480,37 @@ function WorkflowNodeCard({
 }) {
   const nodeProblems = section.nodes.flatMap((node) => warnings[node.nodeId] ?? []);
   const hasWarning = nodeProblems.length > 0;
-  const isSectionActive = section.nodes.some((node) => ["building", "selectingTool", "configuring", "running"].includes(runtimeStates[node.nodeId]?.status ?? ""));
+  const isCardBuilding = section.nodes.some((node) => ["building", "selectingTool", "configuring"].includes(runtimeStates[node.nodeId]?.status ?? ""));
+  const isReviewing = previousConnectionStatus === "checking" || connectionStatus === "checking";
+  const isSectionRunning = section.nodes.some((node) => runtimeStates[node.nodeId]?.status === "running");
+  const isSectionSuccess = section.nodes.length > 0 && section.nodes.every((node) => runtimeStates[node.nodeId]?.status === "success");
+  const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : isSectionSuccess ? "#16a34a" : isReviewing ? "#801AEB" : "#111827";
 
   return (
     <Box sx={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr)", columnGap: 1.1 }}>
       <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <Box sx={{ width: 30, height: 30, borderRadius: "12px", bgcolor: hasWarning ? "#f97316" : isSectionActive ? "#801AEB" : "#111827", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, boxShadow: isSectionActive ? "0 0 0 6px rgba(128, 26, 235, 0.12), 0 10px 22px rgba(128, 26, 235, 0.2)" : "0 8px 18px rgba(17, 24, 39, 0.16)", animation: isSectionActive ? "pulseNode 1.4s ease-in-out infinite" : "none", "@keyframes pulseNode": { "0%, 100%": { transform: "scale(1)" }, "50%": { transform: "scale(1.08)" } } }}>
-          {String(index + 1).padStart(2, "0")}
+        <Box
+          sx={{
+            width: 30,
+            height: 30,
+            borderRadius: "12px",
+            bgcolor: sequenceBg,
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 12,
+            fontWeight: 800,
+            boxShadow: isReviewing ? "0 0 0 5px rgba(128, 26, 235, 0.12), 0 10px 22px rgba(128, 26, 235, 0.2)" : "0 8px 18px rgba(17, 24, 39, 0.16)",
+            animation: isReviewing ? "reviewNodeScan 1.8s ease-in-out infinite" : "none",
+            animationDelay: `${index * 180}ms`,
+            "@keyframes reviewNodeScan": {
+              "0%, 100%": { boxShadow: "0 0 0 0 rgba(128, 26, 235, 0.05), 0 8px 18px rgba(17, 24, 39, 0.12)" },
+              "45%": { boxShadow: "0 0 0 7px rgba(128, 26, 235, 0.2), 0 12px 24px rgba(128, 26, 235, 0.22)" },
+            },
+          }}
+        >
+          {isSectionRunning ? <CircularProgress size={14} color="inherit" /> : isSectionSuccess ? <CheckCircleOutline sx={{ fontSize: 16 }} /> : String(index + 1).padStart(2, "0")}
         </Box>
         {index < total - 1 && (
           <Box sx={{ position: "relative", width: 24, flex: 1, minHeight: 32, my: 0.5, display: "flex", justifyContent: "center" }}>
@@ -1489,10 +1521,11 @@ function WorkflowNodeCard({
                 bgcolor: connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" || connectionStatus === "success" ? "#22c55e" : connectionStatus === "checking" ? "#2563eb" : connectionStatus === "running" ? "#7c3aed" : "#e2e8f0",
                 borderRadius: 999,
                 boxShadow: connectionStatus === "checking" || connectionStatus === "running" ? "0 0 0 4px rgba(128, 26, 235, 0.08)" : "none",
-                animation: connectionStatus === "checking" ? "scanLine 1.1s ease-in-out infinite" : "none",
+                animation: connectionStatus === "checking" ? "scanLine 1.8s ease-in-out infinite" : "none",
+                animationDelay: `${index * 180 + 100}ms`,
                 "@keyframes scanLine": {
-                  "0%, 100%": { opacity: 0.35 },
-                  "50%": { opacity: 1 },
+                  "0%, 100%": { opacity: 0.25, boxShadow: "none" },
+                  "45%": { opacity: 1, boxShadow: "0 0 0 5px rgba(128, 26, 235, 0.14)" },
                 },
               }}
             />
@@ -1506,7 +1539,20 @@ function WorkflowNodeCard({
         onDragStart={canEdit ? onNodeDragStart : undefined}
         onDragOver={canEdit ? (event) => event.preventDefault() : undefined}
         onDrop={canEdit ? onNodeDrop : undefined}
-        sx={{ mb: index < total - 1 ? 1.25 : 0, border: "1px solid", borderColor: hasWarning ? "#fed7aa" : "#e2e8f0", borderRadius: "14px", bgcolor: "#fff", overflow: "hidden", boxShadow: "0 10px 28px rgba(15, 23, 42, 0.06)" }}
+        sx={{
+          mb: index < total - 1 ? 1.25 : 0,
+          border: "1px solid",
+          borderColor: hasWarning ? "#fed7aa" : isCardBuilding ? "#c4b5fd" : "#e2e8f0",
+          borderRadius: "14px",
+          bgcolor: "#fff",
+          overflow: "hidden",
+          boxShadow: isCardBuilding ? "0 0 0 5px rgba(128, 26, 235, 0.1), 0 14px 30px rgba(128, 26, 235, 0.12)" : "0 10px 28px rgba(15, 23, 42, 0.06)",
+          animation: isCardBuilding ? "pulseCard 1.6s ease-in-out infinite" : "none",
+          "@keyframes pulseCard": {
+            "0%, 100%": { transform: "translateY(0)", boxShadow: "0 0 0 4px rgba(128, 26, 235, 0.08), 0 12px 26px rgba(128, 26, 235, 0.1)" },
+            "50%": { transform: "translateY(-1px)", boxShadow: "0 0 0 8px rgba(128, 26, 235, 0.14), 0 18px 34px rgba(128, 26, 235, 0.16)" },
+          },
+        }}
       >
         <Box sx={{ px: 1.4, py: 1.15, display: "flex", alignItems: "center", gap: 0.75, background: "linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)", borderBottom: "1px solid #EEF2F7" }}>
           {canEdit && <DragIndicator sx={{ color: "#94a3b8", cursor: "grab", fontSize: 19, flexShrink: 0 }} />}
