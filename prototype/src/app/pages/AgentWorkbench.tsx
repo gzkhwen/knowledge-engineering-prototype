@@ -148,6 +148,7 @@ interface McpTool {
 
 interface ToolNode {
   nodeId: string;
+  flowNodeId: string;
   toolId: string;
   toolName: string;
   category: string;
@@ -614,8 +615,10 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
   const tool = toolCatalog.find((item) => item.id === toolId);
   if (!tool) throw new Error("Unknown MCP tool");
   const params = cloneParams(tool.params);
+  const nodeId = `${tool.id}-${Math.random().toString(36).slice(2, 8)}`;
   return {
-    nodeId: `${tool.id}-${Math.random().toString(36).slice(2, 8)}`,
+    nodeId,
+    flowNodeId: nodeId,
     toolId: tool.id,
     toolName: tool.name,
     category: tool.category,
@@ -642,6 +645,7 @@ function createInitialPlanNodes(): ToolNode[] {
   const storage = createNode("system-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "content[0].text" });
   const summary = createNode("summary", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+  summary.flowNodeId = qa.flowNodeId;
   return [parser, code, splitter, storage, qa, summary];
 }
 
@@ -652,6 +656,7 @@ function createAgentDemoPlanNodes(): ToolNode[] {
   const storage = createNode("system-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const summary = createNode("summary", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+  summary.flowNodeId = qa.flowNodeId;
   return [parser, adapter, splitter, storage, qa, summary].map((node) => ({ ...node, adjusted: true }));
 }
 
@@ -662,6 +667,7 @@ function createAgentOptimizedPlanNodes(): ToolNode[] {
   const storage = createNode("system-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const keyword = createNode("keyword-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+  keyword.flowNodeId = qa.flowNodeId;
   return [parser, adapter, splitter, storage, qa, keyword].map((node) => ({ ...node, adjusted: true }));
 }
 
@@ -671,6 +677,7 @@ function replaceToolKeepingStep(currentNode: ToolNode | undefined, toolId: strin
   return {
     ...replacement,
     nodeId: currentNode.nodeId,
+    flowNodeId: currentNode.flowNodeId,
     expanded: currentNode.expanded,
     enabled: currentNode.enabled,
     adjusted: true,
@@ -783,11 +790,11 @@ function getCategorySections(nodes: ToolNode[]) {
   const sections: { sectionId: string; category: string; nodes: ToolNode[] }[] = [];
   nodes.forEach((node) => {
     const lastSection = sections[sections.length - 1];
-    if (lastSection?.category === node.category) {
+    if (lastSection?.sectionId === node.flowNodeId) {
       lastSection.nodes.push(node);
       return;
     }
-    sections.push({ sectionId: `${node.category}-${node.nodeId}`, category: node.category, nodes: [node] });
+    sections.push({ sectionId: node.flowNodeId, category: node.category, nodes: [node] });
   });
 
   return sections;
@@ -1382,7 +1389,7 @@ export function AgentWorkbench() {
     const from = planNodes.findIndex((node) => node.nodeId === draggingNodeId);
     const to = planNodes.findIndex((node) => node.nodeId === targetId);
     if (from < 0 || to < 0) return;
-    if (planNodes[from].category !== planNodes[to].category) return;
+    if (planNodes[from].flowNodeId !== planNodes[to].flowNodeId) return;
     const next = [...planNodes];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, { ...moved, adjusted: true });
