@@ -2184,12 +2184,14 @@ function ToolRuntimeRow({
         }}
       >
         <Box sx={{ p: 1, borderRadius: "9px", bgcolor: "#fff", border: `1px solid ${isConfigured ? "#bbf7d0" : runtimeExpanded ? "#fed7aa" : "#e2e8f0"}`, boxShadow: isConfigured ? "0 0 0 3px rgba(34, 197, 94, 0.1)" : "none", transition: "border-color 0.2s ease, box-shadow 0.2s ease" }}>
-          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mb: 0.75 }}>
-            {isConfigured ? <CheckCircleOutline sx={{ fontSize: 14, color: "#16a34a" }} /> : runtimeExpanded ? <CircularProgress size={12} sx={{ color: "#c2410c" }} /> : <Handyman sx={{ fontSize: 13, color: "#64748b" }} />}
-            <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: isConfigured ? "#15803d" : runtimeExpanded ? "#9a3412" : "#334155" }}>
-              {isConfigured ? "工具参数配置完成" : runtimeExpanded ? "正在写入工具参数" : "工具参数配置"}
-            </Typography>
-          </Stack>
+          {runtimeExpanded && (
+            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mb: 0.75 }}>
+              {isConfigured ? <CheckCircleOutline sx={{ fontSize: 14, color: "#16a34a" }} /> : <CircularProgress size={12} sx={{ color: "#c2410c" }} />}
+              <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: isConfigured ? "#15803d" : "#9a3412" }}>
+                {isConfigured ? "工具参数配置完成" : "正在写入工具参数"}
+              </Typography>
+            </Stack>
+          )}
           <Stack spacing={0.55}>
             {visibleParams.length === 0 ? (
               <Typography sx={{ fontSize: 12, color: "#94a3b8" }}>等待 Agent 生成参数...</Typography>
