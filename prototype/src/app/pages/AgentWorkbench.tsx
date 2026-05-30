@@ -1075,29 +1075,29 @@ export function AgentWorkbench() {
         setNodesRuntime(nodes, { status: "building" });
         buildEventId = pushAgentEvent({
           role: "thought",
-          title: `开始搭建方案：${title}`,
-          content: `正在创建${nodeTitle}流程节点，并确定它在文档处理链路中的位置。`,
+          title: `设计流程节点：${nodeTitle}`,
+          content: `我会把${nodeTitle}放在当前处理链路中，并确认它与前后节点的职责边界。`,
           status: "running",
         });
       });
       step(2300, () => {
-        updateAgentEvent(buildEventId, { status: "done", content: `${nodeTitle}流程节点已创建。接下来会从工具目录中为该节点绑定可执行工具。` });
+        updateAgentEvent(buildEventId, { status: "done", content: `${nodeTitle}节点已加入方案。下一步需要为这个节点选择具体 MCP 工具。` });
         setNodesRuntime(nodes, { status: "selectingTool" });
         selectEventId = pushAgentEvent({
           role: "thought",
-          title: "绑定工具",
-          content: `${toolText} 待绑定工具：${toolNames}。`,
+          title: `工具选择：${nodeTitle}`,
+          content: `候选依据：${toolText} 选择结果：${toolNames}。`,
           status: "running",
           kind: "toolCall",
         });
       });
       step(2300, () => {
-        updateAgentEvent(selectEventId, { status: "done", content: `工具绑定完成：${toolNames} 已写入${nodeTitle}节点。` });
+        updateAgentEvent(selectEventId, { status: "done", content: `已选择工具：${toolNames}；所属流程节点：${nodeTitle}。` });
         setNodesRuntime(nodes, { status: "configuring", visibleParamCount: 0 });
         configEventId = pushAgentEvent({
           role: "thought",
-          title: "写入执行参数",
-          content: `正在根据工具 inputSchema、样例分析结果和上游输出路径写入参数：${paramSummary}。`,
+          title: `参数配置：${toolNames}`,
+          content: `配置依据：工具 inputSchema、样例分析结果、上游输出路径。配置项：${paramSummary}。`,
           status: "running",
           kind: "toolCall",
         });
@@ -1109,7 +1109,7 @@ export function AgentWorkbench() {
         setNodesRuntime(nodes, { status: "configured", visibleParamCount: 4 });
         updateAgentEvent(configEventId, {
           status: "done",
-          content: `执行参数写入完成：${toolNames} 已形成本次 Workflow Step 执行契约。`,
+          content: `参数配置完成：${toolNames} 已形成当前方案中的 Step 执行契约。`,
         });
       });
       step(1100, () => setNodesRuntime(nodes, { status: "done" }));
@@ -1128,37 +1128,37 @@ export function AgentWorkbench() {
     step(800, () => {
       analyzeEventId = pushAgentEvent({
         role: "thought",
-        title: "分析文档内容",
-        content: "正在读取样例文件的基础信息、页数、格式和可能的内容结构。",
+        title: "分析样例文件",
+        content: "我先判断样例文件的类型、内容结构和处理目标，避免直接套用固定流程。",
         status: "running",
       });
     });
     step(2800, () => {
-      updateAgentEvent(analyzeEventId, { status: "done", content: "样例文件基础信息读取完成：PDF，医保政策类文档，包含条款和问答式说明。" });
+      updateAgentEvent(analyzeEventId, { status: "done", content: "样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。" });
       parseEventId = pushAgentEvent({
         role: "thought",
-        title: "开始分析文档",
-        content: "正在抽取目录层级、段落结构、表格区域和可用于分片的边界信号。",
+        title: "识别文档结构",
+        content: "我会优先保留政策标题、条款层级和来源页码，因为后续分片、问答和摘要都依赖这些结构信息。",
         status: "running",
       });
     });
     step(3200, () => {
-      updateAgentEvent(parseEventId, { status: "done", content: "文档分析完成：识别到政策标题、适用范围、办理条件、材料清单、问答说明。" });
+      updateAgentEvent(parseEventId, { status: "done", content: "结构识别完成：需要先解析文档，再做结构适配、分片、存储，并基于分片结果生成问答和摘要。" });
       setSampleFiles((current) => current.map((file) => ({ ...file, status: "试跑中" })));
       queryEventId = pushAgentEvent({
         role: "thought",
-        title: "查询工具目录",
-        content: "正在读取管理端已启用的工具分类和工具清单，筛选可用于当前知识处理目标的 MCP 工具。",
+        title: "工具目录查询",
+        content: "输入：工具状态=可用，分类=文档解析/内容处理/智能生成/系统工具；输出：候选工具清单。",
         status: "running",
         kind: "toolCall",
       });
     });
     step(3000, () => {
-      updateAgentEvent(queryEventId, { status: "done", content: "工具目录查询完成：命中 14 个可用工具，其中系统工具 2 个，外部接入工具 12 个。" });
+      updateAgentEvent(queryEventId, { status: "done", content: "查询结果：命中 14 个可用工具，其中系统工具 2 个、外部接入工具 12 个。" });
       designEventId = pushAgentEvent({
         role: "thought",
         title: "开始设计处理方案",
-        content: "正在根据用户目标、样例结构和工具能力设计文档处理链路。",
+        content: "我会先生成主链路，再检查工具返回能否被后置工具直接消费。",
         status: "running",
       });
     });
@@ -1171,16 +1171,16 @@ export function AgentWorkbench() {
       });
     });
 
-    buildToolNode([parser], [parser], "文档解析节点", "正在比对通用解析、多模态解析、医保政策解析，优先选择对政策条款结构更稳定的工具。");
-    buildToolNode([splitter], [parser, splitter], "内容处理节点", "正在比对通用分片、递归分片、医保政策分片，先选择递归分片进行样例试跑。");
-    buildToolNode([storage], [parser, splitter, storage], "数据存储节点", "正在选择可持久化中间结果的系统工具，目标为 ES 索引写入。");
-    buildToolNode([qa, summary], draftNodes, "智能生成节点", "正在选择问答提取和摘要工具，作为同一智能生成节点下的两个处理工具。");
+    buildToolNode([parser], [parser], "文档解析节点", "候选工具=通用解析、多模态解析、医保政策解析；选择原因=医保政策解析更适合保留政策条款层级。");
+    buildToolNode([splitter], [parser, splitter], "内容处理节点", "候选工具=通用分片、递归分片、医保政策分片；选择原因=递归分片支持按标题和段落边界切分。");
+    buildToolNode([storage], [parser, splitter, storage], "数据存储节点", "候选工具=数据存储工具；选择原因=需要把分片结果写入 ES 供后续检索使用。");
+    buildToolNode([qa, summary], draftNodes, "智能生成节点", "候选工具=QA提取、摘要总结；选择原因=同一分片结果可同时生成问答和摘要。");
 
     step(2200, () => {
       checkEventId = pushAgentEvent({
         role: "thought",
         title: "开始检查完整链路",
-        content: "正在从上到下检查每个节点的输入、输出、变量路径和存储位置。",
+        content: "我会检查节点顺序、工具输入输出、变量路径和存储策略，确认这份方案能被流程引擎执行。",
         status: "running",
       });
     });
@@ -1194,7 +1194,7 @@ export function AgentWorkbench() {
       issueAnalysisEventId = pushAgentEvent({
         role: "thought",
         title: "正在分析适配问题",
-        content: "正在检查解析工具的实际返回、分片工具 inputSchema，以及两者之间缺失的变量路径。",
+        content: "我需要对比解析工具的实际返回和分片工具的 inputSchema，确认问题是字段命名不一致，还是缺少结构转换。",
         status: "running",
       });
     });
@@ -1214,13 +1214,13 @@ export function AgentWorkbench() {
       resolveEventId = pushAgentEvent({
         role: "thought",
         title: "开始解决适配问题",
-        content: "正在插入代码适配节点，并把异常连接切换为处理中状态。",
+        content: "我会在文档解析和内容处理之间插入代码工具，把解析结果转换成分片工具可识别的数据结构。",
         status: "running",
       });
       setConnectionStatus(parser.category, splitter.category, "resolving");
     });
 
-    buildToolNode([adapter], finalNodes, "代码适配节点", "正在选择系统代码工具，用于将 sections[].content 转换为 data.cleanBlocks。");
+    buildToolNode([adapter], finalNodes, "代码适配节点", "候选工具=代码工具；选择原因=需要把 sections[].content 转换为 data.cleanBlocks。");
 
     step(2000, () => {
       setConnectionStatus(parser.category, adapter.category, "resolved");
@@ -1236,7 +1236,7 @@ export function AgentWorkbench() {
       recheckEventId = pushAgentEvent({
         role: "thought",
         title: "检查完整方案",
-        content: "正在重新检查完整方案的节点顺序、输入输出映射和执行契约。",
+        content: "我会重新检查修复后的节点顺序、输入输出映射和 Step 执行契约。",
         status: "running",
       });
     });
@@ -1250,8 +1250,8 @@ export function AgentWorkbench() {
     step(1800, () => {
       executeEventId = pushAgentEvent({
         role: "thought",
-        title: "执行方案处理样例文件",
-        content: "正在按最终 Workflow Step 顺序执行样例文件，并收集每个工具的输入参数、完整输出和执行状态。",
+        title: "样例试跑",
+        content: "输入：医保政策样例.pdf；执行对象：最终 Workflow Step；输出：每个工具的输入、输出和执行状态。",
         status: "running",
         kind: "toolCall",
       });
@@ -1269,7 +1269,7 @@ export function AgentWorkbench() {
       setNodesRuntime(finalNodes, { status: "success" });
       updateAgentEvent(executeEventId, {
         status: "done",
-        content: "样例执行完成：所有工具执行成功，分片结果已写入 ES，问答和摘要结果已生成。",
+        content: "试跑结果：所有工具执行成功；分片结果已写入 ES；问答和摘要结果已生成。",
       });
     });
     step(1200, () => {
@@ -1331,8 +1331,8 @@ export function AgentWorkbench() {
     setTimeout(() => {
       adjustEventId = appendAgentEvent({
         role: "thought",
-        title: "更新方案契约",
-        content: "正在复用现有解析、代码适配、存储和 QA 提取配置，只替换受影响工具并重新计算下游引用。",
+        title: "局部更新方案",
+        content: "输入：当前方案、用户调整意见；变更范围：内容处理节点、智能生成节点；保持不变：解析、代码适配、存储和 QA 提取配置。",
         status: "running",
         kind: "toolCall",
       });
@@ -1352,7 +1352,7 @@ export function AgentWorkbench() {
       setNodesRuntime(affectedAdjustedNodes, { status: "configured", visibleParamCount: 4 });
       updateAgentEvent(adjustEventId, {
         status: "done",
-        content: "方案契约更新完成：分片工具已切换为医保政策解析分片，摘要总结已替换为关键词提取，其他节点配置保持不变。",
+        content: "更新结果：分片工具切换为医保政策解析分片；摘要总结替换为关键词提取；其他节点配置保持不变。",
       });
     }, 4300);
 
@@ -1724,14 +1724,12 @@ function AgentEventCard({ event }: { event: AgentEvent }) {
     : isToolCall
       ? {
           maxWidth: 580,
-          px: 1.25,
-          py: 1.05,
+          p: 1.25,
           borderRadius: "12px",
-          bgcolor: "#F8FAFC",
+          bgcolor: "#fbf7ff",
           color: "#111827",
-          border: "1px solid #DBEAFE",
-          borderLeft: "3px solid #3B82F6",
-          boxShadow: "0 8px 18px rgba(59, 130, 246, 0.08)",
+          border: "1px solid #ddd6fe",
+          boxShadow: "0 8px 18px rgba(128, 26, 235, 0.08)",
         }
       : {
           maxWidth: 580,
@@ -1743,13 +1741,13 @@ function AgentEventCard({ event }: { event: AgentEvent }) {
           border: "none",
           boxShadow: "none",
         };
-  const titleColor = isUser ? "#fff" : isToolCall ? "#1D4ED8" : "#111827";
-  const contentColor = isUser ? "rgba(255,255,255,0.92)" : isToolCall ? "#334155" : "#374151";
+  const titleColor = isUser ? "#fff" : isToolCall ? "#5b21b6" : "#111827";
+  const contentColor = isUser ? "rgba(255,255,255,0.92)" : isToolCall ? "#4c1d95" : "#374151";
   return (
     <Box sx={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start" }}>
       <Box sx={containerSx}>
         <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.45 }}>
-          {event.status === "running" ? <CircularProgress size={13} color="inherit" /> : isToolCall ? <Handyman sx={{ fontSize: 15, color: "#2563EB" }} /> : null}
+          {event.status === "running" ? <CircularProgress size={13} color="inherit" /> : isToolCall ? <AutoAwesome sx={{ fontSize: 15, color: "#7c3aed" }} /> : null}
           <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: titleColor }}>{event.title}</Typography>
         </Stack>
         <Typography sx={{ fontSize: 13, lineHeight: 1.7, color: contentColor }}>{event.content}</Typography>
