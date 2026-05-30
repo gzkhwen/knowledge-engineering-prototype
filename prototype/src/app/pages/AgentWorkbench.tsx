@@ -681,7 +681,7 @@ export function AgentWorkbench() {
     return category?.name ?? "常见问题";
   }, [categoryId, projectId]);
   const [rightTab, setRightTab] = useState(1);
-  const [planNodes, setPlanNodes] = useState<ToolNode[]>(cloneNodes(initialPlanNodes));
+  const [planNodes, setPlanNodes] = useState<ToolNode[]>([]);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("全部");
   const [selectedToolId, setSelectedToolId] = useState(toolCatalog[0].id);
@@ -703,8 +703,9 @@ export function AgentWorkbench() {
   const nodeWarnings = useMemo(() => getNodeWarnings(planNodes), [planNodes]);
   const displayedNodeWarnings = isAgentRunning ? {} : nodeWarnings;
   const allProblems = getPlanProblems(planNodes);
-  const visibleProblems = isAgentRunning ? [] : allProblems;
+  const visibleProblems = isAgentRunning || planNodes.length === 0 ? [] : allProblems;
   const canEdit = !confirmed && !isAgentRunning;
+  const canSavePlan = canEdit && planNodes.length > 0 && visibleProblems.length === 0;
   const editingNode = planNodes.find((node) => node.nodeId === editingNodeId) ?? null;
   const addedToolIds = useMemo(() => new Set(planNodes.map((node) => node.toolId)), [planNodes]);
 
@@ -1264,27 +1265,37 @@ export function AgentWorkbench() {
                 </Tooltip>
               </Box>
               <Box sx={{ p: 1.5, minHeight: 0, overflow: "auto", flex: 1 }}>
-                <Stack spacing={0}>
-                  {categorySections.map((section, index) => (
-                    <WorkflowNodeCard
-                      key={section.sectionId}
-                      index={index}
-                      total={categorySections.length}
-                      section={section}
-                      connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
-                      isReviewScanActive={reviewScanIndex === index}
-                      runtimeStates={nodeRuntimeStates}
-                      canEdit={canEdit}
-                      warnings={displayedNodeWarnings}
-                      onEditTool={(nodeId) => setEditingNodeId(nodeId)}
-                      onRemoveTool={removeNode}
-                      onNodeDragStart={() => setDraggingCategory(section.sectionId)}
-                      onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId)}
-                      onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
-                      onToolDrop={onDropNode}
-                    />
-                  ))}
-                </Stack>
+                {categorySections.length === 0 ? (
+                  <Box sx={{ height: "100%", minHeight: 260, border: "1px dashed #d8dce5", borderRadius: "12px", bgcolor: "#FBFCFF", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", px: 3 }}>
+                    <Box>
+                      <AutoAwesome sx={{ color: "#94a3b8", mb: 1 }} />
+                      <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>等待 Agent 生成处理方案</Typography>
+                      <Typography sx={{ mt: 0.5, fontSize: 12, color: "#94a3b8", lineHeight: 1.5 }}>发送样例文件后，流程节点会随 Agent 的思考逐步生成。</Typography>
+                    </Box>
+                  </Box>
+                ) : (
+                  <Stack spacing={0}>
+                    {categorySections.map((section, index) => (
+                      <WorkflowNodeCard
+                        key={section.sectionId}
+                        index={index}
+                        total={categorySections.length}
+                        section={section}
+                        connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
+                        isReviewScanActive={reviewScanIndex === index}
+                        runtimeStates={nodeRuntimeStates}
+                        canEdit={canEdit}
+                        warnings={displayedNodeWarnings}
+                        onEditTool={(nodeId) => setEditingNodeId(nodeId)}
+                        onRemoveTool={removeNode}
+                        onNodeDragStart={() => setDraggingCategory(section.sectionId)}
+                        onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId)}
+                        onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
+                        onToolDrop={onDropNode}
+                      />
+                    ))}
+                  </Stack>
+                )}
               </Box>
               <Box sx={{ p: 1.5, borderTop: "1px solid #EEF2F7", bgcolor: "#fff" }}>
                 {visibleProblems.length > 0 && (
@@ -1292,7 +1303,7 @@ export function AgentWorkbench() {
                     <Typography sx={{ fontSize: 12, color: "#b91c1c" }}>当前方案存在 {visibleProblems.length} 个校验问题，请处理后保存。</Typography>
                   </Box>
                 )}
-                <Button fullWidth startIcon={<FactCheck />} onClick={confirmPlan} disabled={!canEdit || isAgentRunning || visibleProblems.length > 0} variant="contained" sx={{ bgcolor: isAgentRunning || visibleProblems.length ? "#cbd5e1" : "#801AEB", borderRadius: "10px", textTransform: "none", "&:hover": { bgcolor: isAgentRunning || visibleProblems.length ? "#cbd5e1" : "#6D16C9" } }}>
+                <Button fullWidth startIcon={<FactCheck />} onClick={confirmPlan} disabled={!canSavePlan} variant="contained" sx={{ bgcolor: !canSavePlan ? "#cbd5e1" : "#801AEB", borderRadius: "10px", textTransform: "none", "&:hover": { bgcolor: !canSavePlan ? "#cbd5e1" : "#6D16C9" } }}>
                   保存为处理方案
                 </Button>
               </Box>
@@ -1494,7 +1505,18 @@ function WorkflowNodeCard({
   const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : isReviewing ? "#801AEB" : "#111827";
 
   return (
-    <Box sx={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr)", columnGap: 1.1 }}>
+    <Box
+      sx={{
+        display: "grid",
+        gridTemplateColumns: "36px minmax(0, 1fr)",
+        columnGap: 1.1,
+        animation: "nodeCardEnter 0.38s ease-out both",
+        "@keyframes nodeCardEnter": {
+          from: { opacity: 0, transform: "translateY(8px) scale(0.985)" },
+          to: { opacity: 1, transform: "translateY(0) scale(1)" },
+        },
+      }}
+    >
       <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Box
           sx={{
