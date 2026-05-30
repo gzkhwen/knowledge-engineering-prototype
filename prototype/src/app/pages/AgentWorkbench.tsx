@@ -674,7 +674,6 @@ export function AgentWorkbench() {
   const { projectId, categoryId, formType } = useParams<{ projectId: string; categoryId: string; formType: string }>();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const agentStreamRef = useRef<HTMLDivElement | null>(null);
-  const planFlowRef = useRef<HTMLDivElement | null>(null);
   const displayFormType = formType ? decodeURIComponent(formType) : "问答库";
   const displayCategory = useMemo(() => {
     if (!projectId || !categoryId) return "常见问题";
@@ -801,31 +800,6 @@ export function AgentWorkbench() {
     };
   };
 
-  const startSuccessWave = (nodes: ToolNode[]) => {
-    const total = Math.max(getCategorySections(nodes).length, 1);
-    window.requestAnimationFrame(() => {
-      const root = planFlowRef.current;
-      if (!root) return;
-      const cards = Array.from(root.querySelectorAll<HTMLElement>("[data-flow-card]")).slice(0, total);
-      const run = async () => {
-        for (const card of cards) {
-          const animation = card.animate(
-            [
-              { transform: "translateY(0) scale(1)", boxShadow: "0 10px 28px rgba(15, 23, 42, 0.06)", borderColor: "#e2e8f0" },
-              { transform: "translateY(-10px) scale(1.018)", boxShadow: "0 24px 42px rgba(34, 197, 94, 0.22)", borderColor: "#86efac", offset: 0.34 },
-              { transform: "translateY(4px) scale(0.996)", boxShadow: "0 10px 22px rgba(34, 197, 94, 0.12)", borderColor: "#bbf7d0", offset: 0.54 },
-              { transform: "translateY(-2px) scale(1.006)", boxShadow: "0 16px 28px rgba(34, 197, 94, 0.16)", borderColor: "#bbf7d0", offset: 0.74 },
-              { transform: "translateY(0) scale(1)", boxShadow: "0 10px 28px rgba(15, 23, 42, 0.06)", borderColor: "#e2e8f0" },
-            ],
-            { duration: 620, easing: "cubic-bezier(0.2, 0.9, 0.22, 1.18)", fill: "none" },
-          );
-          await animation.finished.catch(() => undefined);
-        }
-      };
-      void run();
-    });
-  };
-
   const addDemoSample = () => {
     setSampleFiles((current) => (current.some((file) => file.id === demoSampleFile.id) ? current : [demoSampleFile, ...current]));
     toast.success("已添加演示样例文件");
@@ -934,7 +908,6 @@ export function AgentWorkbench() {
     let resolveEventId = "";
     let recheckEventId = "";
     let executeEventId = "";
-    let successWaveEventId = "";
     let stopReviewScan: (() => void) | null = null;
     let stopRecheckScan: (() => void) | null = null;
 
@@ -1090,20 +1063,9 @@ export function AgentWorkbench() {
         status: "done",
         content: "方案执行完成：所有节点执行成功，分片结果已写入 ES，问答和摘要结果已生成。",
       });
-      startSuccessWave(finalNodes);
-      successWaveEventId = pushAgentEvent({
-        role: "thought",
-        title: "方案生成成功",
-        content: "正在从第一个节点向后确认完整处理方案，确认完成后恢复工具节点默认状态。",
-        status: "running",
-      });
     });
-    step(3400, () => {
+    step(1200, () => {
       setNodesRuntime(finalNodes, { status: "done" });
-      updateAgentEvent(successWaveEventId, {
-        status: "done",
-        content: "完整处理方案确认成功，工具节点已恢复默认状态。",
-      });
       setSampleFiles((current) => current.map((file) => ({ ...file, status: "已完成" })));
       setSampleResults(filesSnapshot.map(createSampleResult));
       pushAgentEvent({
@@ -1354,7 +1316,7 @@ export function AgentWorkbench() {
                     </Box>
                   </Box>
                 ) : (
-                  <Box ref={planFlowRef} sx={{ position: "relative" }}>
+                  <Box sx={{ position: "relative" }}>
                     <Stack spacing={0}>
                       {categorySections.map((section, index) => (
                         <WorkflowNodeCard
@@ -1722,7 +1684,6 @@ function WorkflowNodeCard({
       </Box>
 
       <Box
-        data-flow-card={index}
         draggable={canEdit}
         onDragStart={canEdit ? onNodeDragStart : undefined}
         onDragOver={canEdit ? (event) => event.preventDefault() : undefined}
