@@ -697,6 +697,7 @@ export function AgentWorkbench() {
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionStatus>>({});
   const [nodeRuntimeStates, setNodeRuntimeStates] = useState<Record<string, NodeRuntimeState>>({});
   const [isReviewScanning, setIsReviewScanning] = useState(false);
+  const [isSuccessWaving, setIsSuccessWaving] = useState(false);
 
   const categories = useMemo(() => ["全部", ...Array.from(new Set(toolCatalog.map((tool) => tool.category)))], []);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
@@ -811,6 +812,8 @@ export function AgentWorkbench() {
     setPlanNodes([]);
     setConnectionStates({});
     setNodeRuntimeStates({});
+    setIsReviewScanning(false);
+    setIsSuccessWaving(false);
     setSampleResults([]);
     setSampleFiles((current) => current.map((file) => ({ ...file, status: "已发送" })));
     pushAgentEvent({
@@ -881,9 +884,11 @@ export function AgentWorkbench() {
     let queryEventId = "";
     let designEventId = "";
     let checkEventId = "";
+    let issueAnalysisEventId = "";
     let resolveEventId = "";
     let recheckEventId = "";
     let executeEventId = "";
+    let successWaveEventId = "";
 
     step(800, () => {
       analyzeEventId = pushAgentEvent({
@@ -953,10 +958,30 @@ export function AgentWorkbench() {
         status: "done",
         content: "发现适配问题：医保政策解析返回 sections[].content，分片工具需要 data.cleanBlocks。",
       });
+      issueAnalysisEventId = pushAgentEvent({
+        role: "thought",
+        title: "正在分析适配问题",
+        content: "正在检查解析工具的实际返回、分片工具 inputSchema，以及两者之间缺失的变量路径。",
+        status: "running",
+      });
+    });
+    step(2800, () => {
+      updateAgentEvent(issueAnalysisEventId, {
+        status: "done",
+        content: "问题原因已确认：上游工具未声明稳定 outputSchema，实际返回字段需要先转换成平台可识别的 cleanBlocks。",
+      });
+      pushAgentEvent({
+        role: "thought",
+        title: "输出解决方案",
+        content: "解决方案：在文档解析节点和内容处理节点之间插入系统代码工具，生成 data.cleanBlocks 作为分片工具输入。",
+        status: "done",
+      });
+    });
+    step(1600, () => {
       resolveEventId = pushAgentEvent({
         role: "thought",
-        title: "开始处理适配问题",
-        content: "正在准备插入代码节点，把客户自建工具输出转换为平台标准变量。",
+        title: "开始解决适配问题",
+        content: "正在插入代码适配节点，并把异常连接切换为处理中状态。",
         status: "running",
       });
       setConnectionStatus(parser.category, splitter.category, "resolving");
@@ -1014,6 +1039,21 @@ export function AgentWorkbench() {
       updateAgentEvent(executeEventId, {
         status: "done",
         content: "方案执行完成：所有节点执行成功，分片结果已写入 ES，问答和摘要结果已生成。",
+      });
+      setIsSuccessWaving(true);
+      successWaveEventId = pushAgentEvent({
+        role: "thought",
+        title: "方案生成成功",
+        content: "正在从第一个节点向后确认完整处理方案，确认完成后恢复工具节点默认状态。",
+        status: "running",
+      });
+    });
+    step(3400, () => {
+      setIsSuccessWaving(false);
+      setNodesRuntime(finalNodes, { status: "done" });
+      updateAgentEvent(successWaveEventId, {
+        status: "done",
+        content: "完整处理方案确认成功，工具节点已恢复默认状态。",
       });
       setSampleFiles((current) => current.map((file) => ({ ...file, status: "已完成" })));
       setSampleResults(filesSnapshot.map(createSampleResult));
@@ -1272,10 +1312,11 @@ export function AgentWorkbench() {
                           key={section.sectionId}
                           index={index}
                           total={categorySections.length}
-                          section={section}
-                          connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
-                          isReviewScanning={isReviewScanning}
-                          runtimeStates={nodeRuntimeStates}
+                        section={section}
+                        connectionStatus={categorySections[index + 1] ? connectionStates[getConnectionKey(section.category, categorySections[index + 1].category)] ?? "normal" : "normal"}
+                        isReviewScanning={isReviewScanning}
+                        isSuccessWaving={isSuccessWaving}
+                        runtimeStates={nodeRuntimeStates}
                           canEdit={canEdit}
                           warnings={displayedNodeWarnings}
                           onEditTool={(nodeId) => setEditingNodeId(nodeId)}
@@ -1465,6 +1506,7 @@ function WorkflowNodeCard({
   section,
   connectionStatus,
   isReviewScanning,
+  isSuccessWaving,
   runtimeStates,
   canEdit,
   warnings,
@@ -1480,6 +1522,7 @@ function WorkflowNodeCard({
   section: { sectionId: string; category: string; nodes: ToolNode[] };
   connectionStatus: ConnectionStatus;
   isReviewScanning: boolean;
+  isSuccessWaving: boolean;
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
   warnings: Record<string, string[]>;
@@ -1497,7 +1540,10 @@ function WorkflowNodeCard({
   const sequenceBg = hasWarning ? "#f97316" : isSectionRunning ? "#7c3aed" : "#111827";
   const reviewDelay = `${index * 320}ms`;
   const reviewLineDelay = `${index * 320 + 160}ms`;
+  const successDelay = `${index * 220}ms`;
+  const successLineDelay = `${index * 220 + 110}ms`;
   const canShineConnection = isReviewScanning && connectionStatus === "normal";
+  const canWaveConnection = isSuccessWaving && connectionStatus === "normal";
 
   return (
     <Box
@@ -1527,21 +1573,50 @@ function WorkflowNodeCard({
             fontWeight: 800,
             position: "relative",
             overflow: "hidden",
-            boxShadow: isReviewScanning ? "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 18px rgba(128, 26, 235, 0.18)" : "0 8px 18px rgba(17, 24, 39, 0.16)",
-            animation: isReviewScanning ? "sequenceSelfGlow 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite" : "none",
-            animationDelay: reviewDelay,
-            "&::after": isReviewScanning
+            boxShadow: isSuccessWaving
+              ? "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 22px rgba(34, 197, 94, 0.42)"
+              : isReviewScanning
+                ? "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 18px rgba(128, 26, 235, 0.18)"
+                : "0 8px 18px rgba(17, 24, 39, 0.16)",
+            animation: isSuccessWaving
+              ? "sequenceSuccessWave 2.2s ease-out both"
+              : isReviewScanning
+                ? "sequenceSelfGlow 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite"
+                : "none",
+            animationDelay: isSuccessWaving ? successDelay : reviewDelay,
+            "&::after": isReviewScanning || isSuccessWaving
               ? {
                   content: '""',
                   position: "absolute",
-                  inset: -10,
-                  background: "linear-gradient(115deg, rgba(255,255,255,0) 28%, rgba(255,255,255,0.96) 48%, rgba(196,181,253,0.72) 55%, rgba(255,255,255,0) 72%)",
-                  transform: "translateX(-120%)",
+                  left: -8,
+                  right: -8,
+                  top: -16,
+                  bottom: -16,
+                  background: isSuccessWaving
+                    ? "linear-gradient(180deg, rgba(255,255,255,0) 20%, rgba(255,255,255,0.96) 42%, rgba(187,247,208,0.86) 52%, rgba(255,255,255,0) 72%)"
+                    : "linear-gradient(180deg, rgba(255,255,255,0) 20%, rgba(255,255,255,0.96) 44%, rgba(196,181,253,0.72) 54%, rgba(255,255,255,0) 76%)",
+                  transform: "translateY(-120%)",
                   mixBlendMode: "screen",
-                  animation: "sequenceBlockShine 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite",
-                  animationDelay: reviewDelay,
+                  animation: isSuccessWaving
+                    ? "sequenceBlockSuccess 2.2s ease-out both"
+                    : "sequenceBlockShine 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite",
+                  animationDelay: isSuccessWaving ? successDelay : reviewDelay,
                 }
               : undefined,
+            "@keyframes sequenceSuccessWave": {
+              "0%, 100%": {
+                backgroundColor: sequenceBg,
+                boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 0 rgba(34, 197, 94, 0)",
+              },
+              "34%": {
+                backgroundColor: "#16a34a",
+                boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 26px rgba(34, 197, 94, 0.52)",
+              },
+              "54%": {
+                backgroundColor: "#22c55e",
+                boxShadow: "0 8px 18px rgba(17, 24, 39, 0.16), 0 0 30px rgba(34, 197, 94, 0.62)",
+              },
+            },
             "@keyframes sequenceSelfGlow": {
               "0%, 20%, 62%, 100%": {
                 backgroundColor: sequenceBg,
@@ -1557,12 +1632,18 @@ function WorkflowNodeCard({
               },
             },
             "@keyframes sequenceBlockShine": {
-              "0%": { transform: "translateX(-120%)", opacity: 0 },
+              "0%": { transform: "translateY(-120%)", opacity: 0 },
               "18%": { opacity: 0 },
               "30%": { opacity: 1 },
               "46%": { opacity: 1 },
-              "58%": { transform: "translateX(120%)", opacity: 0 },
-              "100%": { transform: "translateX(120%)", opacity: 0 },
+              "58%": { transform: "translateY(120%)", opacity: 0 },
+              "100%": { transform: "translateY(120%)", opacity: 0 },
+            },
+            "@keyframes sequenceBlockSuccess": {
+              "0%": { transform: "translateY(-120%)", opacity: 0 },
+              "24%": { opacity: 1 },
+              "52%": { transform: "translateY(120%)", opacity: 1 },
+              "100%": { transform: "translateY(120%)", opacity: 0 },
             },
           }}
         >
@@ -1578,11 +1659,23 @@ function WorkflowNodeCard({
                 fontWeight: 900,
                 lineHeight: 1,
                 color: "#fff",
-                ...(isReviewScanning
+                ...(isSuccessWaving
                   ? {
-                      backgroundImage: "linear-gradient(90deg, #ffffff 0%, #ffffff 34%, #fef08a 45%, #ddd6fe 54%, #ffffff 68%, #ffffff 100%)",
-                      backgroundSize: "240% 100%",
-                      backgroundPosition: "120% 0",
+                      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #ffffff 28%, #bbf7d0 42%, #ffffff 56%, #ffffff 100%)",
+                      backgroundSize: "100% 260%",
+                      backgroundPosition: "0 -130%",
+                      WebkitBackgroundClip: "text",
+                      backgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      animation: "sequenceTextSuccess 2.2s ease-out both",
+                      animationDelay: successDelay,
+                      textShadow: "0 0 12px rgba(255, 255, 255, 0.62)",
+                    }
+                  : isReviewScanning
+                  ? {
+                      backgroundImage: "linear-gradient(180deg, #ffffff 0%, #ffffff 30%, #fef08a 44%, #ddd6fe 54%, #ffffff 70%, #ffffff 100%)",
+                      backgroundSize: "100% 260%",
+                      backgroundPosition: "0 -130%",
                       WebkitBackgroundClip: "text",
                       backgroundClip: "text",
                       WebkitTextFillColor: "transparent",
@@ -1592,10 +1685,15 @@ function WorkflowNodeCard({
                     }
                   : {}),
                 "@keyframes sequenceTextShine": {
-                  "0%": { backgroundPosition: "120% 0" },
-                  "22%": { backgroundPosition: "120% 0" },
-                  "48%": { backgroundPosition: "-120% 0" },
-                  "100%": { backgroundPosition: "-120% 0" },
+                  "0%": { backgroundPosition: "0 -130%" },
+                  "22%": { backgroundPosition: "0 -130%" },
+                  "48%": { backgroundPosition: "0 130%" },
+                  "100%": { backgroundPosition: "0 130%" },
+                },
+                "@keyframes sequenceTextSuccess": {
+                  "0%": { backgroundPosition: "0 -130%" },
+                  "50%": { backgroundPosition: "0 130%" },
+                  "100%": { backgroundPosition: "0 130%" },
                 },
               }}
             >
@@ -1609,19 +1707,32 @@ function WorkflowNodeCard({
               sx={{
                 width: 2,
                 height: "100%",
-                bgcolor: canShineConnection ? "transparent" : connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : "#e2e8f0",
-                backgroundImage: canShineConnection ? "linear-gradient(180deg, #e2e8f0 0%, #e2e8f0 28%, #ffffff 42%, #a855f7 49%, #22c55e 54%, #e2e8f0 68%, #e2e8f0 100%)" : "none",
-                backgroundSize: canShineConnection ? "100% 260%" : "auto",
-                backgroundPosition: canShineConnection ? "0 -130%" : "0 0",
+                bgcolor: canShineConnection || canWaveConnection ? "transparent" : connectionStatus === "error" ? "#f97316" : connectionStatus === "resolving" ? "#a855f7" : connectionStatus === "resolved" ? "#22c55e" : "#e2e8f0",
+                backgroundImage: canWaveConnection
+                  ? "linear-gradient(180deg, #e2e8f0 0%, #e2e8f0 30%, #ffffff 42%, #22c55e 50%, #bbf7d0 58%, #e2e8f0 72%, #e2e8f0 100%)"
+                  : canShineConnection
+                    ? "linear-gradient(180deg, #e2e8f0 0%, #e2e8f0 28%, #ffffff 42%, #a855f7 49%, #22c55e 54%, #e2e8f0 68%, #e2e8f0 100%)"
+                    : "none",
+                backgroundSize: canShineConnection || canWaveConnection ? "100% 260%" : "auto",
+                backgroundPosition: canShineConnection || canWaveConnection ? "0 -130%" : "0 0",
                 borderRadius: 999,
-                boxShadow: canShineConnection ? "0 0 10px rgba(128, 26, 235, 0.16)" : "none",
-                animation: canShineConnection ? "connectionLineShine 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite" : "none",
-                animationDelay: reviewLineDelay,
+                boxShadow: canWaveConnection ? "0 0 12px rgba(34, 197, 94, 0.22)" : canShineConnection ? "0 0 10px rgba(128, 26, 235, 0.16)" : "none",
+                animation: canWaveConnection
+                  ? "connectionLineSuccess 2.2s ease-out both"
+                  : canShineConnection
+                    ? "connectionLineShine 2.8s cubic-bezier(0.34, 0.04, 0.36, 0.98) infinite"
+                    : "none",
+                animationDelay: canWaveConnection ? successLineDelay : reviewLineDelay,
                 "@keyframes connectionLineShine": {
                   "0%": { backgroundPosition: "0 -130%", boxShadow: "0 0 0 rgba(128, 26, 235, 0)" },
                   "18%": { backgroundPosition: "0 -130%", boxShadow: "0 0 0 rgba(128, 26, 235, 0)" },
                   "48%": { backgroundPosition: "0 130%", boxShadow: "0 0 12px rgba(128, 26, 235, 0.32)" },
                   "100%": { backgroundPosition: "0 130%", boxShadow: "0 0 0 rgba(128, 26, 235, 0)" },
+                },
+                "@keyframes connectionLineSuccess": {
+                  "0%": { backgroundPosition: "0 -130%", boxShadow: "0 0 0 rgba(34, 197, 94, 0)" },
+                  "50%": { backgroundPosition: "0 130%", boxShadow: "0 0 14px rgba(34, 197, 94, 0.42)" },
+                  "100%": { backgroundPosition: "0 130%", boxShadow: "0 0 0 rgba(34, 197, 94, 0)" },
                 },
               }}
             />
