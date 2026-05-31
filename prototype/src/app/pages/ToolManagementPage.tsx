@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Add,
   Delete,
@@ -12,6 +12,7 @@ import {
 import {
   Box,
   Button,
+  Checkbox,
   Chip,
   Dialog,
   DialogActions,
@@ -37,7 +38,6 @@ import {
   Switch,
 } from "@mui/material";
 import { toast } from "sonner";
-import { ToolHubPage } from "./ToolHubPage";
 
 type McpServiceType = "系统内置" | "Nacos" | "标准 MCP Server";
 type McpTransport = "Streamable HTTP" | "SSE";
@@ -78,6 +78,15 @@ interface McpServiceDraft {
   authValue: string;
   version: string;
   description: string;
+}
+
+interface ManagedToolItem {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  enabled: boolean;
+  lastSyncedAt: string;
 }
 
 const BLUE = "#3b82f6";
@@ -248,6 +257,21 @@ function toService(draft: McpServiceDraft, id = `svc-${Date.now()}`): McpService
     toolCategories: {},
     lastSyncedAt: "-",
   };
+}
+
+function buildManagedTools(): ManagedToolItem[] {
+  return initialServices.flatMap((service) => service.tools.map((tool) => ({
+    id: `${service.id}-${tool.name}`,
+    name: tool.name,
+    description: tool.description,
+    category: service.toolCategories?.[tool.name] ?? "未分类",
+    enabled: tool.enabled && service.status !== "已停用",
+    lastSyncedAt: service.lastSyncedAt,
+  })));
+}
+
+function buildInitialCategories() {
+  return Array.from(new Set(buildManagedTools().map((tool) => tool.category)));
 }
 
 export function McpServiceManagementPage() {
@@ -632,5 +656,260 @@ export function McpServiceManagementPage() {
 }
 
 export function ToolManagementPage() {
-  return <ToolHubPage />;
+  const [tools, setTools] = useState<ManagedToolItem[]>(buildManagedTools);
+  const [categories, setCategories] = useState<string[]>(buildInitialCategories);
+  const [selectedCategory, setSelectedCategory] = useState("全部工具");
+  const [query, setQuery] = useState("");
+  const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchCategory, setBatchCategory] = useState(buildInitialCategories()[0] ?? "未分类");
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [categoryDraft, setCategoryDraft] = useState("");
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    tools.forEach((tool) => {
+      counts[tool.category] = (counts[tool.category] ?? 0) + 1;
+    });
+    return counts;
+  }, [tools]);
+
+  const filteredTools = useMemo(() => tools.filter((tool) => {
+    if (selectedCategory !== "全部工具" && tool.category !== selectedCategory) return false;
+    if (!query.trim()) return true;
+    const keyword = query.trim().toLowerCase();
+    return tool.name.toLowerCase().includes(keyword) || tool.description.toLowerCase().includes(keyword);
+  }), [query, selectedCategory, tools]);
+
+  const allFilteredSelected = filteredTools.length > 0 && filteredTools.every((tool) => selectedToolIds.includes(tool.id));
+  const someFilteredSelected = filteredTools.some((tool) => selectedToolIds.includes(tool.id)) && !allFilteredSelected;
+
+  const openCreateCategory = () => {
+    setEditingCategory(null);
+    setCategoryDraft("");
+    setCategoryDialogOpen(true);
+  };
+
+  const openEditCategory = (category: string) => {
+    setEditingCategory(category);
+    setCategoryDraft(category);
+    setCategoryDialogOpen(true);
+  };
+
+  const saveCategory = () => {
+    const nextName = categoryDraft.trim();
+    if (!nextName) {
+      toast.error("分类名称不能为空");
+      return;
+    }
+    if (!editingCategory && categories.includes(nextName)) {
+      toast.error("分类名称已存在");
+      return;
+    }
+    if (editingCategory) {
+      if (editingCategory !== nextName && categories.includes(nextName)) {
+        toast.error("分类名称已存在");
+        return;
+      }
+      setCategories((items) => items.map((item) => (item === editingCategory ? nextName : item)));
+      setTools((items) => items.map((tool) => (tool.category === editingCategory ? { ...tool, category: nextName } : tool)));
+      setSelectedCategory((current) => (current === editingCategory ? nextName : current));
+      toast.success("工具分类已更新");
+    } else {
+      setCategories((items) => [...items, nextName]);
+      toast.success("工具分类已新增");
+    }
+    setCategoryDialogOpen(false);
+  };
+
+  const deleteCategory = (category: string) => {
+    if (!window.confirm(`确定删除分类「${category}」吗？该分类下工具将进入未分类。`)) return;
+    setCategories((items) => {
+      const next = items.filter((item) => item !== category);
+      return next.includes("未分类") ? next : [...next, "未分类"];
+    });
+    setTools((items) => items.map((tool) => (tool.category === category ? { ...tool, category: "未分类" } : tool)));
+    setSelectedCategory("全部工具");
+    toast.success("工具分类已删除");
+  };
+
+  const toggleTool = (toolId: string) => {
+    setSelectedToolIds((items) => (
+      items.includes(toolId) ? items.filter((id) => id !== toolId) : [...items, toolId]
+    ));
+  };
+
+  const toggleAllFiltered = () => {
+    setSelectedToolIds((items) => {
+      const ids = filteredTools.map((tool) => tool.id);
+      if (allFilteredSelected) return items.filter((id) => !ids.includes(id));
+      return Array.from(new Set([...items, ...ids]));
+    });
+  };
+
+  const openBatchCategory = () => {
+    if (selectedToolIds.length === 0) {
+      toast.error("请先选择工具");
+      return;
+    }
+    setBatchCategory(categories[0] ?? "未分类");
+    setBatchOpen(true);
+  };
+
+  const saveBatchCategory = () => {
+    if (!batchCategory) {
+      toast.error("请选择分类");
+      return;
+    }
+    setTools((items) => items.map((tool) => (
+      selectedToolIds.includes(tool.id) ? { ...tool, category: batchCategory } : tool
+    )));
+    setSelectedToolIds([]);
+    setBatchOpen(false);
+    toast.success("工具分类已设置");
+  };
+
+  const toggleToolEnabled = (toolId: string) => {
+    setTools((items) => items.map((tool) => (
+      tool.id === toolId ? { ...tool, enabled: !tool.enabled } : tool
+    )));
+  };
+
+  return (
+    <Box sx={{ height: "calc(100vh - 112px)", minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, mb: 1.5 }}>
+        <Box>
+          <Typography sx={{ fontSize: "15px", fontWeight: 700, color: "#111827" }}>工具管理</Typography>
+          <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.25 }}>
+            管理从 MCP Server 同步回来的工具资产，维护业务分类和启停状态，供 Agent 与流程引擎统一使用。
+          </Typography>
+        </Box>
+        <Button variant="contained" startIcon={<Add sx={{ fontSize: 16 }} />} onClick={openCreateCategory} sx={{ height: 34, bgcolor: BLUE, borderRadius: "6px", textTransform: "none", boxShadow: "none", fontSize: "13px", "&:hover": { bgcolor: "#2563eb", boxShadow: "none" } }}>
+          新增分类
+        </Button>
+      </Box>
+
+      <Box sx={{ display: "grid", gridTemplateColumns: "240px minmax(0, 1fr)", gap: 1.5, flex: 1, minHeight: 0 }}>
+        <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", p: 1.25, minHeight: 0, overflow: "auto" }}>
+          <Stack spacing={0.75}>
+            <Box
+              onClick={() => setSelectedCategory("全部工具")}
+              sx={{ px: 1.1, py: 0.9, borderRadius: "8px", cursor: "pointer", bgcolor: selectedCategory === "全部工具" ? "#eff6ff" : "transparent", border: "1px solid", borderColor: selectedCategory === "全部工具" ? "#bfdbfe" : "transparent" }}
+            >
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>全部工具</Typography>
+                <Typography sx={{ fontSize: "12px", color: "#64748b" }}>{tools.length}</Typography>
+              </Stack>
+            </Box>
+            {categories.map((category) => (
+              <Box
+                key={category}
+                onClick={() => setSelectedCategory(category)}
+                sx={{ px: 1.1, py: 0.85, borderRadius: "8px", cursor: "pointer", bgcolor: selectedCategory === category ? "#eff6ff" : "transparent", border: "1px solid", borderColor: selectedCategory === category ? "#bfdbfe" : "transparent", "&:hover .category-actions": { opacity: 1 } }}
+              >
+                <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography sx={{ fontSize: "13px", fontWeight: 650, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{category}</Typography>
+                    <Typography sx={{ fontSize: "11px", color: "#94a3b8", mt: 0.2 }}>{categoryCounts[category] ?? 0} 个工具</Typography>
+                  </Box>
+                  <Stack className="category-actions" direction="row" spacing={0.1} sx={{ opacity: 0, transition: "opacity 0.16s ease" }} onClick={(event) => event.stopPropagation()}>
+                    <IconButton size="small" onClick={() => openEditCategory(category)} sx={{ p: 0.35, color: "#64748b" }}><Edit sx={{ fontSize: 14 }} /></IconButton>
+                    <IconButton size="small" onClick={() => deleteCategory(category)} sx={{ p: 0.35, color: "#ef4444" }}><Delete sx={{ fontSize: 14 }} /></IconButton>
+                  </Stack>
+                </Stack>
+              </Box>
+            ))}
+          </Stack>
+        </Paper>
+
+        <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <Box sx={{ px: 1.5, py: 1.2, borderBottom: "1px solid #eef2f7", display: "flex", gap: 1, alignItems: "center", justifyContent: "space-between" }}>
+            <TextField
+              size="small"
+              placeholder="搜索工具名称或描述"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              sx={{ width: 320, "& .MuiOutlinedInput-root": { height: 34, borderRadius: "8px", fontSize: "13px" } }}
+            />
+            <Stack direction="row" spacing={1} alignItems="center">
+              {selectedToolIds.length > 0 ? <Typography sx={{ fontSize: "12px", color: "#64748b" }}>已选择 {selectedToolIds.length} 个工具</Typography> : null}
+              <Button variant="outlined" disabled={selectedToolIds.length === 0} onClick={openBatchCategory} sx={{ height: 32, textTransform: "none", fontSize: "12px", borderRadius: "6px" }}>
+                设置分类
+              </Button>
+            </Stack>
+          </Box>
+
+          <TableContainer sx={{ flex: 1, overflow: "auto" }}>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: 48, bgcolor: "#f8f9fb" }}>
+                    <Checkbox size="small" checked={allFilteredSelected} indeterminate={someFilteredSelected} onChange={toggleAllFiltered} />
+                  </TableCell>
+                  {["工具名称", "工具描述", "工具分类", "状态", "最近同步"].map((label) => (
+                    <TableCell key={label} sx={{ bgcolor: "#f8f9fb", fontSize: "12px", fontWeight: 600, color: "#6b7280" }}>{label}</TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {filteredTools.map((tool, index) => (
+                  <TableRow key={tool.id} sx={{ bgcolor: index % 2 === 0 ? "#fff" : "#fafafa", "&:hover": { bgcolor: "#f6f9ff" }, "& td": { borderBottom: "1px solid #f5f5f5" } }}>
+                    <TableCell sx={{ py: 1 }}>
+                      <Checkbox size="small" checked={selectedToolIds.includes(tool.id)} onChange={() => toggleTool(tool.id)} />
+                    </TableCell>
+                    <TableCell sx={{ py: 1.2, fontSize: "13px", fontWeight: 650, color: "#111827" }}>{tool.name}</TableCell>
+                    <TableCell sx={{ py: 1.2, fontSize: "12px", color: "#64748b", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tool.description}</TableCell>
+                    <TableCell sx={{ py: 1.2 }}>
+                      <Chip label={tool.category} size="small" sx={{ height: 22, fontSize: 10.5, bgcolor: "#f1f5f9", color: "#475569" }} />
+                    </TableCell>
+                    <TableCell sx={{ py: 1.2 }}>
+                      <Stack direction="row" spacing={0.75} alignItems="center">
+                        <Chip label={tool.enabled ? "启用" : "停用"} size="small" sx={{ height: 22, fontSize: 10.5, bgcolor: tool.enabled ? "#f0fdf4" : "#f1f5f9", color: tool.enabled ? "#16a34a" : "#64748b" }} />
+                        <Switch size="small" checked={tool.enabled} onChange={() => toggleToolEnabled(tool.id)} sx={{ "& .MuiSwitch-switchBase.Mui-checked": { color: BLUE }, "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": { bgcolor: "#93c5fd" } }} />
+                      </Stack>
+                    </TableCell>
+                    <TableCell sx={{ py: 1.2, fontSize: "12px", color: "#64748b" }}>{tool.lastSyncedAt}</TableCell>
+                  </TableRow>
+                ))}
+                {filteredTools.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} sx={{ py: 4, textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>暂无匹配工具</TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      </Box>
+
+      <Dialog open={categoryDialogOpen} onClose={() => setCategoryDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontSize: "15px", fontWeight: 700, py: 2, px: 3 }}>{editingCategory ? "编辑分类" : "新增分类"}</DialogTitle>
+        <DialogContent sx={{ px: 3, pt: "8px !important" }}>
+          <TextField autoFocus fullWidth size="small" label="分类名称" value={categoryDraft} onChange={(event) => setCategoryDraft(event.target.value)} />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setCategoryDialogOpen(false)} sx={{ textTransform: "none", color: "#64748b" }}>取消</Button>
+          <Button variant="contained" onClick={saveCategory} sx={{ textTransform: "none", bgcolor: BLUE, boxShadow: "none" }}>保存</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={batchOpen} onClose={() => setBatchOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontSize: "15px", fontWeight: 700, py: 2, px: 3 }}>设置分类</DialogTitle>
+        <DialogContent sx={{ px: 3, pt: "8px !important" }}>
+          <Typography sx={{ fontSize: "13px", color: "#64748b", mb: 1 }}>已选择 {selectedToolIds.length} 个工具</Typography>
+          <FormControl size="small" fullWidth>
+            <InputLabel>目标分类</InputLabel>
+            <Select label="目标分类" value={batchCategory} onChange={(event) => setBatchCategory(event.target.value)}>
+              {categories.map((category) => <MenuItem key={category} value={category}>{category}</MenuItem>)}
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setBatchOpen(false)} sx={{ textTransform: "none", color: "#64748b" }}>取消</Button>
+          <Button variant="contained" onClick={saveBatchCategory} sx={{ textTransform: "none", bgcolor: BLUE, boxShadow: "none" }}>确认</Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
 }
