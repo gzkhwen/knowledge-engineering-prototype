@@ -625,7 +625,7 @@ export function McpServiceManagementPage() {
             <TextField label="服务描述" size="small" value={draft.description} onChange={(event) => updateDraft({ description: event.target.value })} multiline minRows={2} fullWidth inputProps={{ maxLength: 200 }} helperText={`${draft.description.length}/200`} />
             <Box>
               <Typography sx={{ mb: 0.75, fontSize: 13, fontWeight: 700, color: "#111827" }}>配置方式</Typography>
-              <Tabs value={draft.configMode} onChange={(_, value) => updateDraft({ configMode: value })} sx={{ minHeight: 34, border: "1px solid #e5e7eb", borderRadius: "8px", p: 0.25, "& .MuiTab-root": { minHeight: 28, flex: 1, fontSize: 12, borderRadius: "6px" }, "& .Mui-selected": { color: "#2563eb !important", bgcolor: "#eff6ff" }, "& .MuiTabs-indicator": { display: "none" } }}>
+              <Tabs value={draft.configMode} variant="fullWidth" onChange={(_, value) => updateDraft({ configMode: value })} sx={{ minHeight: 34, border: "1px solid #e5e7eb", borderRadius: "8px", p: 0.25, "& .MuiTabs-flexContainer": { width: "100%" }, "& .MuiTab-root": { minHeight: 28, flex: 1, maxWidth: "none", fontSize: 12, borderRadius: "6px", alignItems: "center", justifyContent: "center", textAlign: "center" }, "& .Mui-selected": { color: "#2563eb !important", bgcolor: "#eff6ff" }, "& .MuiTabs-indicator": { display: "none" } }}>
                 <Tab value="simple" label="简易配置" />
                 <Tab value="json" label="JSON配置" />
               </Tabs>
@@ -870,7 +870,7 @@ export function ToolManagementPage() {
         <Box>
           <Typography sx={{ fontSize: "15px", fontWeight: 700, color: "#111827" }}>工具管理</Typography>
           <Typography sx={{ fontSize: "12px", color: "#64748b", mt: 0.25 }}>
-            管理从 MCP Server 同步回来的工具资产，维护工具分类，供 Agent 和流程引擎统一使用。工具状态由 MCP 服务同步结果决定，本期不在此处维护。
+            管理从 MCP Server 同步回来的工具资产，维护工具分类，供 Agent 和流程引擎统一使用。
           </Typography>
         </Box>
       </Box>
@@ -878,7 +878,7 @@ export function ToolManagementPage() {
       <Box sx={{ display: "grid", gridTemplateColumns: "240px minmax(0, 1fr)", gap: 1.5, flex: 1, minHeight: 0 }}>
         <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", p: 1.25, minHeight: 0, overflow: "auto" }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 0.5, mb: 1 }}>
-            <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>工具分类</Typography>
+            <Typography sx={{ fontSize: 13, fontWeight: 500, color: "#111827" }}>工具分类</Typography>
             <Tooltip title="新增分类">
               <IconButton size="small" onClick={openCreateCategory} sx={{ color: BLUE }}>
                 <Add sx={{ fontSize: 17 }} />
@@ -891,7 +891,7 @@ export function ToolManagementPage() {
               sx={{ px: 1.1, py: 0.9, borderRadius: "8px", cursor: "pointer", bgcolor: selectedCategory === "全部工具" ? "#eff6ff" : "transparent", border: "1px solid", borderColor: selectedCategory === "全部工具" ? "#bfdbfe" : "transparent" }}
             >
               <Stack direction="row" alignItems="center" justifyContent="space-between">
-                <Typography sx={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>全部工具</Typography>
+                <Typography sx={{ fontSize: "13px", fontWeight: 400, color: "#111827" }}>全部工具</Typography>
                 <Chip label={tools.length} size="small" sx={{ height: 19, fontSize: 10.5, bgcolor: "#f1f5f9", color: "#475569" }} />
               </Stack>
             </Box>
@@ -904,7 +904,7 @@ export function ToolManagementPage() {
                 <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
                   <Box sx={{ minWidth: 0 }}>
                     <Stack direction="row" spacing={0.6} alignItems="center">
-                      <Typography sx={{ fontSize: "13px", fontWeight: 650, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{category}</Typography>
+                      <Typography sx={{ fontSize: "13px", fontWeight: 400, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{category}</Typography>
                       <Chip label={categoryCounts[category] ?? 0} size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f1f5f9", color: "#475569" }} />
                     </Stack>
                   </Box>
@@ -942,7 +942,7 @@ export function ToolManagementPage() {
                   <TableCell sx={{ width: 48, bgcolor: "#f8f9fb" }}>
                     <Checkbox size="small" checked={allFilteredSelected} indeterminate={someFilteredSelected} onChange={toggleAllFiltered} />
                   </TableCell>
-                  {["工具名称", "工具描述", "MCP服务", "工具分类", "最近同步", "操作"].map((label) => (
+                  {["工具名称", "工具描述", "MCP服务", "最近同步", "操作"].map((label) => (
                     <TableCell key={label} sx={{ bgcolor: "#f8f9fb", fontSize: "12px", fontWeight: 600, color: "#6b7280" }}>{label}</TableCell>
                   ))}
                 </TableRow>
@@ -956,9 +956,6 @@ export function ToolManagementPage() {
                     <TableCell sx={{ py: 1.2, fontSize: "13px", fontWeight: 650, color: "#111827" }}>{tool.name}</TableCell>
                     <TableCell sx={{ py: 1.2, fontSize: "12px", color: "#64748b", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tool.description}</TableCell>
                     <TableCell sx={{ py: 1.2, fontSize: "12px", color: "#475569" }}>{tool.serviceName}</TableCell>
-                    <TableCell sx={{ py: 1.2 }}>
-                      <Chip label={tool.category} size="small" sx={{ height: 22, fontSize: 10.5, bgcolor: "#f1f5f9", color: "#475569" }} />
-                    </TableCell>
                     <TableCell sx={{ py: 1.2, fontSize: "12px", color: "#64748b" }}>{tool.lastSyncedAt}</TableCell>
                     <TableCell sx={{ py: 1.2 }}>
                       <Tooltip title="查看工具详情">
@@ -971,7 +968,7 @@ export function ToolManagementPage() {
                 ))}
                 {filteredTools.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} sx={{ py: 4, textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>暂无匹配工具</TableCell>
+                    <TableCell colSpan={6} sx={{ py: 4, textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>暂无匹配工具</TableCell>
                   </TableRow>
                 ) : null}
               </TableBody>
