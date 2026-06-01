@@ -2388,6 +2388,37 @@ function getParamSourceLabel(param: ToolParam, allNodes: ToolNode[]) {
   return `上游工具 · ${sourceNode?.toolName ?? "来源已失效"} · ${param.source.outputPath || "未配置取值路径"}`;
 }
 
+function getDefaultBoundSource(priorNodes: ToolNode[]): ParamSource {
+  const sourceNode = priorNodes[0];
+  if (!sourceNode) return { type: "file" };
+  return { type: "upstream", sourceNodeId: sourceNode.nodeId, outputPath: sourceNode.outputs[0]?.path || "data.result" };
+}
+
+function FxButton({ active, disabled, onClick }: { active: boolean; disabled: boolean; onClick: () => void }) {
+  return (
+    <Tooltip title={active ? "取消取值设置" : "设置取值来源"}>
+      <span>
+        <IconButton
+          disabled={disabled}
+          onClick={onClick}
+          sx={{
+            mt: 0.3,
+            width: 30,
+            height: 30,
+            borderRadius: "8px",
+            color: active ? "#801AEB" : "#64748b",
+            bgcolor: active ? "#f5f3ff" : "transparent",
+            border: `1px solid ${active ? "#ddd6fe" : "transparent"}`,
+            "&:hover": { bgcolor: active ? "#ede9fe" : "#f8fafc" },
+          }}
+        >
+          <Typography component="span" sx={{ fontSize: 11, fontWeight: 800, lineHeight: 1 }}>Fx</Typography>
+        </IconButton>
+      </span>
+    </Tooltip>
+  );
+}
+
 function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: boolean; onChange: (value: ToolParam["value"]) => void }) {
   const commonSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
   if (param.type === "switch") {
@@ -2495,14 +2526,12 @@ function ToolEditDrawer({
   onParamChange: (nodeId: string, paramId: string, value: ToolParam["value"]) => void;
   onParamSourceChange: (nodeId: string, paramId: string, source: ParamSource) => void;
 }) {
-  const [expandedParamId, setExpandedParamId] = useState<string | null>(null);
   const [codeInputs, setCodeInputs] = useState<CodeInputDraft[]>([]);
   const [codeOutputs, setCodeOutputs] = useState<CodeOutputDraft[]>([]);
 
   useEffect(() => {
     if (!node) return;
     const inputParam = getToolInputParam(node);
-    setExpandedParamId(null);
     setCodeInputs([
       {
         id: `${node.nodeId}-input-1`,
@@ -2567,9 +2596,7 @@ function ToolEditDrawer({
                     node={node}
                     allNodes={allNodes}
                     priorNodes={priorNodes}
-                    expanded={expandedParamId === param.id}
                     canEdit={canEdit && param.editable !== false && node.enabled}
-                    onToggleExpanded={() => setExpandedParamId((current) => (current === param.id ? null : param.id))}
                     onParamChange={onParamChange}
                     onParamSourceChange={onParamSourceChange}
                   />
@@ -2604,9 +2631,7 @@ function ParamConfigItem({
   node,
   allNodes,
   priorNodes,
-  expanded,
   canEdit,
-  onToggleExpanded,
   onParamChange,
   onParamSourceChange,
 }: {
@@ -2614,17 +2639,19 @@ function ParamConfigItem({
   node: ToolNode;
   allNodes: ToolNode[];
   priorNodes: ToolNode[];
-  expanded: boolean;
   canEdit: boolean;
-  onToggleExpanded: () => void;
   onParamChange: (nodeId: string, paramId: string, value: ToolParam["value"]) => void;
   onParamSourceChange: (nodeId: string, paramId: string, source: ParamSource) => void;
 }) {
   const source = param.source ?? { type: "manual" };
+  const active = source.type !== "manual";
+  const toggleBinding = () => {
+    onParamSourceChange(node.nodeId, param.id, active ? { type: "manual" } : getDefaultBoundSource(priorNodes));
+  };
   return (
     <Box sx={{ p: 1, border: "1px solid #EEF2F7", borderRadius: "10px", bgcolor: "#fff" }}>
       <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", gap: 0.75, alignItems: "start" }}>
-        {source.type === "manual" ? (
+        {!active ? (
           <ParamField param={param} canEdit={canEdit} onChange={(value) => onParamChange(node.nodeId, param.id, value)} />
         ) : (
           <TextField
@@ -2636,15 +2663,9 @@ function ParamConfigItem({
             sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }}
           />
         )}
-        <Tooltip title="设置取值来源">
-          <span>
-            <IconButton disabled={!canEdit} onClick={onToggleExpanded} sx={{ mt: 0.3, color: expanded ? "#801AEB" : "#64748b" }}>
-              <Sync sx={{ fontSize: 17 }} />
-            </IconButton>
-          </span>
-        </Tooltip>
+        <FxButton active={active} disabled={!canEdit} onClick={toggleBinding} />
       </Box>
-      {expanded ? (
+      {active ? (
         <ParamSourceSetting
           source={source}
           priorNodes={priorNodes}
@@ -2669,10 +2690,6 @@ function ParamSourceSetting({
 }) {
   const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
   const setType = (type: ParamSource["type"]) => {
-    if (type === "manual") {
-      onChange({ type: "manual" });
-      return;
-    }
     if (type === "file") {
       onChange({ type: "file" });
       return;
@@ -2686,7 +2703,6 @@ function ParamSourceSetting({
         <FormControl fullWidth size="small" sx={inputFieldSx}>
           <InputLabel>取值方式</InputLabel>
           <Select label="取值方式" value={source.type} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setType(event.target.value as ParamSource["type"])}>
-            <MenuItem value="manual">自己填写</MenuItem>
             <MenuItem value="upstream" disabled={priorNodes.length === 0}>上游工具输出</MenuItem>
             <MenuItem value="file">文件地址</MenuItem>
           </Select>
@@ -2753,16 +2769,23 @@ function CodeToolConfig({
         <Stack spacing={1}>
           {codeInputs.map((row) => (
             <Box key={row.id} sx={{ p: 1, border: "1px solid #EEF2F7", borderRadius: "10px", bgcolor: "#fff" }}>
-              <Box sx={{ display: "grid", gridTemplateColumns: "160px minmax(0, 1fr) 32px", gap: 1 }}>
+              <Box sx={{ display: "grid", gridTemplateColumns: "160px minmax(0, 1fr) 32px 32px", gap: 1 }}>
                 <TextField size="small" label="参数名称" value={row.name} disabled={!canEdit} onChange={(event) => updateInput(row.id, { name: event.target.value })} sx={inputFieldSx} />
                 {row.source.type === "manual" ? (
                   <TextField size="small" label="参数值" value={row.value} disabled={!canEdit} onChange={(event) => updateInput(row.id, { value: event.target.value })} sx={inputFieldSx} />
                 ) : (
                   <TextField size="small" label="参数值" value={row.source.type === "file" ? "文件地址 · 当前样例文件" : `上游工具 · ${priorNodes.find((item) => item.nodeId === row.source.sourceNodeId)?.toolName ?? "未选择"} · ${row.source.outputPath ?? ""}`} disabled sx={inputFieldSx} />
                 )}
+                <FxButton
+                  active={row.source.type !== "manual"}
+                  disabled={!canEdit}
+                  onClick={() => updateInput(row.id, { source: row.source.type === "manual" ? getDefaultBoundSource(priorNodes) : { type: "manual" } })}
+                />
                 <Tooltip title="删除入参"><span><IconButton disabled={!canEdit || codeInputs.length === 1} onClick={() => onCodeInputsChange(codeInputs.filter((item) => item.id !== row.id))} sx={{ color: "#ef4444" }}><DeleteOutline sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
               </Box>
-              <ParamSourceSetting source={row.source} priorNodes={priorNodes} canEdit={canEdit} onChange={(source) => updateInput(row.id, { source })} />
+              {row.source.type !== "manual" ? (
+                <ParamSourceSetting source={row.source} priorNodes={priorNodes} canEdit={canEdit} onChange={(source) => updateInput(row.id, { source })} />
+              ) : null}
             </Box>
           ))}
           <Button variant="outlined" disabled={!canEdit} startIcon={<Add sx={{ fontSize: 15 }} />} onClick={() => onCodeInputsChange([...codeInputs, { id: `code-input-${Date.now()}`, name: `arg${codeInputs.length + 1}`, source: { type: "manual" }, value: "" }])} sx={{ alignSelf: "flex-start", textTransform: "none", borderRadius: "8px" }}>添加入参</Button>
@@ -2816,15 +2839,32 @@ function StorageToolConfig({
       <ConfigBlock title="存储对象">
         {storageObject ? (
           <Box sx={{ p: 1, border: "1px solid #EEF2F7", borderRadius: "10px", bgcolor: "#fff" }}>
-            <TextField
-              size="small"
-              fullWidth
-              label="存储对象"
-              value={getParamSourceLabel(storageObject, [node, ...priorNodes])}
-              disabled
-              sx={inputFieldSx}
-            />
-            <ParamSourceSetting source={storageObject.source ?? { type: "upstream", sourceNodeId: priorNodes[0]?.nodeId, outputPath: "data.textChunkResult" }} priorNodes={priorNodes} canEdit={canEdit} onChange={(source) => onParamSourceChange(node.nodeId, storageObject.id, source)} />
+            <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", gap: 1 }}>
+              {(storageObject.source?.type ?? "manual") === "manual" ? (
+                <ParamField param={storageObject} canEdit={canEdit} onChange={(value) => onParamChange(node.nodeId, storageObject.id, value)} />
+              ) : (
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="存储对象"
+                  value={getParamSourceLabel(storageObject, [node, ...priorNodes])}
+                  disabled
+                  sx={inputFieldSx}
+                />
+              )}
+              <FxButton
+                active={(storageObject.source?.type ?? "manual") !== "manual"}
+                disabled={!canEdit}
+                onClick={() => onParamSourceChange(
+                  node.nodeId,
+                  storageObject.id,
+                  (storageObject.source?.type ?? "manual") === "manual" ? getDefaultBoundSource(priorNodes) : { type: "manual" },
+                )}
+              />
+            </Box>
+            {(storageObject.source?.type ?? "manual") !== "manual" ? (
+              <ParamSourceSetting source={storageObject.source ?? getDefaultBoundSource(priorNodes)} priorNodes={priorNodes} canEdit={canEdit} onChange={(source) => onParamSourceChange(node.nodeId, storageObject.id, source)} />
+            ) : null}
           </Box>
         ) : null}
         {storagePath ? (
