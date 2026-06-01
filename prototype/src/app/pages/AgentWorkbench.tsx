@@ -2460,26 +2460,29 @@ function ParamField({
   canEdit,
   onChange,
   hideLabel = false,
+  labelOverride,
 }: {
   param: ToolParam;
   canEdit: boolean;
   onChange: (value: ToolParam["value"]) => void;
   hideLabel?: boolean;
+  labelOverride?: string;
 }) {
   const commonSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
-  const fieldLabel = hideLabel ? undefined : param.label;
+  const displayLabel = labelOverride ?? param.label;
+  const fieldLabel = hideLabel ? undefined : displayLabel;
   if (param.type === "switch") {
     return (
       <FormControlLabel
         control={<Checkbox checked={Boolean(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.checked)} sx={{ color: "#801AEB", "&.Mui-checked": { color: "#801AEB" } }} />}
-        label={<Typography sx={{ fontSize: 12, color: "#374151" }}>{hideLabel ? (param.value ? "开启" : "关闭") : param.label}</Typography>}
+        label={<Typography sx={{ fontSize: 12, color: "#374151" }}>{hideLabel ? (param.value ? "开启" : "关闭") : displayLabel}</Typography>}
       />
     );
   }
   if (param.type === "select") {
     return (
       <FormControl fullWidth size="small" sx={commonSx}>
-        {!hideLabel ? <InputLabel>{param.label}</InputLabel> : null}
+        {!hideLabel ? <InputLabel>{displayLabel}</InputLabel> : null}
         <Select displayEmpty label={fieldLabel} value={String(param.value)} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onChange(event.target.value)}>
           {(param.options ?? []).map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
         </Select>
@@ -2490,7 +2493,7 @@ function ParamField({
     const selected = Array.isArray(param.value) ? param.value : [];
     return (
       <FormControl fullWidth size="small" sx={commonSx}>
-        {!hideLabel ? <InputLabel>{param.label}</InputLabel> : null}
+        {!hideLabel ? <InputLabel>{displayLabel}</InputLabel> : null}
         <Select
           multiple
           displayEmpty
@@ -2524,7 +2527,7 @@ function ParamField({
     const removeTag = (tag: string) => onChange(tags.filter((item) => item !== tag));
     return (
       <Box>
-        {!hideLabel ? <Typography sx={{ fontSize: 12, color: "#374151", mb: 0.75 }}>{param.label}</Typography> : null}
+        {!hideLabel ? <Typography sx={{ fontSize: 12, color: "#374151", mb: 0.75 }}>{displayLabel}</Typography> : null}
         <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
           {tags.length ? tags.map((tag) => <Chip key={tag} label={tag} size="small" onDelete={canEdit ? () => removeTag(tag) : undefined} sx={{ bgcolor: "#f5f3ff", color: "#6d28d9" }} />) : <Typography sx={{ fontSize: 12, color: "#94a3b8", py: 0.7 }}>未配置</Typography>}
         </Stack>
@@ -2713,18 +2716,19 @@ function UnifiedParamRow({
   const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
   return (
     <Box sx={{ py: 0.45 }}>
-      <Box sx={{ display: "grid", gridTemplateColumns: "116px minmax(0, 1fr) 32px 32px", gap: 1, alignItems: "start" }}>
-        <Typography sx={{ fontSize: 12, color: "#334155", pt: 1, lineHeight: 1.25 }}>{label}{param.required ? <Box component="span" sx={{ color: "#ef4444", ml: 0.25 }}>*</Box> : null}</Typography>
+      <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px 32px", gap: 1, alignItems: "start" }}>
         {active ? (
           <TextField
             size="small"
             fullWidth
+            label={label}
+            required={param.required}
             value={getParamSourceLabel({ ...param, source }, allNodes)}
             InputProps={{ readOnly: true }}
             sx={{ ...inputFieldSx, "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12, bgcolor: "#F8FAFC" } }}
           />
         ) : (
-          <ParamField param={param} canEdit={canEdit} hideLabel onChange={onValueChange} />
+          <ParamField param={param} canEdit={canEdit} labelOverride={label} onChange={onValueChange} />
         )}
         <FxButton active={active} disabled={!canEdit} onClick={() => onSourceChange(active ? { type: "manual" } : getDefaultBoundSource(priorNodes))} />
         {onRemove ? (
@@ -2732,8 +2736,7 @@ function UnifiedParamRow({
         ) : <Box />}
         {active ? (
           <>
-            <Box />
-            <Box sx={{ gridColumn: "2 / 5" }}>
+            <Box sx={{ gridColumn: "1 / 2" }}>
               <ParamSourceSetting source={source} priorNodes={priorNodes} canEdit={canEdit} onChange={onSourceChange} />
             </Box>
           </>
@@ -2765,8 +2768,8 @@ function ParamSourceSetting({
   };
   return (
     <Box sx={{ mt: 0.75, p: 1, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
-      <Box sx={{ display: "grid", gridTemplateColumns: source.type === "upstream" ? "180px minmax(0, 1fr) minmax(0, 1.4fr)" : "180px minmax(0, 1fr) minmax(0, 1.4fr)", gap: 1, alignItems: "start" }}>
-        <FormControl size="small" sx={inputFieldSx}>
+      <Box sx={{ display: "grid", gridTemplateColumns: "minmax(132px, 0.75fr) minmax(180px, 1fr) minmax(220px, 1.2fr)", gap: 1.25, alignItems: "start" }}>
+        <FormControl fullWidth size="small" sx={inputFieldSx}>
           <InputLabel>取值方式</InputLabel>
           <Select label="取值方式" value={source.type} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setType(event.target.value as ParamSource["type"])}>
             <MenuItem value="upstream" disabled={priorNodes.length === 0}>上游工具输出</MenuItem>
@@ -2800,7 +2803,7 @@ function ParamSourceSetting({
             />
           </>
         ) : (
-          <TextField size="small" label="文件地址" value="当前样例文件地址" disabled sx={{ ...inputFieldSx, gridColumn: "span 2" }} />
+          <TextField size="small" label="文件地址" value="当前样例文件地址" disabled sx={{ ...inputFieldSx, gridColumn: "2 / 4" }} />
         )}
       </Box>
     </Box>
@@ -2849,9 +2852,8 @@ function CodeToolConfig({
             };
             return (
               <Box key={row.id}>
-                <Box sx={{ display: "grid", gridTemplateColumns: "116px minmax(0, 1fr)", gap: 1, alignItems: "center", mb: 0.6 }}>
-                  <Typography sx={{ fontSize: 12, color: "#334155" }}>参数名称</Typography>
-                  <TextField size="small" value={row.name} disabled={!canEdit} placeholder="请输入参数名" onChange={(event) => updateInput(row.id, { name: event.target.value })} sx={inputFieldSx} />
+                <Box sx={{ mb: 0.6 }}>
+                  <TextField fullWidth size="small" label="参数名称" value={row.name} disabled={!canEdit} placeholder="请输入参数名" onChange={(event) => updateInput(row.id, { name: event.target.value })} sx={inputFieldSx} />
                 </Box>
                 <UnifiedParamRow
                   label="参数值"
@@ -2944,43 +2946,28 @@ function StorageToolConfig({
 
       <ConfigBlock title="存储配置">
         <Stack spacing={1}>
-          <PlainConfigRow label="存储方式">
-            <FormControl fullWidth size="small" sx={inputFieldSx}>
-              <Select displayEmpty value="写入ES" disabled MenuProps={elevatedSelectMenuProps}>
-                <MenuItem value="写入ES">写入ES</MenuItem>
-              </Select>
-            </FormControl>
-          </PlainConfigRow>
+          <FormControl fullWidth size="small" sx={inputFieldSx}>
+            <InputLabel>存储方式</InputLabel>
+            <Select label="存储方式" value="写入ES" disabled MenuProps={elevatedSelectMenuProps}>
+              <MenuItem value="写入ES">写入ES</MenuItem>
+            </Select>
+          </FormControl>
           {storageTarget ? (
-            <PlainConfigRow label="ES索引 / 别名" required={storageTarget.required}>
-              <TextField size="small" fullWidth value={String(storageTarget.value)} disabled={!canEdit} onChange={(event) => onParamChange(node.nodeId, storageTarget.id, event.target.value)} sx={inputFieldSx} />
-            </PlainConfigRow>
+            <TextField size="small" fullWidth label="ES索引 / 别名" required={storageTarget.required} value={String(storageTarget.value)} disabled={!canEdit} onChange={(event) => onParamChange(node.nodeId, storageTarget.id, event.target.value)} sx={inputFieldSx} />
           ) : null}
           {writeMode ? (
-            <PlainConfigRow label="写入模式" required={writeMode.required}>
-              <FormControl fullWidth size="small" sx={inputFieldSx}>
-                <Select displayEmpty value={String(writeMode.value)} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onParamChange(node.nodeId, writeMode.id, event.target.value)}>
-                  <MenuItem value="insert">insert</MenuItem>
-                  <MenuItem value="upsert">upsert</MenuItem>
-                  <MenuItem value="overwrite">overwrite</MenuItem>
-                </Select>
-              </FormControl>
-            </PlainConfigRow>
+            <FormControl fullWidth size="small" required={writeMode.required} sx={inputFieldSx}>
+              <InputLabel>写入模式</InputLabel>
+              <Select label="写入模式" value={String(writeMode.value)} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onParamChange(node.nodeId, writeMode.id, event.target.value)}>
+                <MenuItem value="insert">insert</MenuItem>
+                <MenuItem value="upsert">upsert</MenuItem>
+                <MenuItem value="overwrite">overwrite</MenuItem>
+              </Select>
+            </FormControl>
           ) : null}
         </Stack>
       </ConfigBlock>
     </Stack>
-  );
-}
-
-function PlainConfigRow({ label, required = false, children }: { label: string; required?: boolean; children: ReactNode }) {
-  return (
-    <Box sx={{ display: "grid", gridTemplateColumns: "116px minmax(0, 1fr)", gap: 1, alignItems: "center" }}>
-      <Typography sx={{ fontSize: 12, color: "#334155", lineHeight: 1.25 }}>
-        {label}{required ? <Box component="span" sx={{ color: "#ef4444", ml: 0.25 }}>*</Box> : null}
-      </Typography>
-      {children}
-    </Box>
   );
 }
 
