@@ -186,6 +186,8 @@ interface ToolNode {
   inputSource: InputSource;
   params: ToolParam[];
   outputs: ToolOutput[];
+  codeInputs?: CodeInputDraft[];
+  codeOutputs?: CodeOutputDraft[];
 }
 
 const systemMcpService: McpService = {
@@ -567,7 +569,7 @@ const storageToolParams: ToolParam[] = [
     value: "写入ES",
     required: true,
     editable: true,
-    options: ["写入ES", "对象存储", "向量库", "中间表"],
+    options: ["写入ES"],
   },
   {
     id: "storageTarget",
@@ -608,7 +610,7 @@ const toolCatalog: McpTool[] = [
   { id: "summary", name: "摘要总结", category: "智能生成", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [createOutput("summaryResult", "摘要总结结果", "Array<json>，包含摘要内容和来源引用。", "data.summaryResult")] },
   { id: "keyword-extractor", name: "关键词提取", category: "智能生成", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [createOutput("keywordResult", "关键词提取结果", "Array<json>，包含关键词和权重。", "data.keywordResult")] },
   { id: "system-code", name: "代码工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。", status: "可用", input: "rawText", output: "cleanText", params: codeToolParams, outputs: [createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"), createOutput("cleanBlocks", "标准文本块", "Array<json>，可作为后置分片或抽取工具输入。", "data.cleanBlocks")], allowMultiple: true },
-  { id: "system-storage", name: "数据存储工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "选择前置工具输出中的指定路径，将结果写入 ES、对象存储、向量库或中间表。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true },
+  { id: "system-storage", name: "数据存储工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "选择前置工具输出中的指定路径，将结果写入 ES。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true },
 ];
 
 const initialPlanNodes: ToolNode[] = createInitialPlanNodes();
@@ -632,6 +634,8 @@ function cloneNodes(nodes: ToolNode[]): ToolNode[] {
     inputSource: { ...node.inputSource },
     params: cloneParams(node.params),
     outputs: cloneOutputs(node.outputs),
+    codeInputs: node.codeInputs?.map((input) => ({ ...input, source: { ...input.source } })),
+    codeOutputs: node.codeOutputs?.map((output) => ({ ...output })),
   }));
 }
 
@@ -648,6 +652,12 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
     };
   }
   const nodeId = `${tool.id}-${Math.random().toString(36).slice(2, 8)}`;
+  const codeInputs = tool.id === "system-code"
+    ? [{ id: `${nodeId}-input-1`, name: "input", source: params[0]?.source ? { ...params[0].source } : { type: "manual" as const }, value: "" }]
+    : undefined;
+  const codeOutputs = tool.id === "system-code"
+    ? [{ id: `${nodeId}-output-1`, type: "Array<json>", name: "cleanBlocks", value: "data.cleanBlocks" }]
+    : undefined;
   return {
     nodeId,
     flowNodeId: nodeId,
@@ -667,6 +677,8 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
     inputSource,
     params,
     outputs: cloneOutputs(tool.outputs),
+    codeInputs,
+    codeOutputs,
   };
 }
 
@@ -1479,6 +1491,28 @@ export function AgentWorkbench() {
     });
   };
 
+  const changeCodeInputs = (nodeId: string, codeInputs: CodeInputDraft[]) => {
+    if (!isNodeEditable(nodeId)) return;
+    updateNode(nodeId, (node) => ({
+      ...node,
+      adjusted: true,
+      codeInputs: codeInputs.map((input) => ({ ...input, source: { ...input.source } })),
+    }));
+  };
+
+  const changeCodeOutputs = (nodeId: string, codeOutputs: CodeOutputDraft[]) => {
+    if (!isNodeEditable(nodeId)) return;
+    updateNode(nodeId, (node) => ({
+      ...node,
+      adjusted: true,
+      codeOutputs: codeOutputs.map((output) => ({ ...output })),
+      outputs: [
+        createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"),
+        ...codeOutputs.map((output) => createOutput(output.name, output.name, `${output.type}，代码工具输出变量。`, output.value)),
+      ],
+    }));
+  };
+
   const updateInputParam = (nodeId: string, inputParamId: string) => {
     if (!isNodeEditable(nodeId)) return;
     updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputParamId }));
@@ -1743,6 +1777,8 @@ export function AgentWorkbench() {
         onClose={() => setEditingNodeId(null)}
         onParamChange={changeParam}
         onParamSourceChange={changeParamSource}
+        onCodeInputsChange={changeCodeInputs}
+        onCodeOutputsChange={changeCodeOutputs}
       />
     </Box>
   );
@@ -2373,11 +2409,11 @@ function ToolRuntimeRow({
 function getParamPreview(param: ToolParam) {
   if (param.source?.type === "file") return "文件地址";
   if (param.source?.type === "upstream") return param.source.outputPath ? `引用上游输出 · ${param.source.outputPath}` : "引用上游工具输出";
-  if (Array.isArray(param.value)) return param.value.length ? param.value.join("、") : "按样例结果自动生成";
+  if (Array.isArray(param.value)) return param.value.length ? param.value.join("、") : "未配置";
   if (typeof param.value === "boolean") return param.value ? "开启" : "关闭";
   if (typeof param.value === "number") return `${param.value}${param.unit ?? ""}`;
   const value = param.value.trim();
-  if (!value) return "引用上游工具输出";
+  if (!value) return "未配置";
   return value.length > 42 ? `${value.slice(0, 42)}...` : value;
 }
 
@@ -2419,21 +2455,32 @@ function FxButton({ active, disabled, onClick }: { active: boolean; disabled: bo
   );
 }
 
-function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: boolean; onChange: (value: ToolParam["value"]) => void }) {
+function ParamField({
+  param,
+  canEdit,
+  onChange,
+  hideLabel = false,
+}: {
+  param: ToolParam;
+  canEdit: boolean;
+  onChange: (value: ToolParam["value"]) => void;
+  hideLabel?: boolean;
+}) {
   const commonSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
+  const fieldLabel = hideLabel ? undefined : param.label;
   if (param.type === "switch") {
     return (
       <FormControlLabel
         control={<Checkbox checked={Boolean(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.checked)} sx={{ color: "#801AEB", "&.Mui-checked": { color: "#801AEB" } }} />}
-        label={<Typography sx={{ fontSize: 12, color: "#374151" }}>{param.label}</Typography>}
+        label={<Typography sx={{ fontSize: 12, color: "#374151" }}>{hideLabel ? (param.value ? "开启" : "关闭") : param.label}</Typography>}
       />
     );
   }
   if (param.type === "select") {
     return (
       <FormControl fullWidth size="small" sx={commonSx}>
-        <InputLabel>{param.label}</InputLabel>
-        <Select label={param.label} value={String(param.value)} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onChange(event.target.value)}>
+        {!hideLabel ? <InputLabel>{param.label}</InputLabel> : null}
+        <Select displayEmpty label={fieldLabel} value={String(param.value)} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onChange(event.target.value)}>
           {(param.options ?? []).map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
         </Select>
       </FormControl>
@@ -2443,10 +2490,11 @@ function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: b
     const selected = Array.isArray(param.value) ? param.value : [];
     return (
       <FormControl fullWidth size="small" sx={commonSx}>
-        <InputLabel>{param.label}</InputLabel>
+        {!hideLabel ? <InputLabel>{param.label}</InputLabel> : null}
         <Select
           multiple
-          label={param.label}
+          displayEmpty
+          label={fieldLabel}
           value={selected}
           disabled={!canEdit}
           MenuProps={elevatedSelectMenuProps}
@@ -2463,8 +2511,8 @@ function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: b
       </FormControl>
     );
   }
-  if (param.type === "textarea") return <TextField size="small" fullWidth multiline minRows={4} label={param.label} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} sx={commonSx} />;
-  if (param.type === "number") return <TextField size="small" fullWidth type="number" label={param.label} value={Number(param.value)} disabled={!canEdit} onChange={(event) => onChange(Number(event.target.value))} sx={commonSx} />;
+  if (param.type === "textarea") return <TextField size="small" fullWidth multiline minRows={4} label={fieldLabel} placeholder={hideLabel ? "请输入" : undefined} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} sx={commonSx} />;
+  if (param.type === "number") return <TextField size="small" fullWidth type="number" label={fieldLabel} placeholder={hideLabel ? "请输入" : undefined} value={Number(param.value)} disabled={!canEdit} onChange={(event) => onChange(Number(event.target.value))} sx={commonSx} />;
   if (param.type === "tags") {
     const tags = Array.isArray(param.value) ? param.value : [];
     const limit = param.max ?? 10;
@@ -2476,9 +2524,9 @@ function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: b
     const removeTag = (tag: string) => onChange(tags.filter((item) => item !== tag));
     return (
       <Box>
-        <Typography sx={{ fontSize: 12, color: "#374151", mb: 0.75 }}>{param.label}</Typography>
+        {!hideLabel ? <Typography sx={{ fontSize: 12, color: "#374151", mb: 0.75 }}>{param.label}</Typography> : null}
         <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-          {tags.map((tag) => <Chip key={tag} label={tag} size="small" onDelete={canEdit ? () => removeTag(tag) : undefined} sx={{ bgcolor: "#f5f3ff", color: "#6d28d9" }} />)}
+          {tags.length ? tags.map((tag) => <Chip key={tag} label={tag} size="small" onDelete={canEdit ? () => removeTag(tag) : undefined} sx={{ bgcolor: "#f5f3ff", color: "#6d28d9" }} />) : <Typography sx={{ fontSize: 12, color: "#94a3b8", py: 0.7 }}>未配置</Typography>}
         </Stack>
         {canEdit && tags.length < limit && (
           <Stack spacing={1}>
@@ -2506,7 +2554,7 @@ function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: b
       </Box>
     );
   }
-  return <TextField size="small" fullWidth label={param.label} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} sx={commonSx} />;
+  return <TextField size="small" fullWidth label={fieldLabel} placeholder={hideLabel ? "请输入" : undefined} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} sx={commonSx} />;
 }
 
 function ToolEditDrawer({
@@ -2517,6 +2565,8 @@ function ToolEditDrawer({
   onClose,
   onParamChange,
   onParamSourceChange,
+  onCodeInputsChange,
+  onCodeOutputsChange,
 }: {
   open: boolean;
   node: ToolNode | null;
@@ -2525,31 +2575,20 @@ function ToolEditDrawer({
   onClose: () => void;
   onParamChange: (nodeId: string, paramId: string, value: ToolParam["value"]) => void;
   onParamSourceChange: (nodeId: string, paramId: string, source: ParamSource) => void;
+  onCodeInputsChange: (nodeId: string, codeInputs: CodeInputDraft[]) => void;
+  onCodeOutputsChange: (nodeId: string, codeOutputs: CodeOutputDraft[]) => void;
 }) {
-  const [codeInputs, setCodeInputs] = useState<CodeInputDraft[]>([]);
-  const [codeOutputs, setCodeOutputs] = useState<CodeOutputDraft[]>([]);
-
-  useEffect(() => {
-    if (!node) return;
-    const inputParam = getToolInputParam(node);
-    setCodeInputs([
-      {
-        id: `${node.nodeId}-input-1`,
-        name: "input",
-        source: inputParam?.source ?? { type: "upstream", sourceNodeId: getPriorNodes(allNodes, node.nodeId)[0]?.nodeId, outputPath: "data.documentParseResult" },
-        value: "",
-      },
-    ]);
-    setCodeOutputs([
-      { id: `${node.nodeId}-output-1`, type: "Array<json>", name: "cleanBlocks", value: "data.cleanBlocks" },
-    ]);
-  }, [node?.nodeId]);
-
   if (!node) return null;
   const priorNodes = getPriorNodes(allNodes, node.nodeId);
   const visibleParams = node.params.filter((param) => isParamVisible(node, param));
   const isCodeTool = node.toolId === "system-code";
   const isStorageTool = node.toolId === "system-storage";
+  const outputRows = isCodeTool && node.codeOutputs?.length
+    ? [
+        createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"),
+        ...node.codeOutputs.map((output) => createOutput(output.id, output.name, `${output.type}，代码工具输出变量。`, output.value)),
+      ]
+    : node.outputs;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth PaperProps={{ sx: { borderRadius: "14px", maxHeight: "88vh" } }}>
@@ -2572,10 +2611,10 @@ function ToolEditDrawer({
               node={node}
               priorNodes={priorNodes}
               canEdit={canEdit}
-              codeInputs={codeInputs}
-              codeOutputs={codeOutputs}
-              onCodeInputsChange={setCodeInputs}
-              onCodeOutputsChange={setCodeOutputs}
+              codeInputs={node.codeInputs ?? []}
+              codeOutputs={node.codeOutputs ?? []}
+              onCodeInputsChange={(rows) => onCodeInputsChange(node.nodeId, rows)}
+              onCodeOutputsChange={(rows) => onCodeOutputsChange(node.nodeId, rows)}
               onParamChange={onParamChange}
             />
           ) : isStorageTool ? (
@@ -2606,15 +2645,7 @@ function ToolEditDrawer({
           )}
 
           <ConfigBlock title="工具输出">
-            <Stack spacing={0.75}>
-              {node.outputs.map((output) => (
-                <Box key={output.id} sx={{ p: 1, borderRadius: "9px", bgcolor: "#fff", border: "1px solid #EEF2F7" }}>
-                  <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{output.label}</Typography>
-                  <Typography sx={{ fontSize: 11.5, color: "#64748b", mt: 0.35, lineHeight: 1.5 }}>{output.desc}</Typography>
-                  <Typography sx={{ fontSize: 11.5, color: "#475569", mt: 0.35, lineHeight: 1.5 }}>变量路径：{output.path}</Typography>
-                </Box>
-              ))}
-            </Stack>
+            <OutputContractList outputs={outputRows} />
           </ConfigBlock>
         </Stack>
       </DialogContent>
@@ -2643,36 +2674,71 @@ function ParamConfigItem({
   onParamChange: (nodeId: string, paramId: string, value: ToolParam["value"]) => void;
   onParamSourceChange: (nodeId: string, paramId: string, source: ParamSource) => void;
 }) {
-  const source = param.source ?? { type: "manual" };
-  const active = source.type !== "manual";
-  const toggleBinding = () => {
-    onParamSourceChange(node.nodeId, param.id, active ? { type: "manual" } : getDefaultBoundSource(priorNodes));
-  };
   return (
-    <Box sx={{ py: 0.35 }}>
-      <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", gap: 0.75, alignItems: "start" }}>
-        {!active ? (
-          <ParamField param={param} canEdit={canEdit} onChange={(value) => onParamChange(node.nodeId, param.id, value)} />
-        ) : (
+    <UnifiedParamRow
+      label={param.label}
+      param={param}
+      source={param.source ?? { type: "manual" }}
+      priorNodes={priorNodes}
+      allNodes={allNodes}
+      canEdit={canEdit}
+      onValueChange={(value) => onParamChange(node.nodeId, param.id, value)}
+      onSourceChange={(source) => onParamSourceChange(node.nodeId, param.id, source)}
+    />
+  );
+}
+
+function UnifiedParamRow({
+  label,
+  param,
+  source,
+  priorNodes,
+  allNodes,
+  canEdit,
+  onValueChange,
+  onSourceChange,
+  onRemove,
+}: {
+  label: string;
+  param: ToolParam;
+  source: ParamSource;
+  priorNodes: ToolNode[];
+  allNodes: ToolNode[];
+  canEdit: boolean;
+  onValueChange: (value: ToolParam["value"]) => void;
+  onSourceChange: (source: ParamSource) => void;
+  onRemove?: () => void;
+}) {
+  const active = source.type !== "manual";
+  const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
+  return (
+    <Box sx={{ py: 0.45 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: "116px minmax(0, 1fr) 32px 32px", gap: 1, alignItems: "start" }}>
+        <Typography sx={{ fontSize: 12, color: "#334155", pt: 1, lineHeight: 1.25 }}>{label}{param.required ? <Box component="span" sx={{ color: "#ef4444", ml: 0.25 }}>*</Box> : null}</Typography>
+        {active ? (
           <TextField
             size="small"
             fullWidth
-            label={param.label}
-            value={getParamSourceLabel(param, allNodes)}
-            disabled
-            sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }}
+            value={getParamSourceLabel({ ...param, source }, allNodes)}
+            InputProps={{ readOnly: true }}
+            sx={{ ...inputFieldSx, "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12, bgcolor: "#F8FAFC" } }}
           />
+        ) : (
+          <ParamField param={param} canEdit={canEdit} hideLabel onChange={onValueChange} />
         )}
-        <FxButton active={active} disabled={!canEdit} onClick={toggleBinding} />
+        <FxButton active={active} disabled={!canEdit} onClick={() => onSourceChange(active ? { type: "manual" } : getDefaultBoundSource(priorNodes))} />
+        {onRemove ? (
+          <Tooltip title="删除"><span><IconButton disabled={!canEdit} onClick={onRemove} sx={{ color: "#ef4444" }}><DeleteOutline sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+        ) : <Box />}
+        {active ? (
+          <>
+            <Box />
+            <Box sx={{ gridColumn: "2 / 5" }}>
+              <ParamSourceSetting source={source} priorNodes={priorNodes} canEdit={canEdit} onChange={onSourceChange} />
+            </Box>
+          </>
+        ) : null}
       </Box>
-      {active ? (
-        <ParamSourceSetting
-          source={source}
-          priorNodes={priorNodes}
-          canEdit={canEdit}
-          onChange={(nextSource) => onParamSourceChange(node.nodeId, param.id, nextSource)}
-        />
-      ) : null}
     </Box>
   );
 }
@@ -2764,33 +2830,44 @@ function CodeToolConfig({
   const scriptParam = node.params.find((param) => param.id === "script");
   const updateInput = (id: string, patch: Partial<CodeInputDraft>) => onCodeInputsChange(codeInputs.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   const updateOutput = (id: string, patch: Partial<CodeOutputDraft>) => onCodeOutputsChange(codeOutputs.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  const rows = codeInputs.length ? codeInputs : [{ id: `${node.nodeId}-input-1`, name: "input", source: getDefaultBoundSource(priorNodes), value: "" }];
 
   return (
     <Stack spacing={1.5}>
       <ConfigBlock title="定义入参">
         <Stack spacing={1.1}>
-          {codeInputs.map((row) => (
-            <Box key={row.id}>
-              <Box sx={{ display: "grid", gridTemplateColumns: "160px minmax(0, 1fr) 32px 32px", gap: 1 }}>
-                <TextField size="small" label="参数名称" value={row.name} disabled={!canEdit} onChange={(event) => updateInput(row.id, { name: event.target.value })} sx={inputFieldSx} />
-                {row.source.type === "manual" ? (
-                  <TextField size="small" label="参数值" value={row.value} disabled={!canEdit} onChange={(event) => updateInput(row.id, { value: event.target.value })} sx={inputFieldSx} />
-                ) : (
-                  <TextField size="small" label="参数值" value={row.source.type === "file" ? "文件地址 · 当前样例文件" : `上游工具 · ${priorNodes.find((item) => item.nodeId === row.source.sourceNodeId)?.toolName ?? "未选择"} · ${row.source.outputPath ?? ""}`} disabled sx={inputFieldSx} />
-                )}
-                <FxButton
-                  active={row.source.type !== "manual"}
-                  disabled={!canEdit}
-                  onClick={() => updateInput(row.id, { source: row.source.type === "manual" ? getDefaultBoundSource(priorNodes) : { type: "manual" } })}
+          {rows.map((row) => {
+            const draftParam: ToolParam = {
+              id: row.id,
+              label: row.name || "未命名入参",
+              desc: "代码工具入参。",
+              type: "text",
+              value: row.value,
+              required: true,
+              editable: true,
+              source: row.source,
+            };
+            return (
+              <Box key={row.id}>
+                <Box sx={{ display: "grid", gridTemplateColumns: "116px minmax(0, 1fr)", gap: 1, alignItems: "center", mb: 0.6 }}>
+                  <Typography sx={{ fontSize: 12, color: "#334155" }}>参数名称</Typography>
+                  <TextField size="small" value={row.name} disabled={!canEdit} placeholder="请输入参数名" onChange={(event) => updateInput(row.id, { name: event.target.value })} sx={inputFieldSx} />
+                </Box>
+                <UnifiedParamRow
+                  label="参数值"
+                  param={draftParam}
+                  source={row.source}
+                  priorNodes={priorNodes}
+                  allNodes={priorNodes}
+                  canEdit={canEdit}
+                  onValueChange={(value) => updateInput(row.id, { value: String(value) })}
+                  onSourceChange={(source) => updateInput(row.id, { source })}
+                  onRemove={rows.length > 1 ? () => onCodeInputsChange(rows.filter((item) => item.id !== row.id)) : undefined}
                 />
-                <Tooltip title="删除入参"><span><IconButton disabled={!canEdit || codeInputs.length === 1} onClick={() => onCodeInputsChange(codeInputs.filter((item) => item.id !== row.id))} sx={{ color: "#ef4444" }}><DeleteOutline sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
               </Box>
-              {row.source.type !== "manual" ? (
-                <ParamSourceSetting source={row.source} priorNodes={priorNodes} canEdit={canEdit} onChange={(source) => updateInput(row.id, { source })} />
-              ) : null}
-            </Box>
-          ))}
-          <Button variant="outlined" disabled={!canEdit} startIcon={<Add sx={{ fontSize: 15 }} />} onClick={() => onCodeInputsChange([...codeInputs, { id: `code-input-${Date.now()}`, name: `arg${codeInputs.length + 1}`, source: { type: "manual" }, value: "" }])} sx={{ alignSelf: "flex-start", textTransform: "none", borderRadius: "8px" }}>添加入参</Button>
+            );
+          })}
+          <Button variant="outlined" disabled={!canEdit} startIcon={<Add sx={{ fontSize: 15 }} />} onClick={() => onCodeInputsChange([...rows, { id: `code-input-${Date.now()}`, name: `arg${rows.length + 1}`, source: { type: "manual" }, value: "" }])} sx={{ alignSelf: "flex-start", textTransform: "none", borderRadius: "8px" }}>添加入参</Button>
         </Stack>
       </ConfigBlock>
 
@@ -2803,7 +2880,7 @@ function CodeToolConfig({
       <ConfigBlock title="定义输出参数">
         <Stack spacing={1}>
           {codeOutputs.map((row) => (
-            <Box key={row.id} sx={{ display: "grid", gridTemplateColumns: "130px 150px minmax(0, 1fr) 32px", gap: 1 }}>
+            <Box key={row.id} sx={{ display: "grid", gridTemplateColumns: "116px 150px minmax(0, 1fr) 32px", gap: 1 }}>
               <TextField size="small" label="数据类型" value={row.type} disabled={!canEdit} onChange={(event) => updateOutput(row.id, { type: event.target.value })} sx={inputFieldSx} />
               <TextField size="small" label="参数名" value={row.name} disabled={!canEdit} onChange={(event) => updateOutput(row.id, { name: event.target.value })} sx={inputFieldSx} />
               <TextField size="small" label="参数值" value={row.value} disabled={!canEdit} onChange={(event) => updateOutput(row.id, { value: event.target.value })} sx={inputFieldSx} />
@@ -2840,71 +2917,96 @@ function StorageToolConfig({
     <Stack spacing={1.5}>
       <ConfigBlock title="存储对象">
         {storageObject ? (
-          <Box>
-            <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", gap: 1 }}>
-              {(storageObject.source?.type ?? "manual") === "manual" ? (
-                <ParamField param={storageObject} canEdit={canEdit} onChange={(value) => onParamChange(node.nodeId, storageObject.id, value)} />
-              ) : (
-                <TextField
-                  size="small"
-                  fullWidth
-                  label="存储对象"
-                  value={getParamSourceLabel(storageObject, [node, ...priorNodes])}
-                  disabled
-                  sx={inputFieldSx}
-                />
-              )}
-              <FxButton
-                active={(storageObject.source?.type ?? "manual") !== "manual"}
-                disabled={!canEdit}
-                onClick={() => onParamSourceChange(
-                  node.nodeId,
-                  storageObject.id,
-                  (storageObject.source?.type ?? "manual") === "manual" ? getDefaultBoundSource(priorNodes) : { type: "manual" },
-                )}
-              />
-            </Box>
-            {(storageObject.source?.type ?? "manual") !== "manual" ? (
-              <ParamSourceSetting source={storageObject.source ?? getDefaultBoundSource(priorNodes)} priorNodes={priorNodes} canEdit={canEdit} onChange={(source) => onParamSourceChange(node.nodeId, storageObject.id, source)} />
-            ) : null}
-          </Box>
+          <UnifiedParamRow
+            label="存储对象"
+            param={storageObject}
+            source={storageObject.source ?? { type: "manual" }}
+            priorNodes={priorNodes}
+            allNodes={priorNodes}
+            canEdit={canEdit}
+            onValueChange={(value) => onParamChange(node.nodeId, storageObject.id, value)}
+            onSourceChange={(source) => onParamSourceChange(node.nodeId, storageObject.id, source)}
+          />
         ) : null}
         {storagePath ? (
-          <TextField
-            size="small"
-            fullWidth
-            label="取值路径"
-            value={String(storagePath.value)}
-            disabled={!canEdit}
-            onChange={(event) => onParamChange(node.nodeId, storagePath.id, event.target.value)}
-            sx={{ ...inputFieldSx, mt: 1 }}
+          <UnifiedParamRow
+            label="对象内路径"
+            param={storagePath}
+            source={storagePath.source ?? { type: "manual" }}
+            priorNodes={priorNodes}
+            allNodes={priorNodes}
+            canEdit={canEdit}
+            onValueChange={(value) => onParamChange(node.nodeId, storagePath.id, value)}
+            onSourceChange={(source) => onParamSourceChange(node.nodeId, storagePath.id, source)}
           />
         ) : null}
       </ConfigBlock>
 
       <ConfigBlock title="存储配置">
         <Stack spacing={1}>
-          <FormControl fullWidth size="small" sx={inputFieldSx}>
-            <InputLabel>存储方式</InputLabel>
-            <Select label="存储方式" value="写入ES" disabled MenuProps={elevatedSelectMenuProps}>
-              <MenuItem value="写入ES">写入ES</MenuItem>
-            </Select>
-          </FormControl>
-          {storageTarget ? (
-            <TextField size="small" fullWidth label="ES索引 / 别名" value={String(storageTarget.value)} disabled={!canEdit} onChange={(event) => onParamChange(node.nodeId, storageTarget.id, event.target.value)} sx={inputFieldSx} />
-          ) : null}
-          {writeMode ? (
+          <PlainConfigRow label="存储方式">
             <FormControl fullWidth size="small" sx={inputFieldSx}>
-              <InputLabel>写入模式</InputLabel>
-              <Select label="写入模式" value={String(writeMode.value)} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onParamChange(node.nodeId, writeMode.id, event.target.value)}>
-                <MenuItem value="insert">insert</MenuItem>
-                <MenuItem value="upsert">upsert</MenuItem>
-                <MenuItem value="overwrite">overwrite</MenuItem>
+              <Select displayEmpty value="写入ES" disabled MenuProps={elevatedSelectMenuProps}>
+                <MenuItem value="写入ES">写入ES</MenuItem>
               </Select>
             </FormControl>
+          </PlainConfigRow>
+          {storageTarget ? (
+            <PlainConfigRow label="ES索引 / 别名" required={storageTarget.required}>
+              <TextField size="small" fullWidth value={String(storageTarget.value)} disabled={!canEdit} onChange={(event) => onParamChange(node.nodeId, storageTarget.id, event.target.value)} sx={inputFieldSx} />
+            </PlainConfigRow>
+          ) : null}
+          {writeMode ? (
+            <PlainConfigRow label="写入模式" required={writeMode.required}>
+              <FormControl fullWidth size="small" sx={inputFieldSx}>
+                <Select displayEmpty value={String(writeMode.value)} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onParamChange(node.nodeId, writeMode.id, event.target.value)}>
+                  <MenuItem value="insert">insert</MenuItem>
+                  <MenuItem value="upsert">upsert</MenuItem>
+                  <MenuItem value="overwrite">overwrite</MenuItem>
+                </Select>
+              </FormControl>
+            </PlainConfigRow>
           ) : null}
         </Stack>
       </ConfigBlock>
+    </Stack>
+  );
+}
+
+function PlainConfigRow({ label, required = false, children }: { label: string; required?: boolean; children: ReactNode }) {
+  return (
+    <Box sx={{ display: "grid", gridTemplateColumns: "116px minmax(0, 1fr)", gap: 1, alignItems: "center" }}>
+      <Typography sx={{ fontSize: 12, color: "#334155", lineHeight: 1.25 }}>
+        {label}{required ? <Box component="span" sx={{ color: "#ef4444", ml: 0.25 }}>*</Box> : null}
+      </Typography>
+      {children}
+    </Box>
+  );
+}
+
+function OutputContractList({ outputs }: { outputs: ToolOutput[] }) {
+  return (
+    <Stack spacing={0.75}>
+      {outputs.map((output) => (
+        <Box
+          key={`${output.id}-${output.path}`}
+          sx={{
+            display: "grid",
+            gridTemplateColumns: "116px minmax(0, 1fr)",
+            gap: 1,
+            alignItems: "start",
+            py: 0.8,
+            borderBottom: "1px solid #F1F5F9",
+            "&:last-of-type": { borderBottom: "none" },
+          }}
+        >
+          <Typography sx={{ fontSize: 12, color: "#334155", pt: 0.1 }}>{output.label}</Typography>
+          <Box>
+            <Typography sx={{ fontSize: 12, color: "#111827", lineHeight: 1.45 }}>{output.path}</Typography>
+            <Typography sx={{ fontSize: 11.5, color: "#64748b", mt: 0.25, lineHeight: 1.45 }}>{output.desc}</Typography>
+          </Box>
+        </Box>
+      ))}
     </Stack>
   );
 }
