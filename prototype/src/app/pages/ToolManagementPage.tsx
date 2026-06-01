@@ -878,7 +878,7 @@ export function ToolManagementPage() {
       <Box sx={{ display: "grid", gridTemplateColumns: "240px minmax(0, 1fr)", gap: 1.5, flex: 1, minHeight: 0 }}>
         <Paper sx={{ border: "1px solid #e8eaed", borderRadius: "10px", boxShadow: "none", p: 1.25, minHeight: 0, overflow: "auto" }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 0.5, mb: 1 }}>
-            <Typography sx={{ fontSize: 13, fontWeight: 500, color: "#111827" }}>工具分类</Typography>
+            <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>工具分类</Typography>
             <Tooltip title="新增分类">
               <IconButton size="small" onClick={openCreateCategory} sx={{ color: BLUE }}>
                 <Add sx={{ fontSize: 17 }} />
