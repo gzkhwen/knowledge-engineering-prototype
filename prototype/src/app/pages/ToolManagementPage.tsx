@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Add,
   Delete,
@@ -108,7 +108,7 @@ interface McpServiceDraft {
   jsonConfig: string;
 }
 
-interface ManagedToolItem {
+export interface ManagedToolItem {
   id: string;
   name: string;
   description: string;
@@ -376,7 +376,7 @@ function toService(draft: McpServiceDraft, id = `svc-${Date.now()}`): McpService
   };
 }
 
-function buildManagedTools(): ManagedToolItem[] {
+export function buildManagedTools(): ManagedToolItem[] {
   return initialServices.flatMap((service) => service.tools.map((tool) => ({
     id: `${service.id}-${tool.name}`,
     name: tool.name,
@@ -390,8 +390,55 @@ function buildManagedTools(): ManagedToolItem[] {
   })));
 }
 
-function buildInitialCategories() {
+export function buildInitialCategories() {
   return Array.from(new Set(buildManagedTools().map((tool) => tool.category)));
+}
+
+interface ManagedToolCatalogSnapshot {
+  tools: ManagedToolItem[];
+  categories: string[];
+}
+
+const managedToolsStorageKey = "knowledge-engineering-managed-tools";
+const managedToolCategoriesStorageKey = "knowledge-engineering-managed-tool-categories";
+const managedToolCatalogEventName = "knowledge-engineering-managed-tool-catalog-changed";
+
+function readStorageJson<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export function getManagedToolCatalogSnapshot(): ManagedToolCatalogSnapshot {
+  return {
+    tools: readStorageJson(managedToolsStorageKey, buildManagedTools()),
+    categories: readStorageJson(managedToolCategoriesStorageKey, buildInitialCategories()),
+  };
+}
+
+export function saveManagedToolCatalogSnapshot(snapshot: ManagedToolCatalogSnapshot) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(managedToolsStorageKey, JSON.stringify(snapshot.tools));
+  window.localStorage.setItem(managedToolCategoriesStorageKey, JSON.stringify(snapshot.categories));
+  window.dispatchEvent(new CustomEvent(managedToolCatalogEventName));
+}
+
+export function subscribeManagedToolCatalog(listener: () => void) {
+  if (typeof window === "undefined") return () => {};
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === managedToolsStorageKey || event.key === managedToolCategoriesStorageKey) listener();
+  };
+  window.addEventListener(managedToolCatalogEventName, listener);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(managedToolCatalogEventName, listener);
+    window.removeEventListener("storage", onStorage);
+  };
 }
 
 export function McpServiceManagementPage() {
@@ -799,17 +846,25 @@ export function McpServiceManagementPage() {
 }
 
 export function ToolManagementPage() {
-  const [tools, setTools] = useState<ManagedToolItem[]>(buildManagedTools);
-  const [categories, setCategories] = useState<string[]>(buildInitialCategories);
+  const [tools, setTools] = useState<ManagedToolItem[]>(() => getManagedToolCatalogSnapshot().tools);
+  const [categories, setCategories] = useState<string[]>(() => getManagedToolCatalogSnapshot().categories);
   const [selectedCategory, setSelectedCategory] = useState("全部工具");
   const [query, setQuery] = useState("");
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>([]);
   const [batchOpen, setBatchOpen] = useState(false);
-  const [batchCategory, setBatchCategory] = useState(buildInitialCategories()[0] ?? "未分类");
+  const [batchCategory, setBatchCategory] = useState(() => getManagedToolCatalogSnapshot().categories[0] ?? "未分类");
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [categoryDraft, setCategoryDraft] = useState("");
   const [detailTool, setDetailTool] = useState<ManagedToolItem | null>(null);
+
+  useEffect(() => {
+    saveManagedToolCatalogSnapshot({ tools, categories });
+  }, [tools, categories]);
+
+  useEffect(() => {
+    setDetailTool((current) => (current ? tools.find((tool) => tool.id === current.id) ?? null : null));
+  }, [tools]);
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -940,7 +995,7 @@ export function ToolManagementPage() {
               onClick={() => setSelectedCategory("全部工具")}
               sx={{ px: 1.1, py: 0.9, borderRadius: "8px", cursor: "pointer", bgcolor: selectedCategory === "全部工具" ? "#eff6ff" : "transparent", border: "1px solid", borderColor: selectedCategory === "全部工具" ? "#bfdbfe" : "transparent" }}
             >
-              <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Stack direction="row" spacing={0.6} alignItems="center">
                 <Typography sx={{ fontSize: "13px", fontWeight: 400, color: "#111827" }}>全部工具</Typography>
                 <Chip label={tools.length} size="small" sx={{ height: 19, fontSize: 10.5, bgcolor: "#f1f5f9", color: "#475569" }} />
               </Stack>

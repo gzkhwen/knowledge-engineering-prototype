@@ -19,6 +19,7 @@ import {
   Paper,
   Select,
   Stack,
+  SvgIcon,
   Tab,
   Tabs,
   TextField,
@@ -41,6 +42,7 @@ import {
   WarningAmber,
 } from "@mui/icons-material";
 import { toast } from "sonner";
+import { getManagedToolCatalogSnapshot, subscribeManagedToolCatalog, type ManagedToolItem } from "./ToolManagementPage";
 import { dataStore } from "../store/DataStore";
 
 type ParamType = "text" | "textarea" | "number" | "select" | "multiSelect" | "switch" | "tags";
@@ -111,6 +113,7 @@ interface ToolParam {
   max?: number;
   unit?: string;
   source?: ParamSource;
+  forceTextInput?: boolean;
 }
 
 interface ToolOutput {
@@ -162,6 +165,8 @@ interface McpTool {
   status: "可用" | "不可用";
   params: ToolParam[];
   outputs: ToolOutput[];
+  catalogParams?: ToolParam[];
+  catalogOutputs?: ToolOutput[];
   input: ChainType;
   output: ChainType;
   allowMultiple?: boolean;
@@ -478,7 +483,7 @@ const recursiveSeparatorChunkParams: ToolParam[] = [
   { id: "chunkAssociate", label: "分片关联信息", desc: "模式为关联文件信息时配置。", type: "multiSelect", value: [], editable: true, options: chunkAssociateOptions, visibleWhen: { paramId: "mode", value: "关联文件信息" } },
   { id: "chunkSize", label: "理想分块长度", desc: "递归分片目标长度。", type: "number", value: 512, required: true, editable: true, min: 1, max: 100000, unit: "字" },
   { id: "overlap", label: "块之间重叠长度", desc: "相邻分片之间的重叠长度。", type: "number", value: 50, required: true, editable: true, min: 0, max: 100000, unit: "字" },
-  { id: "sliceSeparators", label: "切片分隔符", desc: "最多添加10个分隔符，支持预置分隔符和自定义分隔符。", type: "tags", value: ["\n\n", "\n"], editable: true, options: separatorPresetOptions, max: 10 },
+  { id: "sliceSeparators", label: "切片分隔符", desc: "选择用于递归切分的分隔符。", type: "tags", value: ["\n\n", "\n"], editable: true, options: separatorPresetOptions, max: 10 },
 ];
 
 const ocrChunkParams: ToolParam[] = [
@@ -596,22 +601,130 @@ function createOutput(id: string, label: string, desc: string, path: string): To
   return { id, label, desc, path };
 }
 
-const toolCatalog: McpTool[] = [
-  { id: "document-parser", name: "通用解析", category: "文档解析", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "解析 Word、PDF、Excel 等主流文档，提取文本和版面布局。", status: "可用", input: "sampleFile", output: "rawText", params: commonParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含解析后的文本、版面、图片和表格信息。", "data.documentParseResult")] },
-  { id: "multimodal-parser", name: "多模态解析", category: "文档解析", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "使用多模态大模型对文档内容进行解析，效果好、速度慢。", status: "可用", input: "sampleFile", output: "rawText", params: multimodalParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含多模态解析后的文本、图片理解和版面信息。", "data.documentParseResult")] },
-  { id: "medical-policy-parser", name: "医保政策解析", category: "文档解析", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "适用于解析医保政策类文件。", status: "可用", input: "sampleFile", output: "rawText", params: policyParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含医保政策文档的条款、标题和正文结构。", "data.documentParseResult")] },
-  { id: "chunk-splitter", name: "通用分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "为纯文本文档提供灵活的分块和重叠设置。", status: "可用", input: "rawText", output: "cleanText", params: commonChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含分片文本、标题、来源和元数据。", "data.textChunkResult")] },
-  { id: "custom-separator-splitter", name: "自定义分隔符分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "沿用通用分片配置，并使用指定分隔符切分文本。", status: "可用", input: "rawText", output: "cleanText", params: customSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含按自定义分隔符切分后的文本片段。", "data.textChunkResult")] },
-  { id: "recursive-separator-splitter", name: "分隔符递归分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "按分隔符优先级依次切分，优先保留语义完整。", status: "可用", input: "rawText", output: "cleanText", params: recursiveSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含递归切分后的文本片段。", "data.textChunkResult")] },
-  { id: "ocr-splitter", name: "OCR解析专用分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "根据 OCR 识别的标题及段落进行切分、聚合。", status: "可用", input: "rawText", output: "cleanText", params: ocrChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含面向 OCR 结果聚合后的文本片段。", "data.textChunkResult")] },
-  { id: "medical-policy-splitter", name: "医保政策解析分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "适合医保政策类文件分片，页面上没有可配置参数。", status: "可用", input: "rawText", output: "cleanText", params: policyChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含医保政策文件分片结果。", "data.textChunkResult")] },
-  { id: "video-audio-sync-splitter", name: "视频声画同步分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "按声画同步结果切分视频文本片段。", status: "可用", input: "rawText", output: "cleanText", params: videoAudioSyncChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含视频声画同步分片结果。", "data.textChunkResult")] },
-  { id: "qa-extractor", name: "QA提取", category: "智能生成", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [createOutput("qaResult", "QA提取结果", "Array<json>，包含问题、答案和引用来源。", "data.qaResult")] },
-  { id: "summary", name: "摘要总结", category: "智能生成", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [createOutput("summaryResult", "摘要总结结果", "Array<json>，包含摘要内容和来源引用。", "data.summaryResult")] },
-  { id: "keyword-extractor", name: "关键词提取", category: "智能生成", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [createOutput("keywordResult", "关键词提取结果", "Array<json>，包含关键词和权重。", "data.keywordResult")] },
-  { id: "system-code", name: "代码工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。", status: "可用", input: "rawText", output: "cleanText", params: codeToolParams, outputs: [createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"), createOutput("cleanBlocks", "标准文本块", "Array<json>，可作为后置分片或抽取工具输入。", "data.cleanBlocks")], allowMultiple: true },
-  { id: "system-storage", name: "数据存储工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "选择前置工具输出中的指定路径，将结果写入 ES。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true },
+let managedToolSamples = getManagedToolCatalogSnapshot().tools;
+let managedToolByName = new Map<string, ManagedToolItem>(managedToolSamples.map((tool) => [tool.name, tool]));
+
+function refreshManagedToolSamples() {
+  managedToolSamples = getManagedToolCatalogSnapshot().tools;
+  managedToolByName = new Map<string, ManagedToolItem>(managedToolSamples.map((tool) => [tool.name, tool]));
+}
+
+function normalizeFieldId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function toCatalogParamType(type: string): ParamType {
+  if (type.includes("number") || type.includes("int")) return "number";
+  if (type.includes("boolean")) return "switch";
+  if (type.includes("array") || type.includes("object")) return "textarea";
+  return "text";
+}
+
+function managedInputsToCatalogParams(tool: ManagedToolItem): ToolParam[] {
+  return tool.inputs.map((input) => ({
+    id: normalizeFieldId(input.name),
+    label: input.name,
+    desc: input.description,
+    type: toCatalogParamType(input.type),
+    format: input.type,
+    value: "",
+    required: input.required,
+    editable: true,
+  }));
+}
+
+function managedOutputsToCatalogOutputs(tool: ManagedToolItem, fallbackOutputs: ToolOutput[]): ToolOutput[] {
+  return tool.outputs.map((output, index) => {
+    const fallback = fallbackOutputs.find((item) => item.id === output.name || item.label === output.name) ?? fallbackOutputs[index];
+    return createOutput(
+      normalizeFieldId(output.name),
+      output.name,
+      `${output.type}，${output.description}`,
+      fallback?.path ?? `data.${output.name}`,
+    );
+  });
+}
+
+function withManagedToolSample(baseTool: McpTool, sampleName = baseTool.name): McpTool {
+  const sample = managedToolByName.get(sampleName);
+  if (!sample) return baseTool;
+  return {
+    ...baseTool,
+    name: sample.name,
+    category: sample.category,
+    serviceName: sample.serviceName,
+    summary: sample.description,
+    status: sample.enabled ? "可用" : "不可用",
+    catalogParams: managedInputsToCatalogParams(sample),
+    catalogOutputs: managedOutputsToCatalogOutputs(sample, baseTool.outputs),
+  };
+}
+
+const baseToolCatalog: McpTool[] = [
+  withManagedToolSample({ id: "document-parser", name: "通用解析", category: "文档解析", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "解析 Word、PDF、Excel 等主流文档，提取文本和版面布局。", status: "可用", input: "sampleFile", output: "rawText", params: commonParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含解析后的文本、版面、图片和表格信息。", "data.documentParseResult")] }),
+  withManagedToolSample({ id: "multimodal-parser", name: "多模态解析", category: "文档解析", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "使用多模态大模型对文档内容进行解析，效果好、速度慢。", status: "可用", input: "sampleFile", output: "rawText", params: multimodalParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含多模态解析后的文本、图片理解和版面信息。", "data.documentParseResult")] }),
+  withManagedToolSample({ id: "medical-policy-parser", name: "医保政策文件解析", category: "文档解析", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "适用于解析医保政策类文件。", status: "可用", input: "sampleFile", output: "rawText", params: policyParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含医保政策文档的条款、标题和正文结构。", "data.documentParseResult")] }),
+  withManagedToolSample({ id: "chunk-splitter", name: "通用分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "为纯文本文档提供灵活的分块和重叠设置。", status: "可用", input: "rawText", output: "cleanText", params: commonChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含分片文本、标题、来源和元数据。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "custom-separator-splitter", name: "自定义分隔符分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "沿用通用分片配置，并使用指定分隔符切分文本。", status: "可用", input: "rawText", output: "cleanText", params: customSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含按自定义分隔符切分后的文本片段。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "recursive-separator-splitter", name: "分隔符递归分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "按分隔符优先级依次切分，优先保留语义完整。", status: "可用", input: "rawText", output: "cleanText", params: recursiveSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含递归切分后的文本片段。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "ocr-splitter", name: "OCR解析专用分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "根据 OCR 识别的标题及段落进行切分、聚合。", status: "可用", input: "rawText", output: "cleanText", params: ocrChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含面向 OCR 结果聚合后的文本片段。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "medical-policy-splitter", name: "医保政策文件分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "适合医保政策类文件分片，页面上没有可配置参数。", status: "可用", input: "rawText", output: "cleanText", params: policyChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含医保政策文件分片结果。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "video-audio-sync-splitter", name: "视频声画同步分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "按声画同步结果切分视频文本片段。", status: "可用", input: "rawText", output: "cleanText", params: videoAudioSyncChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含视频声画同步分片结果。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "qa-extractor", name: "QA提取", category: "智能生成", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [createOutput("qaResult", "QA提取结果", "Array<json>，包含问题、答案和引用来源。", "data.qaResult")] }),
+  withManagedToolSample({ id: "summary", name: "摘要总结", category: "智能生成", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [createOutput("summaryResult", "摘要总结结果", "Array<json>，包含摘要内容和来源引用。", "data.summaryResult")] }),
+  withManagedToolSample({ id: "keyword-extractor", name: "关键词提取", category: "智能生成", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [createOutput("keywordResult", "关键词提取结果", "Array<json>，包含关键词和权重。", "data.keywordResult")] }),
+  withManagedToolSample({ id: "system-code", name: "代码工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。", status: "可用", input: "rawText", output: "cleanText", params: codeToolParams, outputs: [createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"), createOutput("cleanBlocks", "标准文本块", "Array<json>，可作为后置分片或抽取工具输入。", "data.cleanBlocks")], allowMultiple: true }),
+  withManagedToolSample({ id: "system-storage", name: "数据存储工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "选择前置工具输出中的指定路径，将结果写入 ES。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true }),
 ];
+
+const baseToolByName = new Map<string, McpTool>(baseToolCatalog.map((tool) => [tool.name, tool]));
+
+function inferInputType(tool: ManagedToolItem): ChainType {
+  if (tool.category === "文档解析") return "sampleFile";
+  if (tool.category === "内容处理") return "rawText";
+  return "cleanText";
+}
+
+function inferOutputType(tool: ManagedToolItem): ChainType {
+  if (tool.category === "文档解析") return "rawText";
+  if (tool.category === "内容处理") return "cleanText";
+  if (tool.name.includes("QA")) return "qaPairs";
+  return "rawText";
+}
+
+function toManagedCatalogTool(tool: ManagedToolItem): McpTool {
+  const baseTool = baseToolByName.get(tool.name);
+  if (baseTool) return withManagedToolSample(baseTool);
+  const outputs = managedOutputsToCatalogOutputs(tool, []);
+  const params = managedInputsToCatalogParams(tool);
+  return {
+    id: tool.id,
+    name: tool.name,
+    category: tool.category,
+    serviceName: tool.serviceName,
+    serviceVersion: "-",
+    summary: tool.description,
+    status: tool.enabled ? "可用" : "不可用",
+    params,
+    outputs,
+    catalogParams: params,
+    catalogOutputs: outputs,
+    input: inferInputType(tool),
+    output: inferOutputType(tool),
+  };
+}
+
+function buildToolCatalogFromManaged() {
+  refreshManagedToolSamples();
+  return managedToolSamples.map(toManagedCatalogTool);
+}
+
+let toolCatalog: McpTool[] = buildToolCatalogFromManaged();
+
+function syncToolCatalogFromManaged() {
+  toolCatalog = buildToolCatalogFromManaged();
+  return toolCatalog;
+}
 
 const initialPlanNodes: ToolNode[] = createInitialPlanNodes();
 
@@ -969,7 +1082,8 @@ export function AgentWorkbench() {
   const [planNodes, setPlanNodes] = useState<ToolNode[]>([]);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("全部");
-  const [selectedToolId, setSelectedToolId] = useState(toolCatalog[0].id);
+  const [selectedToolId, setSelectedToolId] = useState(() => syncToolCatalogFromManaged()[0]?.id ?? "");
+  const [toolCatalogVersion, setToolCatalogVersion] = useState(0);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [draggingCategory, setDraggingCategory] = useState<string | null>(null);
   const [dragInsertTarget, setDragInsertTarget] = useState<{ sectionId: string; position: InsertPosition } | null>(null);
@@ -983,7 +1097,8 @@ export function AgentWorkbench() {
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionStatus>>({});
   const [nodeRuntimeStates, setNodeRuntimeStates] = useState<Record<string, NodeRuntimeState>>({});
 
-  const categories = useMemo(() => ["全部", ...Array.from(new Set(toolCatalog.map((tool) => tool.category)))], []);
+  const currentToolCatalog = useMemo(() => toolCatalog, [toolCatalogVersion]);
+  const categories = useMemo(() => ["全部", ...Array.from(new Set(currentToolCatalog.map((tool) => tool.category)))], [currentToolCatalog]);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
   const nodeWarnings = useMemo(() => getNodeWarnings(planNodes), [planNodes]);
   const inputIssueMap = useMemo(() => getNodeInputIssueMap(planNodes), [planNodes]);
@@ -997,9 +1112,9 @@ export function AgentWorkbench() {
   const addedToolIds = useMemo(() => new Set(planNodes.map((node) => node.toolId)), [planNodes]);
 
   const filteredTools = selectedCategory === "全部"
-    ? toolCatalog
-    : toolCatalog.filter((tool) => tool.category === selectedCategory);
-  const currentTool = toolCatalog.find((tool) => tool.id === selectedToolId) ?? filteredTools[0] ?? null;
+    ? currentToolCatalog
+    : currentToolCatalog.filter((tool) => tool.category === selectedCategory);
+  const currentTool = currentToolCatalog.find((tool) => tool.id === selectedToolId) ?? filteredTools[0] ?? null;
   const selectedToolAdded = currentTool ? addedToolIds.has(currentTool.id) && !currentTool.allowMultiple : false;
   const selectedToolCategoryConfirmed = false;
   const isNodeEditable = () => canEdit;
@@ -1009,6 +1124,14 @@ export function AgentWorkbench() {
     if (!container) return;
     container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
   }, [agentEvents]);
+
+  useEffect(() => subscribeManagedToolCatalog(() => {
+    const nextCatalog = syncToolCatalogFromManaged();
+    setToolCatalogVersion((version) => version + 1);
+    setSelectedToolId((current) => (
+      nextCatalog.some((tool) => tool.id === current) ? current : nextCatalog[0]?.id ?? ""
+    ));
+  }), []);
 
   const appendAgentEvent = (event: Omit<AgentEvent, "id">) => {
     const id = `${event.role}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1438,7 +1561,7 @@ export function AgentWorkbench() {
   const openAddTool = () => {
     setAddDialogOpen(true);
     setSelectedCategory("全部");
-    setSelectedToolId(toolCatalog[0]?.id ?? "");
+    setSelectedToolId(currentToolCatalog[0]?.id ?? "");
   };
 
   const addTool = () => {
@@ -1451,7 +1574,7 @@ export function AgentWorkbench() {
       currentTool.id,
       inputSource,
     ));
-    updatePlanNodesWithMotion((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
+    updatePlanNodesWithMotion((current) => [...current, { ...node, expanded: true, adjusted: true }]);
     setAddDialogOpen(false);
     toast.success(`已添加工具，已归入${getPlanTitle(node.category)}`);
   };
@@ -1649,11 +1772,12 @@ export function AgentWorkbench() {
           <Tabs value={rightTab} onChange={(_, value) => setRightTab(value)} sx={{ px: 1.5, minHeight: 44, borderBottom: "1px solid #EEF2F7", "& .MuiTab-root": { minHeight: 44, fontSize: 13 }, "& .Mui-selected": { color: "#801AEB !important" }, "& .MuiTabs-indicator": { bgcolor: "#801AEB" } }}>
             <Tab label="样例" />
             <Tab label="方案" />
+            <Tab label="结果预览" />
             <Tab label="历史版本" />
           </Tabs>
 
           {rightTab === 0 ? (
-            <SampleResultPanel files={sampleFiles} results={sampleResults} />
+            <ProcessedSampleListPanel files={sampleFiles} results={sampleResults} />
           ) : rightTab === 1 ? (
             <Box sx={{ minHeight: 0, display: "flex", flexDirection: "column", flex: 1 }}>
               <Box sx={{ px: 1.5, py: 1.25, borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
@@ -1704,6 +1828,7 @@ export function AgentWorkbench() {
                               index={index}
                               total={categorySections.length}
                               section={section}
+                              allNodes={planNodes}
                               connectionStatus={connectionStatus}
                               hasInputIssue={!isAgentRunning && sectionHasInputIssue(section, inputIssueMap)}
                               runtimeStates={nodeRuntimeStates}
@@ -1734,7 +1859,12 @@ export function AgentWorkbench() {
                                 setDraggingCategory(null);
                                 setDragInsertTarget(null);
                               }}
-                              onNodeDrop={() => draggingCategory && moveCategoryTo(draggingCategory, section.sectionId, dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : "before")}
+                              onNodeDrop={() => {
+                                if (draggingCategory && dragInsertTarget) {
+                                  moveCategoryTo(draggingCategory, dragInsertTarget.sectionId, dragInsertTarget.position);
+                                }
+                              }}
+                              draggingNodeId={draggingNodeId}
                               onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
                               onToolDrop={onDropNode}
                             />
@@ -1762,6 +1892,8 @@ export function AgentWorkbench() {
                 </Button>
               </Box>
             </Box>
+          ) : rightTab === 2 ? (
+            <SampleResultPanel files={sampleFiles} results={sampleResults} />
           ) : (
             <Box sx={{ p: 2, color: "#94a3b8", fontSize: 13 }}>暂无历史版本。</Box>
           )}
@@ -1771,10 +1903,11 @@ export function AgentWorkbench() {
       <AddToolDialog
         open={addDialogOpen}
         categories={categories}
+        allTools={currentToolCatalog}
         selectedCategory={selectedCategory}
         onCategoryChange={(category) => {
           setSelectedCategory(category);
-          const nextTool = (category === "全部" ? toolCatalog : toolCatalog.filter((tool) => tool.category === category))[0];
+          const nextTool = (category === "全部" ? currentToolCatalog : currentToolCatalog.filter((tool) => tool.category === category))[0];
           setSelectedToolId(nextTool?.id ?? "");
         }}
         tools={filteredTools}
@@ -1858,6 +1991,36 @@ function AgentEventCard({ event }: { event: AgentEvent }) {
           </Stack>
         ) : null}
       </Box>
+    </Box>
+  );
+}
+
+function ProcessedSampleListPanel({ files, results }: { files: SampleFileItem[]; results: SampleProcessResult[] }) {
+  const processedFiles = files.filter((file) => file.status === "已完成" || results.some((item) => item.fileId === file.id));
+  return (
+    <Box sx={{ p: 1.5, minHeight: 0, overflow: "auto", flex: 1 }}>
+      {processedFiles.length === 0 ? (
+        <Box sx={{ height: "100%", minHeight: 220, border: "1px dashed #d8dce5", borderRadius: "12px", bgcolor: "#FBFCFF", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", px: 3 }}>
+          <Box>
+            <UploadFile sx={{ color: "#94a3b8", mb: 1 }} />
+            <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#475569" }}>还没有已处理样例</Typography>
+            <Typography sx={{ mt: 0.5, fontSize: 12, color: "#94a3b8" }}>样例执行完成后，这里只展示已处理文件列表。</Typography>
+          </Box>
+        </Box>
+      ) : (
+        <Stack spacing={0.8}>
+          {processedFiles.map((file) => (
+            <Box key={file.id} sx={{ p: 1, border: "1px solid #E2E8F0", borderRadius: "10px", bgcolor: "#fff", display: "flex", gap: 0.8, alignItems: "center" }}>
+              <Box sx={{ width: 30, height: 30, borderRadius: "8px", bgcolor: "#f1f5f9", color: "#475569", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800 }}>{file.type}</Box>
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</Typography>
+                <Typography sx={{ fontSize: 11, color: "#94a3b8" }}>{file.size}</Typography>
+              </Box>
+              <Chip label="已处理" size="small" sx={{ height: 20, fontSize: 10, bgcolor: "#f0fdf4", color: "#16a34a" }} />
+            </Box>
+          ))}
+        </Stack>
+      )}
     </Box>
   );
 }
@@ -2064,6 +2227,7 @@ function WorkflowNodeCard({
   index,
   total,
   section,
+  allNodes,
   connectionStatus,
   hasInputIssue,
   runtimeStates,
@@ -2083,6 +2247,7 @@ function WorkflowNodeCard({
   index: number;
   total: number;
   section: { sectionId: string; category: string; nodes: ToolNode[] };
+  allNodes: ToolNode[];
   connectionStatus: ConnectionStatus;
   hasInputIssue: boolean;
   runtimeStates: Record<string, NodeRuntimeState>;
@@ -2245,6 +2410,7 @@ function WorkflowNodeCard({
               <ToolRuntimeRow
                 key={node.nodeId}
                 node={node}
+                allNodes={allNodes}
                 canEdit={canEdit}
                 canDrag={canEdit && section.nodes.length > 1}
                 warnings={toolWarnings}
@@ -2298,6 +2464,7 @@ function ToolPendingRow({ status }: { status: "building" | "selectingTool" }) {
 
 function ToolRuntimeRow({
   node,
+  allNodes,
   canEdit,
   canDrag,
   warnings,
@@ -2310,6 +2477,7 @@ function ToolRuntimeRow({
   onDrop,
 }: {
   node: ToolNode;
+  allNodes: ToolNode[];
   canEdit: boolean;
   canDrag: boolean;
   warnings: string[];
@@ -2327,7 +2495,7 @@ function ToolRuntimeRow({
   const isConfigured = status === "configured";
   const isActive = ["configuring", "configured", "running"].includes(status);
   const visibleParamCount = runtimeState?.visibleParamCount ?? 0;
-  const allVisibleParams = node.params.filter((param) => isParamVisible(node, param));
+  const allVisibleParams = getNodePreviewParams(node);
   const visibleParams = runtimeExpanded ? allVisibleParams.slice(0, Math.max(visibleParamCount, 0)) : allVisibleParams;
   const statusText = {
     building: "创建节点中",
@@ -2415,8 +2583,8 @@ function ToolRuntimeRow({
               <Typography sx={{ fontSize: 12, color: "#94a3b8" }}>等待 Agent 生成参数...</Typography>
             ) : visibleParams.map((param) => (
               <Box key={param.id} sx={{ display: "grid", gridTemplateColumns: "92px minmax(0, 1fr)", gap: 0.75, alignItems: "start" }}>
-                <Typography sx={{ fontSize: 11.5, color: "#64748b", fontWeight: 700 }}>{param.label}</Typography>
-                <Typography sx={{ fontSize: 11.5, color: "#111827", lineHeight: 1.45, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getParamPreview(param)}</Typography>
+                <Typography sx={{ fontSize: 11.5, color: "#64748b", fontWeight: 400 }}>{param.label}</Typography>
+                <Typography sx={{ fontSize: 11.5, color: "#111827", lineHeight: 1.45, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getParamPreview(param, allNodes)}</Typography>
               </Box>
             ))}
           </Stack>
@@ -2426,9 +2594,31 @@ function ToolRuntimeRow({
   );
 }
 
-function getParamPreview(param: ToolParam) {
-  if (param.source?.type === "file") return "文件地址";
-  if (param.source?.type === "upstream") return param.source.outputPath ? `引用上游输出 · ${param.source.outputPath}` : "引用上游工具输出";
+function getNodePreviewParams(node: ToolNode): ToolParam[] {
+  if (node.toolId === "system-code") {
+    const inputRows = (node.codeInputs?.length ? node.codeInputs : []).map((row) => ({
+      id: row.id,
+      label: row.name || "未命名入参",
+      desc: "代码工具入参。",
+      type: "text" as const,
+      value: row.value,
+      required: true,
+      editable: true,
+      source: row.source,
+    }));
+    const scriptParam = node.params.find((param) => param.id === "script");
+    return scriptParam ? [...inputRows, scriptParam] : inputRows;
+  }
+  return node.params.filter((param) => isParamVisible(node, param));
+}
+
+function getParamPreview(param: ToolParam, allNodes: ToolNode[] = []) {
+  if (param.source?.type === "file") return "待处理文件地址信息";
+  if (param.source?.type === "upstream") {
+    const sourceNode = allNodes.find((node) => node.nodeId === param.source?.sourceNodeId);
+    const sourceName = sourceNode?.toolName ?? "来源已失效";
+    return `上游工具 · ${sourceName} · ${param.source.outputPath || "未配置取值路径"}`;
+  }
   if (Array.isArray(param.value)) return param.value.length ? param.value.join("、") : "未配置";
   if (typeof param.value === "boolean") return param.value ? "开启" : "关闭";
   if (typeof param.value === "number") return `${param.value}${param.unit ?? ""}`;
@@ -2458,20 +2648,39 @@ function FxButton({ active, disabled, onClick }: { active: boolean; disabled: bo
           disabled={disabled}
           onClick={onClick}
           sx={{
-            mt: 0.3,
-            width: 30,
-            height: 30,
-            borderRadius: "8px",
+            mt: 0,
+            width: 40,
+            height: 40,
+            borderRadius: "50%",
+            p: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
             color: active ? "#801AEB" : "#64748b",
-            bgcolor: active ? "#f5f3ff" : "transparent",
-            border: `1px solid ${active ? "#ddd6fe" : "transparent"}`,
-            "&:hover": { bgcolor: active ? "#ede9fe" : "#f8fafc" },
+            bgcolor: "transparent",
+            border: "none",
+            "&:hover": { bgcolor: "#f8fafc", color: "#801AEB" },
           }}
         >
-          <Typography component="span" sx={{ fontSize: 11, fontWeight: 800, lineHeight: 1 }}>Fx</Typography>
+          <FxIcon sx={{ fontSize: 20 }} />
         </IconButton>
       </span>
     </Tooltip>
+  );
+}
+
+function FxIcon({ sx }: { sx?: object }) {
+  return (
+    <SvgIcon viewBox="0 0 24 24" sx={sx}>
+      <path
+        d="M11.2 4.2c-2.2 0-3.7 1.35-4.05 3.75L6.95 9.2H4.8M6.95 9.2h4M6.95 9.2 5.65 18.8M14.1 10.4l5.1 7.2M19.2 10.4l-5.1 7.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.15"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </SvgIcon>
   );
 }
 
@@ -2488,9 +2697,15 @@ function ParamField({
   hideLabel?: boolean;
   labelOverride?: string;
 }) {
-  const commonSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
+  const commonSx = {
+    "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12, minHeight: 40 },
+    "& .MuiInputLabel-root": { fontSize: 12, bgcolor: "#fff", px: 0.4 },
+  };
   const displayLabel = labelOverride ?? param.label;
   const fieldLabel = hideLabel ? undefined : displayLabel;
+  if (param.forceTextInput) {
+    return <TextField size="small" fullWidth label={fieldLabel} placeholder={hideLabel ? "请输入" : undefined} value={String(Array.isArray(param.value) ? param.value.join("、") : param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} sx={commonSx} />;
+  }
   if (param.type === "switch") {
     return (
       <FormControlLabel
@@ -2503,7 +2718,7 @@ function ParamField({
     return (
       <FormControl fullWidth size="small" sx={commonSx}>
         {!hideLabel ? <InputLabel>{displayLabel}</InputLabel> : null}
-        <Select displayEmpty label={fieldLabel} value={String(param.value)} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onChange(event.target.value)}>
+        <Select label={fieldLabel} value={String(param.value)} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onChange(event.target.value)}>
           {(param.options ?? []).map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
         </Select>
       </FormControl>
@@ -2516,12 +2731,11 @@ function ParamField({
         {!hideLabel ? <InputLabel>{displayLabel}</InputLabel> : null}
         <Select
           multiple
-          displayEmpty
           label={fieldLabel}
           value={selected}
           disabled={!canEdit}
           MenuProps={elevatedSelectMenuProps}
-          renderValue={(value) => (value as string[]).join("、") || "未选择"}
+          renderValue={(value) => (value as string[]).join("、")}
           onChange={(event) => onChange(typeof event.target.value === "string" ? event.target.value.split(",") : event.target.value)}
         >
           {(param.options ?? []).map((option) => (
@@ -2539,45 +2753,38 @@ function ParamField({
   if (param.type === "tags") {
     const tags = Array.isArray(param.value) ? param.value : [];
     const limit = param.max ?? 10;
-    const addTag = (tag: string) => {
-      const normalized = tag.trim();
-      if (!normalized || tags.includes(normalized) || tags.length >= limit) return;
-      onChange([...tags, normalized]);
-    };
-    const removeTag = (tag: string) => onChange(tags.filter((item) => item !== tag));
     return (
-      <Box>
-        {!hideLabel ? <Typography sx={{ fontSize: 12, color: "#374151", mb: 0.75 }}>{displayLabel}</Typography> : null}
-        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-          {tags.length ? tags.map((tag) => <Chip key={tag} label={tag} size="small" onDelete={canEdit ? () => removeTag(tag) : undefined} sx={{ bgcolor: "#f5f3ff", color: "#6d28d9" }} />) : <Typography sx={{ fontSize: 12, color: "#94a3b8", py: 0.7 }}>未配置</Typography>}
-        </Stack>
-        {canEdit && tags.length < limit && (
-          <Stack spacing={1}>
-            <FormControl fullWidth size="small" sx={commonSx}>
-              <InputLabel>添加预置分隔符</InputLabel>
-              <Select label="添加预置分隔符" value="" MenuProps={elevatedSelectMenuProps} onChange={(event) => addTag(event.target.value)}>
-                {(param.options ?? []).map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
-              </Select>
-            </FormControl>
-            <TextField
-              size="small"
-              fullWidth
-              label="自定义分隔符"
-              placeholder="输入后按 Enter 添加"
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                addTag((event.currentTarget as HTMLInputElement).value);
-                (event.currentTarget as HTMLInputElement).value = "";
-              }}
-              sx={commonSx}
-            />
-          </Stack>
-        )}
-      </Box>
+      <FormControl fullWidth size="small" sx={commonSx}>
+        {!hideLabel ? <InputLabel>{displayLabel}</InputLabel> : null}
+        <Select
+          multiple
+          label={fieldLabel}
+          value={tags.filter((tag) => (param.options ?? []).includes(tag))}
+          disabled={!canEdit}
+          MenuProps={elevatedSelectMenuProps}
+          renderValue={(value) => (value as string[]).map(getTagDisplayLabel).join("、")}
+          onChange={(event) => {
+            const selected = typeof event.target.value === "string" ? event.target.value.split(",") : event.target.value;
+            onChange(selected.slice(0, limit));
+          }}
+        >
+          {(param.options ?? []).map((option) => (
+            <MenuItem key={option} value={option}>
+              <Checkbox size="small" checked={tags.includes(option)} sx={{ p: 0.5, mr: 0.5, color: "#801AEB", "&.Mui-checked": { color: "#801AEB" } }} />
+              {getTagDisplayLabel(option)}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
     );
   }
   return <TextField size="small" fullWidth label={fieldLabel} placeholder={hideLabel ? "请输入" : undefined} value={String(param.value)} disabled={!canEdit} onChange={(event) => onChange(event.target.value)} sx={commonSx} />;
+}
+
+function getTagDisplayLabel(value: string) {
+  if (value === "\n\n") return "空行";
+  if (value === "\n") return "换行";
+  return value;
 }
 
 function ToolEditDrawer({
@@ -2650,11 +2857,11 @@ function ToolEditDrawer({
             />
           ) : (
             <ConfigBlock title="工具参数">
-              <Stack spacing={1.1}>
-                {visibleParams.map((param) => (
+              <Stack spacing={1.5}>
+                {visibleParams.map((param, index) => (
                   <ParamConfigItem
                     key={param.id}
-                    param={param}
+                    param={index === 0 ? { ...param, forceTextInput: true } : param}
                     node={node}
                     allNodes={allNodes}
                     priorNodes={priorNodes}
@@ -2733,10 +2940,13 @@ function UnifiedParamRow({
   onRemove?: () => void;
 }) {
   const active = source.type !== "manual";
-  const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
+  const inputFieldSx = {
+    "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12, minHeight: 40 },
+    "& .MuiInputLabel-root": { fontSize: 12, bgcolor: "#fff", px: 0.4 },
+  };
   return (
-    <Box sx={{ py: 0.45 }}>
-      <Box sx={{ display: "grid", gridTemplateColumns: onRemove ? "minmax(0, 1fr) 32px 32px" : "minmax(0, 1fr) 32px", columnGap: 1, rowGap: 0.75, alignItems: "start" }}>
+    <Box>
+      <Box sx={{ display: "grid", gridTemplateColumns: onRemove ? "minmax(0, 1fr) 40px 32px" : "minmax(0, 1fr) 40px", columnGap: 0.25, rowGap: 0, alignItems: "start" }}>
         {active ? (
           <TextField
             size="small"
@@ -2777,7 +2987,10 @@ function ParamSourceSetting({
   canEdit: boolean;
   onChange: (source: ParamSource) => void;
 }) {
-  const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
+  const inputFieldSx = {
+    "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12, minHeight: 40 },
+    "& .MuiInputLabel-root": { fontSize: 12, bgcolor: "#F8FAFC", px: 0.4 },
+  };
   const setType = (type: ParamSource["type"]) => {
     if (type === "file") {
       onChange({ type: "file" });
@@ -2787,8 +3000,8 @@ function ParamSourceSetting({
     onChange({ type: "upstream", sourceNodeId: sourceNode?.nodeId, outputPath: source.outputPath || sourceNode?.outputs[0]?.path || "data.result" });
   };
   return (
-    <Box sx={{ mt: 1, px: 1.5, pt: 1.75, pb: 1.4, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
-      <Box sx={{ display: "grid", gridTemplateColumns: "minmax(132px, 0.75fr) minmax(180px, 1fr) minmax(220px, 1.2fr)", columnGap: 1.5, rowGap: 1.25, alignItems: "start" }}>
+    <Box sx={{ mt: 0.5, px: 1, pt: 1.5, pb: 1, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: "minmax(132px, 0.75fr) minmax(180px, 1fr) minmax(220px, 1.2fr)", columnGap: 1, rowGap: 0.75, alignItems: "start" }}>
         <FormControl fullWidth size="small" sx={inputFieldSx}>
           <InputLabel>取值方式</InputLabel>
           <Select label="取值方式" value={source.type} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setType(event.target.value as ParamSource["type"])}>
@@ -2856,9 +3069,9 @@ function CodeToolConfig({
   const rows = codeInputs.length ? codeInputs : [{ id: `${node.nodeId}-input-1`, name: "input", source: getDefaultBoundSource(priorNodes), value: "" }];
 
   return (
-    <Stack spacing={1.5}>
+    <Stack spacing={1.15}>
       <ConfigBlock title="定义入参">
-        <Stack spacing={1.1}>
+        <Stack spacing={0.75}>
           {rows.map((row) => {
             const draftParam: ToolParam = {
               id: row.id,
@@ -2872,7 +3085,7 @@ function CodeToolConfig({
             };
             return (
               <Box key={row.id}>
-                <Box sx={{ mb: 0.6 }}>
+                <Box sx={{ mb: 0.25 }}>
                   <TextField fullWidth size="small" label="参数名称" value={row.name} disabled={!canEdit} placeholder="请输入参数名" onChange={(event) => updateInput(row.id, { name: event.target.value })} sx={inputFieldSx} />
                 </Box>
                 <UnifiedParamRow
@@ -3030,6 +3243,7 @@ function ConfigBlock({ title, children }: { title: string; children: ReactNode }
 function AddToolDialog({
   open,
   categories,
+  allTools,
   selectedCategory,
   onCategoryChange,
   tools,
@@ -3044,6 +3258,7 @@ function AddToolDialog({
 }: {
   open: boolean;
   categories: string[];
+  allTools: McpTool[];
   selectedCategory: string;
   onCategoryChange: (category: string) => void;
   tools: McpTool[];
@@ -3056,6 +3271,9 @@ function AddToolDialog({
   onClose: () => void;
   onAdd: () => void;
 }) {
+  const detailParams = currentTool?.catalogParams ?? currentTool?.params ?? [];
+  const detailOutputs = currentTool?.catalogOutputs ?? currentTool?.outputs ?? [];
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth PaperProps={{ sx: { borderRadius: "14px" } }}>
       <DialogTitle sx={{ pb: 1 }}>
@@ -3072,7 +3290,7 @@ function AddToolDialog({
           <Typography sx={{ fontSize: 12, color: "#64748b", fontWeight: 700, mb: 1 }}>分类</Typography>
           <Stack spacing={0.5}>
             {categories.map((category) => {
-              const count = (category === "全部" ? toolCatalog : toolCatalog.filter((tool) => tool.category === category)).length;
+              const count = (category === "全部" ? allTools : allTools.filter((tool) => tool.category === category)).length;
               return (
               <Button key={category} onClick={() => onCategoryChange(category)} sx={{ justifyContent: "space-between", color: selectedCategory === category ? "#6d28d9" : "#64748b", bgcolor: selectedCategory === category ? "#f5f3ff" : "transparent", textTransform: "none", borderRadius: "8px" }}>
                 <span>{category}</span>
@@ -3093,7 +3311,6 @@ function AddToolDialog({
                 <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between">
                   <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{tool.name}</Typography>
                   <Stack direction="row" spacing={0.5} alignItems="center">
-                    <Chip label={tool.status} size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f0fdf4", color: "#16a34a" }} />
                     {isAdded && <Chip label="已添加" size="small" sx={{ height: 18, fontSize: 10, bgcolor: "#f1f5f9", color: "#64748b" }} />}
                   </Stack>
                 </Stack>
@@ -3105,14 +3322,10 @@ function AddToolDialog({
 
         <Paper variant="outlined" sx={{ borderColor: "#E0E8F2", borderRadius: "12px", p: 1.25, minHeight: 0, overflow: "auto" }}>
           {currentTool ? <Stack spacing={1.25}>
-            <Box sx={{ p: 1, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #EEF2F7" }}>
-              <Typography sx={{ fontSize: 11, color: "#64748b", fontWeight: 700, mb: 0.4 }}>工具状态</Typography>
-              <Typography sx={{ fontSize: 12, color: "#111827", lineHeight: 1.5 }}>{currentTool.status}</Typography>
-            </Box>
             <Box>
               <Typography sx={{ fontSize: 13, color: "#111827", fontWeight: 800, mb: 0.75 }}>入参</Typography>
               <Stack spacing={0.75}>
-                {currentTool.params.map((param) => (
+                {detailParams.map((param) => (
                   <Box key={param.id} sx={{ p: 0.85, borderRadius: "8px", bgcolor: "#F8FAFC", border: "1px solid #EEF2F7" }}>
                     <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
                       <Typography sx={{ fontSize: 12, fontWeight: 700, color: "#1f2937" }}>{param.label}</Typography>
@@ -3124,11 +3337,10 @@ function AddToolDialog({
                 ))}
               </Stack>
             </Box>
-            <Divider />
             <Box>
               <Typography sx={{ fontSize: 13, color: "#111827", fontWeight: 800, mb: 0.75 }}>出参</Typography>
               <Stack spacing={0.75}>
-                {currentTool.outputs.map((output) => (
+                {detailOutputs.map((output) => (
                   <Box key={output.id} sx={{ p: 0.85, borderRadius: "8px", bgcolor: "#FBFCFF", border: "1px solid #EEF2F7" }}>
                     <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
                       <Typography sx={{ fontSize: 12, fontWeight: 700, color: "#1f2937" }}>{output.label}</Typography>
