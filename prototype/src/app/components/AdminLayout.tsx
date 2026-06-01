@@ -5,7 +5,7 @@ import {
 } from "@mui/material";
 import {
   Category, Description, AccountCircle, Logout, ManageAccounts,
-  Engineering, Settings, Hub, Extension, CloudQueue,
+  Engineering, Settings, Extension, CloudQueue,
 } from "@mui/icons-material";
 import { useState, useEffect } from "react";
 import { User } from "../types";
@@ -24,18 +24,6 @@ const menuItems = [
     path: "/admin/tools",
     label: "工具管理",
     icon: <Extension sx={{ fontSize: 16 }} />,
-  },
-  {
-    path: "/admin/tool-hub",
-    label: "工具 Hub",
-    icon: <Hub sx={{ fontSize: 16 }} />,
-    hidden: true,
-    children: [
-      { path: "/admin/tool-hub/mcp-services", label: "MCP 服务" },
-      { path: "/admin/tool-hub", label: "工具库" },
-      { path: "/admin/tool-hub/connectors", label: "连接器" },
-      { path: "/admin/tool-hub/run-records", label: "调用记录" },
-    ],
   },
 ];
 
@@ -108,7 +96,7 @@ export function AdminLayout() {
           <List disablePadding>
             {menuItems.filter((item) => !item.hidden).map((item) => {
               const selected = item.children
-                ? item.children.some((child) => child.path === location.pathname || (child.path === "/admin/tool-hub" && /^\/admin\/tool-hub\/(?!run-records|mcp-services|connectors)/.test(location.pathname)))
+                ? item.children.some((child) => location.pathname.startsWith(child.path))
                 : location.pathname.startsWith(item.path);
               return (
                 <Box key={item.path} sx={{ mb: 0.25 }}>
@@ -129,9 +117,7 @@ export function AdminLayout() {
                     </ListItemButton>
                   </ListItem>
                   {item.children?.map((child) => {
-                    const childSelected = child.path === "/admin/tool-hub"
-                      ? location.pathname === "/admin/tool-hub" || /^\/admin\/tool-hub\/(?!run-records|mcp-services|connectors)/.test(location.pathname)
-                      : location.pathname.startsWith(child.path);
+                    const childSelected = location.pathname.startsWith(child.path);
                     return (
                       <ListItem key={child.path} disablePadding sx={{ pl: 3.5, mt: 0.25 }}>
                         <ListItemButton component={Link} to={child.path} selected={childSelected}
