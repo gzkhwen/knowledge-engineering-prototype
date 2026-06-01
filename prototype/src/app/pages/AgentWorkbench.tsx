@@ -11,7 +11,6 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  Drawer,
   FormControl,
   FormControlLabel,
   IconButton,
@@ -111,6 +110,7 @@ interface ToolParam {
   min?: number;
   max?: number;
   unit?: string;
+  source?: ParamSource;
 }
 
 interface ToolOutput {
@@ -124,6 +124,26 @@ interface InputSource {
   type: "fixed" | "upstream";
   sourceNodeId?: string;
   outputPath?: string;
+}
+
+interface ParamSource {
+  type: "manual" | "upstream" | "file";
+  sourceNodeId?: string;
+  outputPath?: string;
+}
+
+interface CodeInputDraft {
+  id: string;
+  name: string;
+  source: ParamSource;
+  value: string;
+}
+
+interface CodeOutputDraft {
+  id: string;
+  type: string;
+  name: string;
+  value: string;
 }
 
 interface McpService {
@@ -597,6 +617,7 @@ function cloneParams(params: ToolParam[]): ToolParam[] {
   return params.map((param) => ({
     ...param,
     showOnPage: param.showOnPage ?? false,
+    source: param.source ? { ...param.source } : { type: "manual" },
     value: Array.isArray(param.value) ? [...param.value] : param.value,
   }));
 }
@@ -618,6 +639,14 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
   const tool = toolCatalog.find((item) => item.id === toolId);
   if (!tool) throw new Error("Unknown MCP tool");
   const params = cloneParams(tool.params);
+  if (params[0]) {
+    params[0] = {
+      ...params[0],
+      source: inputSource.type === "upstream"
+        ? { type: "upstream", sourceNodeId: inputSource.sourceNodeId, outputPath: inputSource.outputPath }
+        : { type: "file" },
+    };
+  }
   const nodeId = `${tool.id}-${Math.random().toString(36).slice(2, 8)}`;
   return {
     nodeId,
@@ -731,6 +760,7 @@ function getParamProblems(node: ToolNode, receivesExternalInput = false) {
   return node.params.flatMap((param) => {
     if (!isParamVisible(node, param)) return [];
     if (!param.required) return [];
+    if (param.source?.type === "upstream" || param.source?.type === "file") return [];
     if (param.id === node.inputParamId && (node.inputSource.type === "upstream" || receivesExternalInput)) return [];
     if (typeof param.value === "string" && !param.value.trim()) return [`${param.label} 未填写`];
     if (typeof param.value === "number" && ((param.min !== undefined && param.value < param.min) || (param.max !== undefined && param.value > param.max))) {
@@ -1437,6 +1467,18 @@ export function AgentWorkbench() {
     }));
   };
 
+  const changeParamSource = (nodeId: string, paramId: string, source: ParamSource) => {
+    if (!isNodeEditable(nodeId)) return;
+    updateNode(nodeId, (node) => {
+      const nextParams = node.params.map((param) => (param.id === paramId ? { ...param, source } : param));
+      if (paramId !== node.inputParamId) return { ...node, adjusted: true, params: nextParams };
+      const nextInputSource: InputSource = source.type === "upstream" && source.sourceNodeId
+        ? { type: "upstream", sourceNodeId: source.sourceNodeId, outputPath: source.outputPath }
+        : { type: "fixed" };
+      return { ...node, adjusted: true, inputSource: nextInputSource, params: nextParams };
+    });
+  };
+
   const updateInputParam = (nodeId: string, inputParamId: string) => {
     if (!isNodeEditable(nodeId)) return;
     updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputParamId }));
@@ -1582,8 +1624,8 @@ export function AgentWorkbench() {
                   <Box sx={{ height: "100%", minHeight: 260, border: "1px dashed #d8dce5", borderRadius: "12px", bgcolor: "#FBFCFF", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", px: 3 }}>
                     <Box>
                       <AutoAwesome sx={{ color: "#94a3b8", mb: 1 }} />
-                      <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>等待 Agent 生成处理方案</Typography>
-                      <Typography sx={{ mt: 0.5, fontSize: 12, color: "#94a3b8", lineHeight: 1.5 }}>发送样例文件后，流程节点会随 Agent 的思考逐步生成。</Typography>
+                      <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>等待生成知识处理方案</Typography>
+                      <Typography sx={{ mt: 0.5, fontSize: 12, color: "#94a3b8", lineHeight: 1.5 }}>发送样例文件和处理要求，智能体会自动理解文件和需求，生成知识处理方案。</Typography>
                     </Box>
                   </Box>
                 ) : (
@@ -1699,10 +1741,8 @@ export function AgentWorkbench() {
         allNodes={planNodes}
         canEdit={editingNode ? isNodeEditable(editingNode.nodeId) : false}
         onClose={() => setEditingNodeId(null)}
-        onInputParamChange={updateInputParam}
-        onInputSourceChange={updateInputSource}
         onParamChange={changeParam}
-        onToggleShowOnPage={toggleParamShowOnPage}
+        onParamSourceChange={changeParamSource}
       />
     </Box>
   );
@@ -2121,7 +2161,7 @@ function WorkflowNodeCard({
       >
         <Box sx={{ px: 1.4, pt: 1.15, pb: 0.3, display: "flex", alignItems: "center", gap: 0.75 }}>
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography sx={{ fontSize: 14, fontWeight: 900, color: "#0f172a", lineHeight: 1.3 }}>{section.category}</Typography>
+            <Typography sx={{ fontSize: 13, fontWeight: 500, color: "#0f172a", lineHeight: 1.3 }}>{section.category}</Typography>
           </Box>
           {hasInputIssue && <Chip label="输入异常" size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#fff7ed", color: "#c2410c" }} />}
           {hasWarning && <Chip label="需处理" size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#fef2f2", color: "#dc2626" }} />}
@@ -2282,7 +2322,7 @@ function ToolRuntimeRow({
           {status === "running" ? <CircularProgress size={12} color="inherit" /> : isConfigured || status === "success" ? <CheckCircleOutline sx={{ fontSize: 14 }} /> : <Handyman sx={{ fontSize: 14 }} />}
         </Box>
         <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <Typography sx={{ fontSize: 13, fontWeight: 500, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {status === "building" ? "正在创建工具模块..." : status === "selectingTool" ? "正在选择工具..." : node.toolName}
           </Typography>
           {statusText && <Typography sx={{ mt: 0.15, fontSize: 11, color: statusColor }}>{statusText}</Typography>}
@@ -2331,12 +2371,21 @@ function ToolRuntimeRow({
 }
 
 function getParamPreview(param: ToolParam) {
+  if (param.source?.type === "file") return "文件地址";
+  if (param.source?.type === "upstream") return param.source.outputPath ? `引用上游输出 · ${param.source.outputPath}` : "引用上游工具输出";
   if (Array.isArray(param.value)) return param.value.length ? param.value.join("、") : "按样例结果自动生成";
   if (typeof param.value === "boolean") return param.value ? "开启" : "关闭";
   if (typeof param.value === "number") return `${param.value}${param.unit ?? ""}`;
   const value = param.value.trim();
   if (!value) return "引用上游工具输出";
   return value.length > 42 ? `${value.slice(0, 42)}...` : value;
+}
+
+function getParamSourceLabel(param: ToolParam, allNodes: ToolNode[]) {
+  if (!param.source || param.source.type === "manual") return "手动填写";
+  if (param.source.type === "file") return "文件地址 · 当前样例文件";
+  const sourceNode = allNodes.find((node) => node.nodeId === param.source?.sourceNodeId);
+  return `上游工具 · ${sourceNode?.toolName ?? "来源已失效"} · ${param.source.outputPath || "未配置取值路径"}`;
 }
 
 function ParamField({ param, canEdit, onChange }: { param: ToolParam; canEdit: boolean; onChange: (value: ToolParam["value"]) => void }) {
@@ -2435,146 +2484,386 @@ function ToolEditDrawer({
   allNodes,
   canEdit,
   onClose,
-  onInputParamChange,
-  onInputSourceChange,
   onParamChange,
-  onToggleShowOnPage,
+  onParamSourceChange,
 }: {
   open: boolean;
   node: ToolNode | null;
   allNodes: ToolNode[];
   canEdit: boolean;
   onClose: () => void;
-  onInputParamChange: (nodeId: string, inputParamId: string) => void;
-  onInputSourceChange: (nodeId: string, source: InputSource) => void;
   onParamChange: (nodeId: string, paramId: string, value: ToolParam["value"]) => void;
-  onToggleShowOnPage: (nodeId: string, paramId: string) => void;
+  onParamSourceChange: (nodeId: string, paramId: string, source: ParamSource) => void;
 }) {
+  const [expandedParamId, setExpandedParamId] = useState<string | null>(null);
+  const [codeInputs, setCodeInputs] = useState<CodeInputDraft[]>([]);
+  const [codeOutputs, setCodeOutputs] = useState<CodeOutputDraft[]>([]);
+
+  useEffect(() => {
+    if (!node) return;
+    const inputParam = getToolInputParam(node);
+    setExpandedParamId(null);
+    setCodeInputs([
+      {
+        id: `${node.nodeId}-input-1`,
+        name: "input",
+        source: inputParam?.source ?? { type: "upstream", sourceNodeId: getPriorNodes(allNodes, node.nodeId)[0]?.nodeId, outputPath: "data.documentParseResult" },
+        value: "",
+      },
+    ]);
+    setCodeOutputs([
+      { id: `${node.nodeId}-output-1`, type: "Array<json>", name: "cleanBlocks", value: "data.cleanBlocks" },
+    ]);
+  }, [node?.nodeId]);
+
   if (!node) return null;
   const priorNodes = getPriorNodes(allNodes, node.nodeId);
-  const inputParam = getToolInputParam(node);
-  const configurableParams = node.params.filter((param) => param.id !== node.inputParamId && isParamVisible(node, param));
-  const selectedSourceNode = node.inputSource.type === "upstream"
-    ? priorNodes.find((item) => item.nodeId === node.inputSource.sourceNodeId) ?? null
-    : null;
-  const sourceInvalid = isInputSourceInvalid(node, allNodes);
-  const isFirstInputLocked = isFirstCategoryFirstNode(node, allNodes);
-  const fixedInputText = getFixedInputSourceText(node, allNodes);
-  const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
-
-  const setSourceType = (type: InputSource["type"]) => {
-    if (type === "fixed") {
-      onInputSourceChange(node.nodeId, { type: "fixed" });
-      return;
-    }
-    const sourceNode = selectedSourceNode ?? priorNodes[0];
-    if (!sourceNode) return;
-    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: sourceNode.nodeId, outputPath: node.inputSource.outputPath || "content[0].text" });
-  };
-
-  const setSourceNode = (sourceNodeId: string) => {
-    const sourceNode = priorNodes.find((item) => item.nodeId === sourceNodeId);
-    if (!sourceNode) return;
-    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: sourceNode.nodeId, outputPath: node.inputSource.outputPath || "content[0].text" });
-  };
-
-  const setOutputPath = (outputPath: string) => {
-    if (!selectedSourceNode) return;
-    onInputSourceChange(node.nodeId, { type: "upstream", sourceNodeId: selectedSourceNode.nodeId, outputPath });
-  };
-
+  const visibleParams = node.params.filter((param) => isParamVisible(node, param));
+  const isCodeTool = node.toolId === "system-code";
+  const isStorageTool = node.toolId === "system-storage";
 
   return (
-    <Drawer open={open} onClose={onClose} anchor="right" sx={{ zIndex: (theme) => theme.zIndex.modal + 20 }} PaperProps={{ sx: { width: 480, borderRadius: 0 } }}>
-      <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-        <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", gap: 1 }}>
-          <Box sx={{ width: 30, height: 30, borderRadius: "9px", bgcolor: "#f5f3ff", color: "#801AEB", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <EditOutlined fontSize="small" />
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth PaperProps={{ sx: { borderRadius: "14px", maxHeight: "88vh" } }}>
+      <DialogTitle sx={{ pb: 1.25 }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Box sx={{ width: 30, height: 30, borderRadius: "9px", bgcolor: "#f5f3ff", color: "#801AEB", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Handyman fontSize="small" />
           </Box>
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#111827" }}>{node.toolName}</Typography>
-            <Typography sx={{ fontSize: 12, color: "#64748b" }}>
-              {getPlanTitle(node.category)} · {node.status}
-            </Typography>
+            <Typography sx={{ fontSize: 17, fontWeight: 700, color: "#111827" }}>编辑工具配置</Typography>
+            <Typography sx={{ fontSize: 12, color: "#64748b", mt: 0.25 }}>{node.toolName} · {getPlanTitle(node.category)}</Typography>
           </Box>
           <IconButton onClick={onClose}><Close /></IconButton>
         </Box>
+      </DialogTitle>
+      <DialogContent sx={{ bgcolor: "#FBFCFF", pt: "12px !important" }}>
+        <Stack spacing={1.5}>
+          {isCodeTool ? (
+            <CodeToolConfig
+              node={node}
+              priorNodes={priorNodes}
+              canEdit={canEdit}
+              codeInputs={codeInputs}
+              codeOutputs={codeOutputs}
+              onCodeInputsChange={setCodeInputs}
+              onCodeOutputsChange={setCodeOutputs}
+              onParamChange={onParamChange}
+            />
+          ) : isStorageTool ? (
+            <StorageToolConfig
+              node={node}
+              priorNodes={priorNodes}
+              canEdit={canEdit}
+              onParamChange={onParamChange}
+              onParamSourceChange={onParamSourceChange}
+            />
+          ) : (
+            <ConfigBlock title="工具参数">
+              <Stack spacing={1.1}>
+                {visibleParams.map((param) => (
+                  <ParamConfigItem
+                    key={param.id}
+                    param={param}
+                    node={node}
+                    allNodes={allNodes}
+                    priorNodes={priorNodes}
+                    expanded={expandedParamId === param.id}
+                    canEdit={canEdit && param.editable !== false && node.enabled}
+                    onToggleExpanded={() => setExpandedParamId((current) => (current === param.id ? null : param.id))}
+                    onParamChange={onParamChange}
+                    onParamSourceChange={onParamSourceChange}
+                  />
+                ))}
+              </Stack>
+            </ConfigBlock>
+          )}
 
-        <Box sx={{ p: 2, overflow: "auto", flex: 1, bgcolor: "#FBFCFF" }}>
-          <Stack spacing={1.5}>
-            <ConfigBlock title="工具输入">
-              <Stack spacing={1.25}>
-                {isFirstInputLocked ? (
-                  <TextField size="small" fullWidth label="取值方式" value="待处理文件地址信息" disabled sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }} />
-                ) : (
-                  <FormControl fullWidth size="small" sx={inputFieldSx}>
-                    <InputLabel>取值方式</InputLabel>
-                    <Select label="取值方式" value={node.inputSource.type} disabled={!canEdit || priorNodes.length === 0} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceType(event.target.value as InputSource["type"])}>
-                      <MenuItem value="upstream">上游工具输出</MenuItem>
-                      <MenuItem value="fixed">{fixedInputText}</MenuItem>
-                    </Select>
-                  </FormControl>
-                )}
-                {!isFirstInputLocked && node.inputSource.type === "upstream" ? (
-                  <Stack spacing={1}>
-                    <FormControl fullWidth size="small" sx={inputFieldSx}>
-                      <InputLabel>选择上游工具</InputLabel>
-                      <Select label="选择上游工具" value={selectedSourceNode?.nodeId ?? ""} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setSourceNode(event.target.value)}>
-                        {priorNodes.map((item) => <MenuItem key={item.nodeId} value={item.nodeId}>{item.toolName}</MenuItem>)}
-                      </Select>
-                    </FormControl>
-                    <TextField
-                      size="small"
-                      fullWidth
-                      label="取值路径"
-                      value={node.inputSource.outputPath ?? ""}
-                      disabled={!canEdit || !selectedSourceNode}
-                      onChange={(event) => setOutputPath(event.target.value)}
-                      sx={inputFieldSx}
-                    />
-                    <Typography sx={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
-                      系统将从上游工具的原始输出中按该路径取值，并写入当前工具的输入参数。
-                    </Typography>
-                    {sourceInvalid && <Typography sx={{ fontSize: 12, color: "#c2410c" }}>输入配置异常，请检查。</Typography>}
-                  </Stack>
-                ) : null}
-                <Box>
-                  <FormControl fullWidth size="small" sx={inputFieldSx}>
-                    <InputLabel>选择当前工具的输入参数</InputLabel>
-                    <Select label="选择当前工具的输入参数" value={node.inputParamId} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onInputParamChange(node.nodeId, event.target.value)}>
-                      {node.params.map((param) => <MenuItem key={param.id} value={param.id}>{param.label}</MenuItem>)}
-                    </Select>
-                  </FormControl>
-                  <Typography sx={{ mt: 0.5, fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
-                    从当前工具的入参中选择一个参数，用于接收前面配置的输入值。
-                  </Typography>
+          <ConfigBlock title="工具输出">
+            <Stack spacing={0.75}>
+              {node.outputs.map((output) => (
+                <Box key={output.id} sx={{ p: 1, borderRadius: "9px", bgcolor: "#fff", border: "1px solid #EEF2F7" }}>
+                  <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{output.label}</Typography>
+                  <Typography sx={{ fontSize: 11.5, color: "#64748b", mt: 0.35, lineHeight: 1.5 }}>{output.desc}</Typography>
+                  <Typography sx={{ fontSize: 11.5, color: "#475569", mt: 0.35, lineHeight: 1.5 }}>变量路径：{output.path}</Typography>
                 </Box>
-              </Stack>
-            </ConfigBlock>
+              ))}
+            </Stack>
+          </ConfigBlock>
+        </Stack>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, py: 1.5 }}>
+        <Button onClick={onClose} sx={{ textTransform: "none", color: "#64748b" }}>取消</Button>
+        <Button variant="contained" onClick={onClose} sx={{ textTransform: "none", bgcolor: "#801AEB", boxShadow: "none", "&:hover": { bgcolor: "#6D16C9", boxShadow: "none" } }}>保存</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
 
-            <ConfigBlock title={node.sourceType === "system" ? "系统工具配置" : "工具配置"}>
-              <Stack spacing={1.25}>
-                {configurableParams.map((param) => (
-                  <ParamField key={param.id} param={param} canEdit={canEdit && param.editable !== false && node.enabled} onChange={(value) => onParamChange(node.nodeId, param.id, value)} />
-                ))}
-              </Stack>
-            </ConfigBlock>
-
-            <ConfigBlock title="工具输出">
-              <Stack spacing={0.75}>
-                {node.outputs.map((output) => (
-                  <Box key={output.id} sx={{ p: 1, borderRadius: "9px", bgcolor: "#fff", border: "1px solid #EEF2F7" }}>
-                    <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>{output.label}</Typography>
-                    <Typography sx={{ fontSize: 11.5, color: "#64748b", mt: 0.35, lineHeight: 1.5 }}>{output.desc}</Typography>
-                    <Typography sx={{ fontSize: 11.5, color: "#475569", mt: 0.35, lineHeight: 1.5 }}>变量路径：{output.path}</Typography>
-                  </Box>
-                ))}
-              </Stack>
-            </ConfigBlock>
-          </Stack>
-        </Box>
+function ParamConfigItem({
+  param,
+  node,
+  allNodes,
+  priorNodes,
+  expanded,
+  canEdit,
+  onToggleExpanded,
+  onParamChange,
+  onParamSourceChange,
+}: {
+  param: ToolParam;
+  node: ToolNode;
+  allNodes: ToolNode[];
+  priorNodes: ToolNode[];
+  expanded: boolean;
+  canEdit: boolean;
+  onToggleExpanded: () => void;
+  onParamChange: (nodeId: string, paramId: string, value: ToolParam["value"]) => void;
+  onParamSourceChange: (nodeId: string, paramId: string, source: ParamSource) => void;
+}) {
+  const source = param.source ?? { type: "manual" };
+  return (
+    <Box sx={{ p: 1, border: "1px solid #EEF2F7", borderRadius: "10px", bgcolor: "#fff" }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", gap: 0.75, alignItems: "start" }}>
+        {source.type === "manual" ? (
+          <ParamField param={param} canEdit={canEdit} onChange={(value) => onParamChange(node.nodeId, param.id, value)} />
+        ) : (
+          <TextField
+            size="small"
+            fullWidth
+            label={param.label}
+            value={getParamSourceLabel(param, allNodes)}
+            disabled
+            sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } }}
+          />
+        )}
+        <Tooltip title="设置取值来源">
+          <span>
+            <IconButton disabled={!canEdit} onClick={onToggleExpanded} sx={{ mt: 0.3, color: expanded ? "#801AEB" : "#64748b" }}>
+              <Sync sx={{ fontSize: 17 }} />
+            </IconButton>
+          </span>
+        </Tooltip>
       </Box>
-    </Drawer>
+      {expanded ? (
+        <ParamSourceSetting
+          source={source}
+          priorNodes={priorNodes}
+          canEdit={canEdit}
+          onChange={(nextSource) => onParamSourceChange(node.nodeId, param.id, nextSource)}
+        />
+      ) : null}
+    </Box>
+  );
+}
+
+function ParamSourceSetting({
+  source,
+  priorNodes,
+  canEdit,
+  onChange,
+}: {
+  source: ParamSource;
+  priorNodes: ToolNode[];
+  canEdit: boolean;
+  onChange: (source: ParamSource) => void;
+}) {
+  const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
+  const setType = (type: ParamSource["type"]) => {
+    if (type === "manual") {
+      onChange({ type: "manual" });
+      return;
+    }
+    if (type === "file") {
+      onChange({ type: "file" });
+      return;
+    }
+    const sourceNode = priorNodes.find((item) => item.nodeId === source.sourceNodeId) ?? priorNodes[0];
+    onChange({ type: "upstream", sourceNodeId: sourceNode?.nodeId, outputPath: source.outputPath || sourceNode?.outputs[0]?.path || "data.result" });
+  };
+  return (
+    <Box sx={{ mt: 1, p: 1, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+      <Stack spacing={1}>
+        <FormControl fullWidth size="small" sx={inputFieldSx}>
+          <InputLabel>取值方式</InputLabel>
+          <Select label="取值方式" value={source.type} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setType(event.target.value as ParamSource["type"])}>
+            <MenuItem value="manual">自己填写</MenuItem>
+            <MenuItem value="upstream" disabled={priorNodes.length === 0}>上游工具输出</MenuItem>
+            <MenuItem value="file">文件地址</MenuItem>
+          </Select>
+        </FormControl>
+        {source.type === "upstream" ? (
+          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1 }}>
+            <FormControl fullWidth size="small" sx={inputFieldSx}>
+              <InputLabel>选择上游工具</InputLabel>
+              <Select
+                label="选择上游工具"
+                value={source.sourceNodeId ?? ""}
+                disabled={!canEdit || priorNodes.length === 0}
+                MenuProps={elevatedSelectMenuProps}
+                onChange={(event) => {
+                  const sourceNode = priorNodes.find((item) => item.nodeId === event.target.value);
+                  onChange({ type: "upstream", sourceNodeId: sourceNode?.nodeId, outputPath: source.outputPath || sourceNode?.outputs[0]?.path || "data.result" });
+                }}
+              >
+                {priorNodes.map((item) => <MenuItem key={item.nodeId} value={item.nodeId}>{item.toolName}</MenuItem>)}
+              </Select>
+            </FormControl>
+            <TextField
+              size="small"
+              label="取值路径"
+              value={source.outputPath ?? ""}
+              disabled={!canEdit}
+              onChange={(event) => onChange({ ...source, outputPath: event.target.value })}
+              sx={inputFieldSx}
+            />
+          </Box>
+        ) : null}
+      </Stack>
+    </Box>
+  );
+}
+
+function CodeToolConfig({
+  node,
+  priorNodes,
+  canEdit,
+  codeInputs,
+  codeOutputs,
+  onCodeInputsChange,
+  onCodeOutputsChange,
+  onParamChange,
+}: {
+  node: ToolNode;
+  priorNodes: ToolNode[];
+  canEdit: boolean;
+  codeInputs: CodeInputDraft[];
+  codeOutputs: CodeOutputDraft[];
+  onCodeInputsChange: (rows: CodeInputDraft[]) => void;
+  onCodeOutputsChange: (rows: CodeOutputDraft[]) => void;
+  onParamChange: (nodeId: string, paramId: string, value: ToolParam["value"]) => void;
+}) {
+  const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
+  const scriptParam = node.params.find((param) => param.id === "script");
+  const updateInput = (id: string, patch: Partial<CodeInputDraft>) => onCodeInputsChange(codeInputs.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  const updateOutput = (id: string, patch: Partial<CodeOutputDraft>) => onCodeOutputsChange(codeOutputs.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+
+  return (
+    <Stack spacing={1.5}>
+      <ConfigBlock title="定义入参">
+        <Stack spacing={1}>
+          {codeInputs.map((row) => (
+            <Box key={row.id} sx={{ p: 1, border: "1px solid #EEF2F7", borderRadius: "10px", bgcolor: "#fff" }}>
+              <Box sx={{ display: "grid", gridTemplateColumns: "160px minmax(0, 1fr) 32px", gap: 1 }}>
+                <TextField size="small" label="参数名称" value={row.name} disabled={!canEdit} onChange={(event) => updateInput(row.id, { name: event.target.value })} sx={inputFieldSx} />
+                {row.source.type === "manual" ? (
+                  <TextField size="small" label="参数值" value={row.value} disabled={!canEdit} onChange={(event) => updateInput(row.id, { value: event.target.value })} sx={inputFieldSx} />
+                ) : (
+                  <TextField size="small" label="参数值" value={row.source.type === "file" ? "文件地址 · 当前样例文件" : `上游工具 · ${priorNodes.find((item) => item.nodeId === row.source.sourceNodeId)?.toolName ?? "未选择"} · ${row.source.outputPath ?? ""}`} disabled sx={inputFieldSx} />
+                )}
+                <Tooltip title="删除入参"><span><IconButton disabled={!canEdit || codeInputs.length === 1} onClick={() => onCodeInputsChange(codeInputs.filter((item) => item.id !== row.id))} sx={{ color: "#ef4444" }}><DeleteOutline sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+              </Box>
+              <ParamSourceSetting source={row.source} priorNodes={priorNodes} canEdit={canEdit} onChange={(source) => updateInput(row.id, { source })} />
+            </Box>
+          ))}
+          <Button variant="outlined" disabled={!canEdit} startIcon={<Add sx={{ fontSize: 15 }} />} onClick={() => onCodeInputsChange([...codeInputs, { id: `code-input-${Date.now()}`, name: `arg${codeInputs.length + 1}`, source: { type: "manual" }, value: "" }])} sx={{ alignSelf: "flex-start", textTransform: "none", borderRadius: "8px" }}>添加入参</Button>
+        </Stack>
+      </ConfigBlock>
+
+      <ConfigBlock title="代码脚本">
+        {scriptParam ? (
+          <ParamField param={scriptParam} canEdit={canEdit} onChange={(value) => onParamChange(node.nodeId, scriptParam.id, value)} />
+        ) : null}
+      </ConfigBlock>
+
+      <ConfigBlock title="定义输出参数">
+        <Stack spacing={1}>
+          {codeOutputs.map((row) => (
+            <Box key={row.id} sx={{ display: "grid", gridTemplateColumns: "130px 150px minmax(0, 1fr) 32px", gap: 1 }}>
+              <TextField size="small" label="数据类型" value={row.type} disabled={!canEdit} onChange={(event) => updateOutput(row.id, { type: event.target.value })} sx={inputFieldSx} />
+              <TextField size="small" label="参数名" value={row.name} disabled={!canEdit} onChange={(event) => updateOutput(row.id, { name: event.target.value })} sx={inputFieldSx} />
+              <TextField size="small" label="参数值" value={row.value} disabled={!canEdit} onChange={(event) => updateOutput(row.id, { value: event.target.value })} sx={inputFieldSx} />
+              <Tooltip title="删除输出"><span><IconButton disabled={!canEdit || codeOutputs.length === 1} onClick={() => onCodeOutputsChange(codeOutputs.filter((item) => item.id !== row.id))} sx={{ color: "#ef4444" }}><DeleteOutline sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+            </Box>
+          ))}
+          <Button variant="outlined" disabled={!canEdit} startIcon={<Add sx={{ fontSize: 15 }} />} onClick={() => onCodeOutputsChange([...codeOutputs, { id: `code-output-${Date.now()}`, type: "json", name: `result${codeOutputs.length + 1}`, value: `data.result${codeOutputs.length + 1}` }])} sx={{ alignSelf: "flex-start", textTransform: "none", borderRadius: "8px" }}>添加输出参数</Button>
+        </Stack>
+      </ConfigBlock>
+    </Stack>
+  );
+}
+
+function StorageToolConfig({
+  node,
+  priorNodes,
+  canEdit,
+  onParamChange,
+  onParamSourceChange,
+}: {
+  node: ToolNode;
+  priorNodes: ToolNode[];
+  canEdit: boolean;
+  onParamChange: (nodeId: string, paramId: string, value: ToolParam["value"]) => void;
+  onParamSourceChange: (nodeId: string, paramId: string, source: ParamSource) => void;
+}) {
+  const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
+  const storageObject = node.params.find((param) => param.id === "storageObject");
+  const storagePath = node.params.find((param) => param.id === "storagePath");
+  const storageTarget = node.params.find((param) => param.id === "storageTarget");
+  const writeMode = node.params.find((param) => param.id === "writeMode");
+
+  return (
+    <Stack spacing={1.5}>
+      <ConfigBlock title="存储对象">
+        {storageObject ? (
+          <Box sx={{ p: 1, border: "1px solid #EEF2F7", borderRadius: "10px", bgcolor: "#fff" }}>
+            <TextField
+              size="small"
+              fullWidth
+              label="存储对象"
+              value={getParamSourceLabel(storageObject, [node, ...priorNodes])}
+              disabled
+              sx={inputFieldSx}
+            />
+            <ParamSourceSetting source={storageObject.source ?? { type: "upstream", sourceNodeId: priorNodes[0]?.nodeId, outputPath: "data.textChunkResult" }} priorNodes={priorNodes} canEdit={canEdit} onChange={(source) => onParamSourceChange(node.nodeId, storageObject.id, source)} />
+          </Box>
+        ) : null}
+        {storagePath ? (
+          <TextField
+            size="small"
+            fullWidth
+            label="取值路径"
+            value={String(storagePath.value)}
+            disabled={!canEdit}
+            onChange={(event) => onParamChange(node.nodeId, storagePath.id, event.target.value)}
+            sx={{ ...inputFieldSx, mt: 1 }}
+          />
+        ) : null}
+      </ConfigBlock>
+
+      <ConfigBlock title="存储配置">
+        <Stack spacing={1}>
+          <FormControl fullWidth size="small" sx={inputFieldSx}>
+            <InputLabel>存储方式</InputLabel>
+            <Select label="存储方式" value="写入ES" disabled MenuProps={elevatedSelectMenuProps}>
+              <MenuItem value="写入ES">写入ES</MenuItem>
+            </Select>
+          </FormControl>
+          {storageTarget ? (
+            <TextField size="small" fullWidth label="ES索引 / 别名" value={String(storageTarget.value)} disabled={!canEdit} onChange={(event) => onParamChange(node.nodeId, storageTarget.id, event.target.value)} sx={inputFieldSx} />
+          ) : null}
+          {writeMode ? (
+            <FormControl fullWidth size="small" sx={inputFieldSx}>
+              <InputLabel>写入模式</InputLabel>
+              <Select label="写入模式" value={String(writeMode.value)} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => onParamChange(node.nodeId, writeMode.id, event.target.value)}>
+                <MenuItem value="insert">insert</MenuItem>
+                <MenuItem value="upsert">upsert</MenuItem>
+                <MenuItem value="overwrite">overwrite</MenuItem>
+              </Select>
+            </FormControl>
+          ) : null}
+        </Stack>
+      </ConfigBlock>
+    </Stack>
   );
 }
 
