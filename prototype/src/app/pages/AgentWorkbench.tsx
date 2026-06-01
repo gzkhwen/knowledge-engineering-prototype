@@ -2649,7 +2649,7 @@ function ParamConfigItem({
     onParamSourceChange(node.nodeId, param.id, active ? { type: "manual" } : getDefaultBoundSource(priorNodes));
   };
   return (
-    <Box sx={{ p: 1, border: "1px solid #EEF2F7", borderRadius: "10px", bgcolor: "#fff" }}>
+    <Box sx={{ py: 0.35 }}>
       <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", gap: 0.75, alignItems: "start" }}>
         {!active ? (
           <ParamField param={param} canEdit={canEdit} onChange={(value) => onParamChange(node.nodeId, param.id, value)} />
@@ -2698,9 +2698,9 @@ function ParamSourceSetting({
     onChange({ type: "upstream", sourceNodeId: sourceNode?.nodeId, outputPath: source.outputPath || sourceNode?.outputs[0]?.path || "data.result" });
   };
   return (
-    <Box sx={{ mt: 1, p: 1, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
-      <Stack spacing={1}>
-        <FormControl fullWidth size="small" sx={inputFieldSx}>
+    <Box sx={{ mt: 0.75 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: source.type === "upstream" ? "180px minmax(0, 1fr) minmax(0, 1.4fr)" : "180px minmax(0, 1fr) minmax(0, 1.4fr)", gap: 1, alignItems: "start" }}>
+        <FormControl size="small" sx={inputFieldSx}>
           <InputLabel>取值方式</InputLabel>
           <Select label="取值方式" value={source.type} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setType(event.target.value as ParamSource["type"])}>
             <MenuItem value="upstream" disabled={priorNodes.length === 0}>上游工具输出</MenuItem>
@@ -2708,11 +2708,11 @@ function ParamSourceSetting({
           </Select>
         </FormControl>
         {source.type === "upstream" ? (
-          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1 }}>
+          <>
             <FormControl fullWidth size="small" sx={inputFieldSx}>
-              <InputLabel>选择上游工具</InputLabel>
+              <InputLabel>上游工具</InputLabel>
               <Select
-                label="选择上游工具"
+                label="上游工具"
                 value={source.sourceNodeId ?? ""}
                 disabled={!canEdit || priorNodes.length === 0}
                 MenuProps={elevatedSelectMenuProps}
@@ -2732,9 +2732,11 @@ function ParamSourceSetting({
               onChange={(event) => onChange({ ...source, outputPath: event.target.value })}
               sx={inputFieldSx}
             />
-          </Box>
-        ) : null}
-      </Stack>
+          </>
+        ) : (
+          <TextField size="small" label="文件地址" value="当前样例文件地址" disabled sx={{ ...inputFieldSx, gridColumn: "span 2" }} />
+        )}
+      </Box>
     </Box>
   );
 }
@@ -2766,9 +2768,9 @@ function CodeToolConfig({
   return (
     <Stack spacing={1.5}>
       <ConfigBlock title="定义入参">
-        <Stack spacing={1}>
+        <Stack spacing={1.1}>
           {codeInputs.map((row) => (
-            <Box key={row.id} sx={{ p: 1, border: "1px solid #EEF2F7", borderRadius: "10px", bgcolor: "#fff" }}>
+            <Box key={row.id}>
               <Box sx={{ display: "grid", gridTemplateColumns: "160px minmax(0, 1fr) 32px 32px", gap: 1 }}>
                 <TextField size="small" label="参数名称" value={row.name} disabled={!canEdit} onChange={(event) => updateInput(row.id, { name: event.target.value })} sx={inputFieldSx} />
                 {row.source.type === "manual" ? (
@@ -2838,7 +2840,7 @@ function StorageToolConfig({
     <Stack spacing={1.5}>
       <ConfigBlock title="存储对象">
         {storageObject ? (
-          <Box sx={{ p: 1, border: "1px solid #EEF2F7", borderRadius: "10px", bgcolor: "#fff" }}>
+          <Box>
             <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", gap: 1 }}>
               {(storageObject.source?.type ?? "manual") === "manual" ? (
                 <ParamField param={storageObject} canEdit={canEdit} onChange={(value) => onParamChange(node.nodeId, storageObject.id, value)} />
