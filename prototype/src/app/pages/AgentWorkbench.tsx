@@ -2698,7 +2698,7 @@ function ParamSourceSetting({
     onChange({ type: "upstream", sourceNodeId: sourceNode?.nodeId, outputPath: source.outputPath || sourceNode?.outputs[0]?.path || "data.result" });
   };
   return (
-    <Box sx={{ mt: 0.75 }}>
+    <Box sx={{ mt: 0.75, p: 1, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
       <Box sx={{ display: "grid", gridTemplateColumns: source.type === "upstream" ? "180px minmax(0, 1fr) minmax(0, 1.4fr)" : "180px minmax(0, 1fr) minmax(0, 1.4fr)", gap: 1, alignItems: "start" }}>
         <FormControl size="small" sx={inputFieldSx}>
           <InputLabel>取值方式</InputLabel>
