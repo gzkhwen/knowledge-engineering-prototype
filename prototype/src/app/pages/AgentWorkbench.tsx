@@ -628,6 +628,26 @@ function cloneOutputs(outputs: ToolOutput[]): ToolOutput[] {
   return outputs.map((output) => ({ ...output }));
 }
 
+function emptyParamValue(param: ToolParam): ToolParam["value"] {
+  if (param.type === "multiSelect" || param.type === "tags") return [];
+  if (param.type === "switch") return false;
+  return "";
+}
+
+function clearManualNodeConfig(node: ToolNode): ToolNode {
+  return {
+    ...node,
+    inputSource: { type: "fixed" },
+    params: node.params.map((param) => ({
+      ...param,
+      value: emptyParamValue(param),
+      source: { type: "manual" },
+    })),
+    codeInputs: node.toolId === "system-code" ? [] : node.codeInputs,
+    codeOutputs: node.toolId === "system-code" ? [] : node.codeOutputs,
+  };
+}
+
 function cloneNodes(nodes: ToolNode[]): ToolNode[] {
   return nodes.map((node) => ({
     ...node,
@@ -1427,10 +1447,10 @@ export function AgentWorkbench() {
     const inputSource: InputSource = currentTool.input === "sampleFile" || !upstreamNode
       ? { type: "fixed" }
       : { type: "upstream", sourceNodeId: upstreamNode.nodeId, outputPath: upstreamNode.outputs[0]?.path ?? "data.result" };
-    const node = createNode(
+    const node = clearManualNodeConfig(createNode(
       currentTool.id,
       inputSource,
-    );
+    ));
     updatePlanNodesWithMotion((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
     setAddDialogOpen(false);
     toast.success(`已添加工具，已归入${getPlanTitle(node.category)}`);
@@ -2419,7 +2439,7 @@ function getParamPreview(param: ToolParam) {
 
 function getParamSourceLabel(param: ToolParam, allNodes: ToolNode[]) {
   if (!param.source || param.source.type === "manual") return "手动填写";
-  if (param.source.type === "file") return "文件地址 · 当前样例文件";
+  if (param.source.type === "file") return "文件地址 · 待处理文件地址信息";
   const sourceNode = allNodes.find((node) => node.nodeId === param.source?.sourceNodeId);
   return `上游工具 · ${sourceNode?.toolName ?? "来源已失效"} · ${param.source.outputPath || "未配置取值路径"}`;
 }
@@ -2586,10 +2606,10 @@ function ToolEditDrawer({
   const visibleParams = node.params.filter((param) => isParamVisible(node, param));
   const isCodeTool = node.toolId === "system-code";
   const isStorageTool = node.toolId === "system-storage";
-  const outputRows = isCodeTool && node.codeOutputs?.length
+  const outputRows = isCodeTool
     ? [
         createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"),
-        ...node.codeOutputs.map((output) => createOutput(output.id, output.name, `${output.type}，代码工具输出变量。`, output.value)),
+        ...(node.codeOutputs ?? []).map((output) => createOutput(output.id, output.name, `${output.type}，代码工具输出变量。`, output.value)),
       ]
     : node.outputs;
 
@@ -2716,7 +2736,7 @@ function UnifiedParamRow({
   const inputFieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "9px", fontSize: 12 }, "& .MuiInputLabel-root": { fontSize: 12 } };
   return (
     <Box sx={{ py: 0.45 }}>
-      <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px 32px", gap: 1, alignItems: "start" }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: onRemove ? "minmax(0, 1fr) 32px 32px" : "minmax(0, 1fr) 32px", columnGap: 1, rowGap: 0.75, alignItems: "start" }}>
         {active ? (
           <TextField
             size="small"
@@ -2767,7 +2787,7 @@ function ParamSourceSetting({
     onChange({ type: "upstream", sourceNodeId: sourceNode?.nodeId, outputPath: source.outputPath || sourceNode?.outputs[0]?.path || "data.result" });
   };
   return (
-    <Box sx={{ mt: 0.75, p: 1, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+    <Box sx={{ mt: 1, px: 1, pt: 1.25, pb: 1, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
       <Box sx={{ display: "grid", gridTemplateColumns: "minmax(132px, 0.75fr) minmax(180px, 1fr) minmax(220px, 1.2fr)", gap: 1.25, alignItems: "start" }}>
         <FormControl fullWidth size="small" sx={inputFieldSx}>
           <InputLabel>取值方式</InputLabel>
@@ -2803,7 +2823,7 @@ function ParamSourceSetting({
             />
           </>
         ) : (
-          <TextField size="small" label="文件地址" value="当前样例文件地址" disabled sx={{ ...inputFieldSx, gridColumn: "2 / 4" }} />
+          <TextField size="small" label="文件地址" value="待处理文件地址信息" disabled sx={{ ...inputFieldSx, gridColumn: "2 / 4" }} />
         )}
       </Box>
     </Box>

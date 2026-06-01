@@ -57,12 +57,19 @@ interface McpToolSyncItem {
   description: string;
   enabled: boolean;
   inputs?: ToolInputSchemaItem[];
+  outputs?: ToolOutputSchemaItem[];
 }
 
 interface ToolInputSchemaItem {
   name: string;
   type: string;
   required: boolean;
+  description: string;
+}
+
+interface ToolOutputSchemaItem {
+  name: string;
+  type: string;
   description: string;
 }
 
@@ -110,6 +117,7 @@ interface ManagedToolItem {
   lastSyncedAt: string;
   serviceName: string;
   inputs: ToolInputSchemaItem[];
+  outputs: ToolOutputSchemaItem[];
 }
 
 const BLUE = "#3b82f6";
@@ -283,6 +291,47 @@ function defaultToolInputs(toolName: string): ToolInputSchemaItem[] {
   ];
 }
 
+function defaultToolOutputs(toolName: string): ToolOutputSchemaItem[] {
+  if (toolName.includes("解析")) {
+    return [
+      { name: "documentParseResult", type: "array<object>", description: "解析后的文本、版面、图片和表格结构。" },
+      { name: "metadata", type: "object", description: "页数、解析器版本、耗时等元信息。" },
+    ];
+  }
+  if (toolName.includes("分片")) {
+    return [
+      { name: "textChunkResult", type: "array<object>", description: "分片后的文本片段集合。" },
+      { name: "stats", type: "object", description: "分片数量、平均长度和重叠配置等统计信息。" },
+    ];
+  }
+  if (toolName.includes("存储")) {
+    return [
+      { name: "storageRef", type: "string", description: "写入后的存储引用地址。" },
+      { name: "storedCount", type: "number", description: "本次成功写入的数据条数。" },
+      { name: "writeResult", type: "object", description: "写入确认状态、失败数量和写入模式。" },
+    ];
+  }
+  if (toolName.includes("代码")) {
+    return [
+      { name: "scriptResult", type: "object", description: "脚本执行后的完整返回结果。" },
+      { name: "outputVariables", type: "array<object>", description: "用户在代码工具中声明的可引用输出变量。" },
+    ];
+  }
+  if (toolName.includes("QA")) {
+    return [
+      { name: "qaResult", type: "array<object>", description: "抽取出的问答对及来源片段。" },
+    ];
+  }
+  if (toolName.includes("摘要")) {
+    return [
+      { name: "summaryResult", type: "array<object>", description: "生成的摘要条目及来源引用。" },
+    ];
+  }
+  return [
+    { name: "result", type: "object", description: "工具执行返回结果。" },
+  ];
+}
+
 function nowText() {
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -337,6 +386,7 @@ function buildManagedTools(): ManagedToolItem[] {
     lastSyncedAt: service.lastSyncedAt,
     serviceName: service.name,
     inputs: tool.inputs ?? defaultToolInputs(tool.name),
+    outputs: tool.outputs ?? defaultToolOutputs(tool.name),
   })));
 }
 
@@ -1027,9 +1077,12 @@ export function ToolManagementPage() {
                 <Paper variant="outlined" sx={{ p: 1.5, borderColor: "#e8eaed", borderRadius: "10px", bgcolor: "#fff" }}>
                   <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827", mb: 0.75 }}>工具描述</Typography>
                   <Typography sx={{ fontSize: 12.5, color: "#475569", lineHeight: 1.7 }}>{detailTool.description}</Typography>
-                </Paper>
-                <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", overflow: "hidden", bgcolor: "#fff" }}>
-                  <Table size="small">
+	                </Paper>
+	                <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", overflow: "hidden", bgcolor: "#fff" }}>
+	                  <Box sx={{ px: 1.5, py: 1.1, borderBottom: "1px solid #eef2f7" }}>
+	                    <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>输入参数</Typography>
+	                  </Box>
+	                  <Table size="small">
                     <TableHead>
                       <TableRow>
                         {["参数名", "类型", "必填", "说明"].map((label) => (
@@ -1047,9 +1100,32 @@ export function ToolManagementPage() {
                         </TableRow>
                       ))}
                     </TableBody>
-                  </Table>
-                </Paper>
-              </Stack>
+	                  </Table>
+	                </Paper>
+	                <Paper variant="outlined" sx={{ borderColor: "#e8eaed", borderRadius: "10px", overflow: "hidden", bgcolor: "#fff" }}>
+	                  <Box sx={{ px: 1.5, py: 1.1, borderBottom: "1px solid #eef2f7" }}>
+	                    <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>输出参数</Typography>
+	                  </Box>
+	                  <Table size="small">
+	                    <TableHead>
+	                      <TableRow>
+	                        {["参数名", "类型", "说明"].map((label) => (
+	                          <TableCell key={label} sx={{ bgcolor: "#f8f9fb", fontSize: 12, fontWeight: 600, color: "#6b7280" }}>{label}</TableCell>
+	                        ))}
+	                      </TableRow>
+	                    </TableHead>
+	                    <TableBody>
+	                      {detailTool.outputs.map((output) => (
+	                        <TableRow key={output.name}>
+	                          <TableCell sx={{ width: 160, fontSize: 12, color: "#111827", fontWeight: 650 }}>{output.name}</TableCell>
+	                          <TableCell sx={{ width: 130, fontSize: 12, color: "#475569" }}>{output.type}</TableCell>
+	                          <TableCell sx={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>{output.description}</TableCell>
+	                        </TableRow>
+	                      ))}
+	                    </TableBody>
+	                  </Table>
+	                </Paper>
+	              </Stack>
             </Box>
           </Box>
         ) : null}
