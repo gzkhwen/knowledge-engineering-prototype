@@ -2787,8 +2787,8 @@ function ParamSourceSetting({
     onChange({ type: "upstream", sourceNodeId: sourceNode?.nodeId, outputPath: source.outputPath || sourceNode?.outputs[0]?.path || "data.result" });
   };
   return (
-    <Box sx={{ mt: 2, px: 1, pt: 1.25, pb: 1, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
-      <Box sx={{ display: "grid", gridTemplateColumns: "minmax(132px, 0.75fr) minmax(180px, 1fr) minmax(220px, 1.2fr)", gap: 1.25, alignItems: "start" }}>
+    <Box sx={{ mt: 1, px: 1.5, pt: 1.75, pb: 1.4, borderRadius: "9px", bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: "minmax(132px, 0.75fr) minmax(180px, 1fr) minmax(220px, 1.2fr)", columnGap: 1.5, rowGap: 1.25, alignItems: "start" }}>
         <FormControl fullWidth size="small" sx={inputFieldSx}>
           <InputLabel>取值方式</InputLabel>
           <Select label="取值方式" value={source.type} disabled={!canEdit} MenuProps={elevatedSelectMenuProps} onChange={(event) => setType(event.target.value as ParamSource["type"])}>
