@@ -280,9 +280,9 @@ function defaultToolInputs(toolName: string): ToolInputSchemaItem[] {
   }
   if (toolName.includes("存储")) {
     return [
-      { name: "input", type: "array<object>", required: true, description: "需要写入存储的对象集合。" },
-      { name: "target_index", type: "string", required: true, description: "ES 索引或别名。" },
-      { name: "write_mode", type: "string", required: true, description: "写入模式，例如 upsert。" },
+      { name: "存储对象", type: "array<object>", required: true, description: "需要写入存储的对象集合。" },
+      { name: "存储方式", type: "string", required: true, description: "选择结果写入方式，例如写入 ES。" },
+      { name: "写入模式", type: "string", required: true, description: "写入模式，例如 upsert。" },
     ];
   }
   return [
@@ -390,6 +390,14 @@ export function buildManagedTools(): ManagedToolItem[] {
   })));
 }
 
+function normalizeManagedTool(tool: ManagedToolItem): ManagedToolItem {
+  if (tool.name !== "数据存储工具") return tool;
+  return {
+    ...tool,
+    inputs: defaultToolInputs(tool.name),
+  };
+}
+
 export function buildInitialCategories() {
   return Array.from(new Set(buildManagedTools().map((tool) => tool.category)));
 }
@@ -416,7 +424,7 @@ function readStorageJson<T>(key: string, fallback: T): T {
 
 export function getManagedToolCatalogSnapshot(): ManagedToolCatalogSnapshot {
   return {
-    tools: readStorageJson(managedToolsStorageKey, buildManagedTools()),
+    tools: readStorageJson(managedToolsStorageKey, buildManagedTools()).map(normalizeManagedTool),
     categories: readStorageJson(managedToolCategoriesStorageKey, buildInitialCategories()),
   };
 }
