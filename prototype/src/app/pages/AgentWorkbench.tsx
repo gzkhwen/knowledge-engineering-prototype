@@ -33,7 +33,6 @@ import {
   Close,
   DeleteOutline,
   EditOutlined,
-  ErrorOutline,
   FactCheck,
   Handyman,
   PlayArrow,
@@ -1332,6 +1331,11 @@ export function AgentWorkbench() {
     });
   };
 
+  const clearManualConnectionStatuses = () => {
+    setConnectionStates({});
+    setConnectionFailureReasons({});
+  };
+
   const addDemoSample = () => {
     setSampleFiles((current) => (current.some((file) => file.id === demoSampleFile.id) ? current : [demoSampleFile, ...current]));
     toast.success("已添加演示样例文件");
@@ -1713,6 +1717,7 @@ export function AgentWorkbench() {
       currentTool.id,
       inputSource,
     ));
+    clearManualConnectionStatuses();
     updatePlanNodesWithMotion((current) => [...current, { ...node, expanded: true, adjusted: true }]);
     setAddDialogOpen(false);
     toast.success(`已添加工具，已归入${getPlanTitle(node.category)}`);
@@ -1720,6 +1725,7 @@ export function AgentWorkbench() {
 
   const removeNode = (nodeId: string) => {
     if (!isNodeEditable(nodeId)) return;
+    clearManualConnectionStatuses();
     updatePlanNodesWithMotion((current) => current.filter((node) => node.nodeId !== nodeId));
     setEditingNodeId((current) => (current === nodeId ? null : current));
     toast.success("已删除工具节点");
@@ -1774,7 +1780,6 @@ export function AgentWorkbench() {
 
     clearConnectionStatuses(planNodes);
     setIsPlanTesting(true);
-    setRightTab(2);
     setSampleFiles((current) => current.map((file) => ({ ...file, status: "试跑中" })));
     const executeEventId = appendAgentEvent({
       role: "thought",
@@ -1878,6 +1883,7 @@ export function AgentWorkbench() {
     const next = [...planNodes];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, { ...moved, adjusted: true });
+    clearManualConnectionStatuses();
     updatePlanNodesWithMotion(next);
     setDraggingNodeId(null);
   };
@@ -1898,6 +1904,7 @@ export function AgentWorkbench() {
 
   const changeParamSource = (nodeId: string, paramId: string, source: ParamSource) => {
     if (!isNodeEditable(nodeId)) return;
+    clearManualConnectionStatuses();
     updateNode(nodeId, (node) => {
       const nextParams = node.params.map((param) => (param.id === paramId ? { ...param, source } : param));
       if (paramId !== node.inputParamId) return { ...node, adjusted: true, params: nextParams };
@@ -1932,11 +1939,13 @@ export function AgentWorkbench() {
 
   const updateInputParam = (nodeId: string, inputParamId: string) => {
     if (!isNodeEditable(nodeId)) return;
+    clearManualConnectionStatuses();
     updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputParamId }));
   };
 
   const updateInputSource = (nodeId: string, source: InputSource) => {
     if (!isNodeEditable(nodeId)) return;
+    clearManualConnectionStatuses();
     updateNode(nodeId, (node) => ({ ...node, adjusted: true, inputSource: source }));
   };
 
@@ -1962,6 +1971,7 @@ export function AgentWorkbench() {
     const targetIndex = nextSections.findIndex((section) => section.sectionId === targetSectionId);
     if (targetIndex < 0) return;
     nextSections.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, moved);
+    clearManualConnectionStatuses();
     updatePlanNodesWithMotion(nextSections.flatMap((section) => section.nodes.map((node) => ({ ...node, adjusted: section.sectionId === sectionId ? true : node.adjusted }))));
     setDraggingCategory(null);
     setDragInsertTarget(null);
@@ -2441,7 +2451,7 @@ function ToolRunResultCard({ toolRun }: { toolRun: ToolRunResult }) {
 
 function ConnectionStatusBadge({ status, reason, onSmartFix }: { status: ConnectionStatus; reason?: string; onSmartFix?: () => void }) {
   const config = {
-    error: { title: "输入承接异常", color: "#f97316", bgcolor: "#fff7ed", border: "#fed7aa", icon: <ErrorOutline sx={{ fontSize: 15 }} /> },
+    error: { title: "输入承接异常", color: "#dc2626", bgcolor: "#fef2f2", border: "#fecaca", icon: <Close sx={{ fontSize: 16, strokeWidth: 2.6 }} /> },
     resolving: { title: "解决中", color: "#7c3aed", bgcolor: "#f5f3ff", border: "#ddd6fe", icon: <Sync sx={{ fontSize: 15, animation: "spin 1.1s linear infinite" }} /> },
     resolved: { title: "已解决", color: "#16a34a", bgcolor: "#f0fdf4", border: "#bbf7d0", icon: <CheckCircleOutline sx={{ fontSize: 15 }} /> },
     normal: { title: "", color: "#64748b", bgcolor: "#fff", border: "#e2e8f0", icon: null },
@@ -2676,7 +2686,7 @@ function WorkflowNodeCard({
                 height: "100%",
                 bgcolor: "transparent",
                 background: connectionStatus === "error"
-                  ? "linear-gradient(180deg, #e2e8f0 0%, #fb923c 42%, #f97316 58%, #e2e8f0 100%)"
+                  ? "linear-gradient(180deg, #e2e8f0 0%, #f87171 42%, #dc2626 58%, #e2e8f0 100%)"
                   : connectionStatus === "resolving"
                     ? "linear-gradient(180deg, #e2e8f0 0%, #c084fc 42%, #a855f7 58%, #e2e8f0 100%)"
                     : connectionStatus === "resolved"
@@ -2685,7 +2695,7 @@ function WorkflowNodeCard({
                 backgroundSize: connectionStatus === "normal" ? "auto" : "100% 220%",
                 backgroundPosition: connectionStatus === "normal" ? "0 0" : "0 0",
                 borderRadius: 999,
-                boxShadow: connectionStatus === "normal" ? "none" : "0 0 12px rgba(128, 26, 235, 0.12)",
+                boxShadow: connectionStatus === "error" ? "0 0 12px rgba(220, 38, 38, 0.18)" : connectionStatus === "normal" ? "none" : "0 0 12px rgba(128, 26, 235, 0.12)",
                 transition: "background 0.36s ease, box-shadow 0.36s ease",
                 animation: connectionStatus === "normal" ? "none" : "connectionStatusFlow 1.1s ease-in-out infinite",
                 "@keyframes connectionStatusFlow": {
