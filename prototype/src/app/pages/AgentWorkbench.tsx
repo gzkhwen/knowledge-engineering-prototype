@@ -36,6 +36,7 @@ import {
   ErrorOutline,
   FactCheck,
   Handyman,
+  PlayArrow,
   Send,
   Sync,
   UploadFile,
@@ -369,6 +370,42 @@ function createSampleResult(file: SampleFileItem): SampleProcessResult {
         status: "成功",
       },
     ],
+  };
+}
+
+function createSampleResultForPlan(file: SampleFileItem, nodes: ToolNode[]): SampleProcessResult {
+  const defaultRuns = createSampleResult(file).toolRuns;
+  const enabledNodes = nodes.filter((node) => node.enabled);
+  return {
+    fileId: file.id,
+    toolRuns: enabledNodes.map((node, index) => {
+      const matchedRun = defaultRuns.find((run) => run.toolName === node.toolName);
+      if (matchedRun) return matchedRun;
+      const inputParam = getToolInputParam(node);
+      const outputPath = node.outputs[0]?.path || `data.step${index + 1}Result`;
+      return {
+        toolName: node.toolName,
+        category: node.category,
+        outputPath,
+        parameters: [
+          { name: inputParam?.id ?? "input", value: node.inputSource.type === "upstream" ? `${node.inputSource.sourceNodeId ?? "上游节点"} / ${node.inputSource.outputPath ?? "未配置"}` : `${file.name} · ${file.size}` },
+          ...node.params
+            .filter((param) => param.id !== inputParam?.id && isParamVisible(node, param))
+            .slice(0, 4)
+            .map((param) => ({ name: param.id, value: Array.isArray(param.value) ? param.value.join("、") : String(param.value) })),
+        ],
+        outputFull: JSON.stringify({
+          data: {
+            [outputPath.split(".").slice(-1)[0] ?? "result"]: {
+              sourceFile: file.name,
+              nodeId: node.nodeId,
+              status: "completed",
+            },
+          },
+        }, null, 2),
+        status: node.sourceType === "system" ? "已适配" : "成功",
+      };
+    }),
   };
 }
 
@@ -886,6 +923,60 @@ function createAgentAdjustedPlanNodes(currentNodes: ToolNode[]): ToolNode[] {
   return next;
 }
 
+function applyNodeInputSource(node: ToolNode, inputSource: InputSource) {
+  const paramSource: ParamSource = inputSource.type === "upstream"
+    ? { type: "upstream", sourceNodeId: inputSource.sourceNodeId, outputPath: inputSource.outputPath }
+    : { type: "file" };
+  return {
+    ...node,
+    adjusted: true,
+    inputSource,
+    params: node.params.map((param, index) => (
+      param.id === node.inputParamId || (!node.inputParamId && index === 0)
+        ? { ...param, source: paramSource }
+        : param
+    )),
+    codeInputs: node.codeInputs?.map((input, index) => (
+      index === 0 ? { ...input, source: paramSource } : input
+    )),
+  };
+}
+
+function createAgentRepairedPlanNodes(currentNodes: ToolNode[]): ToolNode[] {
+  const adjustedNodes = createAgentAdjustedPlanNodes(currentNodes);
+  const orderedNodes = [...adjustedNodes].sort((a, b) => {
+    const getRepairOrder = (node: ToolNode) => {
+      if (node.category === "文档解析") return 0;
+      if (node.toolId === "system-code") return 1;
+      if (node.category === "内容处理") return 2;
+      if (node.toolId === "system-storage") return 3;
+      if (node.category === "智能生成") return 4;
+      return 5;
+    };
+    return getRepairOrder(a) - getRepairOrder(b);
+  });
+
+  const parser = orderedNodes.find((node) => node.category === "文档解析");
+  const adapter = orderedNodes.find((node) => node.toolId === "system-code");
+  const splitter = orderedNodes.find((node) => node.category === "内容处理");
+
+  return orderedNodes.map((node) => {
+    if (node.nodeId === parser?.nodeId) return applyNodeInputSource(node, { type: "fixed" });
+    if (node.nodeId === adapter?.nodeId && parser) return applyNodeInputSource(node, { type: "upstream", sourceNodeId: parser.nodeId, outputPath: "sections" });
+    if (node.nodeId === splitter?.nodeId) {
+      if (adapter) return applyNodeInputSource(node, { type: "upstream", sourceNodeId: adapter.nodeId, outputPath: "data.cleanBlocks" });
+      if (parser) return applyNodeInputSource(node, { type: "upstream", sourceNodeId: parser.nodeId, outputPath: parser.outputs[0]?.path ?? "data.documentParseResult" });
+    }
+    if ((node.toolId === "system-storage" || node.category === "智能生成") && splitter) {
+      return applyNodeInputSource(node, { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
+    }
+    const previousNode = orderedNodes[Math.max(orderedNodes.findIndex((item) => item.nodeId === node.nodeId) - 1, 0)];
+    return previousNode && previousNode.nodeId !== node.nodeId
+      ? applyNodeInputSource(node, { type: "upstream", sourceNodeId: previousNode.nodeId, outputPath: previousNode.outputs[0]?.path ?? "data.result" })
+      : applyNodeInputSource(node, { type: "fixed" });
+  });
+}
+
 function getParamProblems(node: ToolNode, receivesExternalInput = false) {
   if (!node.enabled) return [];
   return node.params.flatMap((param) => {
@@ -943,11 +1034,22 @@ function isValidOutputPath(path?: string) {
 }
 
 function isInputSourceInvalid(node: ToolNode, nodes: ToolNode[]) {
-  if (isFirstCategoryFirstNode(node, nodes)) return false;
-  if (node.inputSource.type !== "upstream") return false;
+  return Boolean(getInputSourceIssueReason(node, nodes));
+}
+
+function getInputSourceIssueReason(node: ToolNode, nodes: ToolNode[]) {
+  if (isFirstCategoryFirstNode(node, nodes)) return "";
+  if (node.inputSource.type !== "upstream") return "";
   const priorNodes = getPriorNodes(nodes, node.nodeId);
-  const sourceNode = priorNodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
-  return !sourceNode || !isValidOutputPath(node.inputSource.outputPath);
+  const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
+  if (!sourceNode) return `${node.toolName} 的输入来源节点已不存在。`;
+  if (!priorNodes.some((item) => item.nodeId === sourceNode.nodeId)) {
+    return `${node.toolName} 引用的上游工具「${sourceNode.toolName}」位于当前节点之后，流程执行时无法取得 ${node.inputSource.outputPath || "输出结果"}。`;
+  }
+  if (!isValidOutputPath(node.inputSource.outputPath)) {
+    return `${node.toolName} 的输入路径未配置或格式不合法。`;
+  }
+  return "";
 }
 
 function getCategorySections(nodes: ToolNode[]) {
@@ -966,6 +1068,39 @@ function getCategorySections(nodes: ToolNode[]) {
 
 function getConnectionKey(fromCategory: string, toCategory: string) {
   return `${fromCategory}->${toCategory}`;
+}
+
+function getSectionInputIssueReason(section: { nodes: ToolNode[] }, nodes: ToolNode[]) {
+  const issueNode = section.nodes.find((node) => Boolean(getInputSourceIssueReason(node, nodes)));
+  return issueNode ? getInputSourceIssueReason(issueNode, nodes) : "";
+}
+
+function getSectionConnectionFailureReason(section: { nodes: ToolNode[] }, nodes: ToolNode[], warnings: Record<string, string[]>) {
+  const inputReason = getSectionInputIssueReason(section, nodes);
+  if (inputReason) return inputReason;
+  const sectionWarning = section.nodes
+    .flatMap((node) => warnings[node.nodeId] ?? [])
+    .find((warning) => warning !== inputSourceWarningText);
+  return sectionWarning ? `节点「${section.category}」存在配置问题：${sectionWarning}` : "";
+}
+
+function getFirstPlanFailure(nodes: ToolNode[]) {
+  const warnings = getNodeWarnings(nodes);
+  const sections = getCategorySections(nodes);
+  for (let index = 0; index < sections.length; index += 1) {
+    const reason = getSectionConnectionFailureReason(sections[index], nodes, warnings);
+    if (!reason) continue;
+    const fromSection = sections[Math.max(index - 1, 0)];
+    const toSection = sections[index === 0 ? Math.min(index + 1, sections.length - 1) : index];
+    if (!fromSection || !toSection || fromSection.sectionId === toSection.sectionId) return { reason };
+    return {
+      reason,
+      fromCategory: fromSection.category,
+      toCategory: toSection.category,
+      connectionKey: getConnectionKey(fromSection.category, toSection.category),
+    };
+  }
+  return null;
 }
 
 function getCategoryOrder(category: string) {
@@ -1080,7 +1215,9 @@ export function AgentWorkbench() {
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>(initialAgentEvents);
   const [agentInput, setAgentInput] = useState("");
   const [isAgentRunning, setIsAgentRunning] = useState(false);
+  const [isPlanTesting, setIsPlanTesting] = useState(false);
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionStatus>>({});
+  const [connectionFailureReasons, setConnectionFailureReasons] = useState<Record<string, string>>({});
   const [nodeRuntimeStates, setNodeRuntimeStates] = useState<Record<string, NodeRuntimeState>>({});
 
   const currentToolCatalog = useMemo(() => toolCatalog, [toolCatalogVersion]);
@@ -1091,9 +1228,10 @@ export function AgentWorkbench() {
   const displayedNodeWarnings = useMemo(() => (isAgentRunning ? {} : getNodeDisplayWarnings(nodeWarnings)), [isAgentRunning, nodeWarnings]);
   const allProblems = getPlanProblems(planNodes);
   const visibleProblems = isAgentRunning || planNodes.length === 0 ? [] : allProblems;
-  const canEdit = !confirmed && !isAgentRunning;
-  const canSendAgentMessage = !isAgentRunning && Boolean(agentInput.trim()) && (planNodes.length > 0 || sampleFiles.length > 0);
+  const canEdit = !confirmed && !isAgentRunning && !isPlanTesting;
+  const canSendAgentMessage = !isAgentRunning && !isPlanTesting && Boolean(agentInput.trim()) && (planNodes.length > 0 || sampleFiles.length > 0);
   const canSavePlan = canEdit && planNodes.length > 0 && visibleProblems.length === 0;
+  const canTestPlan = planNodes.length > 0 && sampleFiles.length > 0 && !isAgentRunning && !isPlanTesting;
   const editingNode = planNodes.find((node) => node.nodeId === editingNodeId) ?? null;
   const addedToolIds = useMemo(() => new Set(planNodes.map((node) => node.toolId)), [planNodes]);
 
@@ -1147,7 +1285,7 @@ export function AgentWorkbench() {
     return id;
   };
 
-  const setConnectionStatus = (fromCategory: string, toCategory: string, status: ConnectionStatus) => {
+  const setConnectionStatus = (fromCategory: string, toCategory: string, status: ConnectionStatus, reason?: string) => {
     const key = getConnectionKey(fromCategory, toCategory);
     setConnectionStates((current) => {
       if (status === "normal") {
@@ -1156,6 +1294,12 @@ export function AgentWorkbench() {
         return next;
       }
       return { ...current, [key]: status };
+    });
+    setConnectionFailureReasons((current) => {
+      if (status === "error" && reason) return { ...current, [key]: reason };
+      const next = { ...current };
+      delete next[key];
+      return next;
     });
   };
 
@@ -1173,6 +1317,13 @@ export function AgentWorkbench() {
   const clearConnectionStatuses = (nodes: ToolNode[]) => {
     const sections = getCategorySections(nodes);
     setConnectionStates((current) => {
+      const next = { ...current };
+      sections.slice(0, -1).forEach((section, index) => {
+        delete next[getConnectionKey(section.category, sections[index + 1].category)];
+      });
+      return next;
+    });
+    setConnectionFailureReasons((current) => {
       const next = { ...current };
       sections.slice(0, -1).forEach((section, index) => {
         delete next[getConnectionKey(section.category, sections[index + 1].category)];
@@ -1213,13 +1364,14 @@ export function AgentWorkbench() {
     setRightTab(1);
     setPlanNodes([]);
     setConnectionStates({});
+    setConnectionFailureReasons({});
     setNodeRuntimeStates({});
     setSampleResults([]);
     setSampleFiles((current) => current.map((file) => ({ ...file, status: "已发送" })));
     pushAgentEvent({
       role: "user",
       title: "发送样例文件",
-      content: `已发送 ${filesSnapshot.length} 个样例文件，请生成正式的知识处理方案。`,
+      content: `已发送 ${filesSnapshot.length} 个样例文件，并附带已标记问题，请生成正式的知识处理方案。`,
       status: "done",
     });
 
@@ -1357,7 +1509,7 @@ export function AgentWorkbench() {
     });
     step(7200, () => {
       clearConnectionStatuses(draftNodes);
-      setConnectionStatus(parser.category, splitter.category, "error");
+      setConnectionStatus(parser.category, splitter.category, "error", "医保政策解析返回 sections[].content，分片工具需要 data.cleanBlocks，节点之间缺少结构适配。");
       updateAgentEvent(checkEventId, {
         status: "done",
         content: "发现适配问题：医保政策解析返回 sections[].content，分片工具需要 data.cleanBlocks。",
@@ -1512,6 +1664,7 @@ export function AgentWorkbench() {
     setTimeout(() => {
       updatePlanNodesWithMotion(adjustedNodes);
       setConnectionStates({});
+      setConnectionFailureReasons({});
       setNodesRuntime(affectedAdjustedNodes, { status: "configuring", visibleParamCount: 2 });
     }, 2400);
 
@@ -1579,6 +1732,141 @@ export function AgentWorkbench() {
     }
     setConfirmed(true);
     toast.success("处理方案已保存");
+  };
+
+  const testCurrentPlan = () => {
+    if (planNodes.length === 0) {
+      toast.error("请先生成或添加处理方案");
+      return;
+    }
+    if (sampleFiles.length === 0) {
+      toast.error("请先选择样例文件");
+      return;
+    }
+
+    const nodesSnapshot = planNodes.filter((node) => node.enabled);
+    const filesSnapshot = [...sampleFiles];
+    const failure = getFirstPlanFailure(planNodes);
+    setConfirmed(false);
+    setRightTab(1);
+    setSampleResults([]);
+    setNodeRuntimeStates({});
+    appendAgentEvent({
+      role: "user",
+      title: "测试当前方案",
+      content: `使用 ${filesSnapshot[0].name} 试跑当前处理方案。`,
+      status: "done",
+    });
+
+    if (failure) {
+      if (failure.fromCategory && failure.toCategory) {
+        setConnectionStatus(failure.fromCategory, failure.toCategory, "error", failure.reason);
+      }
+      appendAgentEvent({
+        role: "agent",
+        title: "方案测试未通过",
+        content: `试跑已停止：${failure.reason}`,
+        status: "done",
+      });
+      toast.error("方案测试未通过，失败原因已标记在流程连线上");
+      return;
+    }
+
+    clearConnectionStatuses(planNodes);
+    setIsPlanTesting(true);
+    setRightTab(2);
+    setSampleFiles((current) => current.map((file) => ({ ...file, status: "试跑中" })));
+    const executeEventId = appendAgentEvent({
+      role: "thought",
+      title: "测试当前方案",
+      content: "按当前方案节点顺序执行样例文件，逐个校验工具输入、输出和下游承接。",
+      status: "running",
+      kind: "toolCall",
+    });
+
+    nodesSnapshot.forEach((node, index) => {
+      window.setTimeout(() => setNodeRuntime(node, { status: "running" }), 700 + index * 1100);
+      window.setTimeout(() => setNodeRuntime(node, { status: "success" }), 1350 + index * 1100);
+    });
+
+    window.setTimeout(() => {
+      setSampleResults(filesSnapshot.map((file) => createSampleResultForPlan(file, nodesSnapshot)));
+      setSampleFiles((current) => current.map((file) => ({ ...file, status: "已完成" })));
+      setNodesRuntime(nodesSnapshot, { status: "done" });
+      updateAgentEvent(executeEventId, {
+        status: "done",
+        content: "测试通过：样例文件已按当前方案完整跑通，结果预览已更新。",
+      });
+      setIsPlanTesting(false);
+      toast.success("方案测试通过");
+    }, 1400 + nodesSnapshot.length * 1100);
+  };
+
+  const requestSmartRepair = (reason: string, fromCategory?: string, toCategory?: string) => {
+    if (isAgentRunning || isPlanTesting || planNodes.length === 0) return;
+    const instruction = `请智能修复当前处理方案的节点承接问题：${reason}。请基于当前方案调整节点顺序、输入来源和参数路径，不要重建无关节点。`;
+    const currentNodes = planNodes;
+    const repairedNodes = createAgentRepairedPlanNodes(currentNodes);
+    const repairTargets = repairedNodes.filter((node) => node.adjusted);
+    setIsAgentRunning(true);
+    setConfirmed(false);
+    setRightTab(1);
+    appendAgentEvent({
+      role: "user",
+      title: "智能修复请求",
+      content: instruction,
+      status: "done",
+    });
+
+    const analyzeEventId = appendAgentEvent({
+      role: "thought",
+      title: "定位失败连线",
+      content: "正在读取当前流程节点顺序、输入来源和工具输出路径，确认需要修复的承接关系。",
+      status: "running",
+    });
+
+    window.setTimeout(() => {
+      if (fromCategory && toCategory) setConnectionStatus(fromCategory, toCategory, "resolving");
+      updateAgentEvent(analyzeEventId, {
+        status: "done",
+        content: `已确认失败原因：${reason}`,
+      });
+    }, 900);
+
+    let repairEventId = "";
+    window.setTimeout(() => {
+      repairEventId = appendAgentEvent({
+        role: "thought",
+        title: "修复节点承接",
+        content: "修复动作：调整节点顺序，重写下游输入来源，并同步工具参数中的上游输出路径。",
+        status: "running",
+        kind: "toolCall",
+      });
+      updatePlanNodesWithMotion(repairedNodes);
+      setNodesRuntime(repairTargets, { status: "configuring", visibleParamCount: 2 });
+    }, 1600);
+
+    window.setTimeout(() => {
+      setNodesRuntime(repairTargets, { status: "configured", visibleParamCount: 4 });
+      if (fromCategory && toCategory) setConnectionStatus(fromCategory, toCategory, "resolved");
+      updateAgentEvent(repairEventId, {
+        status: "done",
+        content: "节点承接已修复：上游输出路径和下游输入参数已重新连接。",
+      });
+    }, 3000);
+
+    window.setTimeout(() => {
+      clearConnectionStatuses(repairedNodes);
+      setNodesRuntime(repairTargets, { status: "done" });
+      appendAgentEvent({
+        role: "agent",
+        title: "智能修复完成",
+        content: "当前方案已完成局部修复，可以点击测试重新试跑样例文件。",
+        status: "done",
+      });
+      setIsAgentRunning(false);
+      toast.success("智能修复完成");
+    }, 4300);
   };
 
   const onDropNode = (targetId: string) => {
@@ -1719,8 +2007,10 @@ export function AgentWorkbench() {
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#374151", mb: 1 }}>已标记问题</Typography>
           <Box sx={{ bgcolor: "#F8FAFC", borderRadius: "10px", p: 1.5, color: "#64748b", fontSize: 12, lineHeight: 1.5 }}>客户自建解析工具可能不声明输出，需要验证后置工具承接。</Box>
           <Stack spacing={1} sx={{ mt: 2 }}>
-            <Button disabled={sampleFiles.length === 0 || isAgentRunning} onClick={sendSamplesToAgent} startIcon={isAgentRunning ? <CircularProgress size={14} color="inherit" /> : <Send />} variant="contained" sx={{ textTransform: "none", bgcolor: "#801AEB", "&:hover": { bgcolor: "#6D16C9" }, "&.Mui-disabled": { bgcolor: "#ede9fe", color: "#8b5cf6" } }}>发送所选文件给智能体</Button>
-            <Button disabled={sampleFiles.length === 0 || isAgentRunning} onClick={sendSamplesToAgent} startIcon={<Send />} variant="outlined" sx={{ textTransform: "none", color: "#801AEB", borderColor: "#ddd6fe" }}>发送所选问题给智能体</Button>
+            <Button disabled={sampleFiles.length === 0 || isAgentRunning || isPlanTesting} onClick={sendSamplesToAgent} startIcon={isAgentRunning ? <CircularProgress size={14} color="inherit" /> : <Send />} variant="contained" sx={{ textTransform: "none", bgcolor: "#801AEB", "&:hover": { bgcolor: "#6D16C9" }, "&.Mui-disabled": { bgcolor: "#ede9fe", color: "#8b5cf6" } }}>发送样例和问题给智能体</Button>
+            <Typography sx={{ px: 0.5, fontSize: 11, color: "#94a3b8", lineHeight: 1.5 }}>
+              智能体将同时读取样例文件和左侧已标记问题，生成可保存的处理方案。
+            </Typography>
           </Stack>
         </Paper>
 
@@ -1772,7 +2062,7 @@ export function AgentWorkbench() {
                   <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
                     <Chip label={`${categorySections.length} 个流程节点`} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#f5f3ff", color: "#6d28d9" }} />
                     <Chip label={`${planNodes.length} 个工具`} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: "#eff6ff", color: "#2563eb" }} />
-                    <Chip label={isAgentRunning ? "生成中" : confirmed ? "已保存" : visibleProblems.length ? "存在问题" : "待确认"} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: isAgentRunning ? "#fff7ed" : confirmed ? "#f0fdf4" : visibleProblems.length ? "#fef2f2" : "#f8fafc", color: isAgentRunning ? "#c2410c" : confirmed ? "#16a34a" : visibleProblems.length ? "#dc2626" : "#64748b" }} />
+	                    <Chip label={isPlanTesting ? "测试中" : isAgentRunning ? "生成中" : confirmed ? "已保存" : visibleProblems.length ? "存在问题" : "待确认"} size="small" sx={{ height: 20, fontSize: 10.5, bgcolor: isPlanTesting || isAgentRunning ? "#fff7ed" : confirmed ? "#f0fdf4" : visibleProblems.length ? "#fef2f2" : "#f8fafc", color: isPlanTesting || isAgentRunning ? "#c2410c" : confirmed ? "#16a34a" : visibleProblems.length ? "#dc2626" : "#64748b" }} />
                   </Stack>
                 </Box>
                 <Tooltip title="添加工具">
@@ -1798,10 +2088,13 @@ export function AgentWorkbench() {
                       {categorySections.map((section, index) => {
                         const nextSection = categorySections[index + 1];
                         const connectionKey = nextSection ? getConnectionKey(section.category, nextSection.category) : "";
-                        const connectionStatus = nextSection
-                          ? connectionStates[connectionKey] ?? (!isAgentRunning && sectionHasInputIssue(nextSection, inputIssueMap) ? "error" : "normal")
-                          : "normal";
-                        const insertPosition = dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : null;
+	                        const connectionStatus = nextSection
+	                          ? connectionStates[connectionKey] ?? (!isAgentRunning && sectionHasInputIssue(nextSection, inputIssueMap) ? "error" : "normal")
+	                          : "normal";
+	                        const connectionFailureReason = nextSection
+	                          ? connectionFailureReasons[connectionKey] ?? getSectionConnectionFailureReason(nextSection, planNodes, nodeWarnings)
+	                          : "";
+	                        const insertPosition = dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : null;
                         return (
                           <Fragment key={section.sectionId}>
                             {insertPosition === "before" && (
@@ -1814,10 +2107,11 @@ export function AgentWorkbench() {
                               index={index}
                               total={categorySections.length}
                               section={section}
-                              allNodes={planNodes}
-                              connectionStatus={connectionStatus}
-                              hasInputIssue={!isAgentRunning && sectionHasInputIssue(section, inputIssueMap)}
-                              runtimeStates={nodeRuntimeStates}
+	                              allNodes={planNodes}
+	                              connectionStatus={connectionStatus}
+	                              connectionFailureReason={connectionFailureReason}
+	                              hasInputIssue={!isAgentRunning && sectionHasInputIssue(section, inputIssueMap)}
+	                              runtimeStates={nodeRuntimeStates}
                               canEdit={canEdit}
                               isDragging={draggingCategory === section.sectionId}
                               warnings={displayedNodeWarnings}
@@ -1845,12 +2139,13 @@ export function AgentWorkbench() {
                                 setDraggingCategory(null);
                                 setDragInsertTarget(null);
                               }}
-                              onNodeDrop={() => {
-                                if (draggingCategory && dragInsertTarget) {
-                                  moveCategoryTo(draggingCategory, dragInsertTarget.sectionId, dragInsertTarget.position);
-                                }
-                              }}
-                              draggingNodeId={draggingNodeId}
+	                              onNodeDrop={() => {
+	                                if (draggingCategory && dragInsertTarget) {
+	                                  moveCategoryTo(draggingCategory, dragInsertTarget.sectionId, dragInsertTarget.position);
+	                                }
+	                              }}
+	                              onSmartFixConnection={() => requestSmartRepair(connectionFailureReason || "节点之间参数承接失败。", section.category, nextSection?.category)}
+	                              draggingNodeId={draggingNodeId}
                               onToolDragStart={(nodeId) => setDraggingNodeId(nodeId)}
                               onToolDrop={onDropNode}
                             />
@@ -1873,10 +2168,40 @@ export function AgentWorkbench() {
                     <Typography sx={{ fontSize: 12, color: "#b91c1c" }}>当前方案存在 {visibleProblems.length} 个校验问题，请处理后保存。</Typography>
                   </Box>
                 )}
-                <Button fullWidth startIcon={<FactCheck />} onClick={confirmPlan} disabled={!canSavePlan} variant="contained" sx={{ bgcolor: !canSavePlan ? "#cbd5e1" : "#801AEB", borderRadius: "10px", textTransform: "none", "&:hover": { bgcolor: !canSavePlan ? "#cbd5e1" : "#6D16C9" } }}>
-                  保存为处理方案
-                </Button>
-              </Box>
+	                <Stack direction="row" spacing={1}>
+	                  {planNodes.length > 0 && (
+	                    <Button
+	                      startIcon={isPlanTesting ? <CircularProgress size={14} color="inherit" /> : <PlayArrow />}
+	                      onClick={testCurrentPlan}
+	                      disabled={!canTestPlan}
+	                      variant="outlined"
+	                      sx={{
+	                        width: "25%",
+	                        minWidth: 88,
+	                        borderRadius: "10px",
+	                        textTransform: "none",
+	                        borderColor: "#ddd6fe",
+	                        color: "#801AEB",
+	                        bgcolor: "#fff",
+	                        "&:hover": { borderColor: "#c4b5fd", bgcolor: "#faf5ff" },
+	                        "&.Mui-disabled": { borderColor: "#e5e7eb", color: "#94a3b8" },
+	                      }}
+	                    >
+	                      测试
+	                    </Button>
+	                  )}
+	                  <Button
+	                    fullWidth
+	                    startIcon={<FactCheck />}
+	                    onClick={confirmPlan}
+	                    disabled={!canSavePlan}
+	                    variant="contained"
+	                    sx={{ flex: 1, bgcolor: !canSavePlan ? "#cbd5e1" : "#801AEB", borderRadius: "10px", textTransform: "none", "&:hover": { bgcolor: !canSavePlan ? "#cbd5e1" : "#6D16C9" } }}
+	                  >
+	                    保存为处理方案
+	                  </Button>
+	                </Stack>
+	              </Box>
             </Box>
           ) : rightTab === 2 ? (
             <SampleResultPanel files={sampleFiles} results={sampleResults} />
@@ -2114,16 +2439,44 @@ function ToolRunResultCard({ toolRun }: { toolRun: ToolRunResult }) {
   );
 }
 
-function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
+function ConnectionStatusBadge({ status, reason, onSmartFix }: { status: ConnectionStatus; reason?: string; onSmartFix?: () => void }) {
   const config = {
     error: { title: "输入承接异常", color: "#f97316", bgcolor: "#fff7ed", border: "#fed7aa", icon: <ErrorOutline sx={{ fontSize: 15 }} /> },
     resolving: { title: "解决中", color: "#7c3aed", bgcolor: "#f5f3ff", border: "#ddd6fe", icon: <Sync sx={{ fontSize: 15, animation: "spin 1.1s linear infinite" }} /> },
     resolved: { title: "已解决", color: "#16a34a", bgcolor: "#f0fdf4", border: "#bbf7d0", icon: <CheckCircleOutline sx={{ fontSize: 15 }} /> },
     normal: { title: "", color: "#64748b", bgcolor: "#fff", border: "#e2e8f0", icon: null },
   }[status];
+  const tooltipContent = status === "error" ? (
+    <Box sx={{ p: 0.25, maxWidth: 260 }}>
+      <Typography sx={{ fontSize: 12, lineHeight: 1.5, color: "#fff" }}>
+        {reason || config.title}
+      </Typography>
+      <Button
+        size="small"
+        onClick={(event) => {
+          event.stopPropagation();
+          onSmartFix?.();
+        }}
+        sx={{
+          mt: 0.75,
+          minHeight: 24,
+          px: 1,
+          py: 0.2,
+          bgcolor: "#fff",
+          color: "#7c3aed",
+          fontSize: 11,
+          fontWeight: 800,
+          textTransform: "none",
+          "&:hover": { bgcolor: "#f5f3ff" },
+        }}
+      >
+        智能修复
+      </Button>
+    </Box>
+  ) : config.title;
 
   return (
-    <Tooltip title={config.title}>
+    <Tooltip title={tooltipContent}>
       <Box
         sx={{
           position: "absolute",
@@ -2215,6 +2568,7 @@ function WorkflowNodeCard({
   section,
   allNodes,
   connectionStatus,
+  connectionFailureReason,
   hasInputIssue,
   runtimeStates,
   canEdit,
@@ -2227,6 +2581,7 @@ function WorkflowNodeCard({
   onNodeDragOver,
   onNodeDragEnd,
   onNodeDrop,
+  onSmartFixConnection,
   onToolDragStart,
   onToolDrop,
 }: {
@@ -2235,6 +2590,7 @@ function WorkflowNodeCard({
   section: { sectionId: string; category: string; nodes: ToolNode[] };
   allNodes: ToolNode[];
   connectionStatus: ConnectionStatus;
+  connectionFailureReason: string;
   hasInputIssue: boolean;
   runtimeStates: Record<string, NodeRuntimeState>;
   canEdit: boolean;
@@ -2247,6 +2603,7 @@ function WorkflowNodeCard({
   onNodeDragOver: (event: DragEvent<HTMLDivElement>) => void;
   onNodeDragEnd: () => void;
   onNodeDrop: () => void;
+  onSmartFixConnection: () => void;
   onToolDragStart: (nodeId: string) => void;
   onToolDrop: (nodeId: string) => void;
 }) {
@@ -2337,7 +2694,7 @@ function WorkflowNodeCard({
                 },
               }}
             />
-            <ConnectionStatusBadge status={connectionStatus} />
+            <ConnectionStatusBadge status={connectionStatus} reason={connectionFailureReason} onSmartFix={onSmartFixConnection} />
           </Box>
         )}
       </Box>
