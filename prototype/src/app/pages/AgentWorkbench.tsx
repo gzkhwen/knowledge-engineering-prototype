@@ -14,6 +14,7 @@ import {
   FormControl,
   FormControlLabel,
   IconButton,
+  InputAdornment,
   InputLabel,
   MenuItem,
   Paper,
@@ -54,6 +55,24 @@ type AgentEventKind = "message" | "toolCall" | "flow";
 type ConnectionStatus = "normal" | "error" | "resolving" | "resolved";
 type NodeRuntimeStatus = "building" | "selectingTool" | "configuring" | "configured" | "done" | "running" | "success";
 type InsertPosition = "before" | "after";
+type AgentTaskTag =
+  | { type: "tool-config"; nodeId: string; toolName: string }
+  | { type: "connection-fix"; reason: string; fromCategory?: string; toCategory?: string };
+type ConnectionIssueKind = "missing-upstream" | "source-missing" | "source-after" | "bypass-inserted-node" | "invalid-path";
+
+interface ConnectionIssue {
+  kind: ConnectionIssueKind;
+  nodeId: string;
+  reason: string;
+  sourceNodeId?: string;
+  previousNodeId?: string;
+}
+
+interface PlanConnectionFailure extends ConnectionIssue {
+  fromCategory?: string;
+  toCategory?: string;
+  connectionKey?: string;
+}
 
 interface SampleFileItem {
   id: string;
@@ -210,7 +229,47 @@ const customerMcpService: McpService = {
   version: "V1.1.0",
 };
 
+const categoryAliases: Record<string, string> = {
+  内容处理: "文本分片",
+  智能生成: "知识提取",
+};
+
+const workflowCategoryOrder = ["文档解析", "文本分片", "系统工具", "知识提取", "质量评估"];
+const toolDialogCategoryOrder = ["文档解析", "文本分片", "知识提取", "质量评估", "系统工具"];
+
+function normalizeCategory(category: string) {
+  return categoryAliases[category] ?? category;
+}
+
+function getCategorySortIndex(category: string, order: string[]) {
+  const normalizedCategory = normalizeCategory(category);
+  const index = order.indexOf(normalizedCategory);
+  return index >= 0 ? index : order.length;
+}
+
+function sortCategories(categories: string[], order: string[]) {
+  return [...categories].sort((a, b) => {
+    const orderDiff = getCategorySortIndex(a, order) - getCategorySortIndex(b, order);
+    return orderDiff || normalizeCategory(a).localeCompare(normalizeCategory(b), "zh-Hans-CN");
+  });
+}
+
+function sortToolsForDialog(tools: McpTool[]) {
+  return [...tools].sort((a, b) => {
+    const orderDiff = getCategorySortIndex(a.category, toolDialogCategoryOrder) - getCategorySortIndex(b.category, toolDialogCategoryOrder);
+    return orderDiff || a.name.localeCompare(b.name, "zh-Hans-CN");
+  });
+}
+
 const inputSourceWarningText = "输入配置异常，请检查。";
+
+function isParamConfigWarning(warning: string) {
+  return warning.endsWith("未填写") || warning.endsWith("未选择") || warning.endsWith("超出范围");
+}
+
+function getAgentTaskTagLabel(tag: AgentTaskTag) {
+  return tag.type === "connection-fix" ? "处理流程连接问题" : `设置${tag.toolName}参数`;
+}
 
 const demoSampleFile: SampleFileItem = {
   id: "demo-policy-sample",
@@ -281,7 +340,7 @@ function createSampleResult(file: SampleFileItem): SampleProcessResult {
       },
       {
         toolName: "分隔符递归分片",
-        category: "内容处理",
+        category: "文本分片",
         outputPath: "data.textChunkResult",
         parameters: [
           { name: "input", value: "data.cleanBlocks" },
@@ -324,7 +383,7 @@ function createSampleResult(file: SampleFileItem): SampleProcessResult {
       },
       {
         toolName: "QA提取",
-        category: "智能生成",
+        category: "知识提取",
         outputPath: "data.qaResult",
         parameters: [
           { name: "input", value: "data.textChunkResult" },
@@ -347,7 +406,7 @@ function createSampleResult(file: SampleFileItem): SampleProcessResult {
       },
       {
         toolName: "摘要总结",
-        category: "智能生成",
+        category: "知识提取",
         outputPath: "data.summaryResult",
         parameters: [
           { name: "input", value: "data.textChunkResult" },
@@ -384,7 +443,7 @@ function createSampleResultForPlan(file: SampleFileItem, nodes: ToolNode[]): Sam
       const outputPath = node.outputs[0]?.path || `data.step${index + 1}Result`;
       return {
         toolName: node.toolName,
-        category: node.category,
+        category: normalizeCategory(node.category),
         outputPath,
         parameters: [
           { name: inputParam?.id ?? "input", value: node.inputSource.type === "upstream" ? `${node.inputSource.sourceNodeId ?? "上游节点"} / ${node.inputSource.outputPath ?? "未配置"}` : `${file.name} · ${file.size}` },
@@ -669,11 +728,11 @@ function managedOutputsToCatalogOutputs(tool: ManagedToolItem, fallbackOutputs: 
 
 function withManagedToolSample(baseTool: McpTool, sampleName = baseTool.name): McpTool {
   const sample = managedToolByName.get(sampleName);
-  if (!sample) return baseTool;
+  if (!sample) return { ...baseTool, category: normalizeCategory(baseTool.category) };
   return {
     ...baseTool,
     name: sample.name,
-    category: sample.category,
+    category: normalizeCategory(sample.category),
     serviceName: sample.serviceName,
     summary: sample.description,
     status: sample.enabled ? "可用" : "不可用",
@@ -686,15 +745,15 @@ const baseToolCatalog: McpTool[] = [
   withManagedToolSample({ id: "document-parser", name: "通用解析", category: "文档解析", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "解析 Word、PDF、Excel 等主流文档，提取文本和版面布局。", status: "可用", input: "sampleFile", output: "rawText", params: commonParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含解析后的文本、版面、图片和表格信息。", "data.documentParseResult")] }),
   withManagedToolSample({ id: "multimodal-parser", name: "多模态解析", category: "文档解析", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "使用多模态大模型对文档内容进行解析，效果好、速度慢。", status: "可用", input: "sampleFile", output: "rawText", params: multimodalParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含多模态解析后的文本、图片理解和版面信息。", "data.documentParseResult")] }),
   withManagedToolSample({ id: "medical-policy-parser", name: "医保政策文件解析", category: "文档解析", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "适用于解析医保政策类文件。", status: "可用", input: "sampleFile", output: "rawText", params: policyParseParams, outputs: [createOutput("documentParseResult", "文档解析结果", "Array<json>，包含医保政策文档的条款、标题和正文结构。", "data.documentParseResult")] }),
-  withManagedToolSample({ id: "chunk-splitter", name: "通用分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "为纯文本文档提供灵活的分块和重叠设置。", status: "可用", input: "rawText", output: "cleanText", params: commonChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含分片文本、标题、来源和元数据。", "data.textChunkResult")] }),
-  withManagedToolSample({ id: "custom-separator-splitter", name: "自定义分隔符分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "沿用通用分片配置，并使用指定分隔符切分文本。", status: "可用", input: "rawText", output: "cleanText", params: customSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含按自定义分隔符切分后的文本片段。", "data.textChunkResult")] }),
-  withManagedToolSample({ id: "recursive-separator-splitter", name: "分隔符递归分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "按分隔符优先级依次切分，优先保留语义完整。", status: "可用", input: "rawText", output: "cleanText", params: recursiveSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含递归切分后的文本片段。", "data.textChunkResult")] }),
-  withManagedToolSample({ id: "ocr-splitter", name: "OCR解析专用分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "根据 OCR 识别的标题及段落进行切分、聚合。", status: "可用", input: "rawText", output: "cleanText", params: ocrChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含面向 OCR 结果聚合后的文本片段。", "data.textChunkResult")] }),
-  withManagedToolSample({ id: "medical-policy-splitter", name: "医保政策文件分片", category: "内容处理", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "适合医保政策类文件分片，页面上没有可配置参数。", status: "可用", input: "rawText", output: "cleanText", params: policyChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含医保政策文件分片结果。", "data.textChunkResult")] }),
-  withManagedToolSample({ id: "video-audio-sync-splitter", name: "视频声画同步分片", category: "内容处理", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "按声画同步结果切分视频文本片段。", status: "可用", input: "rawText", output: "cleanText", params: videoAudioSyncChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含视频声画同步分片结果。", "data.textChunkResult")] }),
-  withManagedToolSample({ id: "qa-extractor", name: "QA提取", category: "智能生成", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [createOutput("qaResult", "QA提取结果", "Array<json>，包含问题、答案和引用来源。", "data.qaResult")] }),
-  withManagedToolSample({ id: "summary", name: "摘要总结", category: "智能生成", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [createOutput("summaryResult", "摘要总结结果", "Array<json>，包含摘要内容和来源引用。", "data.summaryResult")] }),
-  withManagedToolSample({ id: "keyword-extractor", name: "关键词提取", category: "智能生成", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [createOutput("keywordResult", "关键词提取结果", "Array<json>，包含关键词和权重。", "data.keywordResult")] }),
+  withManagedToolSample({ id: "chunk-splitter", name: "通用分片", category: "文本分片", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "为纯文本文档提供灵活的分块和重叠设置。", status: "可用", input: "rawText", output: "cleanText", params: commonChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含分片文本、标题、来源和元数据。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "custom-separator-splitter", name: "自定义分隔符分片", category: "文本分片", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "沿用通用分片配置，并使用指定分隔符切分文本。", status: "可用", input: "rawText", output: "cleanText", params: customSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含按自定义分隔符切分后的文本片段。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "recursive-separator-splitter", name: "分隔符递归分片", category: "文本分片", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "按分隔符优先级依次切分，优先保留语义完整。", status: "可用", input: "rawText", output: "cleanText", params: recursiveSeparatorChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含递归切分后的文本片段。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "ocr-splitter", name: "OCR解析专用分片", category: "文本分片", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "根据 OCR 识别的标题及段落进行切分、聚合。", status: "可用", input: "rawText", output: "cleanText", params: ocrChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含面向 OCR 结果聚合后的文本片段。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "medical-policy-splitter", name: "医保政策文件分片", category: "文本分片", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "适合医保政策类文件分片，页面上没有可配置参数。", status: "可用", input: "rawText", output: "cleanText", params: policyChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含医保政策文件分片结果。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "video-audio-sync-splitter", name: "视频声画同步分片", category: "文本分片", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "按声画同步结果切分视频文本片段。", status: "可用", input: "rawText", output: "cleanText", params: videoAudioSyncChunkParams, outputs: [createOutput("textChunkResult", "文本分片结果", "Array<json>，包含视频声画同步分片结果。", "data.textChunkResult")] }),
+  withManagedToolSample({ id: "qa-extractor", name: "QA提取", category: "知识提取", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片抽取问答对。", status: "可用", input: "cleanText", output: "qaPairs", params: qaParams, outputs: [createOutput("qaResult", "QA提取结果", "Array<json>，包含问题、答案和引用来源。", "data.qaResult")] }),
+  withManagedToolSample({ id: "summary", name: "摘要总结", category: "知识提取", serviceName: nacosMcpService.name, serviceVersion: nacosMcpService.version, summary: "基于文本分片结果生成摘要总结。", status: "可用", input: "cleanText", output: "rawText", params: summaryParams, outputs: [createOutput("summaryResult", "摘要总结结果", "Array<json>，包含摘要内容和来源引用。", "data.summaryResult")] }),
+  withManagedToolSample({ id: "keyword-extractor", name: "关键词提取", category: "知识提取", serviceName: customerMcpService.name, serviceVersion: customerMcpService.version, summary: "从文本分片中抽取关键词。", status: "可用", input: "cleanText", output: "rawText", params: keywordParams, outputs: [createOutput("keywordResult", "关键词提取结果", "Array<json>，包含关键词和权重。", "data.keywordResult")] }),
   withManagedToolSample({ id: "system-code", name: "代码工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。", status: "可用", input: "rawText", output: "cleanText", params: codeToolParams, outputs: [createOutput("scriptResult", "脚本处理结果", "json，代码脚本返回的完整结果。", "data.scriptResult"), createOutput("cleanBlocks", "标准文本块", "Array<json>，可作为后置分片或抽取工具输入。", "data.cleanBlocks")], allowMultiple: true }),
   withManagedToolSample({ id: "system-storage", name: "数据存储工具", category: "系统工具", sourceType: "system", serviceName: systemMcpService.name, serviceVersion: systemMcpService.version, summary: "选择前置工具输出中的指定路径，将结果写入 ES。", status: "可用", input: "cleanText", output: "rawText", params: storageToolParams, outputs: [createOutput("storageRef", "存储引用", "storage_ref，后置节点可引用的存储结果地址。", "data.storageRef"), createOutput("storedCount", "写入数量", "number，本次成功写入的数据条数。", "data.storedCount")], allowMultiple: true }),
 ];
@@ -702,14 +761,16 @@ const baseToolCatalog: McpTool[] = [
 const baseToolByName = new Map<string, McpTool>(baseToolCatalog.map((tool) => [tool.name, tool]));
 
 function inferInputType(tool: ManagedToolItem): ChainType {
-  if (tool.category === "文档解析") return "sampleFile";
-  if (tool.category === "内容处理") return "rawText";
+  const category = normalizeCategory(tool.category);
+  if (category === "文档解析") return "sampleFile";
+  if (category === "文本分片") return "rawText";
   return "cleanText";
 }
 
 function inferOutputType(tool: ManagedToolItem): ChainType {
-  if (tool.category === "文档解析") return "rawText";
-  if (tool.category === "内容处理") return "cleanText";
+  const category = normalizeCategory(tool.category);
+  if (category === "文档解析") return "rawText";
+  if (category === "文本分片") return "cleanText";
   if (tool.name.includes("QA")) return "qaPairs";
   return "rawText";
 }
@@ -722,7 +783,7 @@ function toManagedCatalogTool(tool: ManagedToolItem): McpTool {
   return {
     id: tool.id,
     name: tool.name,
-    category: tool.category,
+    category: normalizeCategory(tool.category),
     serviceName: tool.serviceName,
     serviceVersion: "-",
     summary: tool.description,
@@ -818,7 +879,7 @@ function createNode(toolId: string, inputSource: InputSource = { type: "fixed" }
     flowNodeId: nodeId,
     toolId: tool.id,
     toolName: tool.name,
-    category: tool.category,
+    category: normalizeCategory(tool.category),
     sourceType: tool.sourceType ?? "external",
     serviceName: tool.serviceName,
     serviceVersion: tool.serviceVersion,
@@ -887,10 +948,10 @@ function createAgentAdjustedPlanNodes(currentNodes: ToolNode[]): ToolNode[] {
   if (currentNodes.length === 0) return createAgentOptimizedPlanNodes();
 
   const next = cloneNodes(currentNodes);
-  const parser = next.find((node) => node.category === "文档解析");
+  const parser = next.find((node) => normalizeCategory(node.category) === "文档解析");
   const adapter = next.find((node) => node.toolId === "system-code");
   const upstream = adapter ?? parser;
-  const splitterIndex = next.findIndex((node) => node.category === "内容处理");
+  const splitterIndex = next.findIndex((node) => normalizeCategory(node.category) === "文本分片");
   const currentSplitter = splitterIndex >= 0 ? next[splitterIndex] : undefined;
   const splitterInputSource: InputSource = upstream
     ? { type: "upstream", sourceNodeId: upstream.nodeId, outputPath: adapter ? "data.cleanBlocks" : "data.documentParseResult" }
@@ -906,7 +967,7 @@ function createAgentAdjustedPlanNodes(currentNodes: ToolNode[]): ToolNode[] {
 
   next.forEach((node) => {
     if (node.nodeId === adjustedSplitter.nodeId) return;
-    if (node.toolId === "system-storage" || node.category === "智能生成") {
+    if (node.toolId === "system-storage" || normalizeCategory(node.category) === "知识提取") {
       node.inputSource = { type: "upstream", sourceNodeId: adjustedSplitter.nodeId, outputPath: "data.textChunkResult" };
     }
   });
@@ -945,19 +1006,20 @@ function createAgentRepairedPlanNodes(currentNodes: ToolNode[]): ToolNode[] {
   const adjustedNodes = createAgentAdjustedPlanNodes(currentNodes);
   const orderedNodes = [...adjustedNodes].sort((a, b) => {
     const getRepairOrder = (node: ToolNode) => {
-      if (node.category === "文档解析") return 0;
+      const category = normalizeCategory(node.category);
+      if (category === "文档解析") return 0;
       if (node.toolId === "system-code") return 1;
-      if (node.category === "内容处理") return 2;
+      if (category === "文本分片") return 2;
       if (node.toolId === "system-storage") return 3;
-      if (node.category === "智能生成") return 4;
+      if (category === "知识提取") return 4;
       return 5;
     };
     return getRepairOrder(a) - getRepairOrder(b);
   });
 
-  const parser = orderedNodes.find((node) => node.category === "文档解析");
+  const parser = orderedNodes.find((node) => normalizeCategory(node.category) === "文档解析");
   const adapter = orderedNodes.find((node) => node.toolId === "system-code");
-  const splitter = orderedNodes.find((node) => node.category === "内容处理");
+  const splitter = orderedNodes.find((node) => normalizeCategory(node.category) === "文本分片");
 
   return orderedNodes.map((node) => {
     if (node.nodeId === parser?.nodeId) return applyNodeInputSource(node, { type: "fixed" });
@@ -966,7 +1028,7 @@ function createAgentRepairedPlanNodes(currentNodes: ToolNode[]): ToolNode[] {
       if (adapter) return applyNodeInputSource(node, { type: "upstream", sourceNodeId: adapter.nodeId, outputPath: "data.cleanBlocks" });
       if (parser) return applyNodeInputSource(node, { type: "upstream", sourceNodeId: parser.nodeId, outputPath: parser.outputs[0]?.path ?? "data.documentParseResult" });
     }
-    if ((node.toolId === "system-storage" || node.category === "智能生成") && splitter) {
+    if ((node.toolId === "system-storage" || normalizeCategory(node.category) === "知识提取") && splitter) {
       return applyNodeInputSource(node, { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
     }
     const previousNode = orderedNodes[Math.max(orderedNodes.findIndex((item) => item.nodeId === node.nodeId) - 1, 0)];
@@ -974,6 +1036,67 @@ function createAgentRepairedPlanNodes(currentNodes: ToolNode[]): ToolNode[] {
       ? applyNodeInputSource(node, { type: "upstream", sourceNodeId: previousNode.nodeId, outputPath: previousNode.outputs[0]?.path ?? "data.result" })
       : applyNodeInputSource(node, { type: "fixed" });
   });
+}
+
+function getBestOutputPathForTarget(upstreamNode: ToolNode, targetNode: ToolNode) {
+  if (normalizeCategory(upstreamNode.category) === "文本分片") {
+    return upstreamNode.outputs.find((output) => output.path.includes("textChunkResult"))?.path ?? upstreamNode.outputs[0]?.path ?? "data.textChunkResult";
+  }
+  if (upstreamNode.outputs.some((output) => output.path.includes("cleanBlocks")) && normalizeCategory(targetNode.category) === "文本分片") {
+    return upstreamNode.outputs.find((output) => output.path.includes("cleanBlocks"))?.path ?? "data.cleanBlocks";
+  }
+  return upstreamNode.outputs[0]?.path ?? "data.result";
+}
+
+function moveNodeAfter(nodes: ToolNode[], targetNodeId: string, sourceNodeId: string) {
+  const next = cloneNodes(nodes);
+  const targetIndex = next.findIndex((node) => node.nodeId === targetNodeId);
+  const sourceIndex = next.findIndex((node) => node.nodeId === sourceNodeId);
+  if (targetIndex < 0 || sourceIndex < 0 || targetIndex === sourceIndex) return next;
+  const [targetNode] = next.splice(targetIndex, 1);
+  const nextSourceIndex = next.findIndex((node) => node.nodeId === sourceNodeId);
+  next.splice(nextSourceIndex + 1, 0, { ...targetNode, adjusted: true });
+  return next;
+}
+
+function repairConnectionIssue(nodes: ToolNode[], issue: PlanConnectionFailure) {
+  if (issue.kind === "source-after" && issue.sourceNodeId) {
+    const repairedNodes = moveNodeAfter(nodes, issue.nodeId, issue.sourceNodeId);
+    return {
+      nodes: repairedNodes,
+      targetIds: [issue.nodeId],
+      actionText: "修复动作：将引用后置上游的节点移动到来源节点之后，并保持原有参数引用不变。",
+    };
+  }
+
+  const next = cloneNodes(nodes);
+  const targetIndex = next.findIndex((node) => node.nodeId === issue.nodeId);
+  if (targetIndex < 0) {
+    return { nodes: next, targetIds: [], actionText: "修复动作：未找到需要修复的节点，保持当前方案不变。" };
+  }
+  const targetNode = next[targetIndex];
+  const upstreamNode = issue.kind === "invalid-path" && issue.sourceNodeId
+    ? next.find((node) => node.nodeId === issue.sourceNodeId)
+    : issue.previousNodeId
+      ? next.find((node) => node.nodeId === issue.previousNodeId)
+      : getPreviousEnabledNode(next, targetNode.nodeId);
+
+  if (!upstreamNode) {
+    next[targetIndex] = applyNodeInputSource(targetNode, { type: "fixed" });
+    return {
+      nodes: next,
+      targetIds: [targetNode.nodeId],
+      actionText: `修复动作：未找到可承接的上游节点，先将「${targetNode.toolName}」恢复为固定输入，等待补充前置工具。`,
+    };
+  }
+
+  const outputPath = getBestOutputPathForTarget(upstreamNode, targetNode);
+  next[targetIndex] = applyNodeInputSource(targetNode, { type: "upstream", sourceNodeId: upstreamNode.nodeId, outputPath });
+  return {
+    nodes: next,
+    targetIds: [targetNode.nodeId],
+    actionText: `修复动作：只重写「${targetNode.toolName}」的输入来源，改为承接「${upstreamNode.toolName} / ${outputPath}」。`,
+  };
 }
 
 function getParamProblems(node: ToolNode, receivesExternalInput = false) {
@@ -992,13 +1115,158 @@ function getParamProblems(node: ToolNode, receivesExternalInput = false) {
   });
 }
 
+function isEmptyParamValue(value: ToolParam["value"]) {
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "string") return !value.trim();
+  return false;
+}
+
+function hasUnsetVisibleConfig(node: ToolNode) {
+  if (node.toolId === "system-code" && (!node.codeInputs?.length || !node.codeOutputs?.length)) return true;
+  return node.params.some((param) => (
+    isParamVisible(node, param)
+    && param.source?.type !== "file"
+    && param.source?.type !== "upstream"
+    && isEmptyParamValue(param.value)
+  ));
+}
+
+function needsSmartToolHandling(node: ToolNode, rawWarnings: string[]) {
+  return rawWarnings.some(isParamConfigWarning) || hasUnsetVisibleConfig(node);
+}
+
+function getSmartPromptValue(param: ToolParam, node: ToolNode, instruction: string) {
+  const lowerId = param.id.toLowerCase();
+  if (normalizeCategory(node.category) === "文档解析") {
+    if (lowerId.includes("system")) return "你是知识工程文档解析专家。请从输入文件中提取正文、标题层级、表格、图片说明和页码来源，保持原文事实，不做总结改写，输出结构化 Markdown/JSON 结果。";
+    if (lowerId.includes("user")) return "请解析当前上传的业务文档，保留标题层级、段落、表格和页码信息，输出可供后续分片与问答抽取使用的结构化文本。";
+  }
+  if (node.toolId === "qa-extractor") {
+    if (lowerId.includes("system")) return "你是知识库问答抽取专家。请基于输入片段生成可用于客服问答的高质量 QA，问题表达自然，答案必须来自原文，并保留来源片段引用。";
+    if (lowerId.includes("guide")) return "请围绕用户可能咨询的问题生成问答对。每个答案需完整、可独立理解，并返回 question、answer、sourceChunkId 字段。";
+  }
+  if (node.toolId === "summary") {
+    if (lowerId.includes("system")) return "你是知识工程摘要生成专家。请基于输入片段提炼关键结论，保持事实准确，避免引入原文没有的信息，并输出结构化摘要。";
+    if (lowerId.includes("guide")) return "请按主题生成摘要条目，每条包含 title、content、sourceChunkIds，优先覆盖适用范围、办理条件和材料要求。";
+  }
+  if (node.toolId === "keyword-extractor") {
+    if (lowerId.includes("system")) return "你是业务关键词抽取专家。请从输入片段中抽取能代表业务主题、对象、条件和流程的关键词，并给出权重。";
+    if (lowerId.includes("guide")) return "请输出不超过 8 个关键词，返回 keyword、weight、sourceChunkId 字段，避免抽取泛化词。";
+  }
+  return instruction || "请根据当前知识处理目标生成结构化配置。";
+}
+
+function getSmartParamValue(param: ToolParam, instruction: string, node: ToolNode): ToolParam["value"] {
+  if (param.id === "parseObject") return '{ "fileUrl": "${sample.fileUrl}", "fileName": "${sample.fileName}", "fileType": "${sample.fileType}" }';
+  if (param.id === "chunkObject") return "${upstream.data.documentParseResult}";
+  if (param.id === "extractionObject") return "${upstream.data.textChunkResult}";
+  if (param.id === "storageObject") return "${upstream.data.textChunkResult}";
+  if (param.id === "codeInput") return "${upstream.data.documentParseResult}";
+  if (param.id === "script") return "function transform(input) {\n  return {\n    cleanBlocks: input.map(item => ({\n      title: item.title || item.heading,\n      text: item.text || item.content,\n      page: item.page,\n      source: item.source || item.fileName\n    })).filter(item => item.text)\n  };\n}";
+  if (param.id === "outputVariables") return '[{ "name": "cleanBlocks", "type": "Array<json>", "path": "data.cleanBlocks" }]';
+  if (param.id === "systemPrompt" || param.id === "userPrompt" || param.id === "guidePrompt") return getSmartPromptValue(param, node, instruction);
+  if (param.id === "parseStrategy") return ["文档内容提取"];
+  if (param.id === "ocrService") return "预置服务-OCR";
+  if (param.id === "vlmModel") return "Qwen2.5-VL-32B-Instruct";
+  if (param.id === "aiModel") return "qwen3-8b";
+  if (param.id === "temperature") return 0.3;
+  if (param.id === "maxTokens") return 2048;
+  if (param.id === "chunkAssociate") return ["关联文件名", "关联标题及子标题"].filter((item) => param.options?.includes(item));
+  if (param.id === "preprocess") return ["删除换行符", "替换掉连续的空格换行符和制表符"].filter((item) => param.options?.includes(item));
+  if (param.id === "customSeparator") return "\n\n";
+  if (param.id === "sliceSeparators") return ["\n\n", "\n", "。"].filter((item) => param.options?.includes(item));
+  if (param.id === "mode") return param.options?.includes("关联文件信息") ? "关联文件信息" : param.options?.[0] ?? "";
+  if (param.id === "storageMethod") return "写入ES";
+  if (param.id === "writeMode") return "upsert";
+  if (param.type === "number") {
+    if (param.id === "chunkSize") return 512;
+    if (param.id === "overlap") return 50;
+    if (param.id === "segmentCount") return 10;
+    return param.min ?? 1;
+  }
+  if (param.type === "switch") return true;
+  if (param.type === "select") return param.options?.[0] ?? "";
+  if (param.type === "multiSelect" || param.type === "tags") return param.options?.length ? param.options.slice(0, Math.min(2, param.options.length)) : [];
+  if (param.id.includes("language") || param.label.includes("语言")) return "zh-CN";
+  if (param.id.includes("output") || param.label.includes("输出")) return node.outputs[0]?.path ?? "data.result";
+  return instruction || `${node.toolName}默认配置`;
+}
+
+function createSmartConfiguredNode(node: ToolNode, nodes: ToolNode[], instruction: string): ToolNode {
+  const tool = toolCatalog.find((item) => item.id === node.toolId);
+  const priorNodes = getPriorNodes(nodes, node.nodeId);
+  const upstreamNode = priorNodes[priorNodes.length - 1];
+  const nextInputSource: InputSource = upstreamNode && tool?.input !== "sampleFile"
+    ? { type: "upstream", sourceNodeId: upstreamNode.nodeId, outputPath: upstreamNode.outputs[0]?.path ?? "data.result" }
+    : { type: "fixed" };
+
+  return {
+    ...node,
+    adjusted: true,
+    expanded: true,
+    inputSource: nextInputSource,
+    params: node.params.map((param) => {
+      if (!isParamVisible(node, param)) return param;
+      if (param.id === node.inputParamId) {
+        return {
+          ...param,
+          source: nextInputSource.type === "upstream"
+            ? { type: "upstream", sourceNodeId: nextInputSource.sourceNodeId, outputPath: nextInputSource.outputPath }
+            : { type: "file" },
+        };
+      }
+      if (!param.required && !isEmptyParamValue(param.value)) return param;
+      if (param.source?.type === "upstream" || param.source?.type === "file") return param;
+      return {
+        ...param,
+        source: { type: "manual" },
+        value: getSmartParamValue(param, instruction, node),
+      };
+    }),
+    codeInputs: node.toolId === "system-code"
+      ? (node.codeInputs?.length ? node.codeInputs : [{
+        id: `${node.nodeId}-input-smart`,
+        name: "input",
+        source: nextInputSource.type === "upstream"
+          ? { type: "upstream", sourceNodeId: nextInputSource.sourceNodeId, outputPath: nextInputSource.outputPath }
+          : { type: "file" },
+        value: "",
+      }])
+      : node.codeInputs,
+    codeOutputs: node.toolId === "system-code"
+      ? (node.codeOutputs?.length ? node.codeOutputs : [{ id: `${node.nodeId}-output-smart`, type: "Array<json>", name: "result", value: node.outputs[0]?.path ?? "data.result" }])
+      : node.codeOutputs,
+  };
+}
+
 function getPlanTitle(category: string) {
-  return category;
+  return normalizeCategory(category);
 }
 
 function getPriorNodes(nodes: ToolNode[], nodeId: string) {
   const index = nodes.findIndex((node) => node.nodeId === nodeId);
   return index > 0 ? nodes.slice(0, index) : [];
+}
+
+function getPreviousEnabledNode(nodes: ToolNode[], nodeId: string) {
+  const priorNodes = getPriorNodes(nodes, nodeId).filter((node) => node.enabled);
+  return priorNodes[priorNodes.length - 1] ?? null;
+}
+
+function getToolChainType(node: ToolNode, field: "input" | "output") {
+  const tool = toolCatalog.find((item) => item.id === node.toolId);
+  return tool?.[field] ?? (field === "input" ? "cleanText" : "rawText");
+}
+
+function canNodeFeedNext(previousNode: ToolNode, node: ToolNode) {
+  if (normalizeCategory(previousNode.category) === normalizeCategory(node.category)) return false;
+  const previousOutput = getToolChainType(previousNode, "output");
+  const nodeInput = getToolChainType(node, "input");
+  if (previousOutput === nodeInput) return true;
+  if (normalizeCategory(previousNode.category) === "文档解析" && normalizeCategory(node.category) === "文本分片") return true;
+  if (normalizeCategory(previousNode.category) === "文本分片" && (normalizeCategory(node.category) === "知识提取" || node.toolId === "system-storage")) return true;
+  if (previousNode.outputs.some((output) => output.path.includes("cleanBlocks")) && normalizeCategory(node.category) === "文本分片") return true;
+  return false;
 }
 
 function getToolInputParam(node: ToolNode) {
@@ -1033,33 +1301,77 @@ function isValidOutputPath(path?: string) {
 }
 
 function isInputSourceInvalid(node: ToolNode, nodes: ToolNode[]) {
-  return Boolean(getInputSourceIssueReason(node, nodes));
+  return Boolean(getConnectionIssueForNode(node, nodes));
+}
+
+function getConnectionIssueForNode(node: ToolNode, nodes: ToolNode[]): ConnectionIssue | null {
+  if (!node.enabled || isFirstCategoryFirstNode(node, nodes)) return null;
+  const previousNode = getPreviousEnabledNode(nodes, node.nodeId);
+  const hasParamConfigIssue = getParamProblems(node, node.inputSource.type !== "upstream").some(isParamConfigWarning);
+  if (node.inputSource.type !== "upstream") {
+    if (!previousNode || hasParamConfigIssue || getToolChainType(node, "input") === "sampleFile") return null;
+    return {
+      kind: "missing-upstream",
+      nodeId: node.nodeId,
+      previousNodeId: previousNode.nodeId,
+      reason: `${node.toolName} 已完成参数配置，但还未接入上游工具「${previousNode.toolName}」的输出。`,
+    };
+  }
+  const priorNodes = getPriorNodes(nodes, node.nodeId);
+  const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
+  if (!sourceNode) {
+    return {
+      kind: "source-missing",
+      nodeId: node.nodeId,
+      sourceNodeId: node.inputSource.sourceNodeId,
+      previousNodeId: previousNode?.nodeId,
+      reason: `${node.toolName} 的输入来源节点已不存在。`,
+    };
+  }
+  if (!priorNodes.some((item) => item.nodeId === sourceNode.nodeId)) {
+    return {
+      kind: "source-after",
+      nodeId: node.nodeId,
+      sourceNodeId: sourceNode.nodeId,
+      previousNodeId: previousNode?.nodeId,
+      reason: `${node.toolName} 引用的上游工具「${sourceNode.toolName}」位于当前节点之后，流程执行时无法取得 ${node.inputSource.outputPath || "输出结果"}。`,
+    };
+  }
+  if (!isValidOutputPath(node.inputSource.outputPath)) {
+    return {
+      kind: "invalid-path",
+      nodeId: node.nodeId,
+      sourceNodeId: sourceNode.nodeId,
+      previousNodeId: previousNode?.nodeId,
+      reason: `${node.toolName} 的输入路径未配置或格式不合法。`,
+    };
+  }
+  if (previousNode && canNodeFeedNext(previousNode, node) && sourceNode.nodeId !== previousNode.nodeId) {
+    return {
+      kind: "bypass-inserted-node",
+      nodeId: node.nodeId,
+      sourceNodeId: sourceNode.nodeId,
+      previousNodeId: previousNode.nodeId,
+      reason: `${node.toolName} 当前仍引用「${sourceNode.toolName}」，但它前面新增/调整了「${previousNode.toolName}」，需要改为承接最新上游输出。`,
+    };
+  }
+  return null;
 }
 
 function getInputSourceIssueReason(node: ToolNode, nodes: ToolNode[]) {
-  if (isFirstCategoryFirstNode(node, nodes)) return "";
-  if (node.inputSource.type !== "upstream") return "";
-  const priorNodes = getPriorNodes(nodes, node.nodeId);
-  const sourceNode = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
-  if (!sourceNode) return `${node.toolName} 的输入来源节点已不存在。`;
-  if (!priorNodes.some((item) => item.nodeId === sourceNode.nodeId)) {
-    return `${node.toolName} 引用的上游工具「${sourceNode.toolName}」位于当前节点之后，流程执行时无法取得 ${node.inputSource.outputPath || "输出结果"}。`;
-  }
-  if (!isValidOutputPath(node.inputSource.outputPath)) {
-    return `${node.toolName} 的输入路径未配置或格式不合法。`;
-  }
-  return "";
+  return getConnectionIssueForNode(node, nodes)?.reason ?? "";
 }
 
 function getCategorySections(nodes: ToolNode[]) {
   const sections: { sectionId: string; category: string; nodes: ToolNode[] }[] = [];
   nodes.forEach((node) => {
-    const lastSection = sections[sections.length - 1];
-    if (lastSection?.sectionId === node.flowNodeId) {
-      lastSection.nodes.push(node);
+    const category = normalizeCategory(node.category);
+    const existingSection = sections.find((section) => section.category === category);
+    if (existingSection) {
+      existingSection.nodes.push(node);
       return;
     }
-    sections.push({ sectionId: node.flowNodeId, category: node.category, nodes: [node] });
+    sections.push({ sectionId: category, category, nodes: [node] });
   });
 
   return sections;
@@ -1074,26 +1386,20 @@ function getSectionInputIssueReason(section: { nodes: ToolNode[] }, nodes: ToolN
   return issueNode ? getInputSourceIssueReason(issueNode, nodes) : "";
 }
 
-function getSectionConnectionFailureReason(section: { nodes: ToolNode[] }, nodes: ToolNode[], warnings: Record<string, string[]>) {
-  const inputReason = getSectionInputIssueReason(section, nodes);
-  if (inputReason) return inputReason;
-  const sectionWarning = section.nodes
-    .flatMap((node) => warnings[node.nodeId] ?? [])
-    .find((warning) => warning !== inputSourceWarningText);
-  return sectionWarning ? `节点「${section.category}」存在配置问题：${sectionWarning}` : "";
+function getSectionConnectionFailureReason(section: { nodes: ToolNode[] }, nodes: ToolNode[]) {
+  return getSectionInputIssueReason(section, nodes);
 }
 
-function getFirstPlanFailure(nodes: ToolNode[]) {
-  const warnings = getNodeWarnings(nodes);
+function getFirstPlanFailure(nodes: ToolNode[]): PlanConnectionFailure | null {
   const sections = getCategorySections(nodes);
   for (let index = 0; index < sections.length; index += 1) {
-    const reason = getSectionConnectionFailureReason(sections[index], nodes, warnings);
-    if (!reason) continue;
+    const issue = sections[index].nodes.map((node) => getConnectionIssueForNode(node, nodes)).find(Boolean);
+    if (!issue) continue;
     const fromSection = sections[Math.max(index - 1, 0)];
     const toSection = sections[index === 0 ? Math.min(index + 1, sections.length - 1) : index];
-    if (!fromSection || !toSection || fromSection.sectionId === toSection.sectionId) return { reason };
+    if (!fromSection || !toSection || fromSection.sectionId === toSection.sectionId) return issue;
     return {
-      reason,
+      ...issue,
       fromCategory: fromSection.category,
       toCategory: toSection.category,
       connectionKey: getConnectionKey(fromSection.category, toSection.category),
@@ -1103,27 +1409,25 @@ function getFirstPlanFailure(nodes: ToolNode[]) {
 }
 
 function getCategoryOrder(category: string) {
-  const order = ["文档解析", "内容处理", "系统工具", "智能生成", "质量评估"];
-  const index = order.indexOf(category);
-  return index >= 0 ? index : order.length;
+  return getCategorySortIndex(category, workflowCategoryOrder);
 }
 
 function insertNodeByCategory(nodes: ToolNode[], node: ToolNode) {
-  if (node.sourceType === "system") {
-    return [...nodes, node];
-  }
-  const lastSameCategoryIndex = nodes.reduce((lastIndex, item, index) => (item.category === node.category ? index : lastIndex), -1);
+  const normalizedNode = { ...node, category: normalizeCategory(node.category) };
+  const existingCategoryNode = nodes.find((item) => normalizeCategory(item.category) === normalizedNode.category);
+  const nodeWithFlow = existingCategoryNode ? { ...normalizedNode, flowNodeId: existingCategoryNode.flowNodeId } : normalizedNode;
+  const lastSameCategoryIndex = nodes.reduce((lastIndex, item, index) => (normalizeCategory(item.category) === nodeWithFlow.category ? index : lastIndex), -1);
   if (lastSameCategoryIndex >= 0) {
     const next = [...nodes];
-    next.splice(lastSameCategoryIndex + 1, 0, node);
+    next.splice(lastSameCategoryIndex + 1, 0, nodeWithFlow);
     return next;
   }
 
-  const nodeOrder = getCategoryOrder(node.category);
+  const nodeOrder = getCategoryOrder(nodeWithFlow.category);
   const insertIndex = nodes.findIndex((item) => getCategoryOrder(item.category) > nodeOrder);
-  if (insertIndex < 0) return [...nodes, node];
+  if (insertIndex < 0) return [...nodes, nodeWithFlow];
   const next = [...nodes];
-  next.splice(insertIndex, 0, node);
+  next.splice(insertIndex, 0, nodeWithFlow);
   return next;
 }
 
@@ -1132,7 +1436,7 @@ function getFirstCategory(nodes: ToolNode[]) {
 }
 
 function isFirstCategoryNode(node: ToolNode, nodes: ToolNode[]) {
-  return getFirstCategory(nodes) === node.category;
+  return getFirstCategory(nodes) === normalizeCategory(node.category);
 }
 
 function isFirstCategoryFirstNode(node: ToolNode, nodes: ToolNode[]) {
@@ -1167,7 +1471,10 @@ function getNodeWarnings(nodes: ToolNode[]) {
 function getNodeDisplayWarnings(warnings: Record<string, string[]>) {
   return Object.fromEntries(
     Object.entries(warnings)
-      .map(([nodeId, nodeWarnings]) => [nodeId, nodeWarnings.filter((warning) => warning !== inputSourceWarningText)] as const)
+      .map(([nodeId, nodeWarnings]) => [
+        nodeId,
+        nodeWarnings.filter((warning) => warning !== inputSourceWarningText && !isParamConfigWarning(warning)),
+      ] as const)
       .filter(([, nodeWarnings]) => nodeWarnings.length > 0),
   );
 }
@@ -1213,14 +1520,15 @@ export function AgentWorkbench() {
   const [sampleResults, setSampleResults] = useState<SampleProcessResult[]>([]);
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>(initialAgentEvents);
   const [agentInput, setAgentInput] = useState("");
+  const [agentTaskTag, setAgentTaskTag] = useState<AgentTaskTag | null>(null);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [isPlanTesting, setIsPlanTesting] = useState(false);
   const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionStatus>>({});
   const [connectionFailureReasons, setConnectionFailureReasons] = useState<Record<string, string>>({});
   const [nodeRuntimeStates, setNodeRuntimeStates] = useState<Record<string, NodeRuntimeState>>({});
 
-  const currentToolCatalog = useMemo(() => toolCatalog, [toolCatalogVersion]);
-  const categories = useMemo(() => ["全部", ...Array.from(new Set(currentToolCatalog.map((tool) => tool.category)))], [currentToolCatalog]);
+  const currentToolCatalog = useMemo(() => sortToolsForDialog(toolCatalog), [toolCatalogVersion]);
+  const categories = useMemo(() => ["全部", ...sortCategories(Array.from(new Set(currentToolCatalog.map((tool) => tool.category))), toolDialogCategoryOrder)], [currentToolCatalog]);
   const categorySections = useMemo(() => getCategorySections(planNodes), [planNodes]);
   const nodeWarnings = useMemo(() => getNodeWarnings(planNodes), [planNodes]);
   const inputIssueMap = useMemo(() => getNodeInputIssueMap(planNodes), [planNodes]);
@@ -1228,7 +1536,8 @@ export function AgentWorkbench() {
   const allProblems = getPlanProblems(planNodes);
   const visibleProblems = isAgentRunning || planNodes.length === 0 ? [] : allProblems;
   const canEdit = !confirmed && !isAgentRunning && !isPlanTesting;
-  const canSendAgentMessage = !isAgentRunning && !isPlanTesting && Boolean(agentInput.trim()) && (planNodes.length > 0 || sampleFiles.length > 0);
+  const hasAgentTask = Boolean(agentTaskTag);
+  const canSendAgentMessage = !isAgentRunning && !isPlanTesting && (Boolean(agentInput.trim()) || hasAgentTask) && (hasAgentTask || planNodes.length > 0 || sampleFiles.length > 0);
   const canSavePlan = canEdit && planNodes.length > 0 && visibleProblems.length === 0;
   const canTestPlan = planNodes.length > 0 && sampleFiles.length > 0 && !isAgentRunning && !isPlanTesting;
   const editingNode = planNodes.find((node) => node.nodeId === editingNodeId) ?? null;
@@ -1475,7 +1784,7 @@ export function AgentWorkbench() {
       queryEventId = pushAgentEvent({
         role: "thought",
         title: "工具目录查询",
-        content: "输入：工具状态=可用，分类=文档解析/内容处理/智能生成/系统工具；输出：候选工具清单。",
+        content: "输入：工具状态=可用，分类=文档解析/文本分片/知识提取/系统工具；输出：候选工具清单。",
         status: "running",
         kind: "toolCall",
       });
@@ -1494,14 +1803,14 @@ export function AgentWorkbench() {
         status: "done",
         content: "方案设计完成。先搭建主链路，再检查工具输出与下游入参是否需要适配。",
         kind: "flow",
-        flowSteps: ["文档解析", "文本分片", "数据存储", "智能生成"],
+        flowSteps: ["文档解析", "文本分片", "系统工具", "知识提取"],
       });
     });
 
     buildToolNode([parser], [parser], "文档解析节点", "候选工具=通用解析、多模态解析、医保政策解析；选择原因=医保政策解析更适合保留政策条款层级。");
-    buildToolNode([splitter], [parser, splitter], "内容处理节点", "候选工具=通用分片、递归分片、医保政策分片；选择原因=递归分片支持按标题和段落边界切分。");
-    buildToolNode([storage], [parser, splitter, storage], "数据存储节点", "候选工具=数据存储工具；选择原因=需要把分片结果写入 ES 供后续检索使用。");
-    buildToolNode([qa, summary], draftNodes, "智能生成节点", "候选工具=QA提取、摘要总结；选择原因=同一分片结果可同时生成问答和摘要。");
+    buildToolNode([splitter], [parser, splitter], "文本分片节点", "候选工具=通用分片、递归分片、医保政策分片；选择原因=递归分片支持按标题和段落边界切分。");
+    buildToolNode([storage], [parser, splitter, storage], "系统工具节点", "候选工具=数据存储工具；选择原因=需要把分片结果写入 ES 供后续检索使用。");
+    buildToolNode([qa, summary], draftNodes, "知识提取节点", "候选工具=QA提取、摘要总结；选择原因=同一分片结果可同时生成问答和摘要。");
 
     step(2200, () => {
       checkEventId = pushAgentEvent({
@@ -1533,7 +1842,7 @@ export function AgentWorkbench() {
       pushAgentEvent({
         role: "thought",
         title: "输出解决方案",
-        content: "解决方案：在文档解析节点和内容处理节点之间插入系统代码工具，生成 data.cleanBlocks 作为分片工具输入。",
+        content: "解决方案：在文档解析节点和文本分片节点之间插入系统代码工具，生成 data.cleanBlocks 作为分片工具输入。",
         status: "done",
       });
     });
@@ -1541,13 +1850,13 @@ export function AgentWorkbench() {
       resolveEventId = pushAgentEvent({
         role: "thought",
         title: "开始解决适配问题",
-        content: "我会在文档解析和内容处理之间插入代码工具，把解析结果转换成分片工具可识别的数据结构。",
+        content: "我会在文档解析和文本分片之间插入代码工具，把解析结果转换成分片工具可识别的数据结构。",
         status: "running",
       });
       setConnectionStatus(parser.category, splitter.category, "resolving");
     });
 
-    buildToolNode([adapter], finalNodes, "代码适配节点", "候选工具=代码工具；选择原因=需要把 sections[].content 转换为 data.cleanBlocks。");
+    buildToolNode([adapter], finalNodes, "系统工具节点", "候选工具=代码工具；选择原因=需要把 sections[].content 转换为 data.cleanBlocks。");
 
     step(2000, () => {
       setConnectionStatus(parser.category, adapter.category, "resolved");
@@ -1614,10 +1923,112 @@ export function AgentWorkbench() {
     });
   };
 
+  const requestSmartConfigureTool = (nodeId: string) => {
+    const node = planNodes.find((item) => item.nodeId === nodeId);
+    if (!node || isAgentRunning || isPlanTesting) return;
+    setAgentTaskTag({ type: "tool-config", nodeId, toolName: node.toolName });
+    setAgentInput("");
+    toast.success(`已指定 Agent 设置${node.toolName}参数`);
+  };
+
+  const runSmartToolConfig = (task: Extract<AgentTaskTag, { type: "tool-config" }>, instruction: string) => {
+    const targetNode = planNodes.find((node) => node.nodeId === task.nodeId);
+    if (!targetNode) {
+      appendAgentEvent({
+        role: "agent",
+        title: "工具节点不存在",
+        content: `未找到「${task.toolName}」工具节点，可能已被删除，请重新选择需要处理的工具。`,
+        status: "done",
+      });
+      return;
+    }
+
+    const effectiveInstruction = instruction || "请根据当前工具的 inputSchema、上游输出和处理目标补齐参数。";
+    const configuredNode = createSmartConfiguredNode(targetNode, planNodes, effectiveInstruction);
+    const nextNodes = planNodes.map((node) => (node.nodeId === task.nodeId ? configuredNode : node));
+    const failure = getFirstPlanFailure(nextNodes);
+    setIsAgentRunning(true);
+    setConfirmed(false);
+    setRightTab(1);
+    clearConnectionStatuses(nextNodes);
+    appendAgentEvent({
+      role: "user",
+      title: `设置${task.toolName}参数`,
+      content: effectiveInstruction,
+      status: "done",
+    });
+
+    const understandEventId = appendAgentEvent({
+      role: "thought",
+      title: `理解${task.toolName}参数需求`,
+      content: "正在读取用户输入、工具 inputSchema、当前节点位置和上游工具输出，判断需要补齐的参数。",
+      status: "running",
+    });
+
+    window.setTimeout(() => {
+      updateAgentEvent(understandEventId, {
+        status: "done",
+        content: `已确认本次只处理「${task.toolName}」的参数配置，不重建其他工具节点。`,
+      });
+      setNodeRuntime(configuredNode, { status: "configuring", visibleParamCount: 2 });
+    }, 700);
+
+    let configEventId = "";
+    window.setTimeout(() => {
+      configEventId = appendAgentEvent({
+        role: "thought",
+        title: `配置${task.toolName}参数`,
+        content: "根据用户需求补齐输入来源、必填参数和取值路径，并写回当前工具节点。",
+        status: "running",
+        kind: "toolCall",
+      });
+      updatePlanNodesWithMotion(nextNodes);
+      setNodeRuntime(configuredNode, { status: "configuring", visibleParamCount: 4 });
+    }, 1300);
+
+    window.setTimeout(() => {
+      updateAgentEvent(configEventId, {
+        status: "done",
+        content: `${task.toolName} 参数已写入，开始校验前后节点连通性。`,
+      });
+      setNodeRuntime(configuredNode, { status: "configured", visibleParamCount: 4 });
+      if (failure?.fromCategory && failure.toCategory) {
+        setConnectionStatus(failure.fromCategory, failure.toCategory, "error", failure.reason);
+      }
+    }, 2300);
+
+    window.setTimeout(() => {
+      setNodeRuntime(configuredNode, { status: "done" });
+      appendAgentEvent({
+        role: "agent",
+        title: failure ? "参数已配置，连通性待处理" : "参数配置完成",
+        content: failure
+          ? `已完成「${task.toolName}」参数配置，但方案仍存在连通性问题：${failure.reason}`
+          : `已完成「${task.toolName}」参数配置，并校验通过前后节点的输入输出承接关系。`,
+        status: "done",
+      });
+      setIsAgentRunning(false);
+      toast[failure ? "warning" : "success"](failure ? "参数已配置，仍需处理连通性" : "Agent 已完成工具参数配置");
+    }, 3200);
+  };
+
   const sendAgentInstruction = () => {
     const instruction = agentInput.trim();
-    if (!instruction) return;
+    const currentTask = agentTaskTag;
+    if (!instruction && !currentTask) return;
     setAgentInput("");
+    setAgentTaskTag(null);
+
+    if (currentTask?.type === "tool-config") {
+      runSmartToolConfig(currentTask, instruction);
+      return;
+    }
+
+    if (currentTask?.type === "connection-fix") {
+      runSmartConnectionRepair(currentTask, instruction);
+      return;
+    }
+
     appendAgentEvent({ role: "user", title: "调整意见", content: instruction, status: "done" });
 
     if (planNodes.length === 0) {
@@ -1649,7 +2060,7 @@ export function AgentWorkbench() {
     setTimeout(() => {
       updateAgentEvent(optimizeEventId, {
         status: "done",
-        content: "已定位到需要局部调整的工具：内容处理节点的分片工具，以及智能生成节点中的补充生成工具。",
+        content: "已定位到需要局部调整的工具：文本分片节点的分片工具，以及知识提取节点中的补充生成工具。",
       });
       setNodesRuntime(affectedCurrentNodes, { status: "configuring", visibleParamCount: 0 });
     }, 900);
@@ -1659,7 +2070,7 @@ export function AgentWorkbench() {
       adjustEventId = appendAgentEvent({
         role: "thought",
         title: "局部更新方案",
-        content: "输入：当前方案、用户调整意见；变更范围：内容处理节点、智能生成节点；保持不变：解析、代码适配、存储和 QA 提取配置。",
+        content: "输入：当前方案、用户调整意见；变更范围：文本分片节点、知识提取节点；保持不变：解析、系统工具、存储和 QA 提取配置。",
         status: "running",
         kind: "toolCall",
       });
@@ -1718,7 +2129,7 @@ export function AgentWorkbench() {
       inputSource,
     ));
     clearManualConnectionStatuses();
-    updatePlanNodesWithMotion((current) => [...current, { ...node, expanded: true, adjusted: true }]);
+    updatePlanNodesWithMotion((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
     setAddDialogOpen(false);
     toast.success(`已添加工具，已归入${getPlanTitle(node.category)}`);
   };
@@ -1728,6 +2139,7 @@ export function AgentWorkbench() {
     clearManualConnectionStatuses();
     updatePlanNodesWithMotion((current) => current.filter((node) => node.nodeId !== nodeId));
     setEditingNodeId((current) => (current === nodeId ? null : current));
+    setAgentTaskTag((current) => (current?.type === "tool-config" && current.nodeId === nodeId ? null : current));
     toast.success("已删除工具节点");
   };
 
@@ -1809,17 +2221,26 @@ export function AgentWorkbench() {
 
   const requestSmartRepair = (reason: string, fromCategory?: string, toCategory?: string) => {
     if (isAgentRunning || isPlanTesting || planNodes.length === 0) return;
-    const instruction = `请智能修复当前处理方案的节点承接问题：${reason}。请基于当前方案调整节点顺序、输入来源和参数路径，不要重建无关节点。`;
-    const currentNodes = planNodes;
-    const repairedNodes = createAgentRepairedPlanNodes(currentNodes);
-    const repairTargets = repairedNodes.filter((node) => node.adjusted);
+    setAgentTaskTag({ type: "connection-fix", reason, fromCategory, toCategory });
+    setAgentInput("");
+    toast.success("已指定 Agent 处理流程连接问题");
+  };
+
+  const runSmartConnectionRepair = (task: Extract<AgentTaskTag, { type: "connection-fix" }>, instruction: string) => {
+    const effectiveInstruction = `请智能修复当前处理方案的节点承接问题：${task.reason}。请基于当前方案调整节点顺序、输入来源和参数路径，不要重建无关节点。${instruction ? `\n补充要求：${instruction}` : ""}`;
+    const currentFailure = getFirstPlanFailure(planNodes);
+    const repairResult = currentFailure
+      ? repairConnectionIssue(planNodes, currentFailure)
+      : { nodes: cloneNodes(planNodes), targetIds: [], actionText: "修复动作：当前未检测到需要处理的流程连接问题。" };
+    const repairedNodes = repairResult.nodes;
+    const repairTargets = repairedNodes.filter((node) => repairResult.targetIds.includes(node.nodeId));
     setIsAgentRunning(true);
     setConfirmed(false);
     setRightTab(1);
     appendAgentEvent({
       role: "user",
-      title: "智能修复请求",
-      content: instruction,
+      title: "处理流程连接问题",
+      content: effectiveInstruction,
       status: "done",
     });
 
@@ -1831,10 +2252,12 @@ export function AgentWorkbench() {
     });
 
     window.setTimeout(() => {
-      if (fromCategory && toCategory) setConnectionStatus(fromCategory, toCategory, "resolving");
+      if (task.fromCategory && task.toCategory) setConnectionStatus(task.fromCategory, task.toCategory, "resolving");
       updateAgentEvent(analyzeEventId, {
         status: "done",
-        content: `已确认失败原因：${reason}`,
+        content: currentFailure
+          ? `已确认失败原因：${currentFailure.reason}`
+          : `未检测到新的流程连接问题；用户请求内容：${task.reason}`,
       });
     }, 900);
 
@@ -1843,30 +2266,34 @@ export function AgentWorkbench() {
       repairEventId = appendAgentEvent({
         role: "thought",
         title: "修复节点承接",
-        content: "修复动作：调整节点顺序，重写下游输入来源，并同步工具参数中的上游输出路径。",
+        content: repairResult.actionText,
         status: "running",
         kind: "toolCall",
       });
-      updatePlanNodesWithMotion(repairedNodes);
-      setNodesRuntime(repairTargets, { status: "configuring", visibleParamCount: 2 });
+      if (currentFailure) updatePlanNodesWithMotion(repairedNodes);
+      if (repairTargets.length > 0) setNodesRuntime(repairTargets, { status: "configuring", visibleParamCount: 2 });
     }, 1600);
 
     window.setTimeout(() => {
-      setNodesRuntime(repairTargets, { status: "configured", visibleParamCount: 4 });
-      if (fromCategory && toCategory) setConnectionStatus(fromCategory, toCategory, "resolved");
+      if (repairTargets.length > 0) setNodesRuntime(repairTargets, { status: "configured", visibleParamCount: 4 });
+      if (task.fromCategory && task.toCategory) setConnectionStatus(task.fromCategory, task.toCategory, "resolved");
       updateAgentEvent(repairEventId, {
         status: "done",
-        content: "节点承接已修复：上游输出路径和下游输入参数已重新连接。",
+        content: currentFailure
+          ? "节点承接已修复：仅更新受影响节点，未重写其他节点参数。"
+          : "当前没有新的流程连接问题需要修复。",
       });
     }, 3000);
 
     window.setTimeout(() => {
       clearConnectionStatuses(repairedNodes);
-      setNodesRuntime(repairTargets, { status: "done" });
+      if (repairTargets.length > 0) setNodesRuntime(repairTargets, { status: "done" });
       appendAgentEvent({
         role: "agent",
-        title: "智能修复完成",
-        content: "当前方案已完成局部修复，可以点击测试重新试跑样例文件。",
+        title: currentFailure ? "智能修复完成" : "未发现连接问题",
+        content: currentFailure
+          ? "当前方案已完成局部修复，可以点击测试重新试跑样例文件。"
+          : "当前方案没有检测到需要 Agent 处理的流程连接问题。",
         status: "done",
       });
       setIsAgentRunning(false);
@@ -1879,10 +2306,11 @@ export function AgentWorkbench() {
     const from = planNodes.findIndex((node) => node.nodeId === draggingNodeId);
     const to = planNodes.findIndex((node) => node.nodeId === targetId);
     if (from < 0 || to < 0) return;
-    if (planNodes[from].flowNodeId !== planNodes[to].flowNodeId) return;
+    if (normalizeCategory(planNodes[from].category) !== normalizeCategory(planNodes[to].category)) return;
+    const targetNode = planNodes[to];
     const next = [...planNodes];
     const [moved] = next.splice(from, 1);
-    next.splice(to, 0, { ...moved, adjusted: true });
+    next.splice(to, 0, { ...moved, flowNodeId: targetNode.flowNodeId, adjusted: true });
     clearManualConnectionStatuses();
     updatePlanNodesWithMotion(next);
     setDraggingNodeId(null);
@@ -2034,7 +2462,7 @@ export function AgentWorkbench() {
               {agentEvents.map((event) => <AgentEventCard key={event.id} event={event} />)}
             </Stack>
           </Box>
-          <Box sx={{ p: 1.5, borderTop: "1px solid #EEF2F7", display: "flex", gap: 1 }}>
+          <Box sx={{ p: 1.5, borderTop: "1px solid #EEF2F7", display: "flex", gap: 1, alignItems: "center" }}>
             <TextField
               fullWidth
               size="small"
@@ -2046,9 +2474,44 @@ export function AgentWorkbench() {
                 event.preventDefault();
                 sendAgentInstruction();
               }}
-              sx={{ "& .MuiOutlinedInput-root": { borderRadius: "10px", fontSize: 13 } }}
+              InputProps={{
+                startAdornment: agentTaskTag ? (
+                  <InputAdornment position="start" sx={{ m: 0, mr: 0.5, height: 24, maxHeight: "none" }}>
+                    <Chip
+                      label={getAgentTaskTagLabel(agentTaskTag)}
+                      size="small"
+                      icon={<AutoAwesome sx={{ fontSize: "14px !important" }} />}
+                      onDelete={() => setAgentTaskTag(null)}
+                      onClick={(event) => event.stopPropagation()}
+                      sx={{
+                        maxWidth: 170,
+                        height: 24,
+                        bgcolor: "#f5f3ff",
+                        color: "#6d28d9",
+                        fontSize: 11,
+                        fontWeight: 800,
+                        "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" },
+                        "& .MuiChip-deleteIcon": { fontSize: 15, color: "#8b5cf6" },
+                      }}
+                    />
+                  </InputAdornment>
+                ) : undefined,
+              }}
+              sx={{
+                "& .MuiOutlinedInput-root": {
+                  borderRadius: "10px",
+                  fontSize: 13,
+                  minHeight: 38,
+                  alignItems: "center",
+                  pl: agentTaskTag ? "7px" : undefined,
+                },
+                "& .MuiOutlinedInput-input": {
+                  py: "7px",
+                  pl: agentTaskTag ? "3px" : undefined,
+                },
+              }}
             />
-            <IconButton onClick={sendAgentInstruction} disabled={!canSendAgentMessage} sx={{ bgcolor: "#f5f3ff", color: "#801AEB", "&:hover": { bgcolor: "#ede9fe" }, "&.Mui-disabled": { bgcolor: "#f1f5f9", color: "#94a3b8" } }}>
+            <IconButton aria-label="发送给智能体" onClick={sendAgentInstruction} disabled={!canSendAgentMessage} sx={{ bgcolor: "#f5f3ff", color: "#801AEB", "&:hover": { bgcolor: "#ede9fe" }, "&.Mui-disabled": { bgcolor: "#f1f5f9", color: "#94a3b8" } }}>
               {isAgentRunning ? <CircularProgress size={18} color="inherit" /> : <Send />}
             </IconButton>
           </Box>
@@ -2102,7 +2565,7 @@ export function AgentWorkbench() {
 	                          ? connectionStates[connectionKey] ?? (!isAgentRunning && sectionHasInputIssue(nextSection, inputIssueMap) ? "error" : "normal")
 	                          : "normal";
 	                        const connectionFailureReason = nextSection
-	                          ? connectionFailureReasons[connectionKey] ?? getSectionConnectionFailureReason(nextSection, planNodes, nodeWarnings)
+	                          ? connectionFailureReasons[connectionKey] ?? getSectionConnectionFailureReason(nextSection, planNodes)
 	                          : "";
 	                        const insertPosition = dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : null;
                         return (
@@ -2125,9 +2588,11 @@ export function AgentWorkbench() {
                               canEdit={canEdit}
                               isDragging={draggingCategory === section.sectionId}
                               warnings={displayedNodeWarnings}
+                              rawWarnings={nodeWarnings}
                               onEditTool={(nodeId) => setEditingNodeId(nodeId)}
                               onRemoveTool={removeNode}
                               onToggleTool={toggleToolExpanded}
+                              onSmartConfigureTool={requestSmartConfigureTool}
                               onNodeDragStart={(event) => {
                                 event.dataTransfer.effectAllowed = "move";
                                 setDraggingCategory(section.sectionId);
@@ -2488,6 +2953,12 @@ function ConnectionStatusBadge({ status, reason, onSmartFix }: { status: Connect
   return (
     <Tooltip title={tooltipContent}>
       <Box
+        role={status === "error" ? "button" : undefined}
+        aria-label={status === "error" ? "处理流程连接问题" : undefined}
+        onClick={status === "error" ? (event) => {
+          event.stopPropagation();
+          onSmartFix?.();
+        } : undefined}
         sx={{
           position: "absolute",
           top: "50%",
@@ -2505,6 +2976,7 @@ function ConnectionStatusBadge({ status, reason, onSmartFix }: { status: Connect
           alignItems: "center",
           justifyContent: "center",
           boxShadow: "0 8px 18px rgba(15, 23, 42, 0.12)",
+          cursor: status === "error" ? "pointer" : "default",
           pointerEvents: status === "normal" ? "none" : "auto",
           transition: "opacity 0.28s ease, scale 0.28s ease, background-color 0.24s ease, border-color 0.24s ease, color 0.24s ease",
           animation: status === "normal" ? "none" : "connectionBadgeIn 0.28s ease-out both",
@@ -2584,9 +3056,11 @@ function WorkflowNodeCard({
   canEdit,
   isDragging,
   warnings,
+  rawWarnings,
   onEditTool,
   onRemoveTool,
   onToggleTool,
+  onSmartConfigureTool,
   onNodeDragStart,
   onNodeDragOver,
   onNodeDragEnd,
@@ -2606,9 +3080,11 @@ function WorkflowNodeCard({
   canEdit: boolean;
   isDragging: boolean;
   warnings: Record<string, string[]>;
+  rawWarnings: Record<string, string[]>;
   onEditTool: (nodeId: string) => void;
   onRemoveTool: (nodeId: string) => void;
   onToggleTool: (nodeId: string) => void;
+  onSmartConfigureTool: (nodeId: string) => void;
   onNodeDragStart: (event: DragEvent<HTMLDivElement>) => void;
   onNodeDragOver: (event: DragEvent<HTMLDivElement>) => void;
   onNodeDragEnd: () => void;
@@ -2619,6 +3095,7 @@ function WorkflowNodeCard({
 }) {
   const nodeProblems = section.nodes.flatMap((node) => warnings[node.nodeId] ?? []);
   const hasWarning = nodeProblems.length > 0;
+  const hasVisualWarning = hasInputIssue;
   const isCardBuilding = section.nodes.some((node) => ["building", "selectingTool", "configuring"].includes(runtimeStates[node.nodeId]?.status ?? ""));
   const isSectionRunning = section.nodes.some((node) => runtimeStates[node.nodeId]?.status === "running");
   const sequenceBg = isSectionRunning ? "#7c3aed" : "#111827";
@@ -2718,9 +3195,9 @@ function WorkflowNodeCard({
         sx={{
           mb: index < total - 1 ? 1.25 : 0,
           border: "1px solid",
-          borderColor: hasWarning ? "#fed7aa" : isCardBuilding ? "#c4b5fd" : "#e2e8f0",
+          borderColor: hasVisualWarning ? "#fed7aa" : isCardBuilding ? "#c4b5fd" : "#e2e8f0",
           borderRadius: "14px",
-          bgcolor: "#fff",
+          bgcolor: hasVisualWarning ? "#fffaf3" : "#fff",
           overflow: "hidden",
           cursor: canEdit ? "grab" : "default",
           boxShadow: isCardBuilding ? "0 0 0 5px rgba(128, 26, 235, 0.1), 0 14px 30px rgba(128, 26, 235, 0.12)" : "0 10px 28px rgba(15, 23, 42, 0.06)",
@@ -2755,6 +3232,8 @@ function WorkflowNodeCard({
 
           {section.nodes.map((node) => {
             const toolWarnings = warnings[node.nodeId] ?? [];
+            const rawToolWarnings = rawWarnings[node.nodeId] ?? [];
+            const toolNeedsSmartHandling = needsSmartToolHandling(node, rawToolWarnings);
             const runtimeState = runtimeStates[node.nodeId];
             if (runtimeState?.status === "building" || runtimeState?.status === "selectingTool") {
               return <ToolPendingRow key={node.nodeId} status={runtimeState.status} />;
@@ -2767,9 +3246,11 @@ function WorkflowNodeCard({
                 canEdit={canEdit}
                 canDrag={canEdit && section.nodes.length > 1}
                 warnings={toolWarnings}
+                needsSmartHandling={toolNeedsSmartHandling}
                 runtimeState={runtimeState}
                 onEdit={() => onEditTool(node.nodeId)}
                 onRemove={() => onRemoveTool(node.nodeId)}
+                onSmartConfigure={() => onSmartConfigureTool(node.nodeId)}
                 onToggleExpand={() => onToggleTool(node.nodeId)}
                 onDragStart={(event) => { event.stopPropagation(); onToolDragStart(node.nodeId); }}
                 onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
@@ -2821,9 +3302,11 @@ function ToolRuntimeRow({
   canEdit,
   canDrag,
   warnings,
+  needsSmartHandling,
   runtimeState,
   onEdit,
   onRemove,
+  onSmartConfigure,
   onToggleExpand,
   onDragStart,
   onDragOver,
@@ -2834,9 +3317,11 @@ function ToolRuntimeRow({
   canEdit: boolean;
   canDrag: boolean;
   warnings: string[];
+  needsSmartHandling: boolean;
   runtimeState?: NodeRuntimeState;
   onEdit: () => void;
   onRemove: () => void;
+  onSmartConfigure: () => void;
   onToggleExpand: () => void;
   onDragStart: (event: DragEvent<HTMLDivElement>) => void;
   onDragOver: (event: DragEvent<HTMLDivElement>) => void;
@@ -2847,9 +3332,12 @@ function ToolRuntimeRow({
   const isExpanded = runtimeExpanded || node.expanded;
   const isConfigured = status === "configured";
   const isActive = ["configuring", "configured", "running"].includes(status);
+  const hasVisualWarning = warnings.length > 0 || needsSmartHandling;
   const visibleParamCount = runtimeState?.visibleParamCount ?? 0;
   const allVisibleParams = getNodePreviewParams(node);
-  const visibleParams = runtimeExpanded ? allVisibleParams.slice(0, Math.max(visibleParamCount, 0)) : allVisibleParams;
+  const previewParams = needsSmartHandling ? allVisibleParams.filter(isPreviewParamConfigured) : allVisibleParams;
+  const visibleParams = runtimeExpanded ? previewParams.slice(0, Math.max(visibleParamCount, 0)) : previewParams;
+  const showPreviewPanel = isExpanded && (visibleParams.length > 0 || runtimeExpanded || !needsSmartHandling);
   const statusText = {
     building: "创建节点中",
     selectingTool: "选择工具中",
@@ -2880,8 +3368,8 @@ function ToolRuntimeRow({
         px: 1,
         py: 0.9,
         borderRadius: "10px",
-        bgcolor: warnings.length ? "#fff7ed" : isConfigured || status === "success" ? "#f0fdf4" : isActive ? "#fbf7ff" : "#f8fafc",
-        border: `1px solid ${warnings.length ? "#fed7aa" : isConfigured || status === "success" ? "#bbf7d0" : isActive ? "#ddd6fe" : "#e2e8f0"}`,
+        bgcolor: hasVisualWarning ? "#fff7ed" : isConfigured || status === "success" ? "#f0fdf4" : isActive ? "#fbf7ff" : "#f8fafc",
+        border: `1px solid ${hasVisualWarning ? "#fed7aa" : isConfigured || status === "success" ? "#bbf7d0" : isActive ? "#ddd6fe" : "#e2e8f0"}`,
         boxShadow: isActive ? isConfigured ? "0 8px 20px rgba(22, 163, 74, 0.1)" : "0 8px 20px rgba(128, 26, 235, 0.08)" : "none",
         animation: "fadeInTool 0.32s ease-out both",
         cursor: "pointer",
@@ -2899,9 +3387,37 @@ function ToolRuntimeRow({
           {status === "running" ? <CircularProgress size={12} color="inherit" /> : isConfigured || status === "success" ? <CheckCircleOutline sx={{ fontSize: 14 }} /> : <Handyman sx={{ fontSize: 14 }} />}
         </Box>
         <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography sx={{ fontSize: 13, fontWeight: 500, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {status === "building" ? "正在创建工具模块..." : status === "selectingTool" ? "正在选择工具..." : node.toolName}
-          </Typography>
+          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+            <Typography sx={{ fontSize: 13, fontWeight: 500, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+              {status === "building" ? "正在创建工具模块..." : status === "selectingTool" ? "正在选择工具..." : node.toolName}
+            </Typography>
+            {needsSmartHandling && canEdit && (
+              <Button
+                size="small"
+                startIcon={<AutoAwesome sx={{ fontSize: 13 }} />}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSmartConfigure();
+                }}
+                sx={{
+                  flexShrink: 0,
+                  height: 22,
+                  minWidth: 0,
+                  px: 0.75,
+                  borderRadius: "999px",
+                  bgcolor: "#f5f3ff",
+                  color: "#6d28d9",
+                  fontSize: 10.5,
+                  fontWeight: 800,
+                  textTransform: "none",
+                  "& .MuiButton-startIcon": { mr: 0.35 },
+                  "&:hover": { bgcolor: "#ede9fe" },
+                }}
+              >
+                智能处理
+              </Button>
+            )}
+          </Stack>
           {statusText && <Typography sx={{ mt: 0.15, fontSize: 11, color: statusColor }}>{statusText}</Typography>}
         </Box>
         {status === "configuring" && <CircularProgress size={16} sx={{ color: "#c2410c" }} />}
@@ -2915,10 +3431,10 @@ function ToolRuntimeRow({
       </Box>
       <Box
         sx={{
-          maxHeight: isExpanded ? 220 : 0,
-          opacity: isExpanded ? 1 : 0,
+          maxHeight: showPreviewPanel ? 220 : 0,
+          opacity: showPreviewPanel ? 1 : 0,
           overflow: "hidden",
-          mt: isExpanded ? 1 : 0,
+          mt: showPreviewPanel ? 1 : 0,
           transition: "max-height 0.34s ease, opacity 0.22s ease, margin-top 0.34s ease",
         }}
       >
@@ -2963,6 +3479,14 @@ function getNodePreviewParams(node: ToolNode): ToolParam[] {
     return scriptParam ? [...inputRows, scriptParam] : inputRows;
   }
   return node.params.filter((param) => isParamVisible(node, param));
+}
+
+function isPreviewParamConfigured(param: ToolParam) {
+  if (param.source?.type === "file") return true;
+  if (param.source?.type === "upstream") return Boolean(param.source.sourceNodeId && param.source.outputPath);
+  if (Array.isArray(param.value)) return param.value.length > 0;
+  if (typeof param.value === "string") return Boolean(param.value.trim());
+  return true;
 }
 
 function getParamPreview(param: ToolParam, allNodes: ToolNode[] = []) {
