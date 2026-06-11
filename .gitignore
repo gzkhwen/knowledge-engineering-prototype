@@ -1,5 +1,9 @@
 node_modules/
 dist/
+.npm-cache/
+.npmrc
+qa/
+design-qa.md
 .DS_Store
 .env
 .env.local
