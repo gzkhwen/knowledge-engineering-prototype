@@ -905,7 +905,6 @@ function createInitialPlanNodes(): ToolNode[] {
   const storage = createNode("system-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "content[0].text" });
   const summary = createNode("summary", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
-  summary.flowNodeId = qa.flowNodeId;
   return [parser, code, splitter, storage, qa, summary];
 }
 
@@ -916,7 +915,6 @@ function createAgentDemoPlanNodes(): ToolNode[] {
   const storage = createNode("system-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const summary = createNode("summary", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
-  summary.flowNodeId = qa.flowNodeId;
   return [parser, adapter, splitter, storage, qa, summary].map((node) => ({ ...node, adjusted: true }));
 }
 
@@ -927,7 +925,6 @@ function createAgentOptimizedPlanNodes(): ToolNode[] {
   const storage = createNode("system-storage", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const qa = createNode("qa-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
   const keyword = createNode("keyword-extractor", { type: "upstream", sourceNodeId: splitter.nodeId, outputPath: "data.textChunkResult" });
-  keyword.flowNodeId = qa.flowNodeId;
   return [parser, adapter, splitter, storage, qa, keyword].map((node) => ({ ...node, adjusted: true }));
 }
 
@@ -1125,6 +1122,7 @@ function hasUnsetVisibleConfig(node: ToolNode) {
   if (node.toolId === "system-code" && (!node.codeInputs?.length || !node.codeOutputs?.length)) return true;
   return node.params.some((param) => (
     isParamVisible(node, param)
+    && param.required
     && param.source?.type !== "file"
     && param.source?.type !== "upstream"
     && isEmptyParamValue(param.value)
@@ -1366,12 +1364,12 @@ function getCategorySections(nodes: ToolNode[]) {
   const sections: { sectionId: string; category: string; nodes: ToolNode[] }[] = [];
   nodes.forEach((node) => {
     const category = normalizeCategory(node.category);
-    const existingSection = sections.find((section) => section.category === category);
-    if (existingSection) {
-      existingSection.nodes.push(node);
+    const lastSection = sections[sections.length - 1];
+    if (lastSection?.sectionId === node.flowNodeId) {
+      lastSection.nodes.push(node);
       return;
     }
-    sections.push({ sectionId: category, category, nodes: [node] });
+    sections.push({ sectionId: node.flowNodeId, category, nodes: [node] });
   });
 
   return sections;
@@ -1414,20 +1412,11 @@ function getCategoryOrder(category: string) {
 
 function insertNodeByCategory(nodes: ToolNode[], node: ToolNode) {
   const normalizedNode = { ...node, category: normalizeCategory(node.category) };
-  const existingCategoryNode = nodes.find((item) => normalizeCategory(item.category) === normalizedNode.category);
-  const nodeWithFlow = existingCategoryNode ? { ...normalizedNode, flowNodeId: existingCategoryNode.flowNodeId } : normalizedNode;
-  const lastSameCategoryIndex = nodes.reduce((lastIndex, item, index) => (normalizeCategory(item.category) === nodeWithFlow.category ? index : lastIndex), -1);
-  if (lastSameCategoryIndex >= 0) {
-    const next = [...nodes];
-    next.splice(lastSameCategoryIndex + 1, 0, nodeWithFlow);
-    return next;
-  }
-
-  const nodeOrder = getCategoryOrder(nodeWithFlow.category);
+  const nodeOrder = getCategoryOrder(normalizedNode.category);
   const insertIndex = nodes.findIndex((item) => getCategoryOrder(item.category) > nodeOrder);
-  if (insertIndex < 0) return [...nodes, nodeWithFlow];
+  if (insertIndex < 0) return [...nodes, normalizedNode];
   const next = [...nodes];
-  next.splice(insertIndex, 0, nodeWithFlow);
+  next.splice(insertIndex, 0, normalizedNode);
   return next;
 }
 
@@ -2129,7 +2118,7 @@ export function AgentWorkbench() {
       inputSource,
     ));
     clearManualConnectionStatuses();
-    updatePlanNodesWithMotion((current) => insertNodeByCategory(current, { ...node, expanded: true, adjusted: true }));
+    updatePlanNodesWithMotion((current) => [...current, { ...node, expanded: true, adjusted: true }]);
     setAddDialogOpen(false);
     toast.success(`已添加工具，已归入${getPlanTitle(node.category)}`);
   };
