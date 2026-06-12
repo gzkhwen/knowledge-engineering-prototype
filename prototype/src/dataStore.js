@@ -82,8 +82,60 @@ const seed = {
     { id: 'cat-process', solutionId: 'sol-finance', parentId: null, name: '业务流程', level: 1, formTypes: [], hasContent: false },
     { id: 'cat-open-account', solutionId: 'sol-finance', parentId: 'cat-process', name: '开户流程', level: 2, formTypes: ['SOP', '问答库'], hasContent: false },
     { id: 'cat-risk-rule', solutionId: 'sol-risk', parentId: null, name: '风控规则', level: 1, formTypes: ['决策表', '非结构化切片'], hasContent: false },
+    { id: 'cat-risk-loan', solutionId: 'sol-risk', parentId: null, name: '贷后规则', level: 1, formTypes: ['问答库'], hasContent: false },
+    { id: 'cat-test-root', solutionId: 'sol-test', parentId: null, name: '测试类目', level: 1, formTypes: ['问答库', '非结构化切片'], hasContent: true },
+    { id: 'cat-529-full-root', solutionId: 'sol-529-full', parentId: null, name: '测试类目', level: 1, formTypes: ['问答库'], hasContent: true },
+    { id: 'cat-529-root', solutionId: 'sol-529', parentId: null, name: '测试类目', level: 1, formTypes: ['问答库'], hasContent: true },
+    { id: 'cat-mixue-product', solutionId: 'sol-mixue', parentId: null, name: '产品知识', level: 1, formTypes: [], hasContent: false },
+    { id: 'cat-mixue-franchise', solutionId: 'sol-mixue', parentId: 'cat-mixue-product', name: '加盟政策', level: 2, formTypes: ['问答库', '非结构化切片'], hasContent: true },
+    { id: 'cat-script-root', solutionId: 'sol-script', parentId: null, name: '测试类目', level: 1, formTypes: ['问答库'], hasContent: false },
   ],
 };
+
+function fallbackCategoriesForProject(solution, project) {
+  const baseId = solution.id.replace(/^sol-/, '');
+  if (project.templateId === 'tpl-mixue') {
+    return [
+      { id: `cat-${baseId}-product`, solutionId: solution.id, parentId: null, name: '产品知识', level: 1, formTypes: [], hasContent: false },
+      { id: `cat-${baseId}-franchise`, solutionId: solution.id, parentId: `cat-${baseId}-product`, name: '加盟政策', level: 2, formTypes: ['问答库', '非结构化切片'], hasContent: project.hasContent },
+    ];
+  }
+  if (project.relationshipId === 'rel-bank-marketing-qa') {
+    return [
+      { id: `cat-${baseId}-product`, solutionId: solution.id, parentId: null, name: '产品知识', level: 1, formTypes: [], hasContent: false },
+      { id: `cat-${baseId}-finance`, solutionId: solution.id, parentId: `cat-${baseId}-product`, name: '理财产品', level: 2, formTypes: ['问答库', '非结构化切片'], hasContent: project.hasContent },
+      { id: `cat-${baseId}-process`, solutionId: solution.id, parentId: null, name: '业务流程', level: 1, formTypes: [], hasContent: false },
+      { id: `cat-${baseId}-account`, solutionId: solution.id, parentId: `cat-${baseId}-process`, name: '开户流程', level: 2, formTypes: ['SOP', '问答库'], hasContent: false },
+    ];
+  }
+  if (project.relationshipId === 'rel-insurance-training-qa') {
+    return [
+      { id: `cat-${baseId}-rules`, solutionId: solution.id, parentId: null, name: project.projectStatus === '草稿' ? '风控规则' : '保险知识', level: 1, formTypes: ['问答库', '非结构化切片'], hasContent: project.hasContent },
+    ];
+  }
+  return [
+    { id: `cat-${baseId}-root`, solutionId: solution.id, parentId: null, name: '测试类目', level: 1, formTypes: ['问答库'], hasContent: project.hasContent },
+  ];
+}
+
+function ensureProjectCategories() {
+  const projects = read(keys.projects, []);
+  const solutions = read(keys.projectSolutions, []);
+  const categories = read(keys.projectCategories, []);
+  const next = [...categories];
+  let changed = false;
+
+  projects.forEach((project) => {
+    const solution = solutions.find((item) => item.projectId === project.id);
+    if (!solution) return;
+    const hasCategory = next.some((item) => item.solutionId === solution.id);
+    if (hasCategory) return;
+    next.push(...fallbackCategoriesForProject(solution, project));
+    changed = true;
+  });
+
+  if (changed) write(keys.projectCategories, next);
+}
 
 function ensureSeeded() {
   const existingProjects = read(keys.projects, null);
@@ -98,6 +150,7 @@ function ensureSeeded() {
 }
 
 ensureSeeded();
+ensureProjectCategories();
 
 export const knowledgeFormTypes = formTypes;
 

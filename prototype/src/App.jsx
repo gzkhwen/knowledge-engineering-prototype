@@ -26,7 +26,7 @@ import {
   ToolOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
-import { dataStore } from './dataStore.js';
+import { dataStore, knowledgeFormTypes } from './dataStore.js';
 import {
   createEmptyServiceDraft,
   defaultCategories,
@@ -1009,6 +1009,9 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
   const [version, setVersion] = useState(0);
   const [expanded, setExpanded] = useState(new Set());
   const [selectedTemplate, setSelectedTemplate] = useState(dataStore.getProject(projectId)?.templateId || '');
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [categoryForm, setCategoryForm] = useState({ name: '', parentId: '', formTypes: ['问答库'] });
+  const [categoryError, setCategoryError] = useState('');
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
   const solution = dataStore.getProjectSolution(project.id);
   const categories = solution ? dataStore.getProjectCategories(solution.id).sort((a, b) => (a.level - b.level) || a.name.localeCompare(b.name, 'zh-CN')) : [];
@@ -1018,6 +1021,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
   const leafCategories = categories.filter((cat) => isLeaf(cat));
   const unconfirmedPlanCount = solution?.status === 'active' ? 0 : leafCategories.reduce((sum, cat) => sum + Math.max(cat.formTypes.length, 1), 0);
   const rootCategories = childrenOf(null);
+  const availableParents = categories.filter((cat) => cat.level < 5);
   const stats = {
     total: categories.length,
     leaves: leafCategories.length,
@@ -1044,6 +1048,67 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
     dataStore.updateProjectSolution(solution.id, { status: 'active', enabled: true });
     refresh();
     notify('项目空间已发布', 'success');
+  };
+
+  const openCreateCategory = () => {
+    setCategoryForm({ name: '', parentId: '', formTypes: ['问答库'] });
+    setCategoryError('');
+    setCategoryDialogOpen(true);
+  };
+
+  const toggleCategoryFormType = (formType) => {
+    setCategoryForm((current) => {
+      const hasValue = current.formTypes.includes(formType);
+      return {
+        ...current,
+        formTypes: hasValue ? current.formTypes.filter((item) => item !== formType) : [...current.formTypes, formType],
+      };
+    });
+    setCategoryError('');
+  };
+
+  const createCategory = () => {
+    if (!solution) return;
+    const name = categoryForm.name.trim();
+    const parentId = categoryForm.parentId || null;
+    const parent = parentId ? categories.find((cat) => cat.id === parentId) : null;
+    const level = parent ? parent.level + 1 : 1;
+
+    if (!name) {
+      setCategoryError('类目名称不能为空');
+      return;
+    }
+    if (dataStore.isProjectCategoryNameExists(solution.id, parentId, name)) {
+      setCategoryError('同级下已存在同名类目');
+      return;
+    }
+    if (level > 5) {
+      setCategoryError('类目层级不得超过 5 层');
+      return;
+    }
+    if (!categoryForm.formTypes.length) {
+      setCategoryError('末级类目必须指定至少一个知识形态');
+      return;
+    }
+
+    if (parent?.formTypes?.length) {
+      dataStore.updateProjectCategory(parent.id, { formTypes: [] });
+    }
+    const next = dataStore.addProjectCategory(solution.id, {
+      name,
+      parentId,
+      level,
+      formTypes: categoryForm.formTypes,
+      hasContent: false,
+    });
+    if (parentId) {
+      setExpanded((current) => new Set(current).add(parentId));
+    } else {
+      setExpanded((current) => new Set(current).add(next.id));
+    }
+    setCategoryDialogOpen(false);
+    refresh();
+    notify(parent?.formTypes?.length ? '已创建类目，父级已转为分类节点' : '已创建知识类目', 'success');
   };
 
   const renderNode = (cat) => {
@@ -1124,11 +1189,76 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
       <section className="panel tree-panel">
         <div className="section-head">
           <h2>知识类目</h2>
-          <div><button type="button" className="secondary" onClick={() => setExpanded(new Set(categories.map((item) => item.id)))}>展开全部</button><button type="button" className="secondary" onClick={() => setExpanded(new Set())}>折叠全部</button></div>
+          <div><button type="button" className="secondary" onClick={() => setExpanded(new Set(categories.map((item) => item.id)))}>展开全部</button><button type="button" className="secondary" onClick={() => setExpanded(new Set())}>折叠全部</button><button type="button" className="primary" onClick={openCreateCategory}><PlusOutlined /> 新增类目</button></div>
         </div>
         <div className="tree-summary">{rootCategories.length} 个根类目 · 共 {stats.total} 个类目 · 最多支持 5 层树形结构</div>
-        <div className="tree-list">{rootCategories.length ? rootCategories.map(renderNode) : <div className="empty-mini large">暂无知识类目</div>}</div>
+        <div className="tree-list">{rootCategories.length ? rootCategories.map(renderNode) : (
+          <div className="empty-mini large category-empty-content">
+            <FolderOpenOutlined />
+            <strong>暂无知识类目</strong>
+            <span>创建末级类目并指定知识形态后，可从类目进入方案工作台。</span>
+            <button type="button" className="primary" onClick={openCreateCategory}><PlusOutlined /> 新增根类目</button>
+          </div>
+        )}</div>
       </section>
+      {categoryDialogOpen ? (
+        <Modal
+          title="新增知识类目"
+          onClose={() => setCategoryDialogOpen(false)}
+          footer={(
+            <>
+              <button type="button" className="secondary" onClick={() => setCategoryDialogOpen(false)}>取消</button>
+              <button type="button" className="primary" onClick={createCategory}>创建类目</button>
+            </>
+          )}
+        >
+          <div className="dialog-stack">
+            <Field label="类目名称" required>
+              <input
+                autoFocus
+                value={categoryForm.name}
+                onChange={(event) => {
+                  setCategoryForm((current) => ({ ...current, name: event.target.value }));
+                  setCategoryError('');
+                }}
+                placeholder="请输入知识类目名称（同级下唯一）"
+              />
+            </Field>
+            <Field label="父级类目">
+              <SelectField
+                value={categoryForm.parentId}
+                onChange={(value) => {
+                  setCategoryForm((current) => ({ ...current, parentId: value }));
+                  setCategoryError('');
+                }}
+              >
+                <option value="">无（根类目）</option>
+                {availableParents.map((cat) => (
+                  <option key={cat.id} value={cat.id}>{`${'　'.repeat(cat.level - 1)}${cat.name} · 第 ${cat.level} 层`}</option>
+                ))}
+              </SelectField>
+              <p className="field-help visible">留空则创建为根类目；最多支持 5 层树形结构。</p>
+            </Field>
+            <div className="form-field">
+              <span>知识形态（末级必选）<em>*</em></span>
+              <div className="checkbox-grid category-form-grid">
+                {knowledgeFormTypes.map((formType) => (
+                  <label key={formType} className="checkbox-option">
+                    <input
+                      type="checkbox"
+                      checked={categoryForm.formTypes.includes(formType)}
+                      onChange={() => toggleCategoryFormType(formType)}
+                    />
+                    <span>{formType}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <p className="category-dialog-hint">末级类目必须指定至少一个知识形态；如果选择已有知识形态的类目作为父级，该父级会转为分类节点，知识形态由新建末级类目承载。</p>
+            {categoryError ? <p className="form-error">{categoryError}</p> : null}
+          </div>
+        </Modal>
+      ) : null}
     </>
   );
 }
@@ -2151,8 +2281,9 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
     pushEvent({ role: 'user', title: '发送样例文件', content: `已发送 ${filesSnapshot.length} 个样例文件，并附带已标记问题，请生成正式的知识处理方案。`, status: 'done' });
 
     let cursor = 0;
+    const agentDelay = (delay) => (delay <= 0 ? 0 : Math.max(350, Math.round(delay * 0.58)));
     const step = (delay, action) => {
-      cursor += delay;
+      cursor += agentDelay(delay);
       window.setTimeout(action, cursor);
     };
 
@@ -2471,25 +2602,56 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
 
   const clearManualConnectionStates = () => setConnectionStates({});
 
+  const clearSectionDragState = () => {
+    setDraggingSectionId(null);
+    setDragInsertTarget(null);
+  };
+
   const moveSectionTo = (sectionId, targetSectionId, position) => {
     if (!canEdit || sectionId === targetSectionId) {
-      setDraggingSectionId(null);
-      setDragInsertTarget(null);
+      clearSectionDragState();
       return;
     }
     const sections = getCategorySections(planNodes);
     const from = sections.findIndex((section) => section.sectionId === sectionId);
-    if (from < 0) return;
+    if (from < 0) {
+      clearSectionDragState();
+      return;
+    }
     const nextSections = [...sections];
     const [moved] = nextSections.splice(from, 1);
     const targetIndex = nextSections.findIndex((section) => section.sectionId === targetSectionId);
-    if (targetIndex < 0) return;
+    if (targetIndex < 0) {
+      clearSectionDragState();
+      return;
+    }
     nextSections.splice(position === 'after' ? targetIndex + 1 : targetIndex, 0, moved);
     clearManualConnectionStates();
     setPlanNodes(nextSections.flatMap((section) => section.nodes.map((node) => ({ ...node, adjusted: section.sectionId === sectionId ? true : node.adjusted }))));
     setConfirmed(false);
-    setDraggingSectionId(null);
-    setDragInsertTarget(null);
+    clearSectionDragState();
+  };
+
+  const getSectionInsertTarget = (event, section) => {
+    if (!draggingSectionId || draggingSectionId === section.sectionId) {
+      return null;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+    return { sectionId: section.sectionId, position };
+  };
+
+  const updateSectionInsertTarget = (event, section) => {
+    const target = getSectionInsertTarget(event, section);
+    setDragInsertTarget(target);
+  };
+
+  const dropSectionAtInsertTarget = (target = dragInsertTarget) => {
+    if (!draggingSectionId || !target) {
+      clearSectionDragState();
+      return;
+    }
+    moveSectionTo(draggingSectionId, target.sectionId, target.position);
   };
 
   const dropToolOnNode = (targetNodeId) => {
@@ -2553,7 +2715,18 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
                 {categorySections.length ? categorySections.map((section, index) => {
                   const insertPosition = dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : null;
                   return (
-                    <div className="workflow-section-wrap" key={`${section.sectionId}-${index}`}>
+                    <div
+                      className="workflow-section-wrap"
+                      key={`${section.sectionId}-${index}`}
+                      onDragOver={canEdit ? (event) => {
+                        event.preventDefault();
+                        updateSectionInsertTarget(event, section);
+                      } : undefined}
+                      onDrop={canEdit ? (event) => {
+                        event.preventDefault();
+                        dropSectionAtInsertTarget(getSectionInsertTarget(event, section));
+                      } : undefined}
+                    >
                       {insertPosition === 'before' ? <div className="workflow-drop-indicator" /> : null}
                       <WorkflowSection
                         section={section}
@@ -2567,17 +2740,7 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
                         draggingSectionId={draggingSectionId}
                         draggingNodeId={draggingNodeId}
                         onSectionDragStart={() => setDraggingSectionId(section.sectionId)}
-                        onSectionDragOver={(event) => {
-                          if (!draggingSectionId || draggingSectionId === section.sectionId) {
-                            setDragInsertTarget(null);
-                            return;
-                          }
-                          const rect = event.currentTarget.getBoundingClientRect();
-                          const position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
-                          setDragInsertTarget({ sectionId: section.sectionId, position });
-                        }}
-                        onSectionDrop={() => draggingSectionId && dragInsertTarget && moveSectionTo(draggingSectionId, dragInsertTarget.sectionId, dragInsertTarget.position)}
-                        onSectionDragEnd={() => { setDraggingSectionId(null); setDragInsertTarget(null); }}
+                        onSectionDragEnd={clearSectionDragState}
                         onToolDragStart={setDraggingNodeId}
                         onToolDrop={dropToolOnNode}
                         onEdit={setEditingNode}
@@ -2633,8 +2796,6 @@ function WorkflowSection({
   draggingSectionId,
   draggingNodeId,
   onSectionDragStart,
-  onSectionDragOver,
-  onSectionDrop,
   onSectionDragEnd,
   onToolDragStart,
   onToolDrop,
@@ -2661,11 +2822,9 @@ function WorkflowSection({
         } : undefined}
         onDragOver={canEdit ? (event) => {
           event.preventDefault();
-          onSectionDragOver(event);
         } : undefined}
         onDrop={canEdit ? (event) => {
           event.preventDefault();
-          onSectionDrop();
         } : undefined}
         onDragEnd={canEdit ? onSectionDragEnd : undefined}
       >
