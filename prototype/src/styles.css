@@ -640,18 +640,23 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .source-field .select-field-wrap, .source-field .select-field, .source-field input { width: 100%; min-width: 0; }
 .source-field .select-field { height: 36px; color: #111827; background: #fff; border: 1px solid #cfd9e8; border-radius: 8px; }
 .code-input-list { display: grid; gap: 10px; }
-.code-input-row { display: grid; grid-template-columns: minmax(180px, .45fr) minmax(0, 1fr) 36px; gap: 10px; align-items: start; padding: 12px; border: 1px solid #dbe6f3; border-radius: 10px; background: #fff; }
-.code-input-name-field { display: grid; gap: 8px; color: #344054; font-size: 12px; font-weight: 700; line-height: 1.2; }
+.code-input-row { display: grid; grid-template-columns: 220px minmax(0, 1fr) 64px; gap: 8px; align-items: start; padding: 12px; border: 1px solid #dbe6f3; border-radius: 10px; background: #fff; }
+.code-input-name-field, .code-input-value-field { display: grid; gap: 8px; color: #344054; font-size: 12px; font-weight: 700; line-height: 1.2; }
 .code-input-row > input { min-height: 38px; padding: 8px 11px; border: 1px solid #cfd9e8; border-radius: 8px; }
-.code-input-name-field input { min-height: 38px; padding: 8px 11px; color: #111827; border: 1px solid #cfd9e8; border-radius: 8px; font-size: 13px; font-weight: 400; line-height: 1.4; }
-.code-input-row > button, .code-output-row button { display: grid; place-items: center; width: 36px; height: 38px; border-radius: 8px; color: #667085; background: #f8fafc; border: 1px solid #cfd9e8; }
-.code-input-row > .param-editor-row { grid-column: auto; padding: 0; border: 0; background: transparent; }
-.code-input-row > button { margin-top: 20px; }
+.code-input-name-field input, .code-input-value-field input { min-height: 38px; padding: 8px 11px; color: #111827; border: 1px solid #cfd9e8; border-radius: 8px; font-size: 13px; font-weight: 400; line-height: 1.4; }
+.code-input-actions { display: inline-flex; align-items: center; justify-content: flex-start; gap: 2px; height: 38px; margin-top: 20px; }
+.code-input-actions .fx-button { width: 32px; height: 38px; border-radius: 8px; }
+.code-row-delete-button, .code-output-row > button { display: grid; place-items: center; width: 28px; height: 38px; border-radius: 8px; color: #ef4444; background: transparent; }
+.code-row-delete-button:hover, .code-output-row > button:hover { background: #fef2f2; }
+.code-input-fx-panel { grid-column: 1 / 3; width: 100%; margin: 0; }
 .code-output-list { display: grid; gap: 8px; }
-.code-output-row { display: grid; grid-template-columns: minmax(0, 1fr) 100px minmax(0, 1.2fr) 36px; gap: 8px; }
+.code-output-row { display: grid; grid-template-columns: minmax(0, .8fr) 150px minmax(0, 1.2fr) 36px; gap: 8px; }
 .code-output-row input, .code-output-row select { min-height: 38px; padding: 8px 11px; border: 1px solid #cfd9e8; border-radius: 8px; background: #fff; }
+.code-output-field { display: grid; gap: 8px; color: #344054; font-size: 12px; font-weight: 700; line-height: 1.2; }
+.code-output-field input { min-height: 38px; padding: 8px 11px; color: #111827; border: 1px solid #cfd9e8; border-radius: 8px; font-size: 13px; font-weight: 400; line-height: 1.4; }
 .code-output-row .select-field-wrap { width: 100%; min-width: 0; }
 .code-output-row .select-field { width: 100%; min-width: 0; height: 38px; background: #fff; border: 1px solid #cfd9e8; border-radius: 8px; }
+.code-output-row > button { margin-top: 20px; }
 .code-lang-chip { display: inline-flex; align-items: center; height: 22px; margin-left: 6px; padding: 0 8px; border-radius: 999px; color: #475467; background: #f2f4f7; font-size: 12px; font-weight: 600; vertical-align: middle; }
 .output-schema { display: grid; padding: 2px 0; background: #fff; }
 .output-item { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 4px 16px; padding: 12px 0; border-bottom: 1px solid #edf1f7; color: #344054; font-size: 13px; }
