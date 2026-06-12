@@ -2994,7 +2994,7 @@ function AddToolDialog({ tools, nodes, confirmed, onClose, onAdd }) {
   );
 }
 
-function ParamEditor({ param, nodes, priorNodes, onChange }) {
+function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false }) {
   const active = param.source?.type === 'file' || param.source?.type === 'upstream';
   const updateSourceType = (type) => {
     if (type === 'file') onChange({ ...param, source: { type: 'file' } });
@@ -3007,7 +3007,7 @@ function ParamEditor({ param, nodes, priorNodes, onChange }) {
     <div className="param-editor-row">
       <label>{param.label}{param.required ? <em>*</em> : null}</label>
       <div className="param-editor-field">
-        {active ? <input readOnly value={getParamPreview(param, nodes)} /> : param.type === 'textarea' ? <textarea value={Array.isArray(param.value) ? param.value.join('\n') : param.value} onChange={(event) => onChange({ ...param, value: event.target.value })} /> : param.type === 'select' ? <SelectField value={param.value} onChange={(value) => onChange({ ...param, value })}>{param.options.map((option) => <option key={option} value={option}>{option}</option>)}</SelectField> : param.type === 'multiSelect' || param.type === 'tags' ? <input value={Array.isArray(param.value) ? param.value.join('、') : ''} onChange={(event) => onChange({ ...param, value: event.target.value.split(/[、,]/).filter(Boolean) })} /> : <input type={param.type === 'number' ? 'number' : 'text'} value={param.value} onChange={(event) => onChange({ ...param, value: param.type === 'number' ? Number(event.target.value) : event.target.value })} />}
+        {active ? <input readOnly value={getParamPreview(param, nodes)} /> : param.type === 'textarea' && !singleLine ? <textarea value={Array.isArray(param.value) ? param.value.join('\n') : param.value} onChange={(event) => onChange({ ...param, value: event.target.value })} /> : param.type === 'select' ? <SelectField value={param.value} onChange={(value) => onChange({ ...param, value })}>{param.options.map((option) => <option key={option} value={option}>{option}</option>)}</SelectField> : param.type === 'multiSelect' || param.type === 'tags' ? <input value={Array.isArray(param.value) ? param.value.join('、') : ''} onChange={(event) => onChange({ ...param, value: event.target.value.split(/[、,]/).filter(Boolean) })} /> : <input type={param.type === 'number' ? 'number' : 'text'} value={Array.isArray(param.value) ? param.value.join('、') : param.value} onChange={(event) => onChange({ ...param, value: param.type === 'number' ? Number(event.target.value) : event.target.value })} />}
         <button type="button" title="配置参数来源" className={active ? 'fx-button active' : 'fx-button'} onClick={() => {
           if (active) onChange({ ...param, source: { type: 'manual' } });
           else {
@@ -3100,12 +3100,12 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
             <div className="config-section-head"><h3>定义入参</h3><button type="button" className="text-link" onClick={addCodeInput}><PlusOutlined /> 添加入参</button></div>
             <div className="code-input-list">
               {(draft.codeInputs || []).map((input) => {
-                const inputParam = { ...(codeInputParam || makeParam('codeInput', '脚本输入', '', { type: 'textarea' })), id: input.id, label: input.name, value: input.value || '', source: input.source || { type: 'manual' } };
+                const inputParam = { ...(codeInputParam || makeParam('codeInput', '脚本输入', '', { type: 'textarea' })), id: input.id, label: '参数值', required: false, value: input.value || '', source: input.source || { type: 'manual' } };
                 return (
                   <div className="code-input-row" key={input.id}>
-                    <input value={input.name} onChange={(event) => updateCodeInput(input.id, { name: event.target.value })} />
-                    <button type="button" disabled={(draft.codeInputs || []).length <= 1} onClick={() => removeCodeInput(input.id)}><DeleteOutlined /></button>
-                    <ParamEditor param={inputParam} nodes={nodes} priorNodes={priorNodes} onChange={(nextParam) => updateCodeInputSource(input.id, nextParam)} />
+                    <label className="code-input-name-field"><span>参数名称</span><input value={input.name} onChange={(event) => updateCodeInput(input.id, { name: event.target.value })} /></label>
+                    <ParamEditor param={inputParam} nodes={nodes} priorNodes={priorNodes} onChange={(nextParam) => updateCodeInputSource(input.id, nextParam)} singleLine />
+                    <button type="button" onClick={() => removeCodeInput(input.id)}><DeleteOutlined /></button>
                   </div>
                 );
               })}
@@ -3118,7 +3118,7 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
           <section className="config-section">
             <div className="config-section-head"><h3>定义脚本输出参数</h3><button type="button" className="text-link" onClick={addCodeOutput}><PlusOutlined /> 添加出参</button></div>
             <div className="code-output-list">
-              {(draft.codeOutputs || []).length ? (draft.codeOutputs || []).map((output) => <div className="code-output-row" key={output.id}><input aria-label="输出名称" value={output.name} onChange={(event) => updateCodeOutput(output.id, { name: event.target.value })} /><SelectField value={output.type} onChange={(value) => updateCodeOutput(output.id, { type: value })}>{['string', 'number', 'boolean', 'object', 'json', 'Array<json>'].map((type) => <option key={type} value={type}>{type}</option>)}</SelectField><input aria-label="输出路径" value={output.value} onChange={(event) => updateCodeOutput(output.id, { value: event.target.value })} /><button type="button" disabled={(draft.codeOutputs || []).length <= 1} onClick={() => removeCodeOutput(output.id)}><DeleteOutlined /></button></div>) : <div className="empty-mini">暂无脚本出参</div>}
+              {(draft.codeOutputs || []).length ? (draft.codeOutputs || []).map((output) => <div className="code-output-row" key={output.id}><input aria-label="输出名称" value={output.name} onChange={(event) => updateCodeOutput(output.id, { name: event.target.value })} /><SelectField value={output.type} onChange={(value) => updateCodeOutput(output.id, { type: value })}>{['string', 'number', 'boolean', 'object', 'json', 'Array<json>'].map((type) => <option key={type} value={type}>{type}</option>)}</SelectField><input aria-label="输出路径" value={output.value} onChange={(event) => updateCodeOutput(output.id, { value: event.target.value })} /><button type="button" onClick={() => removeCodeOutput(output.id)}><DeleteOutlined /></button></div>) : <div className="empty-mini">暂无脚本出参</div>}
             </div>
           </section>
         </>
@@ -3126,16 +3126,10 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
         <section className="config-section">
           <div className="config-section-head"><h3>工具参数</h3></div>
           <div className="param-list">
-            {normalParams.map((param) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} onChange={updateParam} />)}
+            {normalParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} onChange={updateParam} singleLine={index === 0} />)}
           </div>
         </section>
       )}
-      {draft.toolId === 'system-code' && normalParams.length ? (
-        <section className="config-section">
-          <div className="config-section-head"><h3>输出变量声明</h3></div>
-          <div className="param-list">{normalParams.map((param) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} onChange={updateParam} />)}</div>
-        </section>
-      ) : null}
       <section className="config-section">
         <div className="config-section-head"><h3>工具输出</h3></div>
         <div className="output-schema">

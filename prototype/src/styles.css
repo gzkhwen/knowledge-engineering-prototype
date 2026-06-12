@@ -640,10 +640,13 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .source-field .select-field-wrap, .source-field .select-field, .source-field input { width: 100%; min-width: 0; }
 .source-field .select-field { height: 36px; color: #111827; background: #fff; border: 1px solid #cfd9e8; border-radius: 8px; }
 .code-input-list { display: grid; gap: 10px; }
-.code-input-row { display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 8px; padding: 12px; border: 1px solid #dbe6f3; border-radius: 10px; background: #fff; }
+.code-input-row { display: grid; grid-template-columns: minmax(180px, .45fr) minmax(0, 1fr) 36px; gap: 10px; align-items: start; padding: 12px; border: 1px solid #dbe6f3; border-radius: 10px; background: #fff; }
+.code-input-name-field { display: grid; gap: 8px; color: #344054; font-size: 12px; font-weight: 700; line-height: 1.2; }
 .code-input-row > input { min-height: 38px; padding: 8px 11px; border: 1px solid #cfd9e8; border-radius: 8px; }
+.code-input-name-field input { min-height: 38px; padding: 8px 11px; color: #111827; border: 1px solid #cfd9e8; border-radius: 8px; font-size: 13px; font-weight: 400; line-height: 1.4; }
 .code-input-row > button, .code-output-row button { display: grid; place-items: center; width: 36px; height: 38px; border-radius: 8px; color: #667085; background: #f8fafc; border: 1px solid #cfd9e8; }
-.code-input-row > .param-editor-row { grid-column: 1 / -1; padding: 0; border: 0; background: transparent; }
+.code-input-row > .param-editor-row { grid-column: auto; padding: 0; border: 0; background: transparent; }
+.code-input-row > button { margin-top: 20px; }
 .code-output-list { display: grid; gap: 8px; }
 .code-output-row { display: grid; grid-template-columns: minmax(0, 1fr) 100px minmax(0, 1.2fr) 36px; gap: 8px; }
 .code-output-row input, .code-output-row select { min-height: 38px; padding: 8px 11px; border: 1px solid #cfd9e8; border-radius: 8px; background: #fff; }
