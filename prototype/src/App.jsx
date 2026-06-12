@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Children, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -70,10 +70,56 @@ function SearchBox({ value, onChange, placeholder }) {
 }
 
 function SelectField({ value, onChange, children, className = '' }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const options = Children.toArray(children)
+    .filter(isValidElement)
+    .map((child, index) => ({
+      id: `${child.props.value ?? ''}-${index}`,
+      value: child.props.value ?? '',
+      label: child.props.children,
+      disabled: Boolean(child.props.disabled),
+    }));
+  const selected = options.find((option) => `${option.value}` === `${value}`) || options[0];
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handlePointerDown = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [open]);
+
+  const chooseOption = (option) => {
+    if (option.disabled) return;
+    onChange(option.value);
+    setOpen(false);
+  };
+
   return (
-    <select className={`select-field ${className}`} value={value} onChange={(event) => onChange(event.target.value)}>
-      {children}
-    </select>
+    <span ref={rootRef} className={`select-field-wrap ${open ? 'open' : ''} ${className}`.trim()}>
+      <button type="button" className={`select-field ${className}`.trim()} onClick={() => setOpen((current) => !current)}>
+        <span>{selected?.label}</span>
+        <DownOutlined />
+      </button>
+      {open ? (
+        <span className="select-dropdown">
+          {options.map((option) => (
+            <button
+              type="button"
+              key={option.id}
+              className={`select-option ${`${option.value}` === `${value}` ? 'selected' : ''} ${option.disabled ? 'disabled' : ''}`.trim()}
+              aria-disabled={option.disabled}
+              disabled={option.disabled}
+              onClick={() => chooseOption(option)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -2107,15 +2153,15 @@ function createSampleResultForPlan(file, nodes) {
 }
 
 function getParamPreview(param, nodes = []) {
-  if (param.source?.type === 'file') return '待处理文件地址信息';
+  if (param.source?.type === 'file') return '原始文件的地址信息';
   if (param.source?.type === 'upstream') {
     const source = nodes.find((node) => node.nodeId === param.source.sourceNodeId);
     return `上游工具 · ${source?.toolName || '来源已失效'} · ${param.source.outputPath || '未配置取值路径'}`;
   }
-  if (Array.isArray(param.value)) return param.value.length ? param.value.join('、') : '未配置';
+  if (Array.isArray(param.value)) return param.value.length ? param.value.join('、') : '';
   if (typeof param.value === 'boolean') return param.value ? '开启' : '关闭';
   if (typeof param.value === 'number') return `${param.value}${param.unit || ''}`;
-  return String(param.value || '').trim() || '未配置';
+  return String(param.value || '').trim();
 }
 
 function getToolPreviewParams(node) {
@@ -2132,14 +2178,6 @@ function getToolPreviewParams(node) {
     return scriptParam ? [...codeInputs, scriptParam] : codeInputs;
   }
   return node.params;
-}
-
-function isPreviewParamConfigured(param) {
-  if (param.source?.type === 'file') return true;
-  if (param.source?.type === 'upstream') return Boolean(param.source.sourceNodeId && param.source.outputPath);
-  if (Array.isArray(param.value)) return param.value.length > 0;
-  if (typeof param.value === 'string') return Boolean(param.value.trim());
-  return true;
 }
 
 function getRuntimeLabel(status) {
@@ -2863,7 +2901,7 @@ function ToolRuntimeRow({ node, nodes, warnings, needsSmartHandling, runtime, ca
   const expanded = runtimeExpanded || node.expanded;
   const previewParams = getToolPreviewParams(node);
   const visibleParamCount = runtimeExpanded ? Math.max(runtime?.visibleParamCount || 0, configured ? 4 : 0) : previewParams.length;
-  const visibleParams = (needsSmartHandling ? previewParams.filter(isPreviewParamConfigured) : previewParams).slice(0, visibleParamCount);
+  const visibleParams = previewParams.slice(0, visibleParamCount);
   const runtimeLabel = getRuntimeLabel(status);
   return (
     <div
@@ -2916,7 +2954,7 @@ function ToolRuntimeRow({ node, nodes, warnings, needsSmartHandling, runtime, ca
       </div>
       {expanded ? (
         <div className="tool-param-preview">
-          {visibleParams.length ? visibleParams.map((param) => <span key={param.id}>{param.label}: {getParamPreview(param, nodes)}</span>) : <span>等待 Agent 生成参数...</span>}
+          {visibleParams.length ? visibleParams.map((param) => <span key={param.id}>{param.label}: {getParamPreview(param, nodes)}</span>) : <span>暂无参数</span>}
         </div>
       ) : null}
     </div>
@@ -2984,27 +3022,27 @@ function ParamEditor({ param, nodes, priorNodes, onChange }) {
             <span>取值方式</span>
             <SelectField value={param.source?.type === 'upstream' ? 'upstream' : 'file'} onChange={updateSourceType}>
               <option value="upstream" disabled={priorNodes.length === 0}>上游工具输出</option>
-              <option value="file">文件地址</option>
+              <option value="file">原始文件</option>
             </SelectField>
           </label>
           {param.source?.type === 'upstream' ? (
             <>
               <label className="source-field">
-                <span>来源工具</span>
+                <span>上游工具</span>
                 <SelectField value={param.source.sourceNodeId || ''} onChange={(value) => {
                   const source = priorNodes.find((item) => item.nodeId === value);
                   onChange({ ...param, source: { type: 'upstream', sourceNodeId: value, outputPath: source?.outputs[0]?.path || 'data.result' } });
                 }}>{priorNodes.map((item) => <option key={item.nodeId} value={item.nodeId}>{item.toolName}</option>)}</SelectField>
               </label>
               <label className="source-field">
-                <span>输出路径</span>
+                <span>取值路径</span>
                 <input value={param.source.outputPath || ''} onChange={(event) => onChange({ ...param, source: { ...param.source, outputPath: event.target.value } })} />
               </label>
             </>
           ) : (
             <label className="source-field source-field-wide">
-              <span>文件地址</span>
-              <input readOnly value="待处理文件地址信息" />
+              <span>取值内容</span>
+              <input readOnly value="文件地址" />
             </label>
           )}
         </div>
