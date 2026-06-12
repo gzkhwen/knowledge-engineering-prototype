@@ -123,6 +123,30 @@ function SelectField({ value, onChange, children, className = '' }) {
   );
 }
 
+function PrefixedSelectField({ label, value, onChange, children }) {
+  const prefixWidth = Math.max(56, label.length * 14 + 28);
+  return (
+    <div className="prefixed-field" style={{ '--prefix-width': `${prefixWidth}px` }}>
+      <span className="prefixed-label">{label}</span>
+      <span className="prefixed-body">
+        <SelectField value={value} onChange={onChange} className="embedded-select">
+          {children}
+        </SelectField>
+      </span>
+    </div>
+  );
+}
+
+function PrefixedInput({ label, value, onChange, readOnly = false }) {
+  const prefixWidth = Math.max(56, label.length * 14 + 28);
+  return (
+    <label className="prefixed-field" style={{ '--prefix-width': `${prefixWidth}px` }}>
+      <span className="prefixed-label">{label}</span>
+      <input value={value} readOnly={readOnly} onChange={onChange} />
+    </label>
+  );
+}
+
 function Modal({ title, children, footer, onClose, wide = false, className = '' }) {
   return (
     <div className="modal-layer">
@@ -2994,35 +3018,80 @@ function AddToolDialog({ tools, nodes, confirmed, onClose, onAdd }) {
   );
 }
 
-function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false }) {
+function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, inlineSource = false, showHeader = true, showFx = true }) {
   const active = param.source?.type === 'file' || param.source?.type === 'upstream';
+  const sourceType = param.source?.type === 'upstream' ? 'upstream' : param.source?.type === 'file' ? 'file' : 'manual';
   const updateSourceType = (type) => {
-    if (type === 'file') onChange({ ...param, source: { type: 'file' } });
+    if (type === 'manual') onChange({ ...param, source: { type: 'manual' } });
+    else if (type === 'file') onChange({ ...param, source: { type: 'file' } });
     else {
       const source = priorNodes.find((node) => node.nodeId === param.source?.sourceNodeId) || priorNodes[0];
       onChange({ ...param, source: source ? { type: 'upstream', sourceNodeId: source.nodeId, outputPath: source.outputs[0]?.path || 'data.result' } : { type: 'file' } });
     }
   };
+  const renderManualField = () => param.type === 'textarea' && !singleLine && !inlineSource
+    ? <textarea value={Array.isArray(param.value) ? param.value.join('\n') : param.value} onChange={(event) => onChange({ ...param, value: event.target.value })} />
+    : param.type === 'select'
+      ? <SelectField value={param.value} onChange={(value) => onChange({ ...param, value })}>{param.options.map((option) => <option key={option} value={option}>{option}</option>)}</SelectField>
+      : param.type === 'multiSelect' || param.type === 'tags'
+        ? <input value={Array.isArray(param.value) ? param.value.join('、') : ''} onChange={(event) => onChange({ ...param, value: event.target.value.split(/[、,]/).filter(Boolean) })} />
+        : <input type={param.type === 'number' ? 'number' : 'text'} value={Array.isArray(param.value) ? param.value.join('、') : param.value} onChange={(event) => onChange({ ...param, value: param.type === 'number' ? Number(event.target.value) : event.target.value })} />;
+
+  if (inlineSource) {
+    return (
+      <div className="param-editor-row inline-source">
+        <label className="param-name-column">
+          <span>{showHeader ? '参数名称' : ''}</span>
+          <div className="param-name-display">{param.label}{param.required ? <em>*</em> : null}</div>
+        </label>
+        <label className="source-field">
+          <span>{showHeader ? '取值方式' : ''}</span>
+          <SelectField value={sourceType} onChange={updateSourceType}>
+            <option value="manual">手动输入</option>
+            <option value="file">引用原始文件</option>
+            <option value="upstream" disabled={priorNodes.length === 0}>引用上游工具输出</option>
+          </SelectField>
+        </label>
+        <div className="param-value-column">
+          <span>{showHeader ? '参数值' : ''}</span>
+          {sourceType === 'manual' ? renderManualField() : null}
+          {sourceType === 'file' ? <input readOnly value="原始文件的地址信息" /> : null}
+          {sourceType === 'upstream' ? (
+            <div className="param-upstream-setting">
+              <PrefixedSelectField label="工具" value={param.source?.sourceNodeId || ''} onChange={(value) => {
+                  const source = priorNodes.find((item) => item.nodeId === value);
+                  onChange({ ...param, source: { type: 'upstream', sourceNodeId: value, outputPath: source?.outputs[0]?.path || 'data.result' } });
+                }}>{priorNodes.map((item) => <option key={item.nodeId} value={item.nodeId}>{item.toolName}</option>)}</PrefixedSelectField>
+              <PrefixedInput label="取值路径" value={param.source?.outputPath || ''} onChange={(event) => onChange({ ...param, source: { ...param.source, type: 'upstream', outputPath: event.target.value } })} />
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="param-editor-row">
       <label>{param.label}{param.required ? <em>*</em> : null}</label>
-      <div className="param-editor-field">
-        {active ? <input readOnly value={getParamPreview(param, nodes)} /> : param.type === 'textarea' && !singleLine ? <textarea value={Array.isArray(param.value) ? param.value.join('\n') : param.value} onChange={(event) => onChange({ ...param, value: event.target.value })} /> : param.type === 'select' ? <SelectField value={param.value} onChange={(value) => onChange({ ...param, value })}>{param.options.map((option) => <option key={option} value={option}>{option}</option>)}</SelectField> : param.type === 'multiSelect' || param.type === 'tags' ? <input value={Array.isArray(param.value) ? param.value.join('、') : ''} onChange={(event) => onChange({ ...param, value: event.target.value.split(/[、,]/).filter(Boolean) })} /> : <input type={param.type === 'number' ? 'number' : 'text'} value={Array.isArray(param.value) ? param.value.join('、') : param.value} onChange={(event) => onChange({ ...param, value: param.type === 'number' ? Number(event.target.value) : event.target.value })} />}
-        <button type="button" title="配置参数来源" className={active ? 'fx-button active' : 'fx-button'} onClick={() => {
-          if (active) onChange({ ...param, source: { type: 'manual' } });
-          else {
-            const source = priorNodes[0];
-            onChange({ ...param, source: source ? { type: 'upstream', sourceNodeId: source.nodeId, outputPath: source.outputs[0]?.path || 'data.result' } : { type: 'file' } });
-          }
-        }}>fx</button>
+      <div className={`param-editor-field ${showFx ? '' : 'no-fx'}`.trim()}>
+        {active ? <input readOnly value={getParamPreview(param, nodes)} /> : renderManualField()}
+        {showFx ? (
+          <button type="button" title="配置参数来源" className={active ? 'fx-button active' : 'fx-button'} onClick={() => {
+            if (active) onChange({ ...param, source: { type: 'manual' } });
+            else {
+              const source = priorNodes[0];
+              onChange({ ...param, source: source ? { type: 'upstream', sourceNodeId: source.nodeId, outputPath: source.outputs[0]?.path || 'data.result' } : { type: 'file' } });
+            }
+          }}>fx</button>
+        ) : null}
       </div>
       {active ? (
         <div className="param-source-row">
           <label className="source-field">
             <span>取值方式</span>
             <SelectField value={param.source?.type === 'upstream' ? 'upstream' : 'file'} onChange={updateSourceType}>
-              <option value="upstream" disabled={priorNodes.length === 0}>上游工具输出</option>
-              <option value="file">原始文件</option>
+              <option value="upstream" disabled={priorNodes.length === 0}>引用上游工具输出</option>
+              <option value="file">引用原始文件</option>
             </SelectField>
           </label>
           {param.source?.type === 'upstream' ? (
@@ -3098,62 +3167,47 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
           <section className="config-section">
             <div className="config-section-head"><h3>定义入参</h3><button type="button" className="text-link" onClick={addCodeInput}><PlusOutlined /> 添加入参</button></div>
             <div className="code-input-list">
-              {(draft.codeInputs || []).map((input) => {
+              {(draft.codeInputs || []).map((input, index) => {
                 const source = input.source || { type: 'manual' };
-                const sourceNode = priorNodes.find((item) => item.nodeId === source.sourceNodeId);
-                const active = source.type === 'file' || source.type === 'upstream';
-                const valueText = active
-                  ? source.type === 'file'
-                    ? '原始文件的地址信息'
-                    : `上游工具 · ${sourceNode?.toolName || '来源已失效'} · ${source.outputPath || '未配置取值路径'}`
-                  : input.value || '';
+                const sourceType = source.type === 'upstream' ? 'upstream' : source.type === 'file' ? 'file' : 'manual';
                 const updateInputSource = (nextSource) => updateCodeInputSource(input.id, { source: nextSource, value: input.value || '' });
                 const updateSourceType = (type) => {
+                  if (type === 'manual') updateInputSource({ type: 'manual' });
                   if (type === 'file') updateInputSource({ type: 'file' });
-                  else {
+                  if (type === 'upstream') {
                     const nextSourceNode = priorNodes.find((item) => item.nodeId === source.sourceNodeId) || priorNodes[0];
                     updateInputSource(nextSourceNode ? { type: 'upstream', sourceNodeId: nextSourceNode.nodeId, outputPath: source.outputPath || nextSourceNode.outputs[0]?.path || 'data.result' } : { type: 'file' });
                   }
                 };
                 return (
-                  <div className="code-input-row" key={input.id}>
-                    <label className="code-input-name-field"><span>参数名称</span><input value={input.name} onChange={(event) => updateCodeInput(input.id, { name: event.target.value })} /></label>
-                    <label className="code-input-value-field"><span>参数值</span><input readOnly={active} value={valueText} onChange={(event) => updateCodeInput(input.id, { value: event.target.value })} /></label>
-                    <div className="code-input-actions">
-                      <button type="button" title="配置参数来源" className={active ? 'fx-button active' : 'fx-button'} onClick={() => updateInputSource(active ? { type: 'manual' } : (priorNodes[0] ? { type: 'upstream', sourceNodeId: priorNodes[0].nodeId, outputPath: priorNodes[0].outputs[0]?.path || 'data.result' } : { type: 'file' }))}>fx</button>
-                      <button type="button" className="code-row-delete-button" onClick={() => removeCodeInput(input.id)}><DeleteOutlined /></button>
+                  <div className={`code-input-row ${index === 0 ? 'has-header' : ''}`} key={input.id}>
+                    <label className="code-input-name-field">
+                      <span>{index === 0 ? '参数名称' : ''}</span>
+                      <input value={input.name} onChange={(event) => updateCodeInput(input.id, { name: event.target.value })} />
+                    </label>
+                    <label className="source-field">
+                      <span>{index === 0 ? '取值方式' : ''}</span>
+                      <SelectField value={sourceType} onChange={updateSourceType}>
+                        <option value="manual">手动输入</option>
+                        <option value="file">引用原始文件</option>
+                        <option value="upstream" disabled={priorNodes.length === 0}>引用上游工具输出</option>
+                      </SelectField>
+                    </label>
+                    <div className="code-input-value-setting">
+                      <span>{index === 0 ? '参数值' : ''}</span>
+                      {sourceType === 'manual' ? <input value={input.value || ''} onChange={(event) => updateCodeInput(input.id, { value: event.target.value })} /> : null}
+                      {sourceType === 'file' ? <input readOnly value="原始文件的地址信息" /> : null}
+                      {sourceType === 'upstream' ? (
+                        <div className="param-upstream-setting">
+                          <PrefixedSelectField label="工具" value={source.sourceNodeId || ''} onChange={(value) => {
+                              const nextSourceNode = priorNodes.find((item) => item.nodeId === value);
+                              updateInputSource({ type: 'upstream', sourceNodeId: value, outputPath: nextSourceNode?.outputs[0]?.path || 'data.result' });
+                            }}>{priorNodes.map((item) => <option key={item.nodeId} value={item.nodeId}>{item.toolName}</option>)}</PrefixedSelectField>
+                          <PrefixedInput label="取值路径" value={source.outputPath || ''} onChange={(event) => updateInputSource({ ...source, type: 'upstream', outputPath: event.target.value })} />
+                        </div>
+                      ) : null}
                     </div>
-                    {active ? (
-                      <div className="code-input-fx-panel param-source-row">
-                        <label className="source-field">
-                          <span>取值方式</span>
-                          <SelectField value={source.type === 'upstream' ? 'upstream' : 'file'} onChange={updateSourceType}>
-                            <option value="upstream" disabled={priorNodes.length === 0}>上游工具输出</option>
-                            <option value="file">原始文件</option>
-                          </SelectField>
-                        </label>
-                        {source.type === 'upstream' ? (
-                          <>
-                            <label className="source-field">
-                              <span>上游工具</span>
-                              <SelectField value={source.sourceNodeId || ''} onChange={(value) => {
-                                const nextSourceNode = priorNodes.find((item) => item.nodeId === value);
-                                updateInputSource({ type: 'upstream', sourceNodeId: value, outputPath: nextSourceNode?.outputs[0]?.path || 'data.result' });
-                              }}>{priorNodes.map((item) => <option key={item.nodeId} value={item.nodeId}>{item.toolName}</option>)}</SelectField>
-                            </label>
-                            <label className="source-field">
-                              <span>取值路径</span>
-                              <input value={source.outputPath || ''} onChange={(event) => updateInputSource({ ...source, outputPath: event.target.value })} />
-                            </label>
-                          </>
-                        ) : (
-                          <label className="source-field source-field-wide">
-                            <span>取值内容</span>
-                            <input readOnly value="文件地址" />
-                          </label>
-                        )}
-                      </div>
-                    ) : null}
+                    <button type="button" className="code-row-delete-button" onClick={() => removeCodeInput(input.id)}><DeleteOutlined /></button>
                   </div>
                 );
               })}
@@ -3161,13 +3215,13 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
           </section>
           <section className="config-section">
             <div className="config-section-head"><h3>代码脚本 <span className="code-lang-chip">Python</span></h3></div>
-            {scriptParam ? <ParamEditor param={scriptParam} nodes={nodes} priorNodes={priorNodes} onChange={updateParam} /> : null}
+            {scriptParam ? <ParamEditor param={scriptParam} nodes={nodes} priorNodes={priorNodes} onChange={updateParam} showFx={false} /> : null}
           </section>
           <section className="config-section">
             <div className="config-section-head"><h3>定义脚本输出参数</h3><button type="button" className="text-link" onClick={addCodeOutput}><PlusOutlined /> 添加出参</button></div>
             <div className="code-output-list">
               {(draft.codeOutputs || []).length ? (draft.codeOutputs || []).map((output, index) => (
-                <div className="code-output-row" key={output.id}>
+                <div className={`code-output-row ${index === 0 ? 'has-header' : ''}`} key={output.id}>
                   <label className="code-output-field">
                     <span>{index === 0 ? '参数名称' : ''}</span>
                     <input value={output.name} onChange={(event) => updateCodeOutput(output.id, { name: event.target.value })} />
@@ -3190,7 +3244,7 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
         <section className="config-section">
           <div className="config-section-head"><h3>工具参数</h3></div>
           <div className="param-list">
-            {normalParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} onChange={updateParam} singleLine={index === 0} />)}
+            {normalParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} onChange={updateParam} singleLine={index === 0} inlineSource showHeader={index === 0} />)}
           </div>
         </section>
       )}
@@ -3199,7 +3253,6 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
         <div className="output-schema">
           {draft.outputs.map((output) => (
             <span className="output-item" key={output.path}>
-              <strong>{output.label || output.name}</strong>
               <code>{output.path}</code>
               <small>{output.desc}</small>
             </span>
