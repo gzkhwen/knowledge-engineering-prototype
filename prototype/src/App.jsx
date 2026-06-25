@@ -463,7 +463,7 @@ function KnowledgePointsPage() {
         </aside>
         <section className="knowledge-main">
           <PageHeader
-            title="知识点？"
+            title="知识点"
             actions={<span className="project-space-label">项目空间：奶茶品牌</span>}
           />
           <Toolbar className="knowledge-toolbar">
