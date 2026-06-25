@@ -230,10 +230,19 @@ function ConfirmDialog({ title, message, danger, onCancel, onConfirm }) {
   );
 }
 
-function Field({ label, children, required }) {
+function HelpTip({ text }) {
+  if (!text) return null;
+  return (
+    <span className="field-help-tip" data-tip={text} tabIndex={0} aria-label={text}>
+      ?
+    </span>
+  );
+}
+
+function Field({ label, children, required, help }) {
   return (
     <label className="form-field">
-      <span>{label}{required ? <em>*</em> : null}</span>
+      <span className="field-label-text">{required ? <em>*</em> : null}{label}<HelpTip text={help} /></span>
       {children}
     </label>
   );
@@ -1180,6 +1189,7 @@ function ToolManagementPage({ notify }) {
       inputs: createDraft.inputs,
       outputs: createDraft.outputs,
       storageRules: createDraft.storageRules,
+      indexConfig: createDraft.indexConfig,
     };
     if (createDraft.id) {
       persist(snapshot.tools.map((tool) => (tool.id === createDraft.id ? applyKnowledgeToolDraft(tool, overrides) : tool)));
@@ -1323,6 +1333,7 @@ function makeKnowledgeToolDraft(source, category) {
     inputs: normalizeDraftInputs(source?.tool?.inputs || []),
     outputs: source?.tool?.outputs || [],
     storageRules: firstOutputName ? [createOutputRule(firstOutputName)] : [],
+    indexConfig: createIndexConfig(firstOutputName),
   };
 }
 
@@ -1340,6 +1351,7 @@ function makeKnowledgeToolEditDraft(tool) {
     inputs: normalizeDraftInputs(tool.inputs || []),
     outputs: tool.outputs || [],
     storageRules: normalizeStorageRules(tool.storageContract, tool.outputs || []),
+    indexConfig: normalizeIndexConfig(tool.storageContract, tool.outputs || []),
   };
 }
 
@@ -1351,7 +1363,7 @@ function applyKnowledgeToolDraft(tool, draft) {
     category: draft.category || tool.category,
     inputs: draft.inputs || tool.inputs,
     outputs: draft.outputs || tool.outputs,
-    storageContract: buildStorageContractFromRules(draft.storageRules || [], tool.storageContract),
+    storageContract: buildStorageContractFromRules(draft.storageRules || [], draft.indexConfig, tool.storageContract),
   };
 }
 
@@ -1363,22 +1375,48 @@ function normalizeDraftInputs(inputs = []) {
   }));
 }
 
+function inferArtifactType(outputName = '') {
+  const value = outputName.toLowerCase();
+  if (value.includes('parent') || value.includes('child') || value.includes('chunk')) return value.includes('parent') || value.includes('child') ? '父子切片' : '文本切片';
+  if (value.includes('qa')) return 'QA对';
+  if (value.includes('section') || value.includes('paragraph')) return '解析文档';
+  if (value.includes('summary') || value.includes('knowledge')) return '知识点';
+  if (value.includes('metadata') || value.includes('stats')) return '元数据';
+  return '原始结果';
+}
+
+function createFieldExample(outputName = '') {
+  const value = outputName.toLowerCase();
+  if (value.includes('qa')) return { indexField: 'question', recallField: 'answer', filterFields: 'sourceChunkId' };
+  if (value.includes('parent')) return { indexField: 'text', recallField: 'text', filterFields: 'documentId,parentChunkId' };
+  if (value.includes('child') || value.includes('chunk')) return { indexField: 'text', recallField: 'text', filterFields: 'documentId,page,parentChunkId' };
+  if (value.includes('section') || value.includes('paragraph')) return { indexField: 'content', recallField: 'content', filterFields: 'documentId,page' };
+  return { indexField: 'content', recallField: 'content', filterFields: 'documentId' };
+}
+
 function createOutputRule(outputName = '') {
   return {
     id: makeId('output-rule'),
     outputName,
-    artifactType: '文本切片',
+    artifactType: inferArtifactType(outputName),
     storageTargetType: 'Elasticsearch',
-    esAddress: '',
-    esIndex: '',
-    objectStorageAddress: '',
-    objectStoragePath: '',
+    esAddress: 'http://es.internal:9200',
+    esIndex: outputName ? `ke_${outputName.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`).replace(/^_/, '').toLowerCase()}` : 'ke_tool_output',
+    objectStorageAddress: 'oss://knowledge-engineering',
+    objectStoragePath: outputName ? `tool-output/{run_id}/${outputName}.json` : 'tool-output/{run_id}/result.json',
     writeMode: 'upsert',
-    fieldMapping: '',
+  };
+}
+
+function createIndexConfig(outputName = '') {
+  const fields = createFieldExample(outputName);
+  return {
     indexEnabled: false,
-    indexFields: '',
-    recallField: '',
-    filterFields: '',
+    indexSource: outputName,
+    indexField: fields.indexField,
+    recallSource: outputName,
+    recallField: fields.recallField,
+    filterFields: fields.filterFields,
   };
 }
 
@@ -1399,15 +1437,25 @@ function normalizeStorageRules(contract, outputs = []) {
     objectStorageAddress: contract?.objectStorageAddress || '',
     objectStoragePath: contract?.objectStoragePath || '',
     writeMode: contract?.writeMode || 'upsert',
-    fieldMapping: contract?.fieldMapping || '',
-    indexEnabled: Boolean(contract?.indexEnabled),
-    indexFields: contract?.indexFields || contract?.textField || '',
-    recallField: contract?.recallField || contract?.parentContextField || '',
-    filterFields: contract?.filterFields || '',
   }];
 }
 
-function buildStorageContractFromRules(rules = [], fallback = {}) {
+function normalizeIndexConfig(contract, outputs = []) {
+  const outputName = contract?.indexSource || contract?.outputName || outputs[0]?.name || '';
+  return {
+    ...createIndexConfig(outputName),
+    indexEnabled: Boolean(contract?.indexConfig?.indexEnabled ?? contract?.indexEnabled),
+    indexSource: contract?.indexConfig?.indexSource || contract?.indexSource || outputName,
+    indexField: contract?.indexConfig?.indexField || contract?.indexField || contract?.indexFields || '',
+    recallSource: contract?.indexConfig?.recallSource || contract?.recallSource || outputName,
+    recallField: contract?.indexConfig?.recallField || contract?.recallField || '',
+    filterFields: contract?.indexConfig?.filterFields || contract?.filterFields || '',
+    indexJoinField: contract?.indexConfig?.indexJoinField || contract?.indexJoinField || '',
+    recallJoinField: contract?.indexConfig?.recallJoinField || contract?.recallJoinField || '',
+  };
+}
+
+function buildStorageContractFromRules(rules = [], indexConfig = createIndexConfig(), fallback = {}) {
   const firstRule = rules[0] || {};
   return {
     ...(fallback || {}),
@@ -1421,11 +1469,15 @@ function buildStorageContractFromRules(rules = [], fallback = {}) {
     objectStorageAddress: firstRule.objectStorageAddress || '',
     objectStoragePath: firstRule.objectStoragePath || '',
     writeMode: firstRule.writeMode || 'upsert',
-    fieldMapping: firstRule.fieldMapping || '',
-    indexEnabled: rules.some((rule) => rule.indexEnabled),
-    indexFields: firstRule.indexFields || '',
-    recallField: firstRule.recallField || '',
-    filterFields: firstRule.filterFields || '',
+    indexEnabled: Boolean(indexConfig?.indexEnabled),
+    indexSource: indexConfig?.indexSource || '',
+    indexField: indexConfig?.indexField || '',
+    recallSource: indexConfig?.recallSource || '',
+    recallField: indexConfig?.recallField || '',
+    filterFields: indexConfig?.filterFields || '',
+    indexJoinField: indexConfig?.indexJoinField || '',
+    recallJoinField: indexConfig?.recallJoinField || '',
+    indexConfig: indexConfig || createIndexConfig(),
     rules,
   };
 }
@@ -1457,10 +1509,22 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
     ...current,
     outputs: [...current.outputs, { name: 'result', type: 'object', description: '自定义输出', path: 'result' }],
   }));
+  const removeOutput = (index) => {
+    setDraft((current) => ({
+      ...current,
+      outputs: current.outputs.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
   const updateStorageRule = (ruleId, patch) => {
     setDraft((current) => ({
       ...current,
       storageRules: (current.storageRules || []).map((rule) => (rule.id === ruleId ? { ...rule, ...patch } : rule)),
+    }));
+  };
+  const updateIndexConfig = (patch) => {
+    setDraft((current) => ({
+      ...current,
+      indexConfig: { ...createIndexConfig(current.outputs?.[0]?.name || ''), ...(current.indexConfig || {}), ...patch },
     }));
   };
   const addStorageRule = () => setDraft((current) => ({
@@ -1555,15 +1619,18 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
             columns={['输出名称', '原始返回路径', '类型', '说明']}
             onChange={updateParam}
             onAdd={addOutput}
+            onRemove={removeOutput}
           />
         ) : null}
         {activeStep === 4 ? (
           <OutputRuleList
             rules={draft.storageRules || []}
             outputs={draft.outputs || []}
+            indexConfig={draft.indexConfig || createIndexConfig(draft.outputs?.[0]?.name || '')}
             onAdd={addStorageRule}
             onRemove={removeStorageRule}
             onChange={updateStorageRule}
+            onIndexChange={updateIndexConfig}
           />
         ) : null}
       </div>
@@ -1603,92 +1670,139 @@ function RawMcpToolPreview({ source }) {
   );
 }
 
-function OutputRuleList({ rules, outputs, onAdd, onRemove, onChange }) {
+function getRuleFieldOptions(rule) {
+  return rule?.outputName ? [rule.outputName] : ['content'];
+}
+
+function OutputRuleList({ rules, outputs, indexConfig, onAdd, onRemove, onChange, onIndexChange }) {
+  const storedOutputOptions = rules
+    .filter((rule) => rule.outputName)
+    .map((rule) => ({ value: rule.outputName, label: rule.outputName, rule }));
+  const selectedIndexRule = storedOutputOptions.find((item) => item.value === indexConfig.indexSource)?.rule || storedOutputOptions[0]?.rule;
+  const selectedRecallRule = storedOutputOptions.find((item) => item.value === indexConfig.recallSource)?.rule || selectedIndexRule;
+  const indexFieldOptions = getRuleFieldOptions(selectedIndexRule);
+  const recallFieldOptions = getRuleFieldOptions(selectedRecallRule);
+  const needsRelation = Boolean(indexConfig.indexEnabled && indexConfig.indexSource && indexConfig.recallSource && indexConfig.indexSource !== indexConfig.recallSource);
+
   return (
     <section className="schema-card output-rule-section">
-      <p className="step-tip">为需要沉淀为知识数据的工具输出配置知识形态、存储目标、字段映射和检索索引。未配置的输出仅作为流程变量传递。</p>
-      <div className="schema-actions">
-        <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 新增存储规则</button>
-      </div>
+      <p className="step-tip">工具输出可以分别保存；索引和召回单独配置一组。未保存的输出仅作为流程变量传递。</p>
       <div className="output-rule-list">
-        {rules.map((rule, index) => {
-          const storageTargetType = rule.storageTargetType || 'Elasticsearch';
-          return (
-            <div className="output-rule-card" key={rule.id}>
-              <div className="output-rule-head">
-                <strong>存储规则 {index + 1}</strong>
-                <button type="button" className="danger-link" onClick={() => onRemove(rule.id)}>删除</button>
-              </div>
-              <Field label="工具输出" required>
-                <SelectField value={rule.outputName} onChange={(outputName) => onChange(rule.id, { outputName })}>
-                  {outputs.map((output) => <option key={output.name} value={output.name}>{output.name}</option>)}
+        <div className="rule-subsection">
+          <div className="rule-section-head">
+            <div className="rule-subtitle">存储设置</div>
+            <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加存储配置</button>
+          </div>
+          {rules.length ? (
+            <table className="data-table compact-table editable-schema-table storage-rule-table">
+              <thead>
+                <tr>
+                  <th>工具输出</th>
+                  <th>存储的知识形态</th>
+                  <th>存储目标</th>
+                  <th>存储地址</th>
+                  <th>存储对象</th>
+                  <th>写入方式</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((rule) => {
+                  const storageTargetType = rule.storageTargetType || 'Elasticsearch';
+                  return (
+                    <tr key={rule.id}>
+                      <td>
+                        <SelectField value={rule.outputName} onChange={(outputName) => onChange(rule.id, { outputName })}>
+                          {outputs.map((output) => <option key={output.name} value={output.name}>{output.name}</option>)}
+                        </SelectField>
+                      </td>
+                      <td>
+                        <SelectField value={rule.artifactType} onChange={(artifactType) => onChange(rule.id, { artifactType })}>
+                          {['文本切片', '父子切片', 'QA对', '解析文档', '知识点', '元数据', '原始结果'].map((item) => <option key={item} value={item}>{item}</option>)}
+                        </SelectField>
+                      </td>
+                      <td>
+                        <SelectField value={storageTargetType} onChange={(value) => onChange(rule.id, { storageTargetType: value })}>
+                          {['Elasticsearch', '对象存储'].map((item) => <option key={item} value={item}>{item}</option>)}
+                        </SelectField>
+                      </td>
+                      <td>
+                        {storageTargetType === 'Elasticsearch'
+                          ? <input placeholder="ES 地址" value={rule.esAddress || ''} onChange={(event) => onChange(rule.id, { esAddress: event.target.value })} />
+                          : <input placeholder="Bucket 地址" value={rule.objectStorageAddress || ''} onChange={(event) => onChange(rule.id, { objectStorageAddress: event.target.value })} />}
+                      </td>
+                      <td>
+                        {storageTargetType === 'Elasticsearch'
+                          ? <input placeholder="Index 名称" value={rule.esIndex || ''} onChange={(event) => onChange(rule.id, { esIndex: event.target.value })} />
+                          : <input placeholder="路径规则" value={rule.objectStoragePath || ''} onChange={(event) => onChange(rule.id, { objectStoragePath: event.target.value })} />}
+                      </td>
+                      <td>
+                        <SelectField value={rule.writeMode} onChange={(writeMode) => onChange(rule.id, { writeMode })}>
+                          {['新增', '覆盖', 'upsert'].map((item) => <option key={item} value={item}>{item}</option>)}
+                        </SelectField>
+                      </td>
+                      <td><button type="button" className="danger-link" onClick={() => onRemove(rule.id)}>删除</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : null}
+          {rules.length === 0 ? <p className="empty-hint">暂无存储配置。未配置的输出仅作为流程变量传递。</p> : null}
+        </div>
+        <div className="rule-subsection">
+          <div className="rule-subtitle">索引设置</div>
+          <label className="checkbox-line">
+            <input type="checkbox" checked={Boolean(indexConfig.indexEnabled)} onChange={(event) => onIndexChange({ indexEnabled: event.target.checked })} />
+            配置到检索索引
+          </label>
+          {indexConfig.indexEnabled ? (
+            <>
+              <Field label="索引来源" required help="选择哪一个已保存的工具输出用于建立检索索引。">
+                <SelectField value={indexConfig.indexSource || storedOutputOptions[0]?.value || ''} onChange={(indexSource) => onIndexChange({ indexSource })}>
+                  <option value="">请选择</option>
+                  {storedOutputOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                 </SelectField>
               </Field>
-              <div className="rule-subsection">
-                <div className="rule-subtitle">保存设置</div>
-                <Field label="存储的知识形态" required>
-                  <SelectField value={rule.artifactType} onChange={(artifactType) => onChange(rule.id, { artifactType })}>
-                    {['文本切片', '父子切片', 'QA对', '解析文档', '知识点', '元数据', '原始结果'].map((item) => <option key={item} value={item}>{item}</option>)}
-                  </SelectField>
-                </Field>
-                <Field label="存储目标" required>
-                  <SelectField value={storageTargetType} onChange={(value) => onChange(rule.id, { storageTargetType: value })}>
-                    {['Elasticsearch', '对象存储'].map((item) => <option key={item} value={item}>{item}</option>)}
-                  </SelectField>
-                </Field>
-                {storageTargetType === 'Elasticsearch' ? (
-                  <>
-                    <Field label="ES 地址" required><input placeholder="例如 http://es.internal:9200" value={rule.esAddress || ''} onChange={(event) => onChange(rule.id, { esAddress: event.target.value })} /></Field>
-                    <Field label="Index 名称" required><input placeholder="例如 policy_chunks" value={rule.esIndex || ''} onChange={(event) => onChange(rule.id, { esIndex: event.target.value })} /></Field>
-                  </>
-                ) : (
-                  <>
-                    <Field label="Bucket / 存储地址" required><input placeholder="例如 oss://policy-knowledge" value={rule.objectStorageAddress || ''} onChange={(event) => onChange(rule.id, { objectStorageAddress: event.target.value })} /></Field>
-                    <Field label="路径规则" required><input placeholder="例如 chunks/{run_id}/{document_id}.json" value={rule.objectStoragePath || ''} onChange={(event) => onChange(rule.id, { objectStoragePath: event.target.value })} /></Field>
-                  </>
-                )}
-                <Field label="写入方式">
-                  <SelectField value={rule.writeMode} onChange={(writeMode) => onChange(rule.id, { writeMode })}>
-                    {['新增', '覆盖', 'upsert'].map((item) => <option key={item} value={item}>{item}</option>)}
-                  </SelectField>
-                </Field>
-                <Field label="字段映射" required>
-                  <textarea
-                    className="mapping-textarea"
-                    placeholder={`例如：\n{\n  "id": "$.chunk_id",\n  "content": "$.text",\n  "source_doc_id": "$.document_id",\n  "metadata": "$.metadata"\n}`}
-                    value={rule.fieldMapping || ''}
-                    onChange={(event) => onChange(rule.id, { fieldMapping: event.target.value })}
-                  />
-                </Field>
-              </div>
-              <div className="rule-subsection">
-                <div className="rule-subtitle">索引设置</div>
-                <label className="checkbox-line">
-                  <input type="checkbox" checked={Boolean(rule.indexEnabled)} onChange={(event) => onChange(rule.id, { indexEnabled: event.target.checked })} />
-                  进入检索索引
-                </label>
-                {rule.indexEnabled ? (
-                  <>
-                    <Field label="进索引字段" required>
-                      <SelectField value={rule.indexFields || rule.outputName || ''} onChange={(indexFields) => onChange(rule.id, { indexFields })}>
-                        <option value="">请选择</option>
-                        {outputs.map((output) => <option key={output.name} value={output.name}>{output.name}</option>)}
-                      </SelectField>
-                    </Field>
-                    <Field label="召回字段" required>
-                      <SelectField value={rule.recallField || rule.outputName || ''} onChange={(recallField) => onChange(rule.id, { recallField })}>
-                        <option value="">请选择</option>
-                        {outputs.map((output) => <option key={output.name} value={output.name}>{output.name}</option>)}
-                      </SelectField>
-                    </Field>
-                    <Field label="过滤字段"><input placeholder="例如 $.metadata.doc_id, $.metadata.page" value={rule.filterFields || ''} onChange={(event) => onChange(rule.id, { filterFields: event.target.value })} /></Field>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          );
-        })}
-        {rules.length === 0 ? <p className="empty-hint">暂无存储规则。未配置规则的输出仅作为流程变量传递。</p> : null}
+              <Field label="进索引字段" required help="选择索引来源里真正写入检索索引的字段。">
+                <SelectField value={indexConfig.indexField || ''} onChange={(indexField) => onIndexChange({ indexField })}>
+                  <option value="">请选择</option>
+                  {indexFieldOptions.map((field) => <option key={field} value={field}>{field}</option>)}
+                </SelectField>
+              </Field>
+              <Field label="召回来源" required help="选择检索命中后最终返回给下游或进入上下文的工具输出。">
+                <SelectField value={indexConfig.recallSource || storedOutputOptions[0]?.value || ''} onChange={(recallSource) => onIndexChange({ recallSource })}>
+                  <option value="">请选择</option>
+                  {storedOutputOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                </SelectField>
+              </Field>
+              <Field label="召回字段" required help="选择召回来源中作为最终返回内容的字段。">
+                <SelectField value={indexConfig.recallField || ''} onChange={(recallField) => onIndexChange({ recallField })}>
+                  <option value="">请选择</option>
+                  {recallFieldOptions.map((field) => <option key={field} value={field}>{field}</option>)}
+                </SelectField>
+              </Field>
+              <Field label="过滤字段" help="可选。用于检索过滤的字段，例如文档 ID、页码、类目等。"><input placeholder="例如 doc_id,page,category" value={indexConfig.filterFields || ''} onChange={(event) => onIndexChange({ filterFields: event.target.value })} /></Field>
+            </>
+          ) : null}
+        </div>
+        {needsRelation ? (
+          <div className="rule-subsection">
+            <div className="rule-subtitle">关联规则</div>
+            <Field label="索引结果关联字段" required help="当索引来源和召回来源不同，用索引命中结果里的这个字段去查找召回结果。">
+              <SelectField value={indexConfig.indexJoinField || ''} onChange={(indexJoinField) => onIndexChange({ indexJoinField })}>
+                <option value="">请选择</option>
+                {indexFieldOptions.map((field) => <option key={field} value={field}>{field}</option>)}
+              </SelectField>
+            </Field>
+            <Field label="召回结果匹配字段" required help="当索引来源和召回来源不同，用召回结果里的这个字段与索引结果关联字段匹配。">
+              <SelectField value={indexConfig.recallJoinField || ''} onChange={(recallJoinField) => onIndexChange({ recallJoinField })}>
+                <option value="">请选择</option>
+                {recallFieldOptions.map((field) => <option key={field} value={field}>{field}</option>)}
+              </SelectField>
+            </Field>
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -1745,7 +1859,8 @@ function toJsonSchemaType(type = 'object') {
 
 const inputTypeOptions = ['string', 'number', 'integer', 'boolean', 'object', 'array<object>', 'array<string>'];
 
-function EditableParamTable({ tip, rows, kind, columns, sourceInputs = [], onChange, onAdd }) {
+function EditableParamTable({ tip, rows, kind, columns, sourceInputs = [], onChange, onAdd, onRemove }) {
+  const visibleColumns = onRemove ? [...columns, '操作'] : columns;
   return (
     <section className="schema-card editable-schema-card">
       {tip ? <p className="step-tip">{tip}</p> : null}
@@ -1755,7 +1870,7 @@ function EditableParamTable({ tip, rows, kind, columns, sourceInputs = [], onCha
         </div>
       ) : null}
       <table className={`data-table compact-table editable-schema-table ${kind === 'inputs' ? 'input-schema-table' : 'output-schema-table'}`}>
-        <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+        <thead><tr>{visibleColumns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
         <tbody>
           {rows.map((row, index) => (
             <tr key={`${kind}-${index}`}>
@@ -1788,6 +1903,7 @@ function EditableParamTable({ tip, rows, kind, columns, sourceInputs = [], onCha
                   <td><input value={row.description || ''} onChange={(event) => onChange(kind, index, 'description', event.target.value)} /></td>
                 </>
               )}
+              {onRemove ? <td><button type="button" className="danger-link" onClick={() => onRemove(index)}>删除</button></td> : null}
             </tr>
           ))}
         </tbody>
@@ -1798,24 +1914,32 @@ function EditableParamTable({ tip, rows, kind, columns, sourceInputs = [], onCha
 
 function StorageContractCard({ contract }) {
   if (contract?.rules?.length) {
+    const indexConfig = contract.indexConfig || normalizeIndexConfig(contract);
+    const needsRelation = Boolean(indexConfig.indexEnabled && indexConfig.indexSource && indexConfig.recallSource && indexConfig.indexSource !== indexConfig.recallSource);
     return (
       <section className="schema-card">
-        <div className="schema-head"><strong>结果存储与索引</strong><Badge tone="blue">{contract.rules.length} 条规则</Badge></div>
+        <div className="schema-head"><strong>结果存储与索引</strong><Badge tone="blue">{contract.rules.length} 条存储配置</Badge></div>
         <div className="storage-rule-detail-list">
           {contract.rules.map((rule, index) => (
             <div className="storage-rule-detail" key={rule.id || `${rule.outputName}-${index}`}>
               <div><label>工具输出</label><strong>{rule.outputName || '-'}</strong></div>
               <div><label>知识形态</label><strong>{rule.artifactType || '-'}</strong></div>
               <div><label>存储目标</label><strong>{rule.storageTargetType || '-'}</strong></div>
-              {rule.storageTargetType === '对象存储' ? <div><label>Bucket / 存储地址</label><strong>{rule.objectStorageAddress || '-'}</strong></div> : <div><label>ES 地址</label><strong>{rule.esAddress || '-'}</strong></div>}
+              {rule.storageTargetType === '对象存储' ? <div><label>Bucket 地址</label><strong>{rule.objectStorageAddress || '-'}</strong></div> : <div><label>ES 地址</label><strong>{rule.esAddress || '-'}</strong></div>}
               {rule.storageTargetType === '对象存储' ? <div><label>路径规则</label><strong>{rule.objectStoragePath || '-'}</strong></div> : <div><label>Index 名称</label><strong>{rule.esIndex || '-'}</strong></div>}
               <div><label>写入方式</label><strong>{rule.writeMode || '-'}</strong></div>
-              <div><label>进入检索索引</label><strong>{rule.indexEnabled ? '是' : '否'}</strong></div>
-              {rule.indexEnabled ? <div><label>进索引字段</label><strong>{rule.indexFields || '-'}</strong></div> : null}
-              {rule.indexEnabled ? <div><label>召回字段</label><strong>{rule.recallField || '-'}</strong></div> : null}
-              {rule.indexEnabled && rule.filterFields ? <div><label>过滤字段</label><strong>{rule.filterFields}</strong></div> : null}
             </div>
           ))}
+          <div className="storage-rule-detail">
+            <div><label>配置到检索索引</label><strong>{indexConfig.indexEnabled ? '是' : '否'}</strong></div>
+            {indexConfig.indexEnabled ? <div><label>索引来源</label><strong>{indexConfig.indexSource || '-'}</strong></div> : null}
+            {indexConfig.indexEnabled ? <div><label>进索引字段</label><strong>{indexConfig.indexField || '-'}</strong></div> : null}
+            {indexConfig.indexEnabled ? <div><label>召回来源</label><strong>{indexConfig.recallSource || '-'}</strong></div> : null}
+            {indexConfig.indexEnabled ? <div><label>召回字段</label><strong>{indexConfig.recallField || '-'}</strong></div> : null}
+            {indexConfig.indexEnabled && indexConfig.filterFields ? <div><label>过滤字段</label><strong>{indexConfig.filterFields}</strong></div> : null}
+            {needsRelation ? <div><label>索引结果关联字段</label><strong>{indexConfig.indexJoinField || '-'}</strong></div> : null}
+            {needsRelation ? <div><label>召回结果匹配字段</label><strong>{indexConfig.recallJoinField || '-'}</strong></div> : null}
+          </div>
         </div>
       </section>
     );
@@ -1836,7 +1960,7 @@ function StorageContractCard({ contract }) {
         <div><label>结果类型</label><strong>{contract.artifactType}</strong></div>
         <div><label>保存方式</label><strong>{contract.storageType}</strong></div>
         <div><label>知识库</label><strong>{contract.knowledgeBase}</strong></div>
-        <div><label>数据库 / 集合</label><strong>{contract.database}</strong></div>
+        <div><label>存储对象</label><strong>{contract.database}</strong></div>
         <div><label>目录结构</label><strong>{contract.directory}</strong></div>
         <div><label>写入方式</label><strong>{contract.writeMode}</strong></div>
         {contract.indexEnabled ? <div><label>索引方式</label><strong>{contract.indexType}</strong></div> : null}
