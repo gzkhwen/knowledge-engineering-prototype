@@ -446,10 +446,6 @@ function KnowledgePointsPage() {
     setTaggingCompletedAt('');
     setTaggingDialog(null);
   };
-  const retryFailedTagging = () => {
-    startTagging(taggingConfig, { success: 0, failed: 0, remaining: taggingStats.failed || 1 }, { success: taggingStats.failed || 1, failed: 0, remaining: 0 });
-    setTaggingDialog(null);
-  };
   const reopenTaggingSettings = () => setTaggingDialog('settings');
 
   return (
@@ -592,7 +588,6 @@ function KnowledgePointsPage() {
           completedAt={taggingCompletedAt}
           onClose={() => setTaggingDialog(null)}
           onRetag={reopenTaggingSettings}
-          onRetryFailed={retryFailedTagging}
         />
       ) : null}
     </>
@@ -696,7 +691,7 @@ function KnowledgeTaggingStatusModal({ config, stats, onClose, onStop }) {
   );
 }
 
-function KnowledgeTaggingCompletedModal({ config, stats, completedAt, onClose, onRetag, onRetryFailed }) {
+function KnowledgeTaggingCompletedModal({ config, stats, completedAt, onClose, onRetag }) {
   return (
     <Modal
       title="知识点打标状态"
@@ -707,7 +702,6 @@ function KnowledgeTaggingCompletedModal({ config, stats, completedAt, onClose, o
         <>
           <button type="button" className="secondary" onClick={onClose}>关闭弹窗</button>
           <button type="button" className="secondary" onClick={onRetag}>再次打标</button>
-          <button type="button" className="primary" disabled={!stats.failed} onClick={onRetryFailed}>重试失败的任务</button>
         </>
       )}
     >
