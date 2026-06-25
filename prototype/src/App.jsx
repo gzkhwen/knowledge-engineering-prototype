@@ -701,7 +701,7 @@ function KnowledgeTaggingCompletedModal({ config, stats, completedAt, onClose, o
       footer={(
         <>
           <button type="button" className="secondary" onClick={onClose}>关闭弹窗</button>
-          <button type="button" className="secondary" onClick={onRetag}>再次打标</button>
+          <button type="button" className="secondary" onClick={onRetag}>继续打标</button>
         </>
       )}
     >
