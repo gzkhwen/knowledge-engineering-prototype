@@ -398,7 +398,6 @@ function KnowledgePointsPage() {
   const taggingTimerRef = useRef(null);
   const [taggingConfig, setTaggingConfig] = useState({
     range: '全部知识点',
-    newPointPolicy: '自动打标',
     labelPool: ['产品', '营销', '风控', '服务', '门店', '合规'],
     structureAware: '开启',
   });
@@ -636,21 +635,6 @@ function KnowledgeTaggingSettingsModal({ config, onClose, onSubmit }) {
       <section className="tagging-section">
         <h3>打标设置</h3>
         <div className="tagging-form-row">
-          <label>打标任务完成前新增的知识点</label>
-          <div className="tagging-segment">
-            {['自动打标', '不自动打标'].map((item) => (
-              <button
-                type="button"
-                key={item}
-                className={draft.newPointPolicy === item ? 'active' : ''}
-                onClick={() => updateDraft({ newPointPolicy: item })}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="tagging-form-row">
           <label>标签池</label>
           <div className="tagging-label-pool">
             {draft.labelPool.map((label) => <span key={label}>{label}</span>)}
@@ -704,7 +688,6 @@ function KnowledgeTaggingStatusModal({ config, stats, onClose, onStop }) {
         <h3>打标配置</h3>
         <div className="tagging-readonly-grid">
           <div><label>知识点范围</label><strong>{config.range}</strong></div>
-          <div><label>新增知识点</label><strong>{config.newPointPolicy}</strong></div>
           <div><label>结构感知打标</label><strong>{config.structureAware}</strong></div>
           <div className="wide"><label>标签池</label><div className="tagging-label-pool">{config.labelPool.map((label) => <span key={label}>{label}</span>)}</div></div>
         </div>
@@ -746,7 +729,6 @@ function KnowledgeTaggingCompletedModal({ config, stats, completedAt, onClose, o
         <h3>打标配置</h3>
         <div className="tagging-readonly-grid">
           <div><label>知识点范围</label><strong>{config.range}</strong></div>
-          <div><label>新增知识点</label><strong>{config.newPointPolicy}</strong></div>
           <div><label>结构感知打标</label><strong>{config.structureAware}</strong></div>
           <div className="wide"><label>标签池</label><div className="tagging-label-pool">{config.labelPool.map((label) => <span key={label}>{label}</span>)}</div></div>
         </div>
