@@ -1,4 +1,5 @@
 import { Children, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -28,8 +29,10 @@ import {
 } from '@ant-design/icons';
 import { dataStore, knowledgeFormTypes } from './dataStore.js';
 import {
+  createKnowledgeToolFromRaw,
   createEmptyServiceDraft,
   defaultCategories,
+  listRawMcpTools,
   loadServices,
   readCatalog,
   saveCatalog,
@@ -37,6 +40,9 @@ import {
   subscribeCatalog,
   syncService,
 } from './toolCatalog.js';
+
+const allToolsCategory = '全部';
+const lockedToolCategories = new Set(defaultCategories);
 
 function makeId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -71,7 +77,9 @@ function SearchBox({ value, onChange, placeholder }) {
 
 function SelectField({ value, onChange, children, className = '' }) {
   const [open, setOpen] = useState(false);
+  const [dropdownStyle, setDropdownStyle] = useState(null);
   const rootRef = useRef(null);
+  const dropdownRef = useRef(null);
   const options = Children.toArray(children)
     .filter(isValidElement)
     .map((child, index) => ({
@@ -85,10 +93,37 @@ function SelectField({ value, onChange, children, className = '' }) {
   useEffect(() => {
     if (!open) return undefined;
     const handlePointerDown = (event) => {
-      if (!rootRef.current?.contains(event.target)) setOpen(false);
+      if (!rootRef.current?.contains(event.target) && !dropdownRef.current?.contains(event.target)) setOpen(false);
     };
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const updatePosition = () => {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const gap = 6;
+      const viewportPadding = 16;
+      const minHeight = 120;
+      const preferredHeight = 260;
+      const below = window.innerHeight - rect.bottom - viewportPadding - gap;
+      const above = rect.top - viewportPadding - gap;
+      const openUpward = below < minHeight && above > below;
+      const maxHeight = Math.max(minHeight, Math.min(preferredHeight, openUpward ? above : below));
+      const top = openUpward ? Math.max(viewportPadding, rect.top - maxHeight - gap) : rect.bottom + gap;
+      const width = Math.max(rect.width, 180);
+      const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - width - viewportPadding);
+      setDropdownStyle({ position: 'fixed', top, left, width, maxHeight, zIndex: 300 });
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
   }, [open]);
 
   const chooseOption = (option) => {
@@ -103,8 +138,8 @@ function SelectField({ value, onChange, children, className = '' }) {
         <span>{selected?.label}</span>
         <DownOutlined />
       </button>
-      {open ? (
-        <span className="select-dropdown">
+      {open && dropdownStyle ? createPortal(
+        <span ref={dropdownRef} className="select-dropdown" style={dropdownStyle}>
           {options.map((option) => (
             <button
               type="button"
@@ -117,7 +152,8 @@ function SelectField({ value, onChange, children, className = '' }) {
               {option.label}
             </button>
           ))}
-        </span>
+        </span>,
+        document.body,
       ) : null}
     </span>
   );
@@ -212,7 +248,11 @@ function Shell({ active, onNavigate, children }) {
         ['ops-category', '查看知识空间类目'],
         ['ops-workbench', '方案工作台'],
         ['ops-access', '知识接入'],
-        ['ops-result', '知识加工结果'],
+        ['ops-result', '知识加工结果', [
+          ['ops-slice-library', '切片库'],
+          ['ops-qa-library', 'QA库'],
+          ['ops-knowledge-points', '知识点'],
+        ]],
         ['ops-package', '知识包管理'],
       ],
     },
@@ -245,11 +285,30 @@ function Shell({ active, onNavigate, children }) {
         {navGroups.map((group) => (
           <section className="nav-group" key={group.title}>
             <div className="nav-title">{group.title}</div>
-            {group.items.map(([key, label]) => (
-              <button type="button" key={key} className={`nav-item ${active === key ? 'active' : ''}`} onClick={() => onNavigate(key)}>
-                <span>{label}</span>
-              </button>
-            ))}
+            {group.items.map(([key, label, children]) => {
+              const childActive = children?.some(([childKey]) => active === childKey);
+              return (
+                <div className={`nav-block ${childActive ? 'active' : ''}`} key={key}>
+                  <button type="button" className={`nav-item ${active === key || childActive ? 'active' : ''}`} onClick={() => onNavigate(key)}>
+                    <span>{label}</span>
+                  </button>
+                  {children?.length ? (
+                    <div className="nav-submenu">
+                      {children.map(([childKey, childLabel]) => (
+                        <button
+                          type="button"
+                          key={childKey}
+                          className={`nav-subitem ${active === childKey ? 'active' : ''}`}
+                          onClick={() => onNavigate(childKey)}
+                        >
+                          {childLabel}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </section>
         ))}
         <button type="button" className="collapse-button"><MenuFoldOutlined /></button>
@@ -279,6 +338,411 @@ function EmptyPage({ title }) {
       <h1>{title}</h1>
       <p>该菜单仅保留导航入口，本轮原型不迁移具体功能。</p>
     </section>
+  );
+}
+
+const knowledgePointCategories = [
+  { id: 'all', name: '全部类目', count: '99+' },
+  { id: 'mixue-ruixing', name: '奶茶 > 瑞幸', count: '99+' },
+];
+
+const knowledgePointRows = [
+  {
+    id: 'kp-1',
+    title: '喜茶门店标准服务',
+    content: '围绕门店接待、点单、出杯与客诉处理沉淀...',
+    source: '喜茶.docx',
+    tag: '产品',
+    status: '启用',
+    updatedAt: '2026-05-27 10:18',
+  },
+  {
+    id: 'kp-2',
+    title: '瑞幸咖啡产品卖点',
+    content: '提炼生椰拿铁、轻乳茶等产品的核心卖点...',
+    source: '瑞幸.docx',
+    tag: '营销',
+    status: '启用',
+    updatedAt: '2026-05-26 18:42',
+  },
+  {
+    id: 'kp-3',
+    title: '奶茶品牌合规话术',
+    content: '用于培训员工识别营销宣传中的合规风险...',
+    source: '合规手册.md',
+    tag: '风控',
+    status: '停用',
+    updatedAt: '2026-05-25 16:30',
+  },
+];
+
+function KnowledgePointsPage() {
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('全部状态');
+  const [sourceFilter, setSourceFilter] = useState('来源文件');
+  const [tagFilter, setTagFilter] = useState('标签');
+  const [taggingDialog, setTaggingDialog] = useState(null);
+  const [taggingStatus, setTaggingStatus] = useState('idle');
+  const [taggingStats, setTaggingStats] = useState({ success: 0, failed: 0, remaining: 0 });
+  const [taggingCompletedAt, setTaggingCompletedAt] = useState('');
+  const taggingTimerRef = useRef(null);
+  const [taggingConfig, setTaggingConfig] = useState({
+    range: '全部知识点',
+    newPointPolicy: '自动打标',
+    labelPool: ['产品', '营销', '风控', '服务', '门店', '合规'],
+    structureAware: '开启',
+  });
+  const filteredRows = knowledgePointRows.filter((row) => {
+    const keyword = query.trim().toLowerCase();
+    const queryMatched = !keyword
+      || row.title.toLowerCase().includes(keyword)
+      || row.content.toLowerCase().includes(keyword)
+      || row.source.toLowerCase().includes(keyword)
+      || row.tag.toLowerCase().includes(keyword);
+    if (!queryMatched) return false;
+    if (statusFilter !== '全部状态' && row.status !== statusFilter) return false;
+    if (sourceFilter !== '来源文件' && row.source !== sourceFilter) return false;
+    if (tagFilter !== '标签' && row.tag !== tagFilter) return false;
+    return true;
+  });
+  useEffect(() => () => {
+    if (taggingTimerRef.current) window.clearTimeout(taggingTimerRef.current);
+  }, []);
+  const finishTagging = (stats) => {
+    setTaggingStats(stats);
+    setTaggingCompletedAt(formatTaggingTime(new Date()));
+    setTaggingStatus('completed');
+  };
+  const startTagging = (nextConfig, stats, completeStats) => {
+    if (taggingTimerRef.current) window.clearTimeout(taggingTimerRef.current);
+    setTaggingConfig(nextConfig);
+    setTaggingStats(stats);
+    setTaggingCompletedAt('');
+    setTaggingStatus('running');
+    taggingTimerRef.current = window.setTimeout(() => finishTagging(completeStats), 4200);
+  };
+  const openTaggingDialog = () => {
+    if (taggingStatus === 'running') setTaggingDialog('status');
+    else if (taggingStatus === 'completed') setTaggingDialog('completed');
+    else setTaggingDialog('settings');
+  };
+  const submitTagging = (nextConfig) => {
+    startTagging(nextConfig, { success: 0, failed: 0, remaining: 3 }, { success: 2, failed: 1, remaining: 0 });
+    setTaggingDialog(null);
+  };
+  const stopTagging = () => {
+    if (taggingTimerRef.current) window.clearTimeout(taggingTimerRef.current);
+    setTaggingStatus('idle');
+    setTaggingStats({ success: 0, failed: 0, remaining: 0 });
+    setTaggingCompletedAt('');
+    setTaggingDialog(null);
+  };
+  const retryFailedTagging = () => {
+    startTagging(taggingConfig, { success: 0, failed: 0, remaining: taggingStats.failed || 1 }, { success: taggingStats.failed || 1, failed: 0, remaining: 0 });
+    setTaggingDialog(null);
+  };
+  const reopenTaggingSettings = () => setTaggingDialog('settings');
+
+  return (
+    <>
+      <div className="knowledge-result-page">
+        <aside className="knowledge-category-panel panel">
+          <div className="knowledge-category-title">知识类目</div>
+          {knowledgePointCategories.map((category) => (
+            <button
+              type="button"
+              key={category.id}
+              className={`knowledge-category-item ${selectedCategory === category.id ? 'active' : ''}`}
+              onClick={() => setSelectedCategory(category.id)}
+            >
+              <span>{category.name}</span>
+              <strong>{category.count}</strong>
+            </button>
+          ))}
+        </aside>
+        <section className="knowledge-main">
+          <PageHeader
+            title="知识点？"
+            actions={<span className="project-space-label">项目空间：奶茶品牌</span>}
+          />
+          <Toolbar className="knowledge-toolbar">
+            <button type="button" className="primary"><PlusOutlined /> 新增知识点</button>
+            <button
+              type="button"
+              className={`tagging-button ${taggingStatus === 'running' ? 'running' : ''} ${taggingStatus === 'completed' ? 'completed' : ''}`.trim()}
+              onClick={openTaggingDialog}
+            >
+              {taggingStatus === 'running' ? <SyncOutlined /> : taggingStatus === 'completed' ? <CheckCircleOutlined /> : <StarOutlined />}
+              {taggingStatus === 'running' ? (
+                <>
+                  <span>打标中</span>
+                  <em>成功{taggingStats.success}、失败{taggingStats.failed}、剩余{taggingStats.remaining}</em>
+                </>
+              ) : taggingStatus === 'completed' ? (
+                <>
+                  <span>打标完成</span>
+                  <em>成功{taggingStats.success}、失败{taggingStats.failed}</em>
+                </>
+              ) : <span>知识点打标</span>}
+            </button>
+            <SearchBox value={query} onChange={setQuery} placeholder="搜索知识点名称/内容" />
+            <SelectField value={statusFilter} onChange={setStatusFilter}>
+              <option>全部状态</option>
+              <option>启用</option>
+              <option>停用</option>
+            </SelectField>
+            <SelectField value={sourceFilter} onChange={setSourceFilter}>
+              <option>来源文件</option>
+              <option>喜茶.docx</option>
+              <option>瑞幸.docx</option>
+              <option>合规手册.md</option>
+            </SelectField>
+            <SelectField value={tagFilter} onChange={setTagFilter}>
+              <option>标签</option>
+              <option>产品</option>
+              <option>营销</option>
+              <option>风控</option>
+            </SelectField>
+          </Toolbar>
+          <section className="panel knowledge-table-panel">
+            <table className="data-table knowledge-table">
+              <colgroup>
+                <col className="knowledge-col-expand" />
+                <col className="knowledge-col-title" />
+                <col className="knowledge-col-content" />
+                <col className="knowledge-col-source" />
+                <col className="knowledge-col-tag" />
+                <col className="knowledge-col-status" />
+                <col className="knowledge-col-time" />
+                <col className="knowledge-col-action" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th />
+                  <th>知识点名称/标题</th>
+                  <th>知识点内容</th>
+                  <th>来源文件</th>
+                  <th>标签</th>
+                  <th>状态</th>
+                  <th>更新时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((row) => (
+                  <tr key={row.id}>
+                    <td className="knowledge-expand-cell"><RightChevron /></td>
+                    <td className="strong">{row.title}</td>
+                    <td>{row.content}</td>
+                    <td>{row.source}</td>
+                    <td>{row.tag}</td>
+                    <td><Badge tone={row.status === '启用' ? 'success' : 'neutral'}>{row.status}</Badge></td>
+                    <td>{row.updatedAt}</td>
+                    <td className="actions knowledge-actions">
+                      <button type="button">编辑</button>
+                      <button type="button">{row.status === '启用' ? '停用' : '启用'}</button>
+                      <button type="button" title="更多"><MoreOutlined /></button>
+                    </td>
+                  </tr>
+                ))}
+                {filteredRows.length === 0 ? <tr><td colSpan={8} className="empty-table-cell">暂无匹配知识点</td></tr> : null}
+              </tbody>
+            </table>
+            <div className="knowledge-pagination">
+              <span>共 38 条</span>
+              <button type="button">&lt;</button>
+              <button type="button" className="active">1</button>
+              <button type="button">2</button>
+              <button type="button">3</button>
+              <button type="button">4</button>
+              <button type="button">&gt;</button>
+              <button type="button" className="page-size">10 条/页</button>
+            </div>
+          </section>
+        </section>
+      </div>
+      {taggingDialog === 'settings' ? (
+        <KnowledgeTaggingSettingsModal
+          config={taggingConfig}
+          onClose={() => setTaggingDialog(null)}
+          onSubmit={submitTagging}
+        />
+      ) : null}
+      {taggingDialog === 'status' ? (
+        <KnowledgeTaggingStatusModal
+          config={taggingConfig}
+          onClose={() => setTaggingDialog(null)}
+          onStop={stopTagging}
+          stats={taggingStats}
+        />
+      ) : null}
+      {taggingDialog === 'completed' ? (
+        <KnowledgeTaggingCompletedModal
+          config={taggingConfig}
+          stats={taggingStats}
+          completedAt={taggingCompletedAt}
+          onClose={() => setTaggingDialog(null)}
+          onRetag={reopenTaggingSettings}
+          onRetryFailed={retryFailedTagging}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function formatTaggingTime(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function KnowledgeTaggingSettingsModal({ config, onClose, onSubmit }) {
+  const [draft, setDraft] = useState(config);
+  const updateDraft = (patch) => setDraft((current) => ({ ...current, ...patch }));
+  return (
+    <Modal
+      title="知识点批量打标设置"
+      onClose={onClose}
+      wide
+      className="knowledge-tagging-modal"
+      footer={(
+        <>
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button type="button" className="primary" onClick={() => onSubmit(draft)}>提交</button>
+        </>
+      )}
+    >
+      <p className="tagging-tip">选择要打标的知识点范围，确认打标规则，提交后系统会离线给知识点完成打标工作。</p>
+      <section className="tagging-section">
+        <h3>知识点范围</h3>
+        <div className="tagging-option-grid">
+          {['全部知识点', '标签为空的知识点', '标签为空的知识点+标签未更新的知识点'].map((item) => (
+            <label key={item} className={`tagging-option ${draft.range === item ? 'active' : ''}`}>
+              <input type="radio" checked={draft.range === item} onChange={() => updateDraft({ range: item })} />
+              <span>{item}</span>
+            </label>
+          ))}
+        </div>
+      </section>
+      <section className="tagging-section">
+        <h3>打标设置</h3>
+        <div className="tagging-form-row">
+          <label>打标任务完成前新增的知识点</label>
+          <div className="tagging-segment">
+            {['自动打标', '不自动打标'].map((item) => (
+              <button
+                type="button"
+                key={item}
+                className={draft.newPointPolicy === item ? 'active' : ''}
+                onClick={() => updateDraft({ newPointPolicy: item })}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="tagging-form-row">
+          <label>标签池</label>
+          <div className="tagging-label-pool">
+            {draft.labelPool.map((label) => <span key={label}>{label}</span>)}
+          </div>
+        </div>
+        <div className="tagging-form-row">
+          <label>结构感知打标</label>
+          <div className="tagging-segment compact">
+            {['开启', '关闭'].map((item) => (
+              <button
+                type="button"
+                key={item}
+                className={draft.structureAware === item ? 'active' : ''}
+                onClick={() => updateDraft({ structureAware: item })}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+    </Modal>
+  );
+}
+
+function KnowledgeTaggingStatusModal({ config, stats, onClose, onStop }) {
+  return (
+    <Modal
+      title="知识点打标状态"
+      onClose={onClose}
+      wide
+      className="knowledge-tagging-modal"
+      footer={(
+        <>
+          <button type="button" className="secondary" onClick={onClose}>关闭弹窗</button>
+          <button type="button" className="danger-button" onClick={onStop}>停止打标</button>
+        </>
+      )}
+    >
+      <section className="tagging-status-card">
+        <div>
+          <label>打标状态</label>
+          <strong><SyncOutlined /> 打标中</strong>
+        </div>
+        <div>
+          <label>执行进度</label>
+          <span>成功 {stats.success} · 失败 {stats.failed} · 剩余 {stats.remaining}</span>
+        </div>
+      </section>
+      <section className="tagging-section readonly">
+        <h3>打标配置</h3>
+        <div className="tagging-readonly-grid">
+          <div><label>知识点范围</label><strong>{config.range}</strong></div>
+          <div><label>新增知识点</label><strong>{config.newPointPolicy}</strong></div>
+          <div><label>结构感知打标</label><strong>{config.structureAware}</strong></div>
+          <div className="wide"><label>标签池</label><div className="tagging-label-pool">{config.labelPool.map((label) => <span key={label}>{label}</span>)}</div></div>
+        </div>
+      </section>
+    </Modal>
+  );
+}
+
+function KnowledgeTaggingCompletedModal({ config, stats, completedAt, onClose, onRetag, onRetryFailed }) {
+  return (
+    <Modal
+      title="知识点打标状态"
+      onClose={onClose}
+      wide
+      className="knowledge-tagging-modal"
+      footer={(
+        <>
+          <button type="button" className="secondary" onClick={onClose}>关闭弹窗</button>
+          <button type="button" className="secondary" onClick={onRetag}>再次打标</button>
+          <button type="button" className="primary" disabled={!stats.failed} onClick={onRetryFailed}>重试失败的任务</button>
+        </>
+      )}
+    >
+      <section className="tagging-status-card completed">
+        <div>
+          <label>打标状态</label>
+          <strong><CheckCircleOutlined /> 打标完成</strong>
+        </div>
+        <div>
+          <label>执行结果</label>
+          <span>成功 {stats.success} · 失败 {stats.failed}</span>
+        </div>
+        <div>
+          <label>完成时间</label>
+          <span>{completedAt || '-'}</span>
+        </div>
+      </section>
+      <section className="tagging-section readonly">
+        <h3>打标配置</h3>
+        <div className="tagging-readonly-grid">
+          <div><label>知识点范围</label><strong>{config.range}</strong></div>
+          <div><label>新增知识点</label><strong>{config.newPointPolicy}</strong></div>
+          <div><label>结构感知打标</label><strong>{config.structureAware}</strong></div>
+          <div className="wide"><label>标签池</label><div className="tagging-label-pool">{config.labelPool.map((label) => <span key={label}>{label}</span>)}</div></div>
+        </div>
+      </section>
+    </Modal>
   );
 }
 
@@ -594,12 +1058,10 @@ function ToolSchemaCard({ tool }) {
 function ToolManagementPage({ notify }) {
   const [snapshot, setSnapshot] = useState(() => normalizeToolSnapshot(readCatalog()));
   const [query, setQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('全部工具');
-  const [selectedToolIds, setSelectedToolIds] = useState([]);
-  const [batchOpen, setBatchOpen] = useState(false);
-  const [batchCategory, setBatchCategory] = useState(() => normalizeToolSnapshot(readCatalog()).categories[0] || '未分类');
+  const [selectedCategory, setSelectedCategory] = useState(allToolsCategory);
   const [categoryDraft, setCategoryDraft] = useState(null);
   const [detailTool, setDetailTool] = useState(null);
+  const [createDraft, setCreateDraft] = useState(null);
 
   useEffect(() => subscribeCatalog(() => setSnapshot(normalizeToolSnapshot(readCatalog()))), []);
 
@@ -622,14 +1084,16 @@ function ToolManagementPage({ notify }) {
   }, [snapshot.tools]);
 
   const filteredTools = useMemo(() => snapshot.tools.filter((tool) => {
-    if (selectedCategory !== '全部工具' && tool.category !== selectedCategory) return false;
+    if (selectedCategory !== allToolsCategory && tool.category !== selectedCategory) return false;
     if (!query.trim()) return true;
     const keyword = query.trim().toLowerCase();
-    return tool.name.toLowerCase().includes(keyword) || tool.description.toLowerCase().includes(keyword);
+    return tool.name.toLowerCase().includes(keyword)
+      || tool.description.toLowerCase().includes(keyword)
+      || tool.sourceToolName?.toLowerCase().includes(keyword)
+      || tool.sourceServiceName?.toLowerCase().includes(keyword);
   }), [query, selectedCategory, snapshot.tools]);
 
-  const allFilteredSelected = filteredTools.length > 0 && filteredTools.every((tool) => selectedToolIds.includes(tool.id));
-  const someFilteredSelected = filteredTools.some((tool) => selectedToolIds.includes(tool.id)) && !allFilteredSelected;
+  const rawSources = useMemo(() => listRawMcpTools(loadServices()), [snapshot.tools.length]);
 
   const openCreateCategory = () => setCategoryDraft({ name: '', oldName: null });
   const openEditCategory = (category) => setCategoryDraft({ name: category, oldName: category });
@@ -661,101 +1125,141 @@ function ToolManagementPage({ notify }) {
   };
 
   const deleteCategory = (category) => {
+    if (lockedToolCategories.has(category)) {
+      notify('系统默认分类不允许删除', 'warning');
+      return;
+    }
     if (!window.confirm(`确定删除分类「${category}」吗？该分类下工具将进入未分类。`)) return;
     const categoriesNext = snapshot.categories.filter((item) => item !== category);
     const toolsNext = snapshot.tools.map((tool) => (tool.category === category ? { ...tool, category: '未分类' } : tool));
-    persist(toolsNext, categoriesNext.includes('未分类') ? categoriesNext : [...categoriesNext, '未分类']);
-    setSelectedCategory('全部工具');
+    persist(toolsNext, categoriesNext);
+    setSelectedCategory(allToolsCategory);
     notify('工具分类已删除', 'success');
   };
 
-  const toggleTool = (toolId) => {
-    setSelectedToolIds((items) => (items.includes(toolId) ? items.filter((id) => id !== toolId) : [...items, toolId]));
+  const openCreateTool = () => {
+    const firstSource = rawSources[0];
+    setCreateDraft(makeKnowledgeToolDraft(firstSource, snapshot.categories[1] || snapshot.categories[0] || '未分类'));
   };
 
-  const toggleAllFiltered = () => {
-    setSelectedToolIds((items) => {
-      const ids = filteredTools.map((tool) => tool.id);
-      if (allFilteredSelected) return items.filter((id) => !ids.includes(id));
-      return Array.from(new Set([...items, ...ids]));
-    });
+  const openEditTool = (tool) => {
+    setCreateDraft(makeKnowledgeToolEditDraft(tool));
   };
 
-  const openBatchCategory = () => {
-    if (selectedToolIds.length === 0) {
-      notify('请先选择工具', 'error');
+  const deleteTool = (tool) => {
+    if (tool.kind === '内置工具') {
+      notify('内置工具不允许删除', 'warning');
       return;
     }
-    setBatchCategory(snapshot.categories[0] || '未分类');
-    setBatchOpen(true);
+    if (!window.confirm(`确定删除工具「${tool.name}」吗？`)) return;
+    persist(snapshot.tools.filter((item) => item.id !== tool.id));
+    notify('知识工程工具已删除', 'success');
   };
 
-  const applyBatch = () => {
-    if (!batchCategory) {
-      notify('请选择分类', 'error');
+  const saveKnowledgeTool = () => {
+    if (!createDraft?.id && !createDraft?.sourceId) {
+      notify('请先选择 MCP 原始工具', 'error');
       return;
     }
-    persist(snapshot.tools.map((tool) => (selectedToolIds.includes(tool.id) ? { ...tool, category: batchCategory } : tool)));
-    setSelectedToolIds([]);
-    setBatchOpen(false);
-    notify('工具分类已设置', 'success');
+    if (!createDraft.name.trim()) {
+      notify('工具名称不能为空', 'error');
+      return;
+    }
+    if (!createDraft.category) {
+      notify('工具分类不能为空', 'error');
+      return;
+    }
+    if (!createDraft.description.trim()) {
+      notify('工具描述不能为空', 'error');
+      return;
+    }
+    const overrides = {
+      name: createDraft.name,
+      description: createDraft.description,
+      category: createDraft.category,
+      inputs: createDraft.inputs,
+      outputs: createDraft.outputs,
+      storageRules: createDraft.storageRules,
+    };
+    if (createDraft.id) {
+      persist(snapshot.tools.map((tool) => (tool.id === createDraft.id ? applyKnowledgeToolDraft(tool, overrides) : tool)));
+      notify('知识工程工具已更新', 'success');
+    } else {
+      const source = rawSources.find((item) => item.id === createDraft.sourceId);
+      if (!source) {
+        notify('来源 MCP 工具不存在，请重新同步后再试', 'error');
+        return;
+      }
+      const nextTool = createKnowledgeToolFromRaw(source, overrides);
+      persist([...snapshot.tools, nextTool]);
+      notify('知识工程工具已创建', 'success');
+    }
+    setCreateDraft(null);
   };
 
   return (
     <>
-      <PageHeader title="工具管理" subtitle="管理从 MCP Server 同步回来的工具资产，维护工具分类，供 Agent 和流程引擎统一使用。" />
+      <PageHeader title="工具管理" subtitle="管理标准化后的知识工程工具。MCP 原始工具只作为创建来源，Agent 和 pipeline 只使用这里发布的工具。" />
       <div className="split-layout">
         <aside className="category-sidebar panel">
           <div className="side-head"><strong>工具分类</strong><button type="button" title="新增分类" onClick={openCreateCategory}><PlusOutlined /></button></div>
-          <button type="button" className={`category-button ${selectedCategory === '全部工具' ? 'active' : ''}`} onClick={() => setSelectedCategory('全部工具')}>
-            <span>全部工具</span><Badge>{snapshot.tools.length}</Badge>
+          <button type="button" className={`category-button ${selectedCategory === allToolsCategory ? 'active' : ''}`} onClick={() => setSelectedCategory(allToolsCategory)}>
+            <span>全部</span><Badge>{snapshot.tools.length}</Badge>
           </button>
           {snapshot.categories.map((category) => (
             <button type="button" key={category} className={`category-button category-row ${selectedCategory === category ? 'active' : ''}`} onClick={() => setSelectedCategory(category)}>
               <span className="category-name">{category}</span>
               <Badge>{categoryCounts[category] || 0}</Badge>
-              <span className="category-inline-actions" onClick={(event) => event.stopPropagation()}>
-                <span role="button" tabIndex={0} onClick={() => openEditCategory(category)}><EditOutlined /></span>
-                <span role="button" tabIndex={0} className="danger-link" onClick={() => deleteCategory(category)}><DeleteOutlined /></span>
-              </span>
+              {!lockedToolCategories.has(category) ? (
+                <span className="category-inline-actions" onClick={(event) => event.stopPropagation()}>
+                  <span role="button" tabIndex={0} onClick={() => openEditCategory(category)}><EditOutlined /></span>
+                  <span role="button" tabIndex={0} className="danger-link" onClick={() => deleteCategory(category)}><DeleteOutlined /></span>
+                </span>
+              ) : null}
             </button>
           ))}
         </aside>
-        <section className="panel table-panel flex-panel">
-          <Toolbar>
-            <SearchBox value={query} onChange={setQuery} placeholder="搜索工具名称或描述" />
-            {selectedToolIds.length > 0 ? <span className="selection-text">已选择 {selectedToolIds.length} 个工具</span> : null}
-            <button type="button" className="secondary" disabled={!selectedToolIds.length} onClick={openBatchCategory}>设置分类</button>
+        <section className="panel table-panel standard-tool-panel">
+          <Toolbar className="standard-tool-toolbar">
+            <SearchBox value={query} onChange={setQuery} placeholder="搜索工具名称、描述或来源" />
+            <button type="button" className="primary" onClick={openCreateTool}><PlusOutlined /> 新建知识工程工具</button>
           </Toolbar>
-          <table className="data-table tool-management-table">
+          <table className="data-table standard-tool-table">
             <colgroup>
-              <col className="tool-col-check" />
-              <col className="tool-col-name" />
-              <col className="tool-col-desc" />
-              <col className="tool-col-service" />
-              <col className="tool-col-sync" />
-              <col className="tool-col-action" />
+              <col className="standard-tool-col-name" />
+              <col className="standard-tool-col-category" />
+              <col className="standard-tool-col-mcp" />
+              <col className="standard-tool-col-raw-tool" />
+              <col className="standard-tool-col-action" />
             </colgroup>
             <thead>
               <tr>
-                <th><IndeterminateCheckbox checked={allFilteredSelected} indeterminate={someFilteredSelected} onChange={toggleAllFiltered} /></th>
-                <th>工具名称</th><th>工具描述</th><th>MCP服务</th><th>最近同步</th><th>操作</th>
+                <th>工具名称</th>
+                <th>分类</th>
+                <th>MCP</th>
+                <th>原始 MCP 工具</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
-              {filteredTools.map((tool, index) => (
+              {filteredTools.map((tool) => (
                 <tr key={tool.id}>
-                  <td><input type="checkbox" checked={selectedToolIds.includes(tool.id)} onChange={() => toggleTool(tool.id)} /></td>
-                  <td className="strong">{tool.name}</td>
-                  <td>{tool.description}</td>
-                  <td>{tool.serviceName}</td>
-                  <td>{tool.lastSyncedAt}</td>
-                  <td className="actions"><button type="button" onClick={() => setDetailTool(tool)}>详情</button></td>
+                  <td>
+                    <div className="standard-tool-name-cell">
+                      <strong>{tool.name}</strong>
+                    </div>
+                  </td>
+                  <td>{tool.category}</td>
+                  <td>{tool.sourceServiceName || tool.serviceName}</td>
+                  <td>{tool.sourceToolName || '-'}</td>
+                  <td className="actions standard-tool-actions">
+                    <button type="button" onClick={() => setDetailTool(tool)}>详情</button>
+                    <button type="button" onClick={() => openEditTool(tool)}>编辑</button>
+                    <button type="button" className="danger-link" onClick={() => deleteTool(tool)}>删除</button>
+                  </td>
                 </tr>
               ))}
-              {filteredTools.length === 0 ? (
-                <tr><td colSpan={6} className="empty-table-cell">暂无匹配工具</td></tr>
-              ) : null}
+              {filteredTools.length === 0 ? <tr><td colSpan={5} className="empty-table-cell">暂无匹配工具</td></tr> : null}
             </tbody>
           </table>
         </section>
@@ -769,28 +1273,577 @@ function ToolManagementPage({ notify }) {
           <Field label="分类名称" required><input value={categoryDraft.name} onChange={(event) => setCategoryDraft({ ...categoryDraft, name: event.target.value })} /></Field>
         </Modal>
       ) : null}
-      {batchOpen ? (
-        <Modal
-          title="设置分类"
-          onClose={() => setBatchOpen(false)}
-          footer={<><button type="button" className="secondary" onClick={() => setBatchOpen(false)}>取消</button><button type="button" className="primary" onClick={applyBatch}>确认</button></>}
-        >
-          <p className="field-help visible">已选择 {selectedToolIds.length} 个工具</p>
-          <Field label="目标分类"><SelectField value={batchCategory} onChange={setBatchCategory}>{snapshot.categories.map((category) => <option key={category} value={category}>{category}</option>)}</SelectField></Field>
-        </Modal>
+      {createDraft ? (
+        <KnowledgeToolCreateModal
+          draft={createDraft}
+          setDraft={setCreateDraft}
+          sources={rawSources}
+          categories={snapshot.categories}
+          onClose={() => setCreateDraft(null)}
+          onSave={saveKnowledgeTool}
+        />
       ) : null}
       {detailTool ? (
         <Drawer title={detailTool.name} onClose={() => setDetailTool(null)} wide>
-          <p className="drawer-subtitle">{detailTool.serviceName} · {detailTool.category} <Badge tone={detailTool.enabled ? 'success' : 'neutral'}>{detailTool.enabled ? '启用' : '停用'}</Badge></p>
+          <p className="drawer-subtitle">{detailTool.kind} · {detailTool.category} <Badge tone={detailTool.enabled ? 'success' : 'neutral'}>{detailTool.lifecycleStatus}</Badge></p>
+          <div className="detail-grid">
+            <div><label>来源 MCP 服务</label><strong>{detailTool.sourceServiceName || detailTool.serviceName || '-'}</strong></div>
+            <div><label>来源 MCP 工具</label><strong>{detailTool.sourceToolName || '-'}</strong></div>
+            <div><label>工具版本</label><strong>{detailTool.version}</strong></div>
+            <div><label>最近同步</label><strong>{detailTool.lastSyncedAt}</strong></div>
+          </div>
           <section className="schema-card">
-            <div className="schema-head"><strong>工具描述</strong></div>
+            <div className="schema-head"><strong>标准化说明</strong></div>
             <p>{detailTool.description}</p>
           </section>
           <ToolParamTable title="输入参数" columns={['参数名', '类型', '必填', '说明']} rows={detailTool.inputs.map((input) => [input.name, input.type, input.required ? '是' : '否', input.description])} />
           <ToolParamTable title="输出参数" columns={['参数名', '类型', '说明']} rows={detailTool.outputs.map((output) => [output.name, output.type, output.description])} />
+          <StorageContractCard contract={detailTool.storageContract} />
+          <section className="schema-card">
+            <div className="schema-head"><strong>Pipeline 使用边界</strong></div>
+            <p>工具管理页只定义工具的标准输入、标准输出和默认结果存储规则。具体参数取固定值还是取上游节点输出，在 pipeline 节点配置时绑定。</p>
+          </section>
         </Drawer>
       ) : null}
     </>
+  );
+}
+
+function makeKnowledgeToolDraft(source, category) {
+  const firstOutputName = source?.tool?.outputs?.[0]?.name || '';
+  return {
+    id: null,
+    sourceId: source?.id || '',
+    selectedMcpId: source?.serviceId || '',
+    mode: 'create',
+    step: 0,
+    name: source?.tool?.name ? `${source.tool.name}标准化工具` : '',
+    description: source?.tool?.description || '',
+    category,
+    inputs: normalizeDraftInputs(source?.tool?.inputs || []),
+    outputs: source?.tool?.outputs || [],
+    storageRules: firstOutputName ? [createOutputRule(firstOutputName)] : [],
+  };
+}
+
+function makeKnowledgeToolEditDraft(tool) {
+  return {
+    id: tool.id,
+    sourceId: `${tool.sourceServiceId || tool.serviceId}-${tool.sourceToolName || tool.name}`,
+    selectedMcpId: tool.sourceServiceId || tool.serviceId || '',
+    mode: 'edit',
+    step: 0,
+    sourceLabel: `${tool.sourceServiceName || tool.serviceName || '-'} / ${tool.sourceToolName || '-'}`,
+    name: tool.name || '',
+    description: tool.description || '',
+    category: tool.category || '未分类',
+    inputs: normalizeDraftInputs(tool.inputs || []),
+    outputs: tool.outputs || [],
+    storageRules: normalizeStorageRules(tool.storageContract, tool.outputs || []),
+  };
+}
+
+function applyKnowledgeToolDraft(tool, draft) {
+  return {
+    ...tool,
+    name: draft.name?.trim() || tool.name,
+    description: draft.description?.trim() || tool.description,
+    category: draft.category || tool.category,
+    inputs: draft.inputs || tool.inputs,
+    outputs: draft.outputs || tool.outputs,
+    storageContract: buildStorageContractFromRules(draft.storageRules || [], tool.storageContract),
+  };
+}
+
+function normalizeDraftInputs(inputs = []) {
+  return inputs.map((input) => ({
+    ...input,
+    sourceName: input.sourceName || input.source || input.name || '',
+    exposed: input.exposed ?? true,
+  }));
+}
+
+function createOutputRule(outputName = '') {
+  return {
+    id: makeId('output-rule'),
+    outputName,
+    artifactType: '文本切片',
+    storageTargetType: 'Elasticsearch',
+    esAddress: '',
+    esIndex: '',
+    objectStorageAddress: '',
+    objectStoragePath: '',
+    writeMode: 'upsert',
+    fieldMapping: '',
+    indexEnabled: false,
+    indexFields: '',
+    recallField: '',
+    filterFields: '',
+  };
+}
+
+function normalizeStorageRules(contract, outputs = []) {
+  if (contract?.rules?.length) return contract.rules.map((rule) => ({ ...createOutputRule(rule.outputName), ...rule, id: rule.id || makeId('output-rule') }));
+  const outputName = contract?.outputName || outputs[0]?.name || '';
+  if (!outputName) return [];
+  const actions = [];
+  if (contract?.enabled) actions.push('保存');
+  if (contract?.indexEnabled) actions.push('建索引');
+  return [{
+    ...createOutputRule(outputName),
+    actions: actions.length ? actions : ['保存'],
+    artifactType: contract?.artifactType || '原始结果',
+    storageTargetType: contract?.storageTargetType || contract?.storageType || 'Elasticsearch',
+    esAddress: contract?.esAddress || '',
+    esIndex: contract?.esIndex || contract?.storageTarget || '',
+    objectStorageAddress: contract?.objectStorageAddress || '',
+    objectStoragePath: contract?.objectStoragePath || '',
+    writeMode: contract?.writeMode || 'upsert',
+    fieldMapping: contract?.fieldMapping || '',
+    indexEnabled: Boolean(contract?.indexEnabled),
+    indexFields: contract?.indexFields || contract?.textField || '',
+    recallField: contract?.recallField || contract?.parentContextField || '',
+    filterFields: contract?.filterFields || '',
+  }];
+}
+
+function buildStorageContractFromRules(rules = [], fallback = {}) {
+  const firstRule = rules[0] || {};
+  return {
+    ...(fallback || {}),
+    enabled: rules.length > 0,
+    outputName: firstRule.outputName || '',
+    artifactType: firstRule.artifactType || '原始结果',
+    storageTargetType: firstRule.storageTargetType || 'Elasticsearch',
+    storageType: firstRule.storageTargetType || 'Elasticsearch',
+    esAddress: firstRule.esAddress || '',
+    esIndex: firstRule.esIndex || '',
+    objectStorageAddress: firstRule.objectStorageAddress || '',
+    objectStoragePath: firstRule.objectStoragePath || '',
+    writeMode: firstRule.writeMode || 'upsert',
+    fieldMapping: firstRule.fieldMapping || '',
+    indexEnabled: rules.some((rule) => rule.indexEnabled),
+    indexFields: firstRule.indexFields || '',
+    recallField: firstRule.recallField || '',
+    filterFields: firstRule.filterFields || '',
+    rules,
+  };
+}
+
+function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClose, onSave }) {
+  const selectedSource = sources.find((item) => item.id === draft.sourceId);
+  const mcpOptions = Array.from(new Map(sources.map((source) => [source.serviceId, { id: source.serviceId, name: source.serviceName }])).values());
+  const selectedMcpId = draft.selectedMcpId || selectedSource?.serviceId || mcpOptions[0]?.id || '';
+  const filteredSources = sources.filter((source) => source.serviceId === selectedMcpId);
+  const rawInputOptions = selectedSource?.tool?.inputs?.length ? selectedSource.tool.inputs : draft.inputs;
+  const steps = ['原始MCP工具', '基础信息', '输入参数', '输出结果', '结果存储与索引'];
+  const activeStep = draft.step || 0;
+  const setStep = (step) => setDraft((current) => ({ ...current, step }));
+  const selectSource = (sourceId) => {
+    const source = sources.find((item) => item.id === sourceId);
+    setDraft({ ...makeKnowledgeToolDraft(source, draft.category || categories[0] || '未分类'), selectedMcpId: source?.serviceId || '', step: 0 });
+  };
+  const selectMcp = (serviceId) => {
+    const source = sources.find((item) => item.serviceId === serviceId);
+    setDraft({ ...makeKnowledgeToolDraft(source, draft.category || categories[0] || '未分类'), selectedMcpId: serviceId, step: 0 });
+  };
+  const updateParam = (kind, index, key, value) => {
+    setDraft((current) => ({
+      ...current,
+      [kind]: current[kind].map((item, itemIndex) => (itemIndex === index ? { ...item, [key]: value } : item)),
+    }));
+  };
+  const addOutput = () => setDraft((current) => ({
+    ...current,
+    outputs: [...current.outputs, { name: 'result', type: 'object', description: '自定义输出', path: 'result' }],
+  }));
+  const updateStorageRule = (ruleId, patch) => {
+    setDraft((current) => ({
+      ...current,
+      storageRules: (current.storageRules || []).map((rule) => (rule.id === ruleId ? { ...rule, ...patch } : rule)),
+    }));
+  };
+  const addStorageRule = () => setDraft((current) => ({
+    ...current,
+    storageRules: [...(current.storageRules || []), createOutputRule(current.outputs?.[0]?.name || '')],
+  }));
+  const removeStorageRule = (ruleId) => setDraft((current) => ({
+    ...current,
+    storageRules: (current.storageRules || []).filter((rule) => rule.id !== ruleId),
+  }));
+
+  return (
+    <Modal
+      title={draft.mode === 'edit' ? '编辑知识工程工具' : '新建知识工程工具'}
+      wide
+      className="standard-tool-modal"
+      onClose={onClose}
+      footer={(
+        <>
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          {activeStep > 0 ? <button type="button" className="secondary" onClick={() => setStep(activeStep - 1)}>上一步</button> : null}
+          {activeStep < steps.length - 1 ? (
+            <button type="button" className="primary" onClick={() => setStep(activeStep + 1)}>下一步</button>
+          ) : (
+            <button type="button" className="primary" onClick={onSave}>{draft.mode === 'edit' ? '保存' : '创建'}</button>
+          )}
+        </>
+      )}
+    >
+      <div className="standard-tool-form">
+        <div className="standard-tool-steps">
+          {steps.map((step, index) => (
+            <button
+              type="button"
+              key={step}
+              className={`step-item ${index === activeStep ? 'active' : ''} ${index < activeStep ? 'done' : ''}`}
+              aria-current={index === activeStep ? 'step' : undefined}
+              onClick={() => setStep(index)}
+            >
+              <span className="step-dot">{index + 1}</span>
+              <span className="step-label">{step}</span>
+            </button>
+          ))}
+        </div>
+        {activeStep === 0 ? (
+          <section className="schema-card">
+            {draft.mode === 'edit' ? (
+              <div className="form-grid two">
+                <Field label="MCP"><input value={draft.sourceLabel?.split(' / ')[0] || ''} readOnly /></Field>
+                <Field label="原始MCP工具"><input value={draft.sourceLabel?.split(' / ')[1] || ''} readOnly /></Field>
+              </div>
+            ) : sources.length ? (
+              <>
+                <Field label="MCP" required>
+                  <SelectField value={selectedMcpId} onChange={selectMcp}>
+                    {mcpOptions.map((mcp) => <option key={mcp.id} value={mcp.id}>{mcp.name}</option>)}
+                  </SelectField>
+                </Field>
+                <Field label="原始MCP工具" required>
+                  <SelectField value={draft.sourceId} onChange={selectSource}>
+                    {filteredSources.map((source) => <option key={source.id} value={source.id}>{source.tool.name}</option>)}
+                  </SelectField>
+                </Field>
+              </>
+            ) : <p className="empty-hint">当前还没有可用的外部 MCP 原始工具。请先在“MCP Server 接入”页完成服务同步。</p>}
+            {selectedSource ? <RawMcpToolPreview source={selectedSource} /> : null}
+          </section>
+        ) : null}
+        {activeStep === 1 ? (
+          <section className="schema-card">
+            <p className="step-tip">如需调整工具基础信息，可以在此处设置，最终对外暴露的工具信息以此处为准。</p>
+            <Field label="工具名称" required><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+            <Field label="工具分类" required><SelectField value={draft.category} onChange={(category) => setDraft({ ...draft, category })}>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</SelectField></Field>
+            <Field label="工具描述" required><textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></Field>
+          </section>
+        ) : null}
+        {activeStep === 2 ? (
+          <EditableParamTable
+            tip="在这里包装原始 input schema：参数名是标准工具对外暴露的名称，原始参数用于映射 MCP 工具真实入参。"
+            rows={draft.inputs}
+            kind="inputs"
+            columns={['参数名', '原始参数', '类型', '必填', '默认值', '说明', '是否暴露']}
+            sourceInputs={rawInputOptions}
+            onChange={updateParam}
+          />
+        ) : null}
+        {activeStep === 3 ? (
+          <EditableParamTable
+            title="输出结果"
+            rows={draft.outputs}
+            kind="outputs"
+            columns={['输出名称', '原始返回路径', '类型', '说明']}
+            onChange={updateParam}
+            onAdd={addOutput}
+          />
+        ) : null}
+        {activeStep === 4 ? (
+          <OutputRuleList
+            rules={draft.storageRules || []}
+            outputs={draft.outputs || []}
+            onAdd={addStorageRule}
+            onRemove={removeStorageRule}
+            onChange={updateStorageRule}
+          />
+        ) : null}
+      </div>
+    </Modal>
+  );
+}
+
+function RawMcpToolPreview({ source }) {
+  const tool = source.tool || {};
+  const inputs = tool.inputs || [];
+  const outputs = tool.outputs || [];
+  const inputSchema = buildRawInputJsonSchema(inputs);
+  const outputSchema = buildRawOutputJsonSchema(outputs);
+  return (
+    <div className="raw-tool-preview">
+      <div className="raw-tool-summary">
+        <div>
+          <label>工具名称</label>
+          <strong>{tool.name || '-'}</strong>
+        </div>
+        <div>
+          <label>工具描述</label>
+          <p>{tool.description || '-'}</p>
+        </div>
+      </div>
+      <div className="raw-schema-block">
+        <div className="raw-schema-title">input schema</div>
+        <pre className="json-schema-preview">{JSON.stringify(inputSchema, null, 2)}</pre>
+      </div>
+      {outputs.length ? (
+        <div className="raw-schema-block">
+          <div className="raw-schema-title">output schema</div>
+          <pre className="json-schema-preview">{JSON.stringify(outputSchema, null, 2)}</pre>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function OutputRuleList({ rules, outputs, onAdd, onRemove, onChange }) {
+  return (
+    <section className="schema-card output-rule-section">
+      <p className="step-tip">为需要沉淀为知识数据的工具输出配置知识形态、存储目标、字段映射和检索索引。未配置的输出仅作为流程变量传递。</p>
+      <div className="schema-actions">
+        <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 新增存储规则</button>
+      </div>
+      <div className="output-rule-list">
+        {rules.map((rule, index) => {
+          const storageTargetType = rule.storageTargetType || 'Elasticsearch';
+          return (
+            <div className="output-rule-card" key={rule.id}>
+              <div className="output-rule-head">
+                <strong>存储规则 {index + 1}</strong>
+                <button type="button" className="danger-link" onClick={() => onRemove(rule.id)}>删除</button>
+              </div>
+              <Field label="工具输出" required>
+                <SelectField value={rule.outputName} onChange={(outputName) => onChange(rule.id, { outputName })}>
+                  {outputs.map((output) => <option key={output.name} value={output.name}>{output.name}</option>)}
+                </SelectField>
+              </Field>
+              <div className="rule-subsection">
+                <div className="rule-subtitle">保存设置</div>
+                <Field label="存储的知识形态" required>
+                  <SelectField value={rule.artifactType} onChange={(artifactType) => onChange(rule.id, { artifactType })}>
+                    {['文本切片', '父子切片', 'QA对', '解析文档', '知识点', '元数据', '原始结果'].map((item) => <option key={item} value={item}>{item}</option>)}
+                  </SelectField>
+                </Field>
+                <Field label="存储目标" required>
+                  <SelectField value={storageTargetType} onChange={(value) => onChange(rule.id, { storageTargetType: value })}>
+                    {['Elasticsearch', '对象存储'].map((item) => <option key={item} value={item}>{item}</option>)}
+                  </SelectField>
+                </Field>
+                {storageTargetType === 'Elasticsearch' ? (
+                  <>
+                    <Field label="ES 地址" required><input placeholder="例如 http://es.internal:9200" value={rule.esAddress || ''} onChange={(event) => onChange(rule.id, { esAddress: event.target.value })} /></Field>
+                    <Field label="Index 名称" required><input placeholder="例如 policy_chunks" value={rule.esIndex || ''} onChange={(event) => onChange(rule.id, { esIndex: event.target.value })} /></Field>
+                  </>
+                ) : (
+                  <>
+                    <Field label="Bucket / 存储地址" required><input placeholder="例如 oss://policy-knowledge" value={rule.objectStorageAddress || ''} onChange={(event) => onChange(rule.id, { objectStorageAddress: event.target.value })} /></Field>
+                    <Field label="路径规则" required><input placeholder="例如 chunks/{run_id}/{document_id}.json" value={rule.objectStoragePath || ''} onChange={(event) => onChange(rule.id, { objectStoragePath: event.target.value })} /></Field>
+                  </>
+                )}
+                <Field label="写入方式">
+                  <SelectField value={rule.writeMode} onChange={(writeMode) => onChange(rule.id, { writeMode })}>
+                    {['新增', '覆盖', 'upsert'].map((item) => <option key={item} value={item}>{item}</option>)}
+                  </SelectField>
+                </Field>
+                <Field label="字段映射" required>
+                  <textarea
+                    className="mapping-textarea"
+                    placeholder={`例如：\n{\n  "id": "$.chunk_id",\n  "content": "$.text",\n  "source_doc_id": "$.document_id",\n  "metadata": "$.metadata"\n}`}
+                    value={rule.fieldMapping || ''}
+                    onChange={(event) => onChange(rule.id, { fieldMapping: event.target.value })}
+                  />
+                </Field>
+              </div>
+              <div className="rule-subsection">
+                <div className="rule-subtitle">索引设置</div>
+                <label className="checkbox-line">
+                  <input type="checkbox" checked={Boolean(rule.indexEnabled)} onChange={(event) => onChange(rule.id, { indexEnabled: event.target.checked })} />
+                  进入检索索引
+                </label>
+                {rule.indexEnabled ? (
+                  <>
+                    <Field label="进索引字段" required>
+                      <SelectField value={rule.indexFields || rule.outputName || ''} onChange={(indexFields) => onChange(rule.id, { indexFields })}>
+                        <option value="">请选择</option>
+                        {outputs.map((output) => <option key={output.name} value={output.name}>{output.name}</option>)}
+                      </SelectField>
+                    </Field>
+                    <Field label="召回字段" required>
+                      <SelectField value={rule.recallField || rule.outputName || ''} onChange={(recallField) => onChange(rule.id, { recallField })}>
+                        <option value="">请选择</option>
+                        {outputs.map((output) => <option key={output.name} value={output.name}>{output.name}</option>)}
+                      </SelectField>
+                    </Field>
+                    <Field label="过滤字段"><input placeholder="例如 $.metadata.doc_id, $.metadata.page" value={rule.filterFields || ''} onChange={(event) => onChange(rule.id, { filterFields: event.target.value })} /></Field>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+        {rules.length === 0 ? <p className="empty-hint">暂无存储规则。未配置规则的输出仅作为流程变量传递。</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function buildRawInputJsonSchema(inputs = []) {
+  const properties = {};
+  const required = [];
+  inputs.forEach((input) => {
+    if (!input.name) return;
+    properties[input.name] = {
+      ...toJsonSchemaType(input.type),
+      ...(input.description ? { description: input.description } : {}),
+      ...(input.defaultValue ? { default: input.defaultValue } : {}),
+    };
+    if (input.required) required.push(input.name);
+  });
+  return {
+    type: 'object',
+    properties,
+    ...(required.length ? { required } : {}),
+  };
+}
+
+function buildRawOutputJsonSchema(outputs = []) {
+  const properties = {};
+  outputs.forEach((output) => {
+    if (!output.name) return;
+    properties[output.name] = {
+      ...toJsonSchemaType(output.type),
+      ...(output.description ? { description: output.description } : {}),
+      ...(output.path && output.path !== output.name ? { sourcePath: output.path } : {}),
+    };
+  });
+  return {
+    type: 'object',
+    properties,
+  };
+}
+
+function toJsonSchemaType(type = 'object') {
+  const value = String(type).toLowerCase();
+  if (value.includes('array')) {
+    const itemType = value.includes('string') ? 'string' : value.includes('number') ? 'number' : value.includes('integer') ? 'integer' : 'object';
+    return { type: 'array', items: { type: itemType } };
+  }
+  if (value.includes('integer')) return { type: 'integer' };
+  if (value.includes('number')) return { type: 'number' };
+  if (value.includes('boolean')) return { type: 'boolean' };
+  if (value.includes('string')) return { type: 'string' };
+  if (value.includes('object')) return { type: 'object' };
+  return { type: 'object', originalType: type };
+}
+
+const inputTypeOptions = ['string', 'number', 'integer', 'boolean', 'object', 'array<object>', 'array<string>'];
+
+function EditableParamTable({ tip, rows, kind, columns, sourceInputs = [], onChange, onAdd }) {
+  return (
+    <section className="schema-card editable-schema-card">
+      {tip ? <p className="step-tip">{tip}</p> : null}
+      {onAdd ? (
+        <div className="schema-actions">
+          <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 新增输出</button>
+        </div>
+      ) : null}
+      <table className={`data-table compact-table editable-schema-table ${kind === 'inputs' ? 'input-schema-table' : 'output-schema-table'}`}>
+        <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`${kind}-${index}`}>
+              <td><input value={row.name} onChange={(event) => onChange(kind, index, 'name', event.target.value)} /></td>
+              {kind === 'inputs' ? (
+                <>
+                  <td>
+                    <SelectField value={row.sourceName || row.name || ''} onChange={(sourceName) => onChange(kind, index, 'sourceName', sourceName)}>
+                      {sourceInputs.map((input) => <option key={input.name} value={input.name}>{input.name}</option>)}
+                    </SelectField>
+                  </td>
+                  <td>
+                    <SelectField value={row.type || 'object'} onChange={(type) => onChange(kind, index, 'type', type)}>
+                      {inputTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
+                    </SelectField>
+                  </td>
+                  <td><input type="checkbox" checked={Boolean(row.required)} onChange={(event) => onChange(kind, index, 'required', event.target.checked)} /></td>
+                  <td><input value={row.defaultValue || ''} onChange={(event) => onChange(kind, index, 'defaultValue', event.target.value)} /></td>
+                  <td><input value={row.description || ''} onChange={(event) => onChange(kind, index, 'description', event.target.value)} /></td>
+                  <td><input type="checkbox" checked={row.exposed ?? true} onChange={(event) => onChange(kind, index, 'exposed', event.target.checked)} /></td>
+                </>
+              ) : (
+                <>
+                  <td><input value={row.path || row.sourcePath || row.name || ''} onChange={(event) => onChange(kind, index, 'path', event.target.value)} /></td>
+                  <td>
+                    <SelectField value={row.type || 'object'} onChange={(type) => onChange(kind, index, 'type', type)}>
+                      {inputTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
+                    </SelectField>
+                  </td>
+                  <td><input value={row.description || ''} onChange={(event) => onChange(kind, index, 'description', event.target.value)} /></td>
+                </>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function StorageContractCard({ contract }) {
+  if (contract?.rules?.length) {
+    return (
+      <section className="schema-card">
+        <div className="schema-head"><strong>结果存储与索引</strong><Badge tone="blue">{contract.rules.length} 条规则</Badge></div>
+        <div className="storage-rule-detail-list">
+          {contract.rules.map((rule, index) => (
+            <div className="storage-rule-detail" key={rule.id || `${rule.outputName}-${index}`}>
+              <div><label>工具输出</label><strong>{rule.outputName || '-'}</strong></div>
+              <div><label>知识形态</label><strong>{rule.artifactType || '-'}</strong></div>
+              <div><label>存储目标</label><strong>{rule.storageTargetType || '-'}</strong></div>
+              {rule.storageTargetType === '对象存储' ? <div><label>Bucket / 存储地址</label><strong>{rule.objectStorageAddress || '-'}</strong></div> : <div><label>ES 地址</label><strong>{rule.esAddress || '-'}</strong></div>}
+              {rule.storageTargetType === '对象存储' ? <div><label>路径规则</label><strong>{rule.objectStoragePath || '-'}</strong></div> : <div><label>Index 名称</label><strong>{rule.esIndex || '-'}</strong></div>}
+              <div><label>写入方式</label><strong>{rule.writeMode || '-'}</strong></div>
+              <div><label>进入检索索引</label><strong>{rule.indexEnabled ? '是' : '否'}</strong></div>
+              {rule.indexEnabled ? <div><label>进索引字段</label><strong>{rule.indexFields || '-'}</strong></div> : null}
+              {rule.indexEnabled ? <div><label>召回字段</label><strong>{rule.recallField || '-'}</strong></div> : null}
+              {rule.indexEnabled && rule.filterFields ? <div><label>过滤字段</label><strong>{rule.filterFields}</strong></div> : null}
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
+  if (!contract?.enabled) {
+    return (
+      <section className="schema-card">
+        <div className="schema-head"><strong>结果存储</strong><Badge>不强制存储</Badge></div>
+        <p>{contract?.note || '工具输出默认作为流程变量传递，是否存储由流程节点决定。'}</p>
+      </section>
+    );
+  }
+  return (
+    <section className="schema-card">
+      <div className="schema-head"><strong>结果存储</strong><Badge tone="blue">{contract.artifactType}</Badge></div>
+      <div className="detail-grid">
+        <div><label>绑定输出</label><strong>{contract.outputName}</strong></div>
+        <div><label>结果类型</label><strong>{contract.artifactType}</strong></div>
+        <div><label>保存方式</label><strong>{contract.storageType}</strong></div>
+        <div><label>知识库</label><strong>{contract.knowledgeBase}</strong></div>
+        <div><label>数据库 / 集合</label><strong>{contract.database}</strong></div>
+        <div><label>目录结构</label><strong>{contract.directory}</strong></div>
+        <div><label>写入方式</label><strong>{contract.writeMode}</strong></div>
+        {contract.indexEnabled ? <div><label>索引方式</label><strong>{contract.indexType}</strong></div> : null}
+      </div>
+      <p>{contract.note}</p>
+      {contract.indexEnabled ? <Badge tone="blue">保存后进入检索索引</Badge> : null}
+    </section>
   );
 }
 
@@ -805,14 +1858,6 @@ function normalizeToolSnapshot(snapshot) {
       lastSyncedAt: tool.lastSyncedAt || '-',
     })),
   };
-}
-
-function IndeterminateCheckbox({ checked, indeterminate, onChange }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = indeterminate;
-  }, [indeterminate]);
-  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} />;
 }
 
 function ToolParamTable({ title, columns, rows }) {
@@ -1340,16 +2385,6 @@ function RightChevron() {
 const workflowCategoryOrder = ['文档解析', '文本分片', '系统工具', '知识提取', '质量评估'];
 const toolDialogCategoryOrder = ['文档解析', '文本分片', '知识提取', '质量评估', '系统工具', '未分类'];
 const categoryAliases = { 内容处理: '文本分片', 智能生成: '知识提取' };
-const workbenchToolCategoryOverrides = {
-  QA提取: '知识提取',
-  摘要总结: '知识提取',
-  关键词提取: '知识提取',
-  文档图谱抽取: '知识提取',
-  RAG质量评估: '质量评估',
-  问答一致性检查: '质量评估',
-  代码工具: '系统工具',
-  数据存储工具: '系统工具',
-};
 const sampleDemoFile = { id: 'demo-policy-sample', name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB', status: '已上传' };
 const initialAgentEvents = [{
   id: 'welcome',
@@ -1362,19 +2397,19 @@ const generatedAgentEvents = [
   { id: 'qa-parse', role: 'thought', title: '分析样例文件', content: '样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。', status: 'done' },
   { id: 'qa-query', role: 'thought', title: '工具目录查询', content: '查询结果：命中可用工具，其中包含系统工具和外部接入工具。', status: 'done', kind: 'toolCall' },
   { id: 'qa-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建文档解析和文本分片主链路，再检查工具输出与下游入参是否需要适配。', status: 'done', flowSteps: ['文档解析', '文本分片'] },
-  { id: 'qa-check-edge', role: 'thought', title: '检查节点承接', content: '发现适配问题：医保政策解析返回 sections[].content，分片工具需要 data.cleanBlocks。', status: 'done' },
-  { id: 'qa-fix-edge', role: 'thought', title: '修复节点承接', content: '已插入代码工具，将解析结果转换为 data.cleanBlocks，然后继续添加后置存储和知识提取节点。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-check-edge', role: 'thought', title: '检查节点承接', content: '发现适配问题：文件解析返回 sections[].content，分片工具需要 data.cleanBlocks。', status: 'done' },
+  { id: 'qa-fix-edge', role: 'thought', title: '修复节点承接', content: '已插入代码工具，将解析结果转换为 data.cleanBlocks，然后继续添加后置存储和 QA 提取节点。', status: 'done', kind: 'toolCall' },
   { id: 'qa-config-storage', role: 'thought', title: '参数配置：数据存储工具', content: '参数配置完成：数据存储工具 已形成当前方案中的 Step 执行契约。', status: 'done', kind: 'toolCall' },
-  { id: 'qa-config-knowledge', role: 'thought', title: '参数配置：QA提取、摘要总结', content: '参数配置完成：QA提取、摘要总结 已形成当前方案中的 Step 执行契约。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-config-knowledge', role: 'thought', title: '参数配置：QA提取', content: '参数配置完成：QA提取 已形成当前方案中的 Step 执行契约。', status: 'done', kind: 'toolCall' },
   { id: 'qa-check', role: 'thought', title: '检查完整方案', content: '方案检查通过：节点顺序、工具参数、变量承接和存储策略均可执行。', status: 'done' },
-  { id: 'qa-run', role: 'thought', title: '样例试跑', content: '试跑结果：所有工具执行成功；分片结果已写入 ES；问答和摘要结果已生成。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-run', role: 'thought', title: '样例试跑', content: '试跑结果：所有工具执行成功；分片结果已写入 ES；问答结果已生成。', status: 'done', kind: 'toolCall' },
   { id: 'qa-done', role: 'agent', title: '方案生成与样例执行完成', content: '已完成方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。', status: 'done' },
 ];
 const runningAgentEvents = [
   { id: 'run-parse', role: 'thought', title: '分析样例文件', content: '样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。', status: 'done' },
   { id: 'run-query', role: 'thought', title: '工具目录查询', content: '查询结果：命中可用工具，其中包含系统工具和外部接入工具。', status: 'done', kind: 'toolCall' },
   { id: 'run-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建主链路，再检查工具输出与下游入参是否需要适配。', status: 'done', flowSteps: ['文档解析', '文本分片', '系统工具', '知识提取'] },
-  { id: 'run-config-storage', role: 'thought', title: '参数配置：数据存储工具', content: '配置依据：工具 inputSchema、样例分析结果、上游输出路径。配置项：存储对象、存储方式、写入模式。', status: 'running', kind: 'toolCall' },
+  { id: 'run-config-storage', role: 'thought', title: '参数配置：数据存储工具', content: '配置依据：工具参数定义、样例分析结果、上游输出路径。配置项：存储对象、存储方式、写入模式。', status: 'running', kind: 'toolCall' },
 ];
 
 function normalizeWorkbenchCategory(category) {
@@ -1390,17 +2425,15 @@ function sortWorkbenchCategories(categories, order = toolDialogCategoryOrder) {
   return [...categories].sort((a, b) => categorySortIndex(a, order) - categorySortIndex(b, order) || a.localeCompare(b, 'zh-CN'));
 }
 
-function makeOutput(idValue, label, desc, path) {
-  return { id: idValue, name: label, label, desc, path };
+function makeOutput(idValue, label, desc, path, type) {
+  return { id: idValue, name: label, label, desc, path, type };
 }
 
 const defaultParamDescriptions = {
   parseObject: '样例文件对象，包含文件地址、文件名和文件类型，通常由上传文件自动带入。',
   parseStrategy: '选择解析能力组合，用于控制是否提取正文、版面、图片或表格内容。',
-  language: '指定文档主要语言，影响解析和后续结构化处理效果。',
   chunkObject: '待分片的上游文本或结构化内容，可引用文档解析或代码工具输出。',
   chunkSize: '每个文本片段的目标长度，用于控制切片粒度。',
-  overlap: '相邻文本片段之间保留的重叠长度，用于降低语义截断风险。',
   mode: '选择分片时是否关联原始文件信息或保留父子切片结构。',
   sliceSeparators: '按优先级使用的切片分隔符，用于优先保留段落、条款等语义边界。',
   codeInput: '传入代码脚本的上游数据，通常用于清洗、转换或字段补齐。',
@@ -1409,11 +2442,16 @@ const defaultParamDescriptions = {
   storageObject: '需要写入知识存储的结构化数据，可引用前置分片或抽取结果。',
   storageMethod: '选择存储目标和写入方式，当前演示链路使用 ES 写入。',
   writeMode: '控制数据写入策略，例如新增、更新或覆盖已有记录。',
-  extractionObject: '待提取的文本片段或结构化内容，可引用分片、清洗或存储前数据。',
-  aiModel: '选择执行知识抽取、问答生成或摘要生成的模型。',
-  temperature: '控制模型输出发散程度，数值越低结果越稳定。',
-  systemPrompt: '约束模型角色、抽取范围和输出规则的系统提示词。',
-  summaryType: '指定摘要生成类型，用于控制摘要侧重点和输出结构。',
+  file: '待解析文件对象，包含 fileUrl、fileName、fileType。',
+  input: '工具输入数据，按当前工具契约传入段落列表或知识片段列表。',
+  parse_mode: '解析模式，默认 policy_clause。',
+  language: '文档语言，默认 zh-CN。',
+  content: '直接传入的政策正文。',
+  chunk_size: '单个片段目标长度，默认 800。',
+  overlap: '相邻片段重叠长度，默认 80。',
+  model: '模型标识。',
+  system_prompt: '问答提取提示词。',
+  summary_type: '摘要类型。',
   topK: '需要返回的关键词数量上限。',
 };
 
@@ -1423,6 +2461,7 @@ function makeParam(idValue, label, value, options = {}) {
     label,
     desc: options.desc || defaultParamDescriptions[idValue] || defaultParamDescriptions[label] || '',
     type: options.type || 'text',
+    schemaType: options.schemaType || options.type || 'text',
     value,
     required: options.required ?? false,
     editable: options.editable ?? true,
@@ -1455,15 +2494,20 @@ const baseTools = [
   },
   {
     id: 'medical-policy-parser',
-    name: '医保政策文件解析',
+    name: '文件解析',
     category: '文档解析',
     serviceName: '客户自建文档处理 MCP',
-    summary: '适用于解析医保政策类文件，保留政策条款、章节和正文结构。',
+    summary: '适用于解析政策类文件，保留政策条款、章节和正文结构。',
     status: '可用',
     input: 'sampleFile',
     output: 'rawText',
-    inputParamId: 'parseObject',
-    params: [makeParam('parseObject', '解析对象', '{ "fileUrl": "${sample.fileUrl}", "fileName": "${sample.fileName}", "fileType": "pdf" }', { type: 'textarea', required: true, source: { type: 'file' } })],
+    inputParamId: 'file',
+    params: [
+      makeParam('file', 'file', '{ "fileUrl": "${sample.fileUrl}", "fileName": "${sample.fileName}", "fileType": "pdf" }', { type: 'textarea', required: true, source: { type: 'file' } }),
+      makeParam('parse_mode', 'parse_mode', 'policy_clause'),
+      makeParam('language', 'language', 'zh-CN'),
+      makeParam('content', 'content', '', { type: 'textarea' }),
+    ],
     outputs: [makeOutput('sections', '政策章节结构', 'Array<json>，包含医保政策章节、标题和正文。', 'sections')],
   },
   {
@@ -1504,16 +2548,20 @@ const baseTools = [
   },
   {
     id: 'medical-policy-splitter',
-    name: '医保政策文件分片',
+    name: '文本分片',
     category: '文本分片',
     serviceName: '客户自建文档处理 MCP',
-    summary: '适合医保政策类文件分片，按章节和条款边界生成片段。',
+    summary: '适合政策类文本分片，按章节和条款边界生成片段。',
     status: '可用',
     input: 'rawText',
     output: 'cleanText',
-    inputParamId: 'chunkObject',
-    params: [makeParam('chunkObject', '分片对象', '', { type: 'textarea', required: true })],
-    outputs: [makeOutput('textChunkResult', '文本分片结果', 'Array<json>，包含医保政策文件分片结果。', 'data.textChunkResult')],
+    inputParamId: 'input',
+    params: [
+      makeParam('input', 'input', '', { type: 'textarea', required: true }),
+      makeParam('chunk_size', 'chunk_size', 800, { type: 'number', min: 1, unit: '字' }),
+      makeParam('overlap', 'overlap', 80, { type: 'number', min: 0, unit: '字' }),
+    ],
+    outputs: [makeOutput('textChunkResult', 'textChunkResult', 'array<object>，分片后的文本片段集合。', 'textChunkResult', 'array<object>'), makeOutput('stats', 'stats', 'object，分片数量、目标长度和重叠配置。', 'stats', 'object')],
   },
   {
     id: 'system-code',
@@ -1562,31 +2610,30 @@ const baseTools = [
     status: '可用',
     input: 'cleanText',
     output: 'qaPairs',
-    inputParamId: 'extractionObject',
+    inputParamId: 'input',
     params: [
-      makeParam('extractionObject', '提取对象', '', { type: 'textarea', required: true }),
-      makeParam('aiModel', 'AI模型', 'qwen3-8b', { type: 'select', required: true, options: ['qwen3-8b', 'qwen3-14b', 'qwen-plus', 'gpt-4o'] }),
-      makeParam('temperature', '温度', 0.3, { type: 'number', min: 0, max: 2 }),
-      makeParam('systemPrompt', 'System Prompt', '你是知识库问答抽取专家。请基于输入片段生成可用于客服问答的高质量 QA，答案必须来自原文。', { type: 'textarea' }),
+      makeParam('input', 'input', '', { type: 'textarea', required: true }),
+      makeParam('model', 'model', 'qwen3-8b'),
+      makeParam('system_prompt', 'system_prompt', '请基于医保政策原文生成问答对，答案必须来自原文，并保留来源片段。', { type: 'textarea' }),
     ],
-    outputs: [makeOutput('qaResult', 'QA提取结果', 'Array<json>，包含问题、答案和引用来源。', 'data.qaResult')],
+    outputs: [makeOutput('qaResult', 'qaResult', 'array<object>，问题、答案和来源分片，包含 question、answer、sourceChunkId。', 'qaResult', 'array<object>')],
   },
   {
     id: 'summary',
-    name: '摘要总结',
+    name: '知识点提取',
     category: '知识提取',
     serviceName: 'Nacos 知识工程 MCP',
-    summary: '基于文本分片结果生成摘要总结。',
+    summary: '基于文本分片结果提取知识点、适用对象和关键规则。',
     status: '可用',
     input: 'cleanText',
     output: 'rawText',
-    inputParamId: 'extractionObject',
+    inputParamId: 'input',
     params: [
-      makeParam('extractionObject', '提取对象', '', { type: 'textarea', required: true }),
-      makeParam('aiModel', 'AI模型', 'qwen3-8b', { type: 'select', required: true, options: ['qwen3-8b', 'qwen3-14b', 'qwen-plus'] }),
-      makeParam('summaryType', '摘要类型', '政策摘要'),
+      makeParam('input', 'input', '', { type: 'textarea', required: true }),
+      makeParam('summary_type', 'summary_type', '政策摘要'),
+      makeParam('model', 'model', 'qwen3-8b'),
     ],
-    outputs: [makeOutput('summaryResult', '摘要总结结果', 'Array<json>，包含摘要内容和来源引用。', 'data.summaryResult')],
+    outputs: [makeOutput('summary', 'summary', 'string，政策知识点摘要正文。', 'summary', 'string'), makeOutput('summaryResult', 'summaryResult', 'array<object>，知识点条目和来源引用，包含 title、content、sourceChunkIds。', 'summaryResult', 'array<object>'), makeOutput('applicableUsers', 'applicableUsers', 'array<string>，适用对象列表。', 'applicableUsers', 'array<string>'), makeOutput('keyRules', 'keyRules', 'array<string>，关键规则列表。', 'keyRules', 'array<string>')],
   },
   {
     id: 'keyword-extractor',
@@ -1606,32 +2653,72 @@ const baseTools = [
   },
 ];
 
+const higressWorkbenchToolIds = {
+  文件解析: 'medical-policy-parser',
+  文本分片: 'medical-policy-splitter',
+  知识点提取: 'summary',
+  QA提取: 'qa-extractor',
+};
+
+const higressWorkbenchToolFlow = {
+  文件解析: { input: 'sampleFile', output: 'rawText' },
+  文本分片: { input: 'rawText', output: 'cleanText' },
+  知识点提取: { input: 'cleanText', output: 'rawText' },
+  QA提取: { input: 'cleanText', output: 'qaPairs' },
+};
+
 function toolInputToParam(input, index) {
   const type = String(input.type || '').toLowerCase();
   const paramType = type.includes('number') || type.includes('int') ? 'number' : type.includes('array') || type.includes('object') ? 'textarea' : 'text';
-  return makeParam(input.name || `input_${index + 1}`, input.name || `参数${index + 1}`, paramType === 'number' ? 0 : '', {
+  const name = input.name || `input_${index + 1}`;
+  return makeParam(name, name, defaultToolParamValue(name, paramType), {
     type: paramType,
+    schemaType: input.type || paramType,
     required: input.required ?? true,
     desc: input.description || '',
   });
 }
 
+function defaultToolParamValue(name, paramType) {
+  if (name === 'file') return '{ "fileUrl": "${sample.fileUrl}", "fileName": "${sample.fileName}", "fileType": "pdf" }';
+  if (name === 'parse_mode') return 'policy_clause';
+  if (name === 'language') return 'zh-CN';
+  if (name === 'content') return '';
+  if (name === 'chunk_size') return 800;
+  if (name === 'overlap') return 80;
+  if (name === 'model') return 'qwen3-8b';
+  if (name === 'system_prompt') return '请基于医保政策原文生成问答对，答案必须来自原文，并保留来源片段。';
+  if (name === 'summary_type') return '政策摘要';
+  if (paramType === 'number') return 0;
+  return '';
+}
+
+function getInputParamIdForTool(tool, base) {
+  if (tool.name.includes('解析')) return 'file';
+  if (tool.inputs?.some((input) => input.name === 'input')) return 'input';
+  return base?.inputParamId || tool.inputs?.[0]?.name || '';
+}
+
 function managedToolToWorkbenchTool(tool) {
-  const category = normalizeWorkbenchCategory(workbenchToolCategoryOverrides[tool.name] || tool.category);
+  const category = normalizeWorkbenchCategory(tool.category);
   const base = baseTools.find((item) => item.name === tool.name);
-  if (base) return { ...base, category, serviceName: tool.serviceName || base.serviceName, summary: tool.description || base.summary, status: tool.status || base.status };
+  if (base?.sourceType === 'system') return { ...base, category, serviceName: tool.serviceName || base.serviceName, summary: tool.description || base.summary, status: tool.status || base.status };
+  const flow = higressWorkbenchToolFlow[tool.name];
   const params = (tool.inputs || []).map(toolInputToParam);
-  const outputs = (tool.outputs || []).map((output, index) => makeOutput(output.name || `output_${index + 1}`, output.name || `出参${index + 1}`, `${output.type || 'object'}，${output.description || '工具输出结果。'}`, `data.${output.name || `output_${index + 1}`}`));
+  const outputs = (tool.outputs || []).map((output, index) => {
+    const name = output.name || `output_${index + 1}`;
+    return makeOutput(name, name, output.description || '工具输出结果。', output.path || name, output.type || 'object');
+  });
   return {
-    id: tool.id,
+    id: higressWorkbenchToolIds[tool.name] || tool.id,
     name: tool.name,
     category,
     serviceName: tool.serviceName || '-',
     summary: tool.description || '',
     status: tool.status || (tool.enabled === false ? '不可用' : '可用'),
-    input: category === '文档解析' ? 'sampleFile' : category === '文本分片' ? 'rawText' : 'cleanText',
-    output: category === '文档解析' ? 'rawText' : category === '文本分片' ? 'cleanText' : 'rawText',
-    inputParamId: params[0]?.id || '',
+    input: flow?.input || (category === '文档解析' ? 'sampleFile' : category === '文本分片' ? 'rawText' : 'cleanText'),
+    output: flow?.output || (category === '文档解析' ? 'rawText' : category === '文本分片' ? 'cleanText' : 'rawText'),
+    inputParamId: getInputParamIdForTool(tool, null),
     params,
     outputs: outputs.length ? outputs : [makeOutput('result', '工具结果', '工具执行返回结果。', 'data.result')],
   };
@@ -1639,11 +2726,9 @@ function managedToolToWorkbenchTool(tool) {
 
 function readWorkbenchCatalog() {
   const managed = readCatalog().tools.filter((tool) => tool.status === '可用' || tool.enabled);
-  const byName = new Map(baseTools.map((tool) => [tool.name, tool]));
-  managed.forEach((tool) => byName.set(tool.name, managedToolToWorkbenchTool(tool)));
-  return Array.from(byName.values()).map((tool) => ({
+  return managed.map(managedToolToWorkbenchTool).map((tool) => ({
     ...tool,
-    category: normalizeWorkbenchCategory(workbenchToolCategoryOverrides[tool.name] || tool.category),
+    category: normalizeWorkbenchCategory(tool.category),
   }));
 }
 
@@ -1695,7 +2780,7 @@ function createWorkbenchNode(tool, inputSource = { type: 'fixed' }) {
     flowNodeId: nodeId,
     toolId: tool.id,
     toolName: tool.name,
-    category: normalizeWorkbenchCategory(workbenchToolCategoryOverrides[tool.name] || tool.category),
+    category: normalizeWorkbenchCategory(tool.category),
     enabled: true,
     expanded: false,
     adjusted: false,
@@ -1709,13 +2794,18 @@ function createWorkbenchNode(tool, inputSource = { type: 'fixed' }) {
 
 function createAgentDemoNodes(catalog = readWorkbenchCatalog()) {
   const byId = new Map(catalog.map((tool) => [tool.id, tool]));
-  const parser = createWorkbenchNode(byId.get('medical-policy-parser') || byId.get('document-parser') || catalog[0], { type: 'fixed' });
-  const adapter = createWorkbenchNode(byId.get('system-code'), { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: 'sections' });
-  const splitter = createWorkbenchNode(byId.get('recursive-separator-splitter') || byId.get('chunk-splitter'), { type: 'upstream', sourceNodeId: adapter.nodeId, outputPath: 'data.cleanBlocks' });
-  const storage = createWorkbenchNode(byId.get('system-storage'), { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'data.textChunkResult' });
-  const qa = createWorkbenchNode(byId.get('qa-extractor'), { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'data.textChunkResult' });
-  const summary = createWorkbenchNode(byId.get('summary') || byId.get('keyword-extractor'), { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'data.textChunkResult' });
-  return [parser, adapter, splitter, storage, qa, summary].filter(Boolean).map((node) => ({
+  const parserTool = byId.get('medical-policy-parser') || byId.get('document-parser') || catalog.find((tool) => normalizeWorkbenchCategory(tool.category) === '文档解析');
+  const adapterTool = byId.get('system-code');
+  const splitterTool = byId.get('medical-policy-splitter') || byId.get('recursive-separator-splitter') || byId.get('chunk-splitter') || catalog.find((tool) => normalizeWorkbenchCategory(tool.category) === '文本分片');
+  const storageTool = byId.get('system-storage');
+  const qaTool = byId.get('qa-extractor');
+  const parser = parserTool ? createWorkbenchNode(parserTool, { type: 'fixed' }) : null;
+  const adapter = parser && adapterTool ? createWorkbenchNode(adapterTool, { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: 'sections' }) : null;
+  const splitterSource = adapter || parser;
+  const splitter = splitterTool && splitterSource ? createWorkbenchNode(splitterTool, { type: 'upstream', sourceNodeId: splitterSource.nodeId, outputPath: adapter ? 'data.cleanBlocks' : 'sections' }) : null;
+  const storage = storageTool && splitter ? createWorkbenchNode(storageTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }) : null;
+  const qa = qaTool && splitter ? createWorkbenchNode(qaTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }) : null;
+  return [parser, adapter, splitter, storage, qa].filter(Boolean).map((node) => ({
     ...node,
     expanded: false,
     adjusted: true,
@@ -1746,14 +2836,9 @@ function createOptimizedNodes(currentNodes, catalog = readWorkbenchCatalog()) {
   next.forEach((node, index) => {
     if (index <= splitterIndex || node.nodeId === splitter?.nodeId) return;
     if (node.toolId === 'system-storage' || normalizeWorkbenchCategory(node.category) === '知识提取') {
-      next[index] = applyInputSource(node, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'data.textChunkResult' });
+      next[index] = applyInputSource(node, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' });
     }
   });
-  const summaryIndex = next.findIndex((node) => node.toolId === 'summary');
-  if (summaryIndex >= 0 && byId.get('keyword-extractor')) {
-    const keyword = createWorkbenchNode(byId.get('keyword-extractor'), { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'data.textChunkResult' });
-    next[summaryIndex] = { ...keyword, nodeId: next[summaryIndex].nodeId, flowNodeId: next[summaryIndex].flowNodeId, adjusted: true };
-  }
   return next;
 }
 
@@ -1959,7 +3044,7 @@ function getFirstPlanFailure(nodes) {
 
 function getBestOutputPathForTarget(upstream, target) {
   if (normalizeWorkbenchCategory(upstream.category) === '文本分片') {
-    return upstream.outputs.find((output) => output.path.includes('textChunkResult'))?.path || upstream.outputs[0]?.path || 'data.textChunkResult';
+    return upstream.outputs.find((output) => output.path.includes('textChunkResult'))?.path || upstream.outputs[0]?.path || 'textChunkResult';
   }
   if (upstream.outputs.some((output) => output.path.includes('cleanBlocks')) && normalizeWorkbenchCategory(target.category) === '文本分片') {
     return upstream.outputs.find((output) => output.path.includes('cleanBlocks'))?.path || 'data.cleanBlocks';
@@ -2018,8 +3103,8 @@ function getSmartPromptValue(param, node, instruction) {
     if (lowerId.includes('guide')) return '请围绕用户可能咨询的问题生成问答对。每个答案需完整、可独立理解，并返回 question、answer、sourceChunkId 字段。';
   }
   if (node.toolId === 'summary') {
-    if (lowerId.includes('system')) return '你是知识工程摘要生成专家。请基于输入片段提炼关键结论，保持事实准确，避免引入原文没有的信息，并输出结构化摘要。';
-    if (lowerId.includes('guide')) return '请按主题生成摘要条目，每条包含 title、content、sourceChunkIds，优先覆盖适用范围、办理条件和材料要求。';
+    if (lowerId.includes('system')) return '你是知识工程知识点提取专家。请基于输入片段提炼关键知识点，保持事实准确，避免引入原文没有的信息，并输出结构化知识点。';
+    if (lowerId.includes('guide')) return '请按主题生成知识点条目，每条包含 title、content、sourceChunkIds，优先覆盖适用范围、办理条件和材料要求。';
   }
   if (node.toolId === 'keyword-extractor') {
     if (lowerId.includes('system')) return '你是业务关键词抽取专家。请从输入片段中抽取能代表业务主题、对象、条件和流程的关键词，并给出权重。';
@@ -2029,18 +3114,22 @@ function getSmartPromptValue(param, node, instruction) {
 }
 
 function getSmartParamValue(param, instruction, node) {
-  if (param.id === 'parseObject') return '{ "fileUrl": "${sample.fileUrl}", "fileName": "${sample.fileName}", "fileType": "${sample.fileType}" }';
+  if (param.id === 'parseObject' || param.id === 'file') return '{ "fileUrl": "${sample.fileUrl}", "fileName": "${sample.fileName}", "fileType": "${sample.fileType}" }';
+  if (param.id === 'parse_mode') return 'policy_clause';
+  if (param.id === 'language') return 'zh-CN';
   if (param.id === 'chunkObject') return '${upstream.data.documentParseResult}';
-  if (param.id === 'extractionObject') return '${upstream.data.textChunkResult}';
-  if (param.id === 'storageObject') return '${upstream.data.textChunkResult}';
+  if (param.id === 'input') return normalizeWorkbenchCategory(node.category) === '文本分片' ? '${upstream.paragraphs}' : '${upstream.textChunkResult}';
+  if (param.id === 'extractionObject') return '${upstream.textChunkResult}';
+  if (param.id === 'storageObject') return '${upstream.textChunkResult}';
   if (param.id === 'codeInput') return '${upstream.data.documentParseResult}';
   if (param.id === 'script') return 'function transform(input) {\n  return {\n    cleanBlocks: input.map(item => ({\n      title: item.title || item.heading,\n      text: item.text || item.content,\n      page: item.page,\n      source: item.source || item.fileName\n    })).filter(item => item.text)\n  };\n}';
   if (param.id === 'outputVariables') return '[{ "name": "cleanBlocks", "type": "Array<json>", "path": "data.cleanBlocks" }]';
-  if (param.id === 'systemPrompt' || param.id === 'userPrompt' || param.id === 'guidePrompt') return getSmartPromptValue(param, node, instruction);
+  if (param.id === 'systemPrompt' || param.id === 'system_prompt' || param.id === 'userPrompt' || param.id === 'guidePrompt') return getSmartPromptValue(param, node, instruction);
   if (param.id === 'parseStrategy') return ['文档内容提取'];
+  if (param.id === 'content') return '';
   if (param.id === 'ocrService') return '预置服务-OCR';
   if (param.id === 'vlmModel') return 'Qwen2.5-VL-32B-Instruct';
-  if (param.id === 'aiModel') return 'qwen3-8b';
+  if (param.id === 'aiModel' || param.id === 'model') return 'qwen3-8b';
   if (param.id === 'temperature') return 0.3;
   if (param.id === 'maxTokens') return 2048;
   if (param.id === 'chunkAssociate') return ['关联文件名', '关联标题及子标题'].filter((item) => param.options?.includes(item));
@@ -2052,7 +3141,8 @@ function getSmartParamValue(param, instruction, node) {
   if (param.id === 'writeMode') return 'upsert';
   if (param.type === 'number') {
     if (param.id === 'chunkSize') return 512;
-    if (param.id === 'overlap') return 50;
+    if (param.id === 'chunk_size') return 800;
+    if (param.id === 'overlap') return 80;
     if (param.id === 'segmentCount') return 10;
     return param.min ?? 1;
   }
@@ -2061,7 +3151,17 @@ function getSmartParamValue(param, instruction, node) {
   if (param.type === 'multiSelect' || param.type === 'tags') return param.options?.length ? param.options.slice(0, Math.min(2, param.options.length)) : [];
   if (param.id.includes('language') || param.label.includes('语言')) return 'zh-CN';
   if (param.id.includes('output') || param.label.includes('输出')) return node.outputs[0]?.path || 'data.result';
-  return instruction || `${node.toolName}默认配置`;
+  return instruction || getSmartConfigureInstruction(node);
+}
+
+function getSmartConfigureInstruction(node) {
+  if (node.toolId === 'medical-policy-parser') return '使用当前上传的医保政策样例文件，按政策条款模式解析正文、章节和段落。';
+  if (node.toolId === 'medical-policy-splitter') return '承接上游标准文本块，按章节边界生成 800 字左右的知识片段。';
+  if (node.toolId === 'qa-extractor') return '承接分片结果，生成可用于客服问答的政策问答对。';
+  if (node.toolId === 'summary') return '承接分片结果，生成政策知识点、适用对象和关键规则。';
+  if (node.toolId === 'system-storage') return '承接分片结果并以 upsert 方式写入 ES。';
+  if (node.toolId === 'system-code') return '把解析输出转换为后续分片工具可消费的标准文本块。';
+  return `补齐「${node.toolName}」在当前处理方案中的输入来源和必填参数。`;
 }
 
 function createSmartConfiguredNode(node, nodes, instruction) {
@@ -2094,13 +3194,10 @@ function createSmartConfiguredNode(node, nodes, instruction) {
   };
 }
 
-function createSampleResult(file) {
-  return {
-    fileId: file.id,
-    fileName: file.name,
-    toolRuns: [
+function createSampleResult(file, options = {}) {
+  const baseRuns = [
       {
-        toolName: '医保政策文件解析',
+        toolName: '文件解析',
         category: '文档解析',
         outputPath: 'sections',
         parameters: [
@@ -2109,7 +3206,7 @@ function createSampleResult(file) {
           { name: 'language', value: 'zh-CN' },
         ],
         status: '成功',
-        outputFull: JSON.stringify({ sections: [{ title: '适用范围', page: 1, content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' }, { title: '办理条件', page: 2, content: '参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可申请备案。' }], metadata: { pageCount: 4, outputSchemaDeclared: false } }, null, 2),
+        outputFull: JSON.stringify({ title: '医保政策样例', sections: [{ title: '适用范围', page: 1, content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' }, { title: '办理条件', page: 2, content: '参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可申请备案。' }], paragraphs: [{ id: 'p1', heading: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' }], metadata: { fileName: file.name, pageCount: 4, parserVersion: 'policy-parser-1.0', elapsedMs: 128 } }, null, 2),
       },
       {
         toolName: '代码工具',
@@ -2120,43 +3217,47 @@ function createSampleResult(file) {
         outputFull: JSON.stringify({ data: { cleanBlocks: [{ title: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 }, { title: '办理条件', text: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 }] }, scriptResult: { normalizedCount: 2 } }, null, 2),
       },
       {
-        toolName: '分隔符递归分片',
+        toolName: '文本分片',
         category: '文本分片',
-        outputPath: 'data.textChunkResult',
-        parameters: [{ name: 'input', value: 'data.cleanBlocks' }, { name: 'chunk_size', value: '512' }, { name: 'overlap', value: '50' }],
+        outputPath: 'textChunkResult',
+        parameters: [{ name: 'input', value: 'data.cleanBlocks' }, { name: 'chunk_size', value: '800' }, { name: 'overlap', value: '80' }],
         status: '成功',
-        outputFull: JSON.stringify({ data: { textChunkResult: [{ chunkId: 'chunk-001', title: '适用范围', tokenCount: 48 }, { chunkId: 'chunk-002', title: '办理条件', tokenCount: 52 }] }, stats: { chunkCount: 2 } }, null, 2),
+        outputFull: JSON.stringify({ textChunkResult: [{ chunkId: 'chunk-001', title: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 }, { chunkId: 'chunk-002', title: '办理条件', text: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 }], stats: { chunkCount: 2, chunkSize: 800, overlap: 80 } }, null, 2),
       },
       {
         toolName: '数据存储工具',
         category: '系统工具',
         outputPath: 'data.storageRef',
-        parameters: [{ name: '存储对象', value: 'data.textChunkResult' }, { name: '存储方式', value: '写入ES' }, { name: '写入模式', value: 'upsert' }],
+        parameters: [{ name: '存储对象', value: 'textChunkResult' }, { name: '存储方式', value: '写入ES' }, { name: '写入模式', value: 'upsert' }],
         status: '成功',
         outputFull: JSON.stringify({ data: { storageRef: 'es://knowledge_chunks/demo-policy-sample', storedCount: 2 }, writeResult: { acknowledged: true, failedCount: 0 } }, null, 2),
       },
+      ...(options.includeKnowledge ? [{
+        toolName: '知识点提取',
+        category: '知识提取',
+        outputPath: 'summaryResult',
+        parameters: [{ name: 'input', value: 'textChunkResult' }, { name: 'summary_type', value: '政策摘要' }, { name: 'model', value: 'qwen3-8b' }],
+        status: '成功',
+        outputFull: JSON.stringify({ summary: '该政策说明医保参保人员异地就医备案与费用结算要求。', summaryResult: [{ title: '适用对象', content: '本政策面向本市医保参保人员。', sourceChunkIds: ['chunk-001'] }], applicableUsers: ['城镇职工基本医保参保人', '城乡居民基本医保参保人'], keyRules: ['异地就医需先备案', '结算结果需支持人工复核'] }, null, 2),
+      }] : []),
       {
         toolName: 'QA提取',
         category: '知识提取',
-        outputPath: 'data.qaResult',
-        parameters: [{ name: 'input', value: 'data.textChunkResult' }, { name: 'aiModel', value: 'qwen3-8b' }],
+        outputPath: 'qaResult',
+        parameters: [{ name: 'input', value: 'textChunkResult' }, { name: 'model', value: 'qwen3-8b' }, { name: 'system_prompt', value: '请基于医保政策原文生成问答对，答案必须来自原文，并保留来源片段。' }],
         status: '成功',
-        outputFull: JSON.stringify({ data: { qaResult: [{ question: '异地就医备案政策适用于哪些人？', answer: '适用于本市基本医疗保险参保人员。' }] }, stats: { questionCount: 1 } }, null, 2),
+        outputFull: JSON.stringify({ qaResult: [{ question: '异地就医备案政策适用于哪些人？', answer: '适用于本市基本医疗保险参保人员。', sourceChunkId: 'chunk-001' }] }, null, 2),
       },
-      {
-        toolName: '摘要总结',
-        category: '知识提取',
-        outputPath: 'data.summaryResult',
-        parameters: [{ name: 'input', value: 'data.textChunkResult' }, { name: 'summary_type', value: 'policy_brief' }],
-        status: '成功',
-        outputFull: JSON.stringify({ data: { summaryResult: [{ title: '适用对象', content: '本政策面向本市医保参保人员。' }] }, stats: { summaryCount: 1 } }, null, 2),
-      },
-    ],
+    ];
+  return {
+    fileId: file.id,
+    fileName: file.name,
+    toolRuns: baseRuns,
   };
 }
 
 function createSampleResultForPlan(file, nodes) {
-  const defaultRuns = createSampleResult(file).toolRuns;
+  const defaultRuns = createSampleResult(file, { includeKnowledge: true }).toolRuns;
   return {
     fileId: file.id,
     fileName: file.name,
@@ -2247,7 +3348,7 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
       [getConnectionKey(fromSection.category, toSection.category)]: {
         status: qaConnectionStatus,
         reason: qaConnectionStatus === 'error'
-          ? '医保政策解析返回 sections[].content，后续工具需要 data.cleanBlocks，节点之间缺少结构适配。'
+          ? '文件解析返回 sections[].content，后续工具需要 data.cleanBlocks，节点之间缺少结构适配。'
           : '正在处理节点之间的输入输出承接关系。',
       },
     };
@@ -2291,8 +3392,13 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
   const canSave = canEdit && planNodes.length > 0 && visibleProblems.length === 0;
   const hasAgentTask = Boolean(agentTask);
   const canSendAgentMessage = !running && !testing && (Boolean(agentInput.trim()) || hasAgentTask) && (hasAgentTask || planNodes.length > 0 || sampleFiles.length > 0);
+  const [toolCategories, setToolCategories] = useState(() => readCatalog().categories || defaultCategories);
 
-  useEffect(() => subscribeCatalog(() => setCatalog(readWorkbenchCatalog())), []);
+  useEffect(() => subscribeCatalog(() => {
+    const snapshot = readCatalog();
+    setCatalog(readWorkbenchCatalog());
+    setToolCategories(snapshot.categories || defaultCategories);
+  }), []);
   useEffect(() => {
     streamRef.current?.scrollTo({ top: streamRef.current.scrollHeight, behavior: 'smooth' });
   }, [events]);
@@ -2326,11 +3432,11 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
       notify('请先上传或添加样例文件', 'error');
       return;
     }
-    const [parser, adapter, splitter, storage, qa, summary] = createAgentDemoNodes(catalog);
+    const [parser, adapter, splitter, storage, qa] = createAgentDemoNodes(catalog);
     const preFixNodes = [parser, splitter].filter(Boolean);
     const adaptedNodes = [parser, adapter, splitter].filter(Boolean);
     const storageNodes = [parser, adapter, splitter, storage].filter(Boolean);
-    const finalNodes = [parser, adapter, splitter, storage, qa, summary].filter(Boolean);
+    const finalNodes = [parser, adapter, splitter, storage, qa].filter(Boolean);
     const filesSnapshot = [...sampleFiles];
     setRunning(true);
     setConfirmed(false);
@@ -2382,7 +3488,7 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
       const paramSummary = nodes.flatMap((node) => visibleParams(node).map((param) => param.label)).slice(0, 5).join('、');
       step(initialDelay, () => {
         setRuntimeForNodes(nodes, { status: 'configuring', visibleParamCount: 0 });
-        configEventId = pushEvent({ role: 'thought', title: `参数配置：${toolNames}`, content: `配置依据：工具 inputSchema、样例分析结果、上游输出路径。配置项：${paramSummary}。`, status: 'running', kind: 'toolCall' });
+        configEventId = pushEvent({ role: 'thought', title: `参数配置：${toolNames}`, content: `配置依据：工具参数定义、样例分析结果、上游输出路径。配置项：${paramSummary}。`, status: 'running', kind: 'toolCall' });
       });
       [1, 2, 3, 4].forEach((count) => {
         step(900, () => setRuntimeForNodes(nodes, { status: 'configuring', visibleParamCount: count }));
@@ -2416,10 +3522,10 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
     });
     step(2800, () => {
       updateEvent(analyzeEventId, { status: 'done', content: '样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。' });
-      parseEventId = pushEvent({ role: 'thought', title: '识别文档结构', content: '我会优先保留政策标题、条款层级和来源页码，因为后续分片、问答和摘要都依赖这些结构信息。', status: 'running' });
+      parseEventId = pushEvent({ role: 'thought', title: '识别文档结构', content: '我会优先保留政策标题、条款层级和来源页码，因为后续分片和问答都依赖这些结构信息。', status: 'running' });
     });
     step(3200, () => {
-      updateEvent(parseEventId, { status: 'done', content: '结构识别完成：需要先解析文档，再做结构适配、分片、存储，并基于分片结果生成问答和摘要。' });
+      updateEvent(parseEventId, { status: 'done', content: '结构识别完成：需要先解析文档，再做结构适配、分片、存储，并基于分片结果生成问答。' });
       setSampleFiles((current) => current.map((file) => ({ ...file, status: '试跑中' })));
       queryEventId = pushEvent({ role: 'thought', title: '工具目录查询', content: '输入：工具状态=可用，分类=文档解析/文本分片/知识提取/系统工具；输出：候选工具清单。', status: 'running', kind: 'toolCall' });
     });
@@ -2431,17 +3537,17 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
       updateEvent(designEventId, { status: 'done', content: '方案设计完成。先搭建主链路，再检查工具输出与下游入参是否需要适配。', kind: 'flow', flowSteps: ['文档解析', '文本分片', '系统工具', '知识提取'] });
     });
 
-    buildAndSelectToolNode([parser], [parser], '文档解析节点', '候选工具=通用解析、多模态解析、医保政策解析；选择原因=医保政策解析更适合保留政策条款层级。');
-    buildAndSelectToolNode([splitter], [parser, splitter], '文本分片节点', '候选工具=通用分片、递归分片、医保政策分片；选择原因=递归分片支持按标题和段落边界切分。');
+    buildAndSelectToolNode([parser], [parser], '文档解析节点', '候选工具=文件解析；选择原因=该工具与 Higress 已发布的文件解析能力一致。');
+    buildAndSelectToolNode([splitter], [parser, splitter], '文本分片节点', '候选工具=文本分片；选择原因=该工具与 Higress 已发布的文本分片能力一致。');
 
     step(2200, () => {
       checkEventId = pushEvent({ role: 'thought', title: '检查节点承接', content: '文本分片工具已选定，我会检查文档解析输出能否被分片工具直接消费，再决定是否继续添加后置节点。', status: 'running' });
     });
     step(7200, () => {
       setPlanNodes(preFixNodes);
-      setConnectionStates({ [getConnectionKey(parser.category, splitter.category)]: { status: 'error', reason: '医保政策解析返回 sections[].content，分片工具需要 data.cleanBlocks，节点之间缺少结构适配。' } });
-      updateEvent(checkEventId, { status: 'done', content: '发现适配问题：医保政策解析返回 sections[].content，分片工具需要 data.cleanBlocks。' });
-      issueAnalysisEventId = pushEvent({ role: 'thought', title: '正在分析适配问题', content: '我需要对比解析工具的实际返回和分片工具的 inputSchema，确认问题是字段命名不一致，还是缺少结构转换。', status: 'running' });
+      setConnectionStates({ [getConnectionKey(parser.category, splitter.category)]: { status: 'error', reason: '文件解析返回 sections[].content，分片工具需要 data.cleanBlocks，节点之间缺少结构适配。' } });
+      updateEvent(checkEventId, { status: 'done', content: '发现适配问题：文件解析返回 sections[].content，分片工具需要 data.cleanBlocks。' });
+      issueAnalysisEventId = pushEvent({ role: 'thought', title: '正在分析适配问题', content: '我需要对比解析工具的实际返回和分片工具的参数要求，确认问题是字段命名不一致，还是缺少结构转换。', status: 'running' });
     });
     step(2800, () => {
       updateEvent(issueAnalysisEventId, { status: 'done', content: '问题原因已确认：上游工具未声明稳定 outputSchema，实际返回字段需要先转换成平台可识别的 cleanBlocks。' });
@@ -2467,7 +3573,7 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
     });
 
     buildToolNode([storage], storageNodes, '系统工具节点', '候选工具=数据存储工具；选择原因=需要把分片结果写入 ES 供后续检索使用。');
-    buildToolNode([qa, summary].filter(Boolean), finalNodes, '知识提取节点', '候选工具=QA提取、摘要总结；选择原因=同一分片结果可同时生成问答和摘要。');
+    buildToolNode([qa].filter(Boolean), finalNodes, '知识提取节点', '候选工具=QA提取；选择原因=自动方案先完成问答抽取，知识点提取可在后续手动添加。');
 
     step(2200, () => {
       setConnectionStates({});
@@ -2485,7 +3591,7 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
     });
     step(2000, () => {
       setRuntimeForNodes(finalNodes, { status: 'success' });
-      updateEvent(executeEventId, { status: 'done', content: '试跑结果：所有工具执行成功；分片结果已写入 ES；问答和摘要结果已生成。' });
+      updateEvent(executeEventId, { status: 'done', content: '试跑结果：所有工具执行成功；分片结果已写入 ES；问答结果已生成。' });
     });
     step(1200, () => {
       setRuntimeForNodes(finalNodes, { status: 'done' });
@@ -2530,15 +3636,16 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
   };
 
   const smartConfigureNode = (node, instruction = '') => {
-    const configured = createSmartConfiguredNode(node, planNodes, instruction || '请根据当前工具的 inputSchema、上游输出和处理目标补齐参数。');
+    const configureInstruction = instruction || getSmartConfigureInstruction(node);
+    const configured = createSmartConfiguredNode(node, planNodes, configureInstruction);
     const nextNodes = planNodes.map((item) => item.nodeId === node.nodeId ? configured : item);
     const failure = getFirstPlanFailure(nextNodes);
     setRunning(true);
     setConfirmed(false);
     setRightTab('方案');
     setConnectionStates({});
-    pushEvent({ role: 'user', title: `设置${node.toolName}参数`, content: instruction || '请根据当前工具的 inputSchema、上游输出和处理目标补齐参数。', status: 'done' });
-    const understandEventId = pushEvent({ role: 'thought', title: `理解${node.toolName}参数需求`, content: '正在读取用户输入、工具 inputSchema、当前节点位置和上游工具输出，判断需要补齐的参数。', status: 'running' });
+    pushEvent({ role: 'user', title: `设置${node.toolName}参数`, content: configureInstruction, status: 'done' });
+    const understandEventId = pushEvent({ role: 'thought', title: `理解${node.toolName}参数需求`, content: '正在读取当前节点位置、上游输出和工具必填参数，准备写入可执行配置。', status: 'running' });
     window.setTimeout(() => {
       updateEvent(understandEventId, { content: `已确认本次只处理「${node.toolName}」的参数配置，不重建其他工具节点。`, status: 'done' });
       setRuntimeForNodes([configured], { status: 'configuring', visibleParamCount: 2 });
@@ -2589,7 +3696,7 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
     window.setTimeout(() => {
       const next = createOptimizedNodes(planNodes, catalog);
       setPlanNodes(next);
-      updateEvent(eventId, { content: '更新结果：分片工具切换为医保政策文件分片；摘要总结替换为关键词提取；其他节点配置保持不变。', status: 'done' });
+      updateEvent(eventId, { content: '更新结果：按当前 Higress 工具链调整节点承接；当前方案中的工具保持不变。', status: 'done' });
       pushEvent({ role: 'agent', title: '方案已调整', content: '右侧流程已按现有方案局部更新，后续节点引用已同步到新的分片结果。', status: 'done' });
       setRunning(false);
       notify('Agent 已调整处理方案', 'success');
@@ -2830,7 +3937,7 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
           </div>
         </aside>
       </div>
-      {addOpen ? <AddToolDialog tools={catalog} nodes={planNodes} confirmed={confirmed} onClose={() => setAddOpen(false)} onAdd={addTool} /> : null}
+      {addOpen ? <AddToolDialog tools={catalog} categories={toolCategories} nodes={planNodes} confirmed={confirmed} onClose={() => setAddOpen(false)} onAdd={addTool} /> : null}
       {editingNode ? <EditNodeDialog node={editingNode} nodes={planNodes} onClose={() => setEditingNode(null)} onSave={updateNode} /> : null}
     </div>
   );
@@ -2985,11 +4092,11 @@ function ToolRuntimeRow({ node, nodes, warnings, needsSmartHandling, runtime, ca
   );
 }
 
-function AddToolDialog({ tools, nodes, confirmed, onClose, onAdd }) {
-  const [category, setCategory] = useState('全部');
+function AddToolDialog({ tools, categories, nodes, confirmed, onClose, onAdd }) {
+  const [category, setCategory] = useState(allToolsCategory);
   const [selectedId, setSelectedId] = useState(tools[0]?.id || '');
-  const cats = ['全部', ...sortWorkbenchCategories(Array.from(new Set(tools.map((tool) => tool.category))))];
-  const filtered = category === '全部' ? tools : tools.filter((tool) => tool.category === category);
+  const cats = [allToolsCategory, ...sortWorkbenchCategories(categories || [])];
+  const filtered = category === allToolsCategory ? tools : tools.filter((tool) => tool.category === category);
   const current = tools.find((tool) => tool.id === selectedId) || filtered[0];
   const addedToolIds = new Set(nodes.map((node) => node.toolId));
   const selectedToolAdded = Boolean(current && addedToolIds.has(current.id) && !current.allowMultiple);
@@ -3007,12 +4114,12 @@ function AddToolDialog({ tools, nodes, confirmed, onClose, onAdd }) {
       footer={<><button type="button" className="secondary" onClick={onClose}>取消</button><button type="button" className="primary" disabled={!current || selectedToolAdded || confirmed} onClick={() => onAdd(current)}>{selectedToolAdded ? '工具已添加' : confirmed ? '方案已确认' : '确认添加'}</button></>}
     >
       <div className="add-tool-grid">
-        <div className="tool-picker-list category-picker"><div className="tool-picker-title">分类</div>{cats.map((cat) => <button type="button" key={cat} className={category === cat ? 'active' : ''} onClick={() => { setCategory(cat); setSelectedId((cat === '全部' ? tools : tools.filter((tool) => tool.category === cat))[0]?.id || ''); }}><span>{cat}</span><Badge>{cat === '全部' ? tools.length : tools.filter((tool) => tool.category === cat).length}</Badge></button>)}</div>
+        <div className="tool-picker-list category-picker"><div className="tool-picker-title">分类</div>{cats.map((cat) => <button type="button" key={cat} className={category === cat ? 'active' : ''} onClick={() => { setCategory(cat); setSelectedId((cat === allToolsCategory ? tools : tools.filter((tool) => tool.category === cat))[0]?.id || ''); }}><span>{cat}</span><Badge>{cat === allToolsCategory ? tools.length : tools.filter((tool) => tool.category === cat).length}</Badge></button>)}</div>
         <div className="tool-picker-list tool-list-picker"><div className="tool-picker-title">工具列表</div>{filtered.map((tool) => {
           const isAdded = addedToolIds.has(tool.id) && !tool.allowMultiple;
           return <button type="button" key={tool.id} className={`${selectedId === tool.id ? 'active' : ''} ${isAdded ? 'added' : ''}`.trim()} onClick={() => setSelectedId(tool.id)}><strong>{tool.name}{isAdded ? <Badge>已添加</Badge> : null}</strong><span>{tool.category} · {tool.summary}</span></button>;
         })}</div>
-        <div className="tool-detail-mini">{current ? <ToolSchemaCard tool={{ ...current, inputs: current.params.map((p) => ({ name: p.label, type: p.type, required: p.required, desc: p.desc || p.description })), outputs: current.outputs.map((o) => ({ name: o.label || o.name, type: o.path, desc: o.desc || o.description })) }} /> : null}</div>
+        <div className="tool-detail-mini">{current ? <ToolSchemaCard tool={{ ...current, inputs: current.params.map((p) => ({ name: p.label, type: p.schemaType || p.type, required: p.required, desc: p.desc || p.description })), outputs: current.outputs.map((o) => ({ name: o.label || o.name, type: o.type || o.path, desc: o.desc || o.description })) }} /> : null}</div>
       </div>
     </Modal>
   );
@@ -3355,13 +4462,16 @@ export function App() {
   else if (active === 'ops-projects') content = <ProjectManagementPage notify={notify} onOpenSolution={openSolution} onOpenWorkbench={openWorkbench} />;
   else if (active === 'ops-category') content = <ProjectSolutionPage projectId={projectId} notify={notify} onBack={() => setActive('ops-projects')} onWorkbench={openWorkbench} />;
   else if (active === 'ops-workbench') content = <WorkbenchPage {...workbenchTarget} notify={notify} onBack={() => setActive('ops-category')} />;
+  else if (active === 'ops-result' || active === 'ops-knowledge-points') content = <KnowledgePointsPage />;
+  else if (active === 'ops-slice-library') content = <EmptyPage title="切片库" />;
+  else if (active === 'ops-qa-library') content = <EmptyPage title="QA库" />;
   else content = <EmptyPage title={active} />;
 
   return (
     <Shell active={active} onNavigate={(key) => {
       if (key === 'ops-category') setProjectId(projectId || dataStore.getProjects()[0]?.id);
       if (key === 'ops-workbench') setWorkbenchTarget((current) => ({ projectId: current.projectId || dataStore.getProjects()[0]?.id, categoryId: current.categoryId || 'cat-finance-product', formType: current.formType || '问答库' }));
-      setActive(key);
+      setActive(key === 'ops-result' ? 'ops-knowledge-points' : key);
     }}>
       {content}
       <Toast toast={toast} onClose={() => setToast(null)} />

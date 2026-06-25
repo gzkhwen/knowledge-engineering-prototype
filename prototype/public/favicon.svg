@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PowerAgent">
+  <rect width="64" height="64" rx="14" fill="#1677ff"/>
+  <path d="M22 24h24a8 8 0 0 1 0 16H21a9 9 0 0 1-1.4-17.9A13 13 0 0 1 44 18.6 10 10 0 0 1 50 28" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M24 45h16M32 40v10" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+</svg>
