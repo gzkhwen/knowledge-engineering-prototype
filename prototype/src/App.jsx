@@ -877,7 +877,6 @@ function McpServicePage({ notify }) {
     notify('MCP 服务已删除', 'success');
   };
 
-  const getServerSourceType = (service) => (service.locked || service.serviceType === '系统内置' ? '系统内置' : '外部接入');
   const formatSyncTime = (value) => {
     if (!value || value === '-') return '未同步';
     const [datePart, timePart = ''] = value.split(' ');
@@ -896,13 +895,12 @@ function McpServicePage({ notify }) {
       <section className="panel table-panel">
         <table className="data-table">
           <thead>
-            <tr><th>服务名称</th><th>Server类型</th><th>协议</th><th>服务地址</th><th>状态</th><th>工具数</th><th>最近检查/同步</th><th>操作</th></tr>
+            <tr><th>服务名称</th><th>协议</th><th>服务地址</th><th>状态</th><th>工具数</th><th>最近检查/同步</th><th>操作</th></tr>
           </thead>
           <tbody>
             {services.map((service) => (
               <tr key={service.id}>
                 <td className="strong">{service.name}</td>
-                <td><Badge tone={service.locked ? 'blue' : 'neutral'}>{getServerSourceType(service)}</Badge></td>
                 <td><Badge tone="blue">{service.transport}</Badge></td>
                 <td title={service.endpoint}>{service.endpoint}</td>
                 <td>
@@ -1384,6 +1382,17 @@ function createInputArtifact(input) {
   };
 }
 
+function createEmptyInputArtifact() {
+  return {
+    id: makeId('input-artifact'),
+    name: '',
+    artifactType: '',
+    sourcePath: '',
+    sourceName: '',
+    description: '',
+  };
+}
+
 function inferInputArtifactType(type = 'object') {
   const normalized = normalizeDataType(type);
   return inputArtifactTypeOptions.find((option) => normalizeDataType(option.type) === normalized)?.value || 'object';
@@ -1460,6 +1469,21 @@ function createOutputRule(outputName = '') {
     objectStorageAddress: 'oss://knowledge-engineering',
     objectStoragePath: outputName ? `tool-output/{run_id}/${outputName}.json` : 'tool-output/{run_id}/result.json',
     writeMode: 'upsert',
+  };
+}
+
+function createEmptyOutputRule() {
+  return {
+    id: makeId('output-rule'),
+    outputName: '',
+    artifactType: '',
+    storageTargetType: '',
+    esAddress: '',
+    esIndex: '',
+    targetField: '',
+    objectStorageAddress: '',
+    objectStoragePath: '',
+    writeMode: '',
   };
 }
 
@@ -1585,7 +1609,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   const addInputArtifact = () => {
     setDraft((current) => ({
       ...current,
-      inputArtifacts: [...(current.inputArtifacts || []), createInputArtifact(rawInputOptions.find((input) => input.name) || {})],
+      inputArtifacts: [...(current.inputArtifacts || []), createEmptyInputArtifact()],
     }));
   };
   const removeInputArtifact = (artifactId) => {
@@ -1596,7 +1620,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   };
   const addOutput = () => setDraft((current) => ({
     ...current,
-    outputs: [...current.outputs, { name: 'result', artifactType: 'parsed_document', type: 'object', sourceType: 'mcpReturn', description: '自定义输出', path: 'result' }],
+    outputs: [...current.outputs, { name: '', artifactType: '', type: '', sourceType: '', description: '', path: '' }],
   }));
   const removeOutput = (index) => {
     setDraft((current) => ({
@@ -1618,7 +1642,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   };
   const addStorageRule = () => setDraft((current) => ({
     ...current,
-    storageRules: [...(current.storageRules || []), createOutputRule(rawOutputOptions[0]?.path || rawOutputOptions[0]?.name || '')],
+    storageRules: [...(current.storageRules || []), createEmptyOutputRule()],
   }));
   const removeStorageRule = (ruleId) => setDraft((current) => ({
     ...current,
@@ -1751,8 +1775,9 @@ function NodeInputArtifactTable({ artifacts, onAdd, onRemove, onChange }) {
               <tr key={artifact.id}>
                 <td><input value={artifact.name || ''} onChange={(event) => onChange(artifact.id, { name: event.target.value })} /></td>
                 <td>
-                  <SelectField value={artifact.artifactType || 'file_object'} onChange={(artifactType) => onChange(artifact.id, { artifactType })}>
-                    {inputArtifactTypeOptions.map((option) => <option key={option.value} value={option.value}><OptionWithType name={option.label} type={option.type} /></option>)}
+                  <SelectField value={artifact.artifactType || ''} onChange={(artifactType) => onChange(artifact.id, { artifactType })}>
+                    <option value="">请选择</option>
+                    {inputArtifactTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </SelectField>
                 </td>
                 <td><input value={artifact.sourcePath || artifact.sourceName || ''} placeholder="例如 file.content" onChange={(event) => onChange(artifact.id, { sourcePath: event.target.value })} /></td>
@@ -1830,33 +1855,40 @@ function OutputRuleList({ rules, onAdd, onRemove, onChange }) {
               </thead>
               <tbody>
                 {rules.map((rule) => {
-                  const storageTargetType = rule.storageTargetType || 'Elasticsearch';
+                  const storageTargetType = rule.storageTargetType || '';
                   return (
                     <tr key={rule.id}>
                       <td><input value={rule.outputName || ''} placeholder="例如 data.pages[]" onChange={(event) => onChange(rule.id, { outputName: event.target.value })} /></td>
                       <td>
-                        <SelectField value={rule.artifactType} onChange={(artifactType) => onChange(rule.id, { artifactType })}>
+                        <SelectField value={rule.artifactType || ''} onChange={(artifactType) => onChange(rule.id, { artifactType })}>
+                          <option value="">请选择</option>
                           {['文本切片', '父子切片', 'QA对', '解析文档', '知识点', '元数据', '原始结果'].map((item) => <option key={item} value={item}>{item}</option>)}
                         </SelectField>
                       </td>
                       <td>
                         <SelectField value={storageTargetType} onChange={(value) => onChange(rule.id, { storageTargetType: value })}>
+                          <option value="">请选择</option>
                           {['Elasticsearch', '对象存储'].map((item) => <option key={item} value={item}>{item}</option>)}
                         </SelectField>
                       </td>
                       <td>
-                        {storageTargetType === 'Elasticsearch'
+                        {storageTargetType === '对象存储'
+                          ? <input placeholder="Bucket 地址" value={rule.objectStorageAddress || ''} onChange={(event) => onChange(rule.id, { objectStorageAddress: event.target.value })} />
+                          : storageTargetType === 'Elasticsearch'
                           ? <input placeholder="ES 地址" value={rule.esAddress || ''} onChange={(event) => onChange(rule.id, { esAddress: event.target.value })} />
-                          : <input placeholder="Bucket 地址" value={rule.objectStorageAddress || ''} onChange={(event) => onChange(rule.id, { objectStorageAddress: event.target.value })} />}
+                          : <input placeholder="存储地址" value="" readOnly />}
                       </td>
                       <td>
-                        {storageTargetType === 'Elasticsearch'
+                        {storageTargetType === '对象存储'
+                          ? <input placeholder="路径规则" value={rule.objectStoragePath || ''} onChange={(event) => onChange(rule.id, { objectStoragePath: event.target.value })} />
+                          : storageTargetType === 'Elasticsearch'
                           ? <input placeholder="Index 名称" value={rule.esIndex || ''} onChange={(event) => onChange(rule.id, { esIndex: event.target.value })} />
-                          : <input placeholder="路径规则" value={rule.objectStoragePath || ''} onChange={(event) => onChange(rule.id, { objectStoragePath: event.target.value })} />}
+                          : <input placeholder="存储位置" value="" readOnly />}
                       </td>
                       <td><input placeholder="例如 content" value={rule.targetField || ''} onChange={(event) => onChange(rule.id, { targetField: event.target.value })} /></td>
                       <td>
-                        <SelectField value={rule.writeMode} onChange={(writeMode) => onChange(rule.id, { writeMode })}>
+                        <SelectField value={rule.writeMode || ''} onChange={(writeMode) => onChange(rule.id, { writeMode })}>
+                          <option value="">请选择</option>
                           {['新增', '覆盖', 'upsert'].map((item) => <option key={item} value={item}>{item}</option>)}
                         </SelectField>
                       </td>
@@ -2002,24 +2034,26 @@ function EditableParamTable({ title, tip, rows, kind, columns, sourceInputs = []
               ) : (
                 <>
                   <td>
-                    <SelectField value={row.artifactType || inferInputArtifactType(row.type)} onChange={(artifactType) => onChange(kind, row.__draftIndex ?? index, 'artifactType', artifactType)}>
-                      {inputArtifactTypeOptions.map((option) => <option key={option.value} value={option.value}><OptionWithType name={option.label} type={option.type} /></option>)}
+                    <SelectField value={row.artifactType || ''} onChange={(artifactType) => onChange(kind, row.__draftIndex ?? index, 'artifactType', artifactType)}>
+                      <option value="">请选择</option>
+                      {inputArtifactTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </SelectField>
                   </td>
                   <td>
-                    <SelectField value={row.sourceType || 'mcpReturn'} onChange={(sourceType) => onChange(kind, row.__draftIndex ?? index, 'sourceType', sourceType)}>
+                    <SelectField value={row.sourceType || ''} onChange={(sourceType) => onChange(kind, row.__draftIndex ?? index, 'sourceType', sourceType)}>
+                      <option value="">请选择</option>
                       <option value="mcpReturn">MCP工具返回值</option>
                       <option value="storageRef">存储引用</option>
                     </SelectField>
                   </td>
                   <td>
-                    {(row.sourceType || 'mcpReturn') === 'storageRef' ? (
+                    {row.sourceType === 'storageRef' ? (
                       <SelectField value={row.storageRuleId || ''} onChange={(storageRuleId) => onChange(kind, row.__draftIndex ?? index, 'storageRuleId', storageRuleId)}>
                         <option value="">请选择</option>
                         {storageRules.map((rule, ruleIndex) => <option key={rule.id} value={rule.id}>{`存储引用${ruleIndex + 1}：${rule.outputName || '未设置路径'}`}</option>)}
                       </SelectField>
                     ) : (
-                      <input value={row.path || row.sourcePath || row.name || ''} placeholder="例如 data.result" onChange={(event) => onChange(kind, row.__draftIndex ?? index, 'path', event.target.value)} />
+                      <input value={row.path || row.sourcePath || ''} placeholder="例如 data.result" onChange={(event) => onChange(kind, row.__draftIndex ?? index, 'path', event.target.value)} />
                     )}
                   </td>
                   <td><input value={row.description || ''} onChange={(event) => onChange(kind, row.__draftIndex ?? index, 'description', event.target.value)} /></td>
@@ -4594,12 +4628,11 @@ function AddNodeDetail({ tool }) {
     name: output.label || output.name,
     description: output.desc || output.description || output.path || '',
     type: output.type || 'object',
-    required: '-',
   }));
   return (
     <div className="add-node-detail">
-      <AddNodeParamGroup title="节点输入" rows={nodeInputs.map((param) => paramToNodeDetailRow(param))} emptyText="暂无节点输入" />
-      <AddNodeParamGroup title="配置参数" rows={configParams.map((param) => paramToNodeDetailRow(param))} emptyText="暂无配置参数" />
+      <AddNodeParamGroup title="节点输入" rows={nodeInputs.map((param) => paramToNodeDetailRow(param))} emptyText="暂无节点输入" showRequired />
+      <AddNodeParamGroup title="配置参数" rows={configParams.map((param) => paramToNodeDetailRow(param))} emptyText="暂无配置参数" showRequired />
       <AddNodeParamGroup title="节点输出" rows={outputRows} emptyText="暂无节点输出" />
     </div>
   );
@@ -4610,22 +4643,24 @@ function paramToNodeDetailRow(param) {
     name: param.label || param.name || param.id,
     description: param.desc || param.description || '',
     type: param.schemaType || param.type || 'text',
-    required: param.required ? '是' : '否',
+    required: Boolean(param.required),
   };
 }
 
-function AddNodeParamGroup({ title, rows, emptyText }) {
+function AddNodeParamGroup({ title, rows, emptyText, showRequired = false }) {
   return (
     <div className="add-node-param-group">
       <h4>{title}</h4>
       {rows.length ? rows.map((row, index) => (
         <div className="add-node-param-item" key={`${title}-${row.name}-${index}`}>
           <div>
-            <strong>{row.name}</strong>
+            <span className="add-node-param-title">
+              <strong>{row.name}</strong>
+              {row.type ? <em>{row.type}</em> : null}
+              {showRequired && row.required ? <b>必填</b> : null}
+            </span>
             {row.description ? <span>{row.description}</span> : null}
           </div>
-          <em>{row.type || '-'}</em>
-          <b>{row.required}</b>
         </div>
       )) : <p className="empty-mini">{emptyText}</p>}
     </div>
