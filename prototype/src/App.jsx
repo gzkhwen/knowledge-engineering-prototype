@@ -42,10 +42,13 @@ import {
 } from './toolCatalog.js';
 
 const allToolsCategory = '全部';
-const lockedToolCategories = new Set(defaultCategories);
 
 function makeId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function nowText() {
+  return new Date().toISOString().slice(0, 16).replace('T', ' ');
 }
 
 function Badge({ children, tone = 'neutral' }) {
@@ -269,8 +272,7 @@ function Shell({ active, onNavigate, children }) {
       title: '管理端',
       items: [
         ['admin-mcp', '接入MCP服务'],
-        ['admin-tools', '工具管理'],
-        ['admin-category', '分类管理'],
+        ['admin-tools', '流程节点管理'],
         ['admin-template', '模板管理'],
       ],
     },
@@ -844,6 +846,10 @@ function McpServicePage({ notify }) {
       notify('系统内置 MCP Server 由平台自动维护，无需手动同步', 'info');
       return;
     }
+    if (service.status === '停用') {
+      notify('请先启用 MCP 服务，再刷新连接', 'warning');
+      return;
+    }
     const nextService = syncService(service);
     persist(services.map((item) => (item.id === service.id ? nextService : item)));
     notify(nextService.status === '连接失败' ? 'MCP Server同步失败' : 'MCP Server同步成功', nextService.status === '连接失败' ? 'error' : 'success');
@@ -854,7 +860,7 @@ function McpServicePage({ notify }) {
       notify('系统内置 MCP Server 不允许停用', 'warning');
       return;
     }
-    if (service.status !== '已停用') {
+    if (service.status !== '停用') {
       setPendingDisable(service);
       return;
     }
@@ -902,13 +908,15 @@ function McpServicePage({ notify }) {
                 <td>
                   <span className="status-inline">
                     <Badge tone={service.status === '连接正常' ? 'success' : service.status === '连接失败' ? 'danger' : service.status === '连接中' ? 'warning' : 'neutral'}>{service.status}</Badge>
-                    <button type="button" className="mini-icon" disabled={service.locked} onClick={() => syncOneService(service)} title={service.locked ? '系统内置服务自动维护' : 'MCP Server同步'}><SyncOutlined /></button>
+                    {service.status !== '停用' ? (
+                      <button type="button" className="mini-icon" disabled={service.locked} onClick={() => syncOneService(service)} title={service.locked ? '系统内置服务自动维护' : 'MCP Server同步'}><SyncOutlined /></button>
+                    ) : null}
                   </span>
                 </td>
                 <td><span>{service.toolCount} 个</span><button type="button" className="mini-icon" onClick={() => setDetailService(service)} title="查看工具列表"><SearchOutlined /></button></td>
                 <td>{service.status === '连接中' ? '检查中' : service.lastSyncedAt}</td>
                 <td className="actions">
-                  <button type="button" onClick={() => handleToggle(service)} disabled={service.locked}>{service.status === '已停用' ? '启用' : '停用'}</button>
+                  <button type="button" onClick={() => handleToggle(service)} disabled={service.locked}>{service.status === '停用' ? '启用' : '停用'}</button>
                   <button type="button" disabled={service.locked} onClick={() => openEdit(service)}>编辑</button>
                   <button type="button" disabled={service.locked} className="danger-link" onClick={() => handleDelete(service)}>删除</button>
                 </td>
@@ -993,7 +1001,7 @@ function McpServicePage({ notify }) {
           message={`停用后，Agent 和流程引擎将不能继续发现和调用「${pendingDisable.name}」下的工具。已发布流程如果依赖这些工具，执行时可能失败。`}
           onCancel={() => setPendingDisable(null)}
           onConfirm={() => {
-            persist(services.map((item) => (item.id === pendingDisable.id ? { ...item, status: '已停用' } : item)));
+            persist(services.map((item) => (item.id === pendingDisable.id ? { ...item, status: '停用' } : item)));
             setPendingDisable(null);
             notify('MCP 服务已停用', 'warning');
           }}
@@ -1079,6 +1087,10 @@ function ToolManagementPage({ notify }) {
   }), [query, selectedCategory, snapshot.tools]);
 
   const rawSources = useMemo(() => listRawMcpTools(loadServices()), [snapshot.tools.length]);
+  const detailRawSource = detailTool ? rawSources.find((source) => (
+    source.serviceId === detailTool.sourceServiceId
+    && source.tool?.name === detailTool.sourceToolName
+  )) : null;
 
   const openCreateCategory = () => setCategoryDraft({ name: '', oldName: null });
   const openEditCategory = (category) => setCategoryDraft({ name: category, oldName: category });
@@ -1086,40 +1098,36 @@ function ToolManagementPage({ notify }) {
   const saveCategory = () => {
     const name = categoryDraft?.name?.trim();
     if (!name) {
-      notify('分类名称不能为空', 'error');
+      notify('节点类型名称不能为空', 'error');
       return;
     }
     if (categoryDraft.oldName) {
       if (categoryDraft.oldName !== name && snapshot.categories.includes(name)) {
-        notify('分类名称已存在', 'error');
+        notify('节点类型名称已存在', 'error');
         return;
       }
       const categoriesNext = snapshot.categories.map((item) => (item === categoryDraft.oldName ? name : item));
       const toolsNext = snapshot.tools.map((tool) => (tool.category === categoryDraft.oldName ? { ...tool, category: name } : tool));
       persist(toolsNext, categoriesNext);
       setSelectedCategory((current) => (current === categoryDraft.oldName ? name : current));
-      notify('工具分类已更新', 'success');
+      notify('节点类型已更新', 'success');
     } else if (snapshot.categories.includes(name)) {
-      notify('分类名称已存在', 'error');
+      notify('节点类型名称已存在', 'error');
       return;
     } else {
       persist(snapshot.tools, [...snapshot.categories, name]);
-      notify('工具分类已新增', 'success');
+      notify('节点类型已新增', 'success');
     }
     setCategoryDraft(null);
   };
 
   const deleteCategory = (category) => {
-    if (lockedToolCategories.has(category)) {
-      notify('系统默认分类不允许删除', 'warning');
-      return;
-    }
-    if (!window.confirm(`确定删除分类「${category}」吗？该分类下工具将进入未分类。`)) return;
+    if (!window.confirm(`确定删除节点类型「${category}」吗？该节点类型下的节点将进入未分类。`)) return;
     const categoriesNext = snapshot.categories.filter((item) => item !== category);
     const toolsNext = snapshot.tools.map((tool) => (tool.category === category ? { ...tool, category: '未分类' } : tool));
     persist(toolsNext, categoriesNext);
     setSelectedCategory(allToolsCategory);
-    notify('工具分类已删除', 'success');
+    notify('节点类型已删除', 'success');
   };
 
   const openCreateTool = () => {
@@ -1128,17 +1136,36 @@ function ToolManagementPage({ notify }) {
   };
 
   const openEditTool = (tool) => {
+    if (tool.enabled) {
+      notify('请先停用流程节点，再编辑', 'warning');
+      return;
+    }
     setCreateDraft(makeKnowledgeToolEditDraft(tool));
   };
 
   const deleteTool = (tool) => {
+    if (tool.enabled) {
+      notify('请先停用流程节点，再删除', 'warning');
+      return;
+    }
     if (tool.kind === '内置工具') {
       notify('内置工具不允许删除', 'warning');
       return;
     }
-    if (!window.confirm(`确定删除工具「${tool.name}」吗？`)) return;
+    if (!window.confirm(`确定删除流程节点「${tool.name}」吗？`)) return;
     persist(snapshot.tools.filter((item) => item.id !== tool.id));
-    notify('知识工程工具已删除', 'success');
+    notify('流程节点已删除', 'success');
+  };
+
+  const toggleToolEnabled = (tool) => {
+    const nextEnabled = !tool.enabled;
+    persist(snapshot.tools.map((item) => (item.id === tool.id ? {
+      ...item,
+      enabled: nextEnabled,
+      status: nextEnabled ? '可用' : '不可用',
+      updatedAt: nowText(),
+    } : item)));
+    notify(nextEnabled ? '流程节点已启用' : '流程节点已停用', 'success');
   };
 
   const saveKnowledgeTool = () => {
@@ -1147,48 +1174,56 @@ function ToolManagementPage({ notify }) {
       return;
     }
     if (!createDraft.name.trim()) {
-      notify('工具名称不能为空', 'error');
+      notify('节点名称不能为空', 'error');
       return;
     }
     if (!createDraft.category) {
-      notify('工具分类不能为空', 'error');
+      notify('节点类型不能为空', 'error');
       return;
     }
     if (!createDraft.description.trim()) {
-      notify('工具描述不能为空', 'error');
+      notify('节点描述不能为空', 'error');
       return;
     }
     const overrides = {
       name: createDraft.name,
       description: createDraft.description,
       category: createDraft.category,
+      inputArtifacts: createDraft.inputArtifacts,
       inputs: createDraft.inputs,
       outputs: createDraft.outputs,
       storageRules: createDraft.storageRules,
       indexConfig: createDraft.indexConfig,
+      exceptionRules: createDraft.exceptionRules,
     };
     if (createDraft.id) {
       persist(snapshot.tools.map((tool) => (tool.id === createDraft.id ? applyKnowledgeToolDraft(tool, overrides) : tool)));
-      notify('知识工程工具已更新', 'success');
+      notify('流程节点已更新', 'success');
     } else {
       const source = rawSources.find((item) => item.id === createDraft.sourceId);
       if (!source) {
         notify('来源 MCP 工具不存在，请重新同步后再试', 'error');
         return;
       }
-      const nextTool = createKnowledgeToolFromRaw(source, overrides);
+      const nextTool = {
+        ...createKnowledgeToolFromRaw(source, overrides),
+        inputArtifacts: overrides.inputArtifacts || [],
+        exceptionRules: overrides.exceptionRules || [],
+        createdBy: '系统管理员',
+        updatedAt: nowText(),
+      };
       persist([...snapshot.tools, nextTool]);
-      notify('知识工程工具已创建', 'success');
+      notify('流程节点已创建', 'success');
     }
     setCreateDraft(null);
   };
 
   return (
     <>
-      <PageHeader title="工具管理" subtitle="管理标准化后的知识工程工具。MCP 原始工具只作为创建来源，Agent 和 pipeline 只使用这里发布的工具。" />
+      <PageHeader title="流程节点管理" subtitle="把原始 MCP 工具标准化为知识处理流程节点，用于 Pipeline 编排和 Agent 选用。" />
       <div className="split-layout">
         <aside className="category-sidebar panel">
-          <div className="side-head"><strong>工具分类</strong><button type="button" title="新增分类" onClick={openCreateCategory}><PlusOutlined /></button></div>
+          <div className="side-head"><strong>节点类型</strong><button type="button" title="新增节点类型" onClick={openCreateCategory}><PlusOutlined /></button></div>
           <button type="button" className={`category-button ${selectedCategory === allToolsCategory ? 'active' : ''}`} onClick={() => setSelectedCategory(allToolsCategory)}>
             <span>全部</span><Badge>{snapshot.tools.length}</Badge>
           </button>
@@ -1196,34 +1231,34 @@ function ToolManagementPage({ notify }) {
             <button type="button" key={category} className={`category-button category-row ${selectedCategory === category ? 'active' : ''}`} onClick={() => setSelectedCategory(category)}>
               <span className="category-name">{category}</span>
               <Badge>{categoryCounts[category] || 0}</Badge>
-              {!lockedToolCategories.has(category) ? (
-                <span className="category-inline-actions" onClick={(event) => event.stopPropagation()}>
-                  <span role="button" tabIndex={0} onClick={() => openEditCategory(category)}><EditOutlined /></span>
-                  <span role="button" tabIndex={0} className="danger-link" onClick={() => deleteCategory(category)}><DeleteOutlined /></span>
-                </span>
-              ) : null}
+              <span className="category-inline-actions" onClick={(event) => event.stopPropagation()}>
+                <span role="button" tabIndex={0} title="编辑节点类型" onClick={() => openEditCategory(category)}><EditOutlined /></span>
+                <span role="button" tabIndex={0} title="删除节点类型" className="danger-link" onClick={() => deleteCategory(category)}><DeleteOutlined /></span>
+              </span>
             </button>
           ))}
         </aside>
         <section className="panel table-panel standard-tool-panel">
           <Toolbar className="standard-tool-toolbar">
-            <SearchBox value={query} onChange={setQuery} placeholder="搜索工具名称、描述或来源" />
-            <button type="button" className="primary" onClick={openCreateTool}><PlusOutlined /> 新建知识工程工具</button>
+            <SearchBox value={query} onChange={setQuery} placeholder="节点名、描述、原始MCP工具的名称、描述" />
+            <button type="button" className="primary" onClick={openCreateTool}><PlusOutlined /> 新建流程节点</button>
           </Toolbar>
           <table className="data-table standard-tool-table">
             <colgroup>
               <col className="standard-tool-col-name" />
-              <col className="standard-tool-col-category" />
-              <col className="standard-tool-col-mcp" />
-              <col className="standard-tool-col-raw-tool" />
+              <col className="standard-tool-col-source" />
+              <col className="standard-tool-col-status" />
+              <col className="standard-tool-col-owner" />
+              <col className="standard-tool-col-updated" />
               <col className="standard-tool-col-action" />
             </colgroup>
             <thead>
               <tr>
-                <th>工具名称</th>
-                <th>分类</th>
-                <th>MCP</th>
-                <th>原始 MCP 工具</th>
+                <th>节点名称</th>
+                <th>来源工具</th>
+                <th>状态</th>
+                <th>创建人</th>
+                <th>最近更新</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -1235,28 +1270,30 @@ function ToolManagementPage({ notify }) {
                       <strong>{tool.name}</strong>
                     </div>
                   </td>
-                  <td>{tool.category}</td>
-                  <td>{tool.sourceServiceName || tool.serviceName}</td>
-                  <td>{tool.sourceToolName || '-'}</td>
+                  <td title={`${tool.sourceServiceName || tool.serviceName || '-'} / ${tool.sourceToolName || '-'}`}>{tool.sourceServiceName || tool.serviceName || '-'} / {tool.sourceToolName || '-'}</td>
+                  <td><Badge tone={tool.enabled ? 'success' : 'neutral'}>{tool.enabled ? '启用' : '停用'}</Badge></td>
+                  <td>{tool.createdBy || '系统管理员'}</td>
+                  <td>{tool.updatedAt || tool.lastModifiedAt || tool.lastSyncedAt || '-'}</td>
                   <td className="actions standard-tool-actions">
                     <button type="button" onClick={() => setDetailTool(tool)}>详情</button>
-                    <button type="button" onClick={() => openEditTool(tool)}>编辑</button>
-                    <button type="button" className="danger-link" onClick={() => deleteTool(tool)}>删除</button>
+                    <button type="button" onClick={() => toggleToolEnabled(tool)}>{tool.enabled ? '停用' : '启用'}</button>
+                    <button type="button" disabled={tool.enabled} onClick={() => openEditTool(tool)}>编辑</button>
+                    <button type="button" disabled={tool.enabled} className="danger-link" onClick={() => deleteTool(tool)}>删除</button>
                   </td>
                 </tr>
               ))}
-              {filteredTools.length === 0 ? <tr><td colSpan={5} className="empty-table-cell">暂无匹配工具</td></tr> : null}
+              {filteredTools.length === 0 ? <tr><td colSpan={6} className="empty-table-cell">暂无匹配工具</td></tr> : null}
             </tbody>
           </table>
         </section>
       </div>
       {categoryDraft ? (
         <Modal
-          title={categoryDraft.oldName ? '编辑分类' : '新增分类'}
+          title={categoryDraft.oldName ? '编辑节点类型' : '新增节点类型'}
           onClose={() => setCategoryDraft(null)}
           footer={<><button type="button" className="secondary" onClick={() => setCategoryDraft(null)}>取消</button><button type="button" className="primary" onClick={saveCategory}>保存</button></>}
         >
-          <Field label="分类名称" required><input value={categoryDraft.name} onChange={(event) => setCategoryDraft({ ...categoryDraft, name: event.target.value })} /></Field>
+          <Field label="节点类型名称" required><input value={categoryDraft.name} onChange={(event) => setCategoryDraft({ ...categoryDraft, name: event.target.value })} /></Field>
         </Modal>
       ) : null}
       {createDraft ? (
@@ -1271,24 +1308,9 @@ function ToolManagementPage({ notify }) {
       ) : null}
       {detailTool ? (
         <Drawer title={detailTool.name} onClose={() => setDetailTool(null)} wide>
-          <p className="drawer-subtitle">{detailTool.kind} · {detailTool.category} <Badge tone={detailTool.enabled ? 'success' : 'neutral'}>{detailTool.lifecycleStatus}</Badge></p>
-          <div className="detail-grid">
-            <div><label>来源 MCP 服务</label><strong>{detailTool.sourceServiceName || detailTool.serviceName || '-'}</strong></div>
-            <div><label>来源 MCP 工具</label><strong>{detailTool.sourceToolName || '-'}</strong></div>
-            <div><label>工具版本</label><strong>{detailTool.version}</strong></div>
-            <div><label>最近同步</label><strong>{detailTool.lastSyncedAt}</strong></div>
-          </div>
-          <section className="schema-card">
-            <div className="schema-head"><strong>标准化说明</strong></div>
-            <p>{detailTool.description}</p>
-          </section>
-          <ToolParamTable title="输入参数" columns={['参数名', '类型', '必填', '说明']} rows={detailTool.inputs.map((input) => [input.name, input.type, input.required ? '是' : '否', input.description])} />
-          <ToolParamTable title="输出参数" columns={['参数名', '类型', '说明']} rows={detailTool.outputs.map((output) => [output.name, output.type, output.description])} />
-          <StorageContractCard contract={detailTool.storageContract} />
-          <section className="schema-card">
-            <div className="schema-head"><strong>Pipeline 使用边界</strong></div>
-            <p>工具管理页只定义工具的标准输入、标准输出和默认结果存储规则。具体参数取固定值还是取上游节点输出，在 pipeline 节点配置时绑定。</p>
-          </section>
+          <NodeDetailBasicInfo tool={detailTool} rawSource={detailRawSource} />
+          <NodeStorageDetailTable contract={detailTool.storageContract} />
+          <NodeMappingDetailTable tool={detailTool} />
         </Drawer>
       ) : null}
     </>
@@ -1303,13 +1325,15 @@ function makeKnowledgeToolDraft(source, category) {
     selectedMcpId: source?.serviceId || '',
     mode: 'create',
     step: 0,
-    name: source?.tool?.name ? `${source.tool.name}标准化工具` : '',
+    name: source?.tool?.name || '',
     description: source?.tool?.description || '',
     category,
+    inputArtifacts: createDefaultInputArtifacts(source?.tool?.inputs || []),
     inputs: normalizeDraftInputs(source?.tool?.inputs || []),
-    outputs: source?.tool?.outputs || [],
+    outputs: normalizeDraftOutputs(source?.tool?.outputs || []),
     storageRules: firstOutputName ? [createOutputRule(firstOutputName)] : [],
     indexConfig: createIndexConfig(firstOutputName),
+    exceptionRules: createDefaultExceptionRules(),
   };
 }
 
@@ -1324,10 +1348,12 @@ function makeKnowledgeToolEditDraft(tool) {
     name: tool.name || '',
     description: tool.description || '',
     category: tool.category || '未分类',
+    inputArtifacts: normalizeInputArtifacts(tool.inputArtifacts || [], tool.inputs || []),
     inputs: normalizeDraftInputs(tool.inputs || []),
-    outputs: tool.outputs || [],
+    outputs: normalizeDraftOutputs(tool.outputs || []),
     storageRules: normalizeStorageRules(tool.storageContract, tool.outputs || []),
     indexConfig: normalizeIndexConfig(tool.storageContract, tool.outputs || []),
+    exceptionRules: normalizeExceptionRules(tool.exceptionRules || []),
   };
 }
 
@@ -1337,10 +1363,54 @@ function applyKnowledgeToolDraft(tool, draft) {
     name: draft.name?.trim() || tool.name,
     description: draft.description?.trim() || tool.description,
     category: draft.category || tool.category,
+    inputArtifacts: draft.inputArtifacts || tool.inputArtifacts || [],
     inputs: draft.inputs || tool.inputs,
     outputs: draft.outputs || tool.outputs,
     storageContract: buildStorageContractFromRules(draft.storageRules || [], draft.indexConfig, tool.storageContract),
+    exceptionRules: draft.exceptionRules || tool.exceptionRules || [],
+    updatedAt: nowText(),
   };
+}
+
+function createInputArtifact(input) {
+  const artifactType = inferInputArtifactType(input?.type);
+  return {
+    id: makeId('input-artifact'),
+    name: input?.name || 'input',
+    artifactType,
+    sourcePath: input?.name || '',
+    sourceName: input?.name || '',
+    description: input?.description || '',
+  };
+}
+
+function inferInputArtifactType(type = 'object') {
+  const normalized = normalizeDataType(type);
+  return inputArtifactTypeOptions.find((option) => normalizeDataType(option.type) === normalized)?.value || 'object';
+}
+
+function createDefaultInputArtifacts(inputs = []) {
+  const selected = inputs.find((input) => input.required) || inputs[0];
+  return selected ? [createInputArtifact(selected)] : [];
+}
+
+function normalizeInputArtifacts(artifacts = [], inputs = []) {
+  if (artifacts.length) return artifacts.map((artifact) => {
+    const sourceInput = inputs.find((input) => input.name === artifact.sourceName);
+    return { ...createInputArtifact(sourceInput), ...artifact, artifactType: artifact.artifactType || inferInputArtifactType(sourceInput?.type), id: artifact.id || makeId('input-artifact') };
+  });
+  return createDefaultInputArtifacts(inputs);
+}
+
+function createDefaultExceptionRules() {
+  return [
+    { id: makeId('exception-timeout'), type: '超时', timeoutSeconds: 60, errorPath: '', errorMessage: '', action: '终止流程' },
+    { id: makeId('exception-error'), type: '工具报错', timeoutSeconds: '', errorPath: 'error.message', errorMessage: '工具返回错误', action: '终止流程' },
+  ];
+}
+
+function normalizeExceptionRules(rules = []) {
+  return rules.length ? rules.map((rule) => ({ ...rule, id: rule.id || makeId('exception-rule') })) : createDefaultExceptionRules();
 }
 
 function normalizeDraftInputs(inputs = []) {
@@ -1348,6 +1418,14 @@ function normalizeDraftInputs(inputs = []) {
     ...input,
     sourceName: input.sourceName || input.source || input.name || '',
     exposed: input.exposed ?? true,
+  }));
+}
+
+function normalizeDraftOutputs(outputs = []) {
+  return outputs.map((output) => ({
+    ...output,
+    artifactType: output.artifactType || inferInputArtifactType(output.type),
+    sourceType: output.sourceType || 'mcpReturn',
   }));
 }
 
@@ -1378,10 +1456,20 @@ function createOutputRule(outputName = '') {
     storageTargetType: 'Elasticsearch',
     esAddress: 'http://es.internal:9200',
     esIndex: outputName ? `ke_${outputName.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`).replace(/^_/, '').toLowerCase()}` : 'ke_tool_output',
+    targetField: inferStorageTargetField(outputName),
     objectStorageAddress: 'oss://knowledge-engineering',
     objectStoragePath: outputName ? `tool-output/{run_id}/${outputName}.json` : 'tool-output/{run_id}/result.json',
     writeMode: 'upsert',
   };
+}
+
+function inferStorageTargetField(outputName = '') {
+  const value = outputName.toLowerCase();
+  if (value.includes('embedding') || value.includes('vector')) return 'vector';
+  if (value.includes('metadata') || value.includes('stats')) return 'metadata';
+  if (value.includes('qa')) return 'answer';
+  if (value.includes('chunk') || value.includes('text') || value.includes('content')) return 'content';
+  return 'content';
 }
 
 function createIndexConfig(outputName = '') {
@@ -1410,6 +1498,7 @@ function normalizeStorageRules(contract, outputs = []) {
     storageTargetType: contract?.storageTargetType || contract?.storageType || 'Elasticsearch',
     esAddress: contract?.esAddress || '',
     esIndex: contract?.esIndex || contract?.storageTarget || '',
+    targetField: contract?.targetField || inferStorageTargetField(outputName),
     objectStorageAddress: contract?.objectStorageAddress || '',
     objectStoragePath: contract?.objectStoragePath || '',
     writeMode: contract?.writeMode || 'upsert',
@@ -1442,6 +1531,7 @@ function buildStorageContractFromRules(rules = [], indexConfig = createIndexConf
     storageType: firstRule.storageTargetType || 'Elasticsearch',
     esAddress: firstRule.esAddress || '',
     esIndex: firstRule.esIndex || '',
+    targetField: firstRule.targetField || '',
     objectStorageAddress: firstRule.objectStorageAddress || '',
     objectStoragePath: firstRule.objectStoragePath || '',
     writeMode: firstRule.writeMode || 'upsert',
@@ -1464,8 +1554,13 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   const selectedMcpId = draft.selectedMcpId || selectedSource?.serviceId || mcpOptions[0]?.id || '';
   const filteredSources = sources.filter((source) => source.serviceId === selectedMcpId);
   const rawInputOptions = selectedSource?.tool?.inputs?.length ? selectedSource.tool.inputs : draft.inputs;
-  const steps = ['原始MCP工具', '基础信息', '输入参数', '输出结果', '结果存储与索引'];
-  const activeStep = draft.step || 0;
+  const rawOutputOptions = selectedSource?.tool?.outputs?.length ? selectedSource.tool.outputs : draft.outputs;
+  const selectedArtifactSources = new Set((draft.inputArtifacts || []).map((artifact) => artifact.sourcePath || artifact.sourceName).filter(Boolean));
+  const configInputRows = (draft.inputs || [])
+    .map((input, index) => ({ ...input, __draftIndex: index }))
+    .filter((input) => !selectedArtifactSources.has(input.sourceName || input.name));
+  const steps = ['节点基础信息', '工具结果存储', '参数映射'];
+  const activeStep = Math.min(draft.step || 0, steps.length - 1);
   const setStep = (step) => setDraft((current) => ({ ...current, step }));
   const selectSource = (sourceId) => {
     const source = sources.find((item) => item.id === sourceId);
@@ -1481,9 +1576,27 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
       [kind]: current[kind].map((item, itemIndex) => (itemIndex === index ? { ...item, [key]: value } : item)),
     }));
   };
+  const updateInputArtifact = (artifactId, patch) => {
+    setDraft((current) => ({
+      ...current,
+      inputArtifacts: (current.inputArtifacts || []).map((artifact) => (artifact.id === artifactId ? { ...artifact, ...patch } : artifact)),
+    }));
+  };
+  const addInputArtifact = () => {
+    setDraft((current) => ({
+      ...current,
+      inputArtifacts: [...(current.inputArtifacts || []), createInputArtifact(rawInputOptions.find((input) => input.name) || {})],
+    }));
+  };
+  const removeInputArtifact = (artifactId) => {
+    setDraft((current) => ({
+      ...current,
+      inputArtifacts: (current.inputArtifacts || []).filter((artifact) => artifact.id !== artifactId),
+    }));
+  };
   const addOutput = () => setDraft((current) => ({
     ...current,
-    outputs: [...current.outputs, { name: 'result', type: 'object', description: '自定义输出', path: 'result' }],
+    outputs: [...current.outputs, { name: 'result', artifactType: 'parsed_document', type: 'object', sourceType: 'mcpReturn', description: '自定义输出', path: 'result' }],
   }));
   const removeOutput = (index) => {
     setDraft((current) => ({
@@ -1500,21 +1613,20 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   const updateIndexConfig = (patch) => {
     setDraft((current) => ({
       ...current,
-      indexConfig: { ...createIndexConfig(current.outputs?.[0]?.name || ''), ...(current.indexConfig || {}), ...patch },
+      indexConfig: { ...createIndexConfig(current.storageRules?.[0]?.outputName || ''), ...(current.indexConfig || {}), ...patch },
     }));
   };
   const addStorageRule = () => setDraft((current) => ({
     ...current,
-    storageRules: [...(current.storageRules || []), createOutputRule(current.outputs?.[0]?.name || '')],
+    storageRules: [...(current.storageRules || []), createOutputRule(rawOutputOptions[0]?.path || rawOutputOptions[0]?.name || '')],
   }));
   const removeStorageRule = (ruleId) => setDraft((current) => ({
     ...current,
     storageRules: (current.storageRules || []).filter((rule) => rule.id !== ruleId),
   }));
-
   return (
     <Modal
-      title={draft.mode === 'edit' ? '编辑知识工程工具' : '新建知识工程工具'}
+      title={draft.mode === 'edit' ? '编辑流程节点' : '新建流程节点'}
       wide
       className="standard-tool-modal"
       onClose={onClose}
@@ -1531,7 +1643,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
       )}
     >
       <div className="standard-tool-form">
-        <div className="standard-tool-steps">
+        <div className="standard-tool-steps" style={{ '--step-count': steps.length }}>
           {steps.map((step, index) => (
             <button
               type="button"
@@ -1553,8 +1665,8 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
                 <Field label="原始MCP工具"><input value={draft.sourceLabel?.split(' / ')[1] || ''} readOnly /></Field>
               </div>
             ) : sources.length ? (
-              <>
-                <Field label="MCP" required>
+              <div className="form-grid two">
+                <Field label="MCP服务" required>
                   <SelectField value={selectedMcpId} onChange={selectMcp}>
                     {mcpOptions.map((mcp) => <option key={mcp.id} value={mcp.id}>{mcp.name}</option>)}
                   </SelectField>
@@ -1564,53 +1676,94 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
                     {filteredSources.map((source) => <option key={source.id} value={source.id}>{source.tool.name}</option>)}
                   </SelectField>
                 </Field>
-              </>
+              </div>
             ) : <p className="empty-hint">当前还没有可用的外部 MCP 原始工具。请先在“MCP Server 接入”页完成服务同步。</p>}
+            <Field label="节点类型" required><SelectField value={draft.category} onChange={(category) => setDraft({ ...draft, category })}>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</SelectField></Field>
+            <Field label="节点名称" required><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+            <Field label="节点描述" required><textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></Field>
             {selectedSource ? <RawMcpToolPreview source={selectedSource} /> : null}
           </section>
         ) : null}
         {activeStep === 1 ? (
-          <section className="schema-card">
-            <p className="step-tip">如需调整工具基础信息，可以在此处设置，最终对外暴露的工具信息以此处为准。</p>
-            <Field label="工具名称" required><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
-            <Field label="工具分类" required><SelectField value={draft.category} onChange={(category) => setDraft({ ...draft, category })}>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</SelectField></Field>
-            <Field label="工具描述" required><textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></Field>
-          </section>
-        ) : null}
-        {activeStep === 2 ? (
-          <EditableParamTable
-            tip="在这里包装原始 input schema：参数名是标准工具对外暴露的名称，原始参数用于映射 MCP 工具真实入参。"
-            rows={draft.inputs}
-            kind="inputs"
-            columns={['参数名', '原始参数', '类型', '必填', '默认值', '说明', '是否暴露']}
-            sourceInputs={rawInputOptions}
-            onChange={updateParam}
-          />
-        ) : null}
-        {activeStep === 3 ? (
-          <EditableParamTable
-            title="输出结果"
-            rows={draft.outputs}
-            kind="outputs"
-            columns={['输出名称', '原始返回路径', '类型', '说明']}
-            onChange={updateParam}
-            onAdd={addOutput}
-            onRemove={removeOutput}
-          />
-        ) : null}
-        {activeStep === 4 ? (
           <OutputRuleList
             rules={draft.storageRules || []}
-            outputs={draft.outputs || []}
-            indexConfig={draft.indexConfig || createIndexConfig(draft.outputs?.[0]?.name || '')}
             onAdd={addStorageRule}
             onRemove={removeStorageRule}
             onChange={updateStorageRule}
-            onIndexChange={updateIndexConfig}
           />
+        ) : null}
+        {activeStep === 2 ? (
+          <div className="standard-step-stack">
+            <NodeInputArtifactTable
+              artifacts={draft.inputArtifacts || []}
+              onAdd={addInputArtifact}
+              onRemove={removeInputArtifact}
+              onChange={updateInputArtifact}
+            />
+            <EditableParamTable
+              title="配置参数"
+              tip="配置参数用于声明节点运行时可配置的 MCP 工具入参。已被节点输入占用的入参路径会自动从此处排除。"
+              rows={configInputRows}
+              kind="inputs"
+              columns={['配置名称', '类型', 'MCP工具入参路径', '必填', '默认值', '说明', '允许修改']}
+              sourceInputs={rawInputOptions}
+              onChange={updateParam}
+            />
+            <EditableParamTable
+              title="节点输出"
+              tip="节点输出用于声明后续节点可引用的标准制品，来源可以是 MCP 工具返回值，也可以是前一步生成的存储引用。"
+              rows={draft.outputs}
+              kind="outputs"
+              columns={['输出名称', '输出类型', '输出来源', 'MCP工具返回路径/存储引用', '说明']}
+              storageRules={draft.storageRules || []}
+              onChange={updateParam}
+              onAdd={addOutput}
+              onRemove={removeOutput}
+            />
+          </div>
         ) : null}
       </div>
     </Modal>
+  );
+}
+
+function NodeInputArtifactTable({ artifacts, onAdd, onRemove, onChange }) {
+  return (
+    <section className="schema-card editable-schema-card">
+      <div className="schema-head">
+        <strong>节点输入</strong>
+        <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加节点输入</button>
+      </div>
+      <p className="plain-step-tip">节点输入用于承接上游节点输出，并写入 MCP 工具入参路径。</p>
+      {artifacts.length ? (
+        <table className="data-table compact-table editable-schema-table input-artifact-table">
+          <thead>
+            <tr>
+              <th>输入名称</th>
+              <th>输入类型</th>
+              <th>MCP工具入参路径</th>
+              <th>输入描述</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {artifacts.map((artifact) => (
+              <tr key={artifact.id}>
+                <td><input value={artifact.name || ''} onChange={(event) => onChange(artifact.id, { name: event.target.value })} /></td>
+                <td>
+                  <SelectField value={artifact.artifactType || 'file_object'} onChange={(artifactType) => onChange(artifact.id, { artifactType })}>
+                    {inputArtifactTypeOptions.map((option) => <option key={option.value} value={option.value}><OptionWithType name={option.label} type={option.type} /></option>)}
+                  </SelectField>
+                </td>
+                <td><input value={artifact.sourcePath || artifact.sourceName || ''} placeholder="例如 file.content" onChange={(event) => onChange(artifact.id, { sourcePath: event.target.value })} /></td>
+                <td><input value={artifact.description || ''} onChange={(event) => onChange(artifact.id, { description: event.target.value })} /></td>
+                <td><button type="button" className="danger-link" onClick={() => onRemove(artifact.id)}>删除</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : <p className="empty-hint">暂无节点输入。可添加后配置输入名称、制品类型和 MCP 工具入参路径。</p>}
+    </section>
   );
 }
 
@@ -1622,6 +1775,7 @@ function RawMcpToolPreview({ source }) {
   const outputSchema = buildRawOutputJsonSchema(outputs);
   return (
     <div className="raw-tool-preview">
+      <div className="schema-head"><strong>MCP工具信息</strong></div>
       <div className="raw-tool-summary">
         <div>
           <label>工具名称</label>
@@ -1650,19 +1804,10 @@ function getRuleFieldOptions(rule) {
   return rule?.outputName ? [rule.outputName] : ['content'];
 }
 
-function OutputRuleList({ rules, outputs, indexConfig, onAdd, onRemove, onChange, onIndexChange }) {
-  const storedOutputOptions = rules
-    .filter((rule) => rule.outputName)
-    .map((rule) => ({ value: rule.outputName, label: rule.outputName, rule }));
-  const selectedIndexRule = storedOutputOptions.find((item) => item.value === indexConfig.indexSource)?.rule || storedOutputOptions[0]?.rule;
-  const selectedRecallRule = storedOutputOptions.find((item) => item.value === indexConfig.recallSource)?.rule || selectedIndexRule;
-  const indexFieldOptions = getRuleFieldOptions(selectedIndexRule);
-  const recallFieldOptions = getRuleFieldOptions(selectedRecallRule);
-  const needsRelation = Boolean(indexConfig.indexEnabled && indexConfig.indexSource && indexConfig.recallSource && indexConfig.indexSource !== indexConfig.recallSource);
-
+function OutputRuleList({ rules, onAdd, onRemove, onChange }) {
   return (
     <section className="schema-card output-rule-section">
-      <p className="step-tip">工具输出可以分别保存；索引和召回单独配置一组。未保存的输出仅作为流程变量传递。</p>
+      <p className="step-tip">工具结果存储直接基于 MCP 工具原始返回配置。这里的持久化结果不等于节点输出，但后续节点输出可以引用这里产生的存储地址。</p>
       <div className="output-rule-list">
         <div className="rule-subsection">
           <div className="rule-section-head">
@@ -1673,11 +1818,12 @@ function OutputRuleList({ rules, outputs, indexConfig, onAdd, onRemove, onChange
             <table className="data-table compact-table editable-schema-table storage-rule-table">
               <thead>
                 <tr>
-                  <th>工具输出</th>
+                  <th>MCP工具返回路径</th>
                   <th>存储的知识形态</th>
                   <th>存储目标</th>
                   <th>存储地址</th>
-                  <th>存储对象</th>
+                  <th>存储位置</th>
+                  <th>目标字段</th>
                   <th>写入方式</th>
                   <th>操作</th>
                 </tr>
@@ -1687,11 +1833,7 @@ function OutputRuleList({ rules, outputs, indexConfig, onAdd, onRemove, onChange
                   const storageTargetType = rule.storageTargetType || 'Elasticsearch';
                   return (
                     <tr key={rule.id}>
-                      <td>
-                        <SelectField value={rule.outputName} onChange={(outputName) => onChange(rule.id, { outputName })}>
-                          {outputs.map((output) => <option key={output.name} value={output.name}>{output.name}</option>)}
-                        </SelectField>
-                      </td>
+                      <td><input value={rule.outputName || ''} placeholder="例如 data.pages[]" onChange={(event) => onChange(rule.id, { outputName: event.target.value })} /></td>
                       <td>
                         <SelectField value={rule.artifactType} onChange={(artifactType) => onChange(rule.id, { artifactType })}>
                           {['文本切片', '父子切片', 'QA对', '解析文档', '知识点', '元数据', '原始结果'].map((item) => <option key={item} value={item}>{item}</option>)}
@@ -1712,6 +1854,7 @@ function OutputRuleList({ rules, outputs, indexConfig, onAdd, onRemove, onChange
                           ? <input placeholder="Index 名称" value={rule.esIndex || ''} onChange={(event) => onChange(rule.id, { esIndex: event.target.value })} />
                           : <input placeholder="路径规则" value={rule.objectStoragePath || ''} onChange={(event) => onChange(rule.id, { objectStoragePath: event.target.value })} />}
                       </td>
+                      <td><input placeholder="例如 content" value={rule.targetField || ''} onChange={(event) => onChange(rule.id, { targetField: event.target.value })} /></td>
                       <td>
                         <SelectField value={rule.writeMode} onChange={(writeMode) => onChange(rule.id, { writeMode })}>
                           {['新增', '覆盖', 'upsert'].map((item) => <option key={item} value={item}>{item}</option>)}
@@ -1724,61 +1867,8 @@ function OutputRuleList({ rules, outputs, indexConfig, onAdd, onRemove, onChange
               </tbody>
             </table>
           ) : null}
-          {rules.length === 0 ? <p className="empty-hint">暂无存储配置。未配置的输出仅作为流程变量传递。</p> : null}
+          {rules.length === 0 ? <p className="empty-hint">暂无存储配置。未配置时，MCP 返回结果只参与后续参数映射，不会持久化。</p> : null}
         </div>
-        <div className="rule-subsection">
-          <div className="rule-subtitle">索引设置</div>
-          <label className="checkbox-line">
-            <input type="checkbox" checked={Boolean(indexConfig.indexEnabled)} onChange={(event) => onIndexChange({ indexEnabled: event.target.checked })} />
-            配置到检索索引
-          </label>
-          {indexConfig.indexEnabled ? (
-            <>
-              <Field label="索引来源" required help="选择哪一个已保存的工具输出用于建立检索索引。">
-                <SelectField value={indexConfig.indexSource || storedOutputOptions[0]?.value || ''} onChange={(indexSource) => onIndexChange({ indexSource })}>
-                  <option value="">请选择</option>
-                  {storedOutputOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                </SelectField>
-              </Field>
-              <Field label="进索引字段" required help="选择索引来源里真正写入检索索引的字段。">
-                <SelectField value={indexConfig.indexField || ''} onChange={(indexField) => onIndexChange({ indexField })}>
-                  <option value="">请选择</option>
-                  {indexFieldOptions.map((field) => <option key={field} value={field}>{field}</option>)}
-                </SelectField>
-              </Field>
-              <Field label="召回来源" required help="选择检索命中后最终返回给下游或进入上下文的工具输出。">
-                <SelectField value={indexConfig.recallSource || storedOutputOptions[0]?.value || ''} onChange={(recallSource) => onIndexChange({ recallSource })}>
-                  <option value="">请选择</option>
-                  {storedOutputOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                </SelectField>
-              </Field>
-              <Field label="召回字段" required help="选择召回来源中作为最终返回内容的字段。">
-                <SelectField value={indexConfig.recallField || ''} onChange={(recallField) => onIndexChange({ recallField })}>
-                  <option value="">请选择</option>
-                  {recallFieldOptions.map((field) => <option key={field} value={field}>{field}</option>)}
-                </SelectField>
-              </Field>
-              <Field label="过滤字段" help="可选。用于检索过滤的字段，例如文档 ID、页码、类目等。"><input placeholder="例如 doc_id,page,category" value={indexConfig.filterFields || ''} onChange={(event) => onIndexChange({ filterFields: event.target.value })} /></Field>
-            </>
-          ) : null}
-        </div>
-        {needsRelation ? (
-          <div className="rule-subsection">
-            <div className="rule-subtitle">关联规则</div>
-            <Field label="索引结果关联字段" required help="当索引来源和召回来源不同，用索引命中结果里的这个字段去查找召回结果。">
-              <SelectField value={indexConfig.indexJoinField || ''} onChange={(indexJoinField) => onIndexChange({ indexJoinField })}>
-                <option value="">请选择</option>
-                {indexFieldOptions.map((field) => <option key={field} value={field}>{field}</option>)}
-              </SelectField>
-            </Field>
-            <Field label="召回结果匹配字段" required help="当索引来源和召回来源不同，用召回结果里的这个字段与索引结果关联字段匹配。">
-              <SelectField value={indexConfig.recallJoinField || ''} onChange={(recallJoinField) => onIndexChange({ recallJoinField })}>
-                <option value="">请选择</option>
-                {recallFieldOptions.map((field) => <option key={field} value={field}>{field}</option>)}
-              </SelectField>
-            </Field>
-          </div>
-        ) : null}
       </div>
     </section>
   );
@@ -1834,54 +1924,111 @@ function toJsonSchemaType(type = 'object') {
 }
 
 const inputTypeOptions = ['string', 'number', 'integer', 'boolean', 'object', 'array<object>', 'array<string>'];
+const inputArtifactTypeOptions = [
+  { value: 'file_object', label: '文件对象', type: 'object' },
+  { value: 'file_url', label: '文件地址', type: 'url' },
+  { value: 'text', label: '文本内容', type: 'string' },
+  { value: 'parsed_document', label: '解析后文档', type: 'object' },
+  { value: 'text_blocks', label: '文本块集合', type: 'array<object>' },
+  { value: 'text_chunks', label: '文本切片集', type: 'array<object>' },
+  { value: 'parent_child_chunks', label: '父子切片集', type: 'array<object>' },
+  { value: 'qa_pairs', label: 'QA对集合', type: 'array<object>' },
+  { value: 'knowledge_points', label: '知识点集合', type: 'array<object>' },
+];
 
-function EditableParamTable({ tip, rows, kind, columns, sourceInputs = [], onChange, onAdd, onRemove }) {
+function normalizeDataType(type = '') {
+  const value = String(type).toLowerCase();
+  if (value.includes('array')) return 'array';
+  if (value.includes('url')) return 'url';
+  if (value.includes('string')) return 'string';
+  if (value.includes('integer')) return 'number';
+  if (value.includes('number')) return 'number';
+  if (value.includes('boolean')) return 'boolean';
+  if (value.includes('object')) return 'object';
+  return value || 'object';
+}
+
+function isArtifactInputTypeMatched(artifactType, inputType) {
+  const artifactOption = inputArtifactTypeOptions.find((option) => option.value === artifactType);
+  if (!artifactOption || !inputType) return true;
+  const artifactNormalized = normalizeDataType(artifactOption.type);
+  const inputNormalized = normalizeDataType(inputType);
+  if (artifactNormalized === inputNormalized) return true;
+  return artifactNormalized === 'url' && inputNormalized === 'string';
+}
+
+function OptionWithType({ name, type }) {
+  return <span className="select-option-with-type"><span>{name}</span><small>{type}</small></span>;
+}
+
+function EditableParamTable({ title, tip, rows, kind, columns, sourceInputs = [], storageRules = [], onChange, onAdd, onRemove }) {
   const visibleColumns = onRemove ? [...columns, '操作'] : columns;
   return (
     <section className="schema-card editable-schema-card">
-      {tip ? <p className="step-tip">{tip}</p> : null}
-      {onAdd ? (
-        <div className="schema-actions">
-          <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 新增输出</button>
+      {title ? (
+        <div className="schema-head">
+          <strong>{title}</strong>
+          {onAdd ? <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加节点输出</button> : null}
         </div>
       ) : null}
+      {tip ? <p className="plain-step-tip">{tip}</p> : null}
       <table className={`data-table compact-table editable-schema-table ${kind === 'inputs' ? 'input-schema-table' : 'output-schema-table'}`}>
         <thead><tr>{visibleColumns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
         <tbody>
           {rows.map((row, index) => (
             <tr key={`${kind}-${index}`}>
-              <td><input value={row.name} onChange={(event) => onChange(kind, index, 'name', event.target.value)} /></td>
+              <td><input value={row.name} onChange={(event) => onChange(kind, row.__draftIndex ?? index, 'name', event.target.value)} /></td>
               {kind === 'inputs' ? (
                 <>
                   <td>
-                    <SelectField value={row.sourceName || row.name || ''} onChange={(sourceName) => onChange(kind, index, 'sourceName', sourceName)}>
-                      {sourceInputs.map((input) => <option key={input.name} value={input.name}>{input.name}</option>)}
-                    </SelectField>
-                  </td>
-                  <td>
-                    <SelectField value={row.type || 'object'} onChange={(type) => onChange(kind, index, 'type', type)}>
+                    <SelectField value={row.type || 'object'} onChange={(type) => onChange(kind, row.__draftIndex ?? index, 'type', type)}>
                       {inputTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
                     </SelectField>
                   </td>
-                  <td><input type="checkbox" checked={Boolean(row.required)} onChange={(event) => onChange(kind, index, 'required', event.target.checked)} /></td>
-                  <td><input value={row.defaultValue || ''} onChange={(event) => onChange(kind, index, 'defaultValue', event.target.value)} /></td>
-                  <td><input value={row.description || ''} onChange={(event) => onChange(kind, index, 'description', event.target.value)} /></td>
-                  <td><input type="checkbox" checked={row.exposed ?? true} onChange={(event) => onChange(kind, index, 'exposed', event.target.checked)} /></td>
+                  <td><input value={row.sourceName || row.name || ''} placeholder="例如 options.chunkSize" onChange={(event) => onChange(kind, row.__draftIndex ?? index, 'sourceName', event.target.value)} /></td>
+                  <td>
+                    <button type="button" className={`switch-control ${row.required ? 'active' : ''}`} onClick={() => onChange(kind, row.__draftIndex ?? index, 'required', !row.required)} aria-pressed={Boolean(row.required)}>
+                      <span />
+                    </button>
+                  </td>
+                  <td><input value={row.defaultValue || ''} onChange={(event) => onChange(kind, row.__draftIndex ?? index, 'defaultValue', event.target.value)} /></td>
+                  <td><input value={row.description || ''} onChange={(event) => onChange(kind, row.__draftIndex ?? index, 'description', event.target.value)} /></td>
+                  <td>
+                    <button type="button" className={`switch-control ${row.exposed ?? true ? 'active' : ''}`} onClick={() => onChange(kind, row.__draftIndex ?? index, 'exposed', !(row.exposed ?? true))} aria-pressed={row.exposed ?? true}>
+                      <span />
+                    </button>
+                  </td>
                 </>
               ) : (
                 <>
-                  <td><input value={row.path || row.sourcePath || row.name || ''} onChange={(event) => onChange(kind, index, 'path', event.target.value)} /></td>
                   <td>
-                    <SelectField value={row.type || 'object'} onChange={(type) => onChange(kind, index, 'type', type)}>
-                      {inputTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
+                    <SelectField value={row.artifactType || inferInputArtifactType(row.type)} onChange={(artifactType) => onChange(kind, row.__draftIndex ?? index, 'artifactType', artifactType)}>
+                      {inputArtifactTypeOptions.map((option) => <option key={option.value} value={option.value}><OptionWithType name={option.label} type={option.type} /></option>)}
                     </SelectField>
                   </td>
-                  <td><input value={row.description || ''} onChange={(event) => onChange(kind, index, 'description', event.target.value)} /></td>
+                  <td>
+                    <SelectField value={row.sourceType || 'mcpReturn'} onChange={(sourceType) => onChange(kind, row.__draftIndex ?? index, 'sourceType', sourceType)}>
+                      <option value="mcpReturn">MCP工具返回值</option>
+                      <option value="storageRef">存储引用</option>
+                    </SelectField>
+                  </td>
+                  <td>
+                    {(row.sourceType || 'mcpReturn') === 'storageRef' ? (
+                      <SelectField value={row.storageRuleId || ''} onChange={(storageRuleId) => onChange(kind, row.__draftIndex ?? index, 'storageRuleId', storageRuleId)}>
+                        <option value="">请选择</option>
+                        {storageRules.map((rule, ruleIndex) => <option key={rule.id} value={rule.id}>{`存储引用${ruleIndex + 1}：${rule.outputName || '未设置路径'}`}</option>)}
+                      </SelectField>
+                    ) : (
+                      <input value={row.path || row.sourcePath || row.name || ''} placeholder="例如 data.result" onChange={(event) => onChange(kind, row.__draftIndex ?? index, 'path', event.target.value)} />
+                    )}
+                  </td>
+                  <td><input value={row.description || ''} onChange={(event) => onChange(kind, row.__draftIndex ?? index, 'description', event.target.value)} /></td>
                 </>
               )}
               {onRemove ? <td><button type="button" className="danger-link" onClick={() => onRemove(index)}>删除</button></td> : null}
             </tr>
           ))}
+          {rows.length === 0 ? <tr><td colSpan={visibleColumns.length} className="empty-table-cell">暂无需要配置的参数</td></tr> : null}
         </tbody>
       </table>
     </section>
@@ -1944,6 +2091,135 @@ function StorageContractCard({ contract }) {
       <p>{contract.note}</p>
       {contract.indexEnabled ? <Badge tone="blue">保存后进入检索索引</Badge> : null}
     </section>
+  );
+}
+
+function NodeDetailBasicInfo({ tool, rawSource }) {
+  const rawTool = rawSource?.tool || {};
+  const rows = [
+    ['节点名称', tool.name || '-'],
+    ['节点描述', tool.description || '-'],
+    ['原始 MCP 服务', tool.sourceServiceName || tool.serviceName || '-'],
+    ['原始 MCP 工具名称', tool.sourceToolName || '-'],
+    ['原始 MCP 工具描述', rawTool.description || '-'],
+  ];
+  return (
+    <section className="node-detail-section">
+      <h3>节点基本信息</h3>
+      <div className="node-basic-fields">
+        {rows.map(([label, value]) => (
+          <div key={label} className="node-basic-field">
+            <label>{label}</label>
+            <span>{value}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function NodeStorageDetailTable({ contract }) {
+  const rules = normalizeStorageRules(contract, []);
+  return (
+    <section className="node-detail-section">
+      <h3>工具结果存储</h3>
+      <table className="data-table compact-table node-detail-table">
+        <thead>
+          <tr>
+            <th>MCP工具返回路径</th>
+            <th>存储的知识形态</th>
+            <th>存储目标</th>
+            <th>存储地址</th>
+            <th>存储位置</th>
+            <th>目标字段</th>
+            <th>写入方式</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rules.length ? rules.map((rule, index) => {
+            const storageTargetType = rule.storageTargetType || rule.storageType || 'Elasticsearch';
+            const storageAddress = storageTargetType === '对象存储' ? rule.objectStorageAddress : rule.esAddress;
+            const storageLocation = storageTargetType === '对象存储' ? rule.objectStoragePath : rule.esIndex;
+            return (
+              <tr key={rule.id || `${rule.outputName}-${index}`}>
+                <td>{rule.outputName || '-'}</td>
+                <td>{rule.artifactType || '-'}</td>
+                <td>{storageTargetType || '-'}</td>
+                <td>{storageAddress || '-'}</td>
+                <td>{storageLocation || '-'}</td>
+                <td>{rule.targetField || '-'}</td>
+                <td>{rule.writeMode || '-'}</td>
+              </tr>
+            );
+          }) : <tr><td colSpan={7} className="empty-table-cell">暂未配置工具结果存储</td></tr>}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function getArtifactTypeLabel(value, fallbackType = '') {
+  const option = inputArtifactTypeOptions.find((item) => item.value === value);
+  if (option) return `${option.label}（${option.type}）`;
+  return fallbackType || value || '-';
+}
+
+function getStorageRuleLabel(storageRules, storageRuleId) {
+  const index = storageRules.findIndex((rule) => rule.id === storageRuleId);
+  if (index < 0) return storageRuleId || '-';
+  const rule = storageRules[index];
+  return `存储引用${index + 1}：${rule.outputName || '-'}`;
+}
+
+function NodeMappingDetailTable({ tool }) {
+  const storageRules = normalizeStorageRules(tool.storageContract, tool.outputs || []);
+  const artifactPaths = new Set((tool.inputArtifacts || []).map((artifact) => artifact.sourcePath || artifact.sourceName).filter(Boolean));
+  const inputRows = (tool.inputArtifacts || []).map((artifact) => [
+    artifact.name || '-',
+    getArtifactTypeLabel(artifact.artifactType, artifact.type),
+    artifact.sourcePath || artifact.sourceName || '-',
+    artifact.description || '-',
+  ]);
+  const configRows = (tool.inputs || [])
+    .filter((input) => !artifactPaths.has(input.name))
+    .map((input) => [
+      input.name || '-',
+      input.type || '-',
+      input.sourceName || input.name || '-',
+      input.required ? '是' : '否',
+      input.defaultValue || '-',
+      input.description || '-',
+    ]);
+  const outputRows = (tool.outputs || []).map((output) => [
+    output.name || '-',
+    getArtifactTypeLabel(output.artifactType, output.type),
+    output.sourceType === 'storageRef' ? '存储引用' : 'MCP工具返回值',
+    output.sourceType === 'storageRef' ? getStorageRuleLabel(storageRules, output.storageRuleId) : output.path || output.name || '-',
+    output.description || '-',
+  ]);
+  return (
+    <section className="node-detail-section">
+      <h3>参数映射</h3>
+      <NodeMappingSubTable title="节点输入" columns={['输入名称', '输入类型', 'MCP工具入参路径', '输入描述']} rows={inputRows} />
+      <NodeMappingSubTable title="配置参数" columns={['配置名称', '类型', 'MCP工具入参路径', '必填', '默认值', '说明']} rows={configRows} />
+      <NodeMappingSubTable title="节点输出" columns={['输出名称', '输出类型', '输出来源', 'MCP工具返回路径/存储引用', '说明']} rows={outputRows} />
+    </section>
+  );
+}
+
+function NodeMappingSubTable({ title, columns, rows }) {
+  return (
+    <div className="node-mapping-group">
+      <h4>{title}</h4>
+      <table className="data-table compact-table node-detail-table node-mapping-table">
+        <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+        <tbody>
+          {rows.length ? rows.map((row, index) => (
+            <tr key={`${title}-${index}`}>{row.map((cell, cellIndex) => <td key={`${title}-${index}-${cellIndex}`}>{cell}</td>)}</tr>
+          )) : <tr><td colSpan={columns.length} className="empty-table-cell">暂无{title}</td></tr>}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -2555,6 +2831,89 @@ const defaultParamDescriptions = {
   topK: '需要返回的关键词数量上限。',
 };
 
+const workbenchParamLabels = {
+  file: '文件对象',
+  parse_mode: '解析模式',
+  language: '文档语言',
+  content: '政策正文',
+  input: '输入内容',
+  chunk_size: '切片长度',
+  overlap: '重叠长度',
+  model: '模型',
+  system_prompt: '提示词',
+  summary_type: '摘要类型',
+  ocr_language: 'OCR语言',
+  enable_layout: '识别版面',
+  pages: '页级内容',
+  table_mode: '表格解析模式',
+  chunks: '文本切片',
+  batch_size: '批处理大小',
+  query: '检索问题',
+  candidates: '候选结果',
+  top_k: '返回数量',
+  metrics: '评估指标',
+  qaPairs: 'QA对',
+  sourceChunks: '来源切片',
+};
+
+const workbenchOutputLabels = {
+  title: '文档标题',
+  sections: '章节结构',
+  paragraphs: '段落列表',
+  metadata: '元数据',
+  documentSections: '文档章节',
+  documentBlocks: '文档块',
+  documentParseResult: '文档解析结果',
+  tables: '表格结果',
+  figures: '图片结果',
+  layout: '版面结构',
+  ocrPages: 'OCR页结果',
+  ocrMetadata: 'OCR元数据',
+  tableMetadata: '表格元数据',
+  textChunkResult: '文本分片结果',
+  textChunks: '文本切片',
+  parentChunks: '父切片',
+  childChunks: '子切片',
+  chunkRelations: '切片关系',
+  stats: '统计信息',
+  chunkStats: '切片统计',
+  summary: '知识摘要',
+  summaryResult: '知识点结果',
+  knowledgePoints: '知识点',
+  applicableUsers: '适用对象',
+  keyRules: '关键规则',
+  qaResult: 'QA结果',
+  qaPairs: 'QA对',
+  qaStats: 'QA统计',
+  embeddings: '向量结果',
+  embeddingStats: '向量统计',
+  chunkQualityReport: '切片质量报告',
+  badChunks: '问题切片',
+  keywordResult: '关键词结果',
+};
+
+const workbenchParamSelects = {
+  parse_mode: ['通用解析', '政策条款解析', 'OCR解析'],
+  language: ['zh-CN', 'en-US'],
+  ocr_language: ['zh-CN', 'en-US', 'ja-JP'],
+  table_mode: ['自动识别', '强表格模式', '版面优先'],
+  model: ['qwen3-8b', 'qwen3-32b', 'bge-m3', 'text-embedding-v3'],
+  summary_type: ['政策摘要', '办理条件', '材料清单', '风险提示'],
+  enable_layout: ['开启', '关闭'],
+};
+
+function getWorkbenchParamLabel(name) {
+  return workbenchParamLabels[name] || name;
+}
+
+function getWorkbenchOutputLabel(name) {
+  return workbenchOutputLabels[name] || name;
+}
+
+function getWorkbenchParamOptions(name) {
+  return workbenchParamSelects[name] || null;
+}
+
 function makeParam(idValue, label, value, options = {}) {
   return {
     id: idValue,
@@ -2668,7 +3027,7 @@ const baseTools = [
     name: '代码工具',
     category: '系统工具',
     sourceType: 'system',
-    serviceName: '知识工程内置 MCP Server',
+    serviceName: '流程引擎默认节点',
     summary: '接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。',
     status: '可用',
     input: 'rawText',
@@ -2687,7 +3046,7 @@ const baseTools = [
     name: '数据存储工具',
     category: '系统工具',
     sourceType: 'system',
-    serviceName: '知识工程内置 MCP Server',
+    serviceName: '流程引擎默认节点',
     summary: '选择前置工具输出中的指定路径，将结果写入 ES。',
     status: '可用',
     input: 'cleanText',
@@ -2769,26 +3128,33 @@ const higressWorkbenchToolFlow = {
 
 function toolInputToParam(input, index) {
   const type = String(input.type || '').toLowerCase();
-  const paramType = type.includes('number') || type.includes('int') ? 'number' : type.includes('array') || type.includes('object') ? 'textarea' : 'text';
   const name = input.name || `input_${index + 1}`;
-  return makeParam(name, name, defaultToolParamValue(name, paramType), {
+  const selectOptions = getWorkbenchParamOptions(name);
+  const paramType = selectOptions ? 'select' : type.includes('number') || type.includes('int') ? 'number' : type.includes('array') || type.includes('object') ? 'textarea' : 'text';
+  return makeParam(name, getWorkbenchParamLabel(name), defaultToolParamValue(name, paramType), {
     type: paramType,
     schemaType: input.type || paramType,
     required: input.required ?? true,
     desc: input.description || '',
+    options: selectOptions || [],
   });
 }
 
 function defaultToolParamValue(name, paramType) {
   if (name === 'file') return '{ "fileUrl": "${sample.fileUrl}", "fileName": "${sample.fileName}", "fileType": "pdf" }';
-  if (name === 'parse_mode') return 'policy_clause';
+  if (name === 'parse_mode') return '政策条款解析';
   if (name === 'language') return 'zh-CN';
+  if (name === 'ocr_language') return 'zh-CN';
+  if (name === 'enable_layout') return '开启';
+  if (name === 'table_mode') return '自动识别';
   if (name === 'content') return '';
   if (name === 'chunk_size') return 800;
   if (name === 'overlap') return 80;
   if (name === 'model') return 'qwen3-8b';
   if (name === 'system_prompt') return '请基于医保政策原文生成问答对，答案必须来自原文，并保留来源片段。';
   if (name === 'summary_type') return '政策摘要';
+  if (name === 'batch_size') return 32;
+  if (name === 'top_k') return 10;
   if (paramType === 'number') return 0;
   return '';
 }
@@ -2807,7 +3173,7 @@ function managedToolToWorkbenchTool(tool) {
   const params = (tool.inputs || []).map(toolInputToParam);
   const outputs = (tool.outputs || []).map((output, index) => {
     const name = output.name || `output_${index + 1}`;
-    return makeOutput(name, name, output.description || '工具输出结果。', output.path || name, output.type || 'object');
+    return makeOutput(name, getWorkbenchOutputLabel(name), output.description || '节点输出结果。', output.path || name, output.type || 'object');
   });
   return {
     id: higressWorkbenchToolIds[tool.name] || tool.id,
@@ -3381,7 +3747,7 @@ function getParamPreview(param, nodes = []) {
   if (param.source?.type === 'file') return '原始文件的地址信息';
   if (param.source?.type === 'upstream') {
     const source = nodes.find((node) => node.nodeId === param.source.sourceNodeId);
-    return `上游工具 · ${source?.toolName || '来源已失效'} · ${param.source.outputPath || '未配置取值路径'}`;
+    return `上游节点 · ${source?.toolName || '来源已失效'} · ${param.source.outputPath || '未选择输出'}`;
   }
   if (Array.isArray(param.value)) return param.value.length ? param.value.join('、') : '';
   if (typeof param.value === 'boolean') return param.value ? '开启' : '关闭';
@@ -3390,19 +3756,18 @@ function getParamPreview(param, nodes = []) {
 }
 
 function getToolPreviewParams(node) {
-  if (node.toolId === 'system-code') {
-    const codeInputs = (node.codeInputs || []).map((input) => ({
-      id: input.id,
-      label: input.name || '未命名入参',
-      type: 'text',
-      value: input.value,
-      source: input.source,
-      required: true,
-    }));
-    const scriptParam = node.params.find((param) => param.id === 'script');
-    return scriptParam ? [...codeInputs, scriptParam] : codeInputs;
+  return node.params.filter((param) => param.id !== node.inputParamId);
+}
+
+function getSelectableNodeOutputs(sourceNode, currentPath = '') {
+  const outputs = (sourceNode?.outputs || []).map((output) => ({
+    value: output.path || output.id || output.name,
+    label: output.label || output.name || output.path,
+  })).filter((output) => output.value);
+  if (currentPath && !outputs.some((output) => output.value === currentPath)) {
+    outputs.push({ value: currentPath, label: currentPath });
   }
-  return node.params;
+  return outputs;
 }
 
 function getRuntimeLabel(status) {
@@ -3806,7 +4171,7 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
   const addTool = (tool) => {
     if (!tool) return;
     if (planNodes.some((node) => node.toolId === tool.id) && !tool.allowMultiple) {
-      notify('该工具已添加', 'warning');
+      notify('该节点已添加', 'warning');
       return;
     }
     const prev = planNodes[planNodes.length - 1];
@@ -3815,7 +4180,7 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
     setPlanNodes((current) => [...current, { ...node, expanded: true, adjusted: true }]);
     setAddOpen(false);
     setConfirmed(false);
-    notify(`已添加工具，已归入${node.category}`, 'success');
+    notify(`已添加节点，已归入${node.category}`, 'success');
   };
 
   const testPlan = () => {
@@ -4202,32 +4567,113 @@ function AddToolDialog({ tools, categories, nodes, confirmed, onClose, onAdd }) 
   const selectedToolAdded = Boolean(current && addedToolIds.has(current.id) && !current.allowMultiple);
   return (
     <Modal
-      title={(
-        <span className="add-tool-title">
-          <strong>添加工具</strong>
-          <small>从管理端维护的工具分类中选择可用工具</small>
-        </span>
-      )}
+      title="添加节点"
       wide
       className="add-tool-modal"
       onClose={onClose}
-      footer={<><button type="button" className="secondary" onClick={onClose}>取消</button><button type="button" className="primary" disabled={!current || selectedToolAdded || confirmed} onClick={() => onAdd(current)}>{selectedToolAdded ? '工具已添加' : confirmed ? '方案已确认' : '确认添加'}</button></>}
+      footer={<><button type="button" className="secondary" onClick={onClose}>取消</button><button type="button" className="primary" disabled={!current || selectedToolAdded || confirmed} onClick={() => onAdd(current)}>{selectedToolAdded ? '节点已添加' : confirmed ? '方案已确认' : '确认添加'}</button></>}
     >
       <div className="add-tool-grid">
-        <div className="tool-picker-list category-picker"><div className="tool-picker-title">分类</div>{cats.map((cat) => <button type="button" key={cat} className={category === cat ? 'active' : ''} onClick={() => { setCategory(cat); setSelectedId((cat === allToolsCategory ? tools : tools.filter((tool) => tool.category === cat))[0]?.id || ''); }}><span>{cat}</span><Badge>{cat === allToolsCategory ? tools.length : tools.filter((tool) => tool.category === cat).length}</Badge></button>)}</div>
-        <div className="tool-picker-list tool-list-picker"><div className="tool-picker-title">工具列表</div>{filtered.map((tool) => {
+        <div className="tool-picker-list category-picker"><div className="tool-picker-title">节点分类</div>{cats.map((cat) => <button type="button" key={cat} className={category === cat ? 'active' : ''} onClick={() => { setCategory(cat); setSelectedId((cat === allToolsCategory ? tools : tools.filter((tool) => tool.category === cat))[0]?.id || ''); }}><span>{cat}</span><Badge>{cat === allToolsCategory ? tools.length : tools.filter((tool) => tool.category === cat).length}</Badge></button>)}</div>
+        <div className="tool-picker-list tool-list-picker"><div className="tool-picker-title">节点列表</div>{filtered.map((tool) => {
           const isAdded = addedToolIds.has(tool.id) && !tool.allowMultiple;
           return <button type="button" key={tool.id} className={`${selectedId === tool.id ? 'active' : ''} ${isAdded ? 'added' : ''}`.trim()} onClick={() => setSelectedId(tool.id)}><strong>{tool.name}{isAdded ? <Badge>已添加</Badge> : null}</strong><span>{tool.category} · {tool.summary}</span></button>;
         })}</div>
-        <div className="tool-detail-mini">{current ? <ToolSchemaCard tool={{ ...current, inputs: current.params.map((p) => ({ name: p.label, type: p.schemaType || p.type, required: p.required, desc: p.desc || p.description })), outputs: current.outputs.map((o) => ({ name: o.label || o.name, type: o.type || o.path, desc: o.desc || o.description })) }} /> : null}</div>
+        <div className="tool-detail-mini">{current ? <AddNodeDetail tool={current} /> : null}</div>
       </div>
     </Modal>
+  );
+}
+
+function AddNodeDetail({ tool }) {
+  const inputParamId = tool.inputParamId || tool.params?.find((param) => param.source?.type === 'file' || param.source?.type === 'upstream')?.id;
+  const nodeInputs = (tool.params || []).filter((param) => param.id === inputParamId || param.source?.type === 'file' || param.source?.type === 'upstream');
+  const inputIds = new Set(nodeInputs.map((param) => param.id));
+  const configParams = (tool.params || []).filter((param) => !inputIds.has(param.id));
+  const outputRows = (tool.outputs || []).map((output) => ({
+    name: output.label || output.name,
+    description: output.desc || output.description || output.path || '',
+    type: output.type || 'object',
+    required: '-',
+  }));
+  return (
+    <div className="add-node-detail">
+      <AddNodeParamGroup title="节点输入" rows={nodeInputs.map((param) => paramToNodeDetailRow(param))} emptyText="暂无节点输入" />
+      <AddNodeParamGroup title="配置参数" rows={configParams.map((param) => paramToNodeDetailRow(param))} emptyText="暂无配置参数" />
+      <AddNodeParamGroup title="节点输出" rows={outputRows} emptyText="暂无节点输出" />
+    </div>
+  );
+}
+
+function paramToNodeDetailRow(param) {
+  return {
+    name: param.label || param.name || param.id,
+    description: param.desc || param.description || '',
+    type: param.schemaType || param.type || 'text',
+    required: param.required ? '是' : '否',
+  };
+}
+
+function AddNodeParamGroup({ title, rows, emptyText }) {
+  return (
+    <div className="add-node-param-group">
+      <h4>{title}</h4>
+      {rows.length ? rows.map((row, index) => (
+        <div className="add-node-param-item" key={`${title}-${row.name}-${index}`}>
+          <div>
+            <strong>{row.name}</strong>
+            {row.description ? <span>{row.description}</span> : null}
+          </div>
+          <em>{row.type || '-'}</em>
+          <b>{row.required}</b>
+        </div>
+      )) : <p className="empty-mini">{emptyText}</p>}
+    </div>
+  );
+}
+
+function SimpleNodeConfigParam({ param, onChange }) {
+  const updateValue = (value) => onChange({ ...param, value, source: { type: 'manual' } });
+  const value = Array.isArray(param.value) ? param.value.join('、') : param.value;
+  return (
+    <label className="simple-node-param-row">
+      <span>{param.label}{param.required ? <em>*</em> : null}</span>
+      {param.type === 'select' ? (
+        <SelectField value={param.value} onChange={updateValue}>
+          {param.options.map((option) => <option key={option} value={option}>{option}</option>)}
+        </SelectField>
+      ) : param.type === 'multiSelect' || param.type === 'tags' ? (
+        <input value={value ?? ''} onChange={(event) => updateValue(event.target.value.split(/[、,]/).filter(Boolean))} />
+      ) : param.type === 'textarea' ? (
+        <textarea value={value ?? ''} onChange={(event) => updateValue(event.target.value)} />
+      ) : (
+        <input type={param.type === 'number' ? 'number' : 'text'} value={value ?? ''} onChange={(event) => updateValue(param.type === 'number' ? Number(event.target.value) : event.target.value)} />
+      )}
+    </label>
+  );
+}
+
+function NodeOutputReadonlyTable({ outputs }) {
+  return (
+    <div className="output-schema">
+      {outputs.length ? outputs.map((output) => (
+        <span className="output-item" key={output.path || output.id || output.name}>
+          <span className="output-item-title">
+            <code>{output.label || output.name || '-'}</code>
+            <strong>{output.type || '-'}</strong>
+          </span>
+          <small>{output.desc || output.description || '-'}</small>
+        </span>
+      )) : <div className="empty-mini">暂无节点输出</div>}
+    </div>
   );
 }
 
 function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, inlineSource = false, showHeader = true, showFx = true }) {
   const active = param.source?.type === 'file' || param.source?.type === 'upstream';
   const sourceType = param.source?.type === 'upstream' ? 'upstream' : param.source?.type === 'file' ? 'file' : 'manual';
+  const upstreamNode = priorNodes.find((item) => item.nodeId === param.source?.sourceNodeId) || priorNodes[0];
+  const upstreamOutputs = getSelectableNodeOutputs(upstreamNode, param.source?.outputPath);
   const updateSourceType = (type) => {
     if (type === 'manual') onChange({ ...param, source: { type: 'manual' } });
     else if (type === 'file') onChange({ ...param, source: { type: 'file' } });
@@ -4245,6 +4691,7 @@ function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, i
         : <input type={param.type === 'number' ? 'number' : 'text'} value={Array.isArray(param.value) ? param.value.join('、') : param.value} onChange={(event) => onChange({ ...param, value: param.type === 'number' ? Number(event.target.value) : event.target.value })} />;
 
   if (inlineSource) {
+    const inlineSourceType = sourceType === 'upstream' ? 'upstream' : 'file';
     return (
       <div className="param-editor-row inline-source">
         <label className="param-name-column">
@@ -4253,23 +4700,23 @@ function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, i
         </label>
         <label className="source-field">
           <span>{showHeader ? '取值方式' : ''}</span>
-          <SelectField value={sourceType} onChange={updateSourceType}>
-            <option value="manual">手动输入</option>
+          <SelectField value={inlineSourceType} onChange={updateSourceType}>
             <option value="file">引用原始文件</option>
-            <option value="upstream" disabled={priorNodes.length === 0}>引用上游工具输出</option>
+            <option value="upstream" disabled={priorNodes.length === 0}>引用上游节点输出</option>
           </SelectField>
         </label>
         <div className="param-value-column">
           <span>{showHeader ? '参数值' : ''}</span>
-          {sourceType === 'manual' ? renderManualField() : null}
-          {sourceType === 'file' ? <input readOnly value="原始文件的地址信息" /> : null}
-          {sourceType === 'upstream' ? (
+          {inlineSourceType === 'file' ? <input readOnly value="原始文件的地址信息" /> : null}
+          {inlineSourceType === 'upstream' ? (
             <div className="param-upstream-setting">
-              <PrefixedSelectField label="工具" value={param.source?.sourceNodeId || ''} onChange={(value) => {
+              <PrefixedSelectField label="上游节点" value={param.source?.sourceNodeId || ''} onChange={(value) => {
                   const source = priorNodes.find((item) => item.nodeId === value);
                   onChange({ ...param, source: { type: 'upstream', sourceNodeId: value, outputPath: source?.outputs[0]?.path || 'data.result' } });
                 }}>{priorNodes.map((item) => <option key={item.nodeId} value={item.nodeId}>{item.toolName}</option>)}</PrefixedSelectField>
-              <PrefixedInput label="取值路径" value={param.source?.outputPath || ''} onChange={(event) => onChange({ ...param, source: { ...param.source, type: 'upstream', outputPath: event.target.value } })} />
+              <PrefixedSelectField label="选择输出" value={param.source?.outputPath || upstreamOutputs[0]?.value || ''} onChange={(outputPath) => onChange({ ...param, source: { ...param.source, type: 'upstream', outputPath } })}>
+                {upstreamOutputs.map((output) => <option key={output.value} value={output.value}>{output.label}</option>)}
+              </PrefixedSelectField>
             </div>
           ) : null}
         </div>
@@ -4297,22 +4744,24 @@ function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, i
           <label className="source-field">
             <span>取值方式</span>
             <SelectField value={param.source?.type === 'upstream' ? 'upstream' : 'file'} onChange={updateSourceType}>
-              <option value="upstream" disabled={priorNodes.length === 0}>引用上游工具输出</option>
+              <option value="upstream" disabled={priorNodes.length === 0}>引用上游节点输出</option>
               <option value="file">引用原始文件</option>
             </SelectField>
           </label>
           {param.source?.type === 'upstream' ? (
             <>
               <label className="source-field">
-                <span>上游工具</span>
+                <span>上游节点</span>
                 <SelectField value={param.source.sourceNodeId || ''} onChange={(value) => {
                   const source = priorNodes.find((item) => item.nodeId === value);
                   onChange({ ...param, source: { type: 'upstream', sourceNodeId: value, outputPath: source?.outputs[0]?.path || 'data.result' } });
                 }}>{priorNodes.map((item) => <option key={item.nodeId} value={item.nodeId}>{item.toolName}</option>)}</SelectField>
               </label>
               <label className="source-field">
-                <span>取值路径</span>
-                <input value={param.source.outputPath || ''} onChange={(event) => onChange({ ...param, source: { ...param.source, outputPath: event.target.value } })} />
+                <span>选择输出</span>
+                <SelectField value={param.source.outputPath || upstreamOutputs[0]?.value || ''} onChange={(outputPath) => onChange({ ...param, source: { ...param.source, outputPath } })}>
+                  {upstreamOutputs.map((output) => <option key={output.value} value={output.value}>{output.label}</option>)}
+                </SelectField>
               </label>
             </>
           ) : (
@@ -4332,7 +4781,18 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
   const priorNodes = getPriorNodes(nodes, node.nodeId);
   const scriptParam = draft.params.find((param) => param.id === 'script');
   const normalParams = draft.toolId === 'system-code' ? draft.params.filter((param) => param.id === 'outputVariables') : draft.params;
-  const updateParam = (nextParam) => setDraft((current) => ({ ...current, inputSource: nextParam.id === current.inputParamId && nextParam.source?.type === 'upstream' ? { type: 'upstream', sourceNodeId: nextParam.source.sourceNodeId, outputPath: nextParam.source.outputPath } : current.inputSource, params: current.params.map((param) => param.id === nextParam.id ? nextParam : param) }));
+  const nodeInputParamId = draft.inputParamId || normalParams[0]?.id || '';
+  const nodeInputParams = normalParams.filter((param) => param.id === nodeInputParamId);
+  const configParams = normalParams.filter((param) => param.id !== nodeInputParamId);
+  const updateParam = (nextParam) => setDraft((current) => {
+    const isNodeInput = nextParam.id === current.inputParamId;
+    const inputSource = isNodeInput
+      ? nextParam.source?.type === 'upstream'
+        ? { type: 'upstream', sourceNodeId: nextParam.source.sourceNodeId, outputPath: nextParam.source.outputPath }
+        : { type: 'fixed' }
+      : current.inputSource;
+    return { ...current, inputSource, params: current.params.map((param) => param.id === nextParam.id ? nextParam : param) };
+  });
   const updateCodeInput = (idValue, patch) => setDraft((current) => ({
     ...current,
     codeInputs: (current.codeInputs || []).map((input) => input.id === idValue ? { ...input, ...patch } : input),
@@ -4359,7 +4819,7 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
         <span className="config-modal-title">
           <span className="config-modal-icon"><ToolOutlined /></span>
           <span className="config-modal-title-copy">
-            <strong>编辑工具配置</strong>
+            <strong>编辑节点配置</strong>
             <small>{node.toolName} · {node.category}</small>
           </span>
         </span>
@@ -4377,6 +4837,8 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
               {(draft.codeInputs || []).map((input, index) => {
                 const source = input.source || { type: 'manual' };
                 const sourceType = source.type === 'upstream' ? 'upstream' : source.type === 'file' ? 'file' : 'manual';
+                const sourceNode = priorNodes.find((item) => item.nodeId === source.sourceNodeId) || priorNodes[0];
+                const sourceOutputs = getSelectableNodeOutputs(sourceNode, source.outputPath);
                 const updateInputSource = (nextSource) => updateCodeInputSource(input.id, { source: nextSource, value: input.value || '' });
                 const updateSourceType = (type) => {
                   if (type === 'manual') updateInputSource({ type: 'manual' });
@@ -4397,7 +4859,7 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
                       <SelectField value={sourceType} onChange={updateSourceType}>
                         <option value="manual">手动输入</option>
                         <option value="file">引用原始文件</option>
-                        <option value="upstream" disabled={priorNodes.length === 0}>引用上游工具输出</option>
+                        <option value="upstream" disabled={priorNodes.length === 0}>引用上游节点输出</option>
                       </SelectField>
                     </label>
                     <div className="code-input-value-setting">
@@ -4406,11 +4868,13 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
                       {sourceType === 'file' ? <input readOnly value="原始文件的地址信息" /> : null}
                       {sourceType === 'upstream' ? (
                         <div className="param-upstream-setting">
-                          <PrefixedSelectField label="工具" value={source.sourceNodeId || ''} onChange={(value) => {
+                          <PrefixedSelectField label="上游节点" value={source.sourceNodeId || ''} onChange={(value) => {
                               const nextSourceNode = priorNodes.find((item) => item.nodeId === value);
                               updateInputSource({ type: 'upstream', sourceNodeId: value, outputPath: nextSourceNode?.outputs[0]?.path || 'data.result' });
                             }}>{priorNodes.map((item) => <option key={item.nodeId} value={item.nodeId}>{item.toolName}</option>)}</PrefixedSelectField>
-                          <PrefixedInput label="取值路径" value={source.outputPath || ''} onChange={(event) => updateInputSource({ ...source, type: 'upstream', outputPath: event.target.value })} />
+                          <PrefixedSelectField label="选择输出" value={source.outputPath || sourceOutputs[0]?.value || ''} onChange={(outputPath) => updateInputSource({ ...source, type: 'upstream', outputPath })}>
+                            {sourceOutputs.map((output) => <option key={output.value} value={output.value}>{output.label}</option>)}
+                          </PrefixedSelectField>
                         </div>
                       ) : null}
                     </div>
@@ -4448,23 +4912,24 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
           </section>
         </>
       ) : (
-        <section className="config-section">
-          <div className="config-section-head"><h3>工具参数</h3></div>
-          <div className="param-list">
-            {normalParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} onChange={updateParam} singleLine={index === 0} inlineSource showHeader={index === 0} />)}
-          </div>
-        </section>
+        <>
+          <section className="config-section">
+            <div className="config-section-head"><h3>节点输入</h3></div>
+            <div className="param-list">
+              {nodeInputParams.length ? nodeInputParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} onChange={updateParam} singleLine={index === 0} inlineSource showHeader={index === 0} />) : <div className="empty-mini">暂无节点输入</div>}
+            </div>
+          </section>
+          <section className="config-section">
+            <div className="config-section-head"><h3>配置参数</h3></div>
+            <div className="simple-node-param-list">
+              {configParams.length ? configParams.map((param) => <SimpleNodeConfigParam key={param.id} param={param} onChange={updateParam} />) : <div className="empty-mini">暂无配置参数</div>}
+            </div>
+          </section>
+        </>
       )}
       <section className="config-section">
-        <div className="config-section-head"><h3>工具输出</h3></div>
-        <div className="output-schema">
-          {draft.outputs.map((output) => (
-            <span className="output-item" key={output.path}>
-              <code>{output.path}</code>
-              <small>{output.desc}</small>
-            </span>
-          ))}
-        </div>
+        <div className="config-section-head"><h3>节点输出</h3></div>
+        <NodeOutputReadonlyTable outputs={draft.outputs || []} />
       </section>
     </Modal>
   );

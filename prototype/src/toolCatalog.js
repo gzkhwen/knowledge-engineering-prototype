@@ -1,6 +1,6 @@
-const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v10';
-const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v10';
-const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v10';
+const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v16';
+const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v16';
+const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v16';
 const CATALOG_EVENT = 'knowledge-engineering-managed-tool-catalog-changed';
 const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v4',
@@ -21,9 +21,27 @@ const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v9',
   'knowledge-engineering-demo-higress-managed-tools-v9',
   'knowledge-engineering-demo-higress-managed-tool-categories-v9',
+  'knowledge-engineering-demo-higress-mcp-services-v10',
+  'knowledge-engineering-demo-higress-managed-tools-v10',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v10',
+  'knowledge-engineering-demo-higress-mcp-services-v11',
+  'knowledge-engineering-demo-higress-managed-tools-v11',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v11',
+  'knowledge-engineering-demo-higress-mcp-services-v12',
+  'knowledge-engineering-demo-higress-managed-tools-v12',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v12',
+  'knowledge-engineering-demo-higress-mcp-services-v13',
+  'knowledge-engineering-demo-higress-managed-tools-v13',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v13',
+  'knowledge-engineering-demo-higress-mcp-services-v14',
+  'knowledge-engineering-demo-higress-managed-tools-v14',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v14',
+  'knowledge-engineering-demo-higress-mcp-services-v15',
+  'knowledge-engineering-demo-higress-managed-tools-v15',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v15',
 ];
 
-export const defaultCategories = ['系统工具', '文档解析', '文本分片', '知识提取', '结果存储'];
+export const defaultCategories = ['文档解析', '文本分片', '知识提取', '向量处理', '质量评估'];
 
 function nowText() {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -147,6 +165,103 @@ const higressDemoTools = [
   },
 ];
 
+const mineruDemoTools = [
+  {
+    name: 'OCR解析',
+    description: '对扫描件、图片型 PDF 进行 OCR 识别，输出页级文本、坐标和置信度。',
+    category: '未分类',
+    enabled: true,
+    inputs: [
+      createInput('file', 'object', true, '待 OCR 的文件对象。'),
+      createInput('ocr_language', 'string', false, 'OCR 语言，默认 zh-CN。'),
+      createInput('enable_layout', 'boolean', false, '是否同时识别版面坐标。'),
+    ],
+    outputs: [
+      createOutput('ocrPages', 'array<object>', '页级 OCR 结果，包含 text、bbox、confidence。'),
+      createOutput('ocrMetadata', 'object', 'OCR 语言、页数、平均置信度和耗时。'),
+    ],
+  },
+  {
+    name: '表格解析',
+    description: '识别文档中的表格区域，输出表格结构、单元格文本和来源页码。',
+    category: '未分类',
+    enabled: true,
+    inputs: [
+      createInput('file', 'object', true, '待解析文件对象。'),
+      createInput('pages', 'array<object>', false, '可选的页级文本或版面块。'),
+      createInput('table_mode', 'string', false, '表格解析模式。'),
+    ],
+    outputs: [
+      createOutput('tables', 'array<object>', '表格集合，包含行列结构、单元格内容和页码。'),
+      createOutput('tableMetadata', 'object', '表格数量、失败页码和解析耗时。'),
+    ],
+  },
+];
+
+const vectorDemoTools = [
+  {
+    name: '文本向量化',
+    description: '对文本片段批量生成向量，输出 embedding 和向量生成统计信息。',
+    category: '未分类',
+    enabled: true,
+    inputs: [
+      createInput('chunks', 'array<object>', true, '待向量化的文本片段集合。'),
+      createInput('model', 'string', false, '向量模型名称。'),
+      createInput('batch_size', 'integer', false, '批处理大小。'),
+    ],
+    outputs: [
+      createOutput('embeddings', 'array<object>', '每个文本片段对应的向量结果。'),
+      createOutput('embeddingStats', 'object', '向量维度、成功数量和失败数量。'),
+    ],
+  },
+  {
+    name: '召回重排',
+    description: '对候选召回结果进行相关性重排，输出排序后的候选片段。',
+    category: '未分类',
+    enabled: true,
+    inputs: [
+      createInput('query', 'string', true, '用户问题或检索 query。'),
+      createInput('candidates', 'array<object>', true, '候选召回结果。'),
+      createInput('top_k', 'integer', false, '返回数量。'),
+    ],
+    outputs: [
+      createOutput('rerankedResults', 'array<object>', '重排后的候选结果。'),
+      createOutput('rerankStats', 'object', '候选数量、返回数量和模型耗时。'),
+    ],
+  },
+];
+
+const qualityDemoTools = [
+  {
+    name: '切片质量评估',
+    description: '评估文本切片的长度、完整性、重复率和边界质量。',
+    category: '未分类',
+    enabled: true,
+    inputs: [
+      createInput('chunks', 'array<object>', true, '待评估的文本切片集合。'),
+      createInput('metrics', 'array<string>', false, '评估指标列表。'),
+    ],
+    outputs: [
+      createOutput('chunkQualityReport', 'object', '切片质量评分、问题明细和改进建议。'),
+      createOutput('badChunks', 'array<object>', '质量较低的切片列表。'),
+    ],
+  },
+  {
+    name: 'QA质量评估',
+    description: '评估 QA 对的问题清晰度、答案完整性和来源一致性。',
+    category: '未分类',
+    enabled: true,
+    inputs: [
+      createInput('qaPairs', 'array<object>', true, '待评估的 QA 对集合。'),
+      createInput('sourceChunks', 'array<object>', false, 'QA 对对应的来源片段。'),
+    ],
+    outputs: [
+      createOutput('qaQualityReport', 'object', 'QA 质量评分、问题类型和审核建议。'),
+      createOutput('lowQualityQaPairs', 'array<object>', '低质量 QA 对列表。'),
+    ],
+  },
+];
+
 function defaultToolInputs(toolName) {
   if (toolName.includes('解析')) {
     return [
@@ -239,29 +354,6 @@ function normalizeToolOutputs(tool) {
 
 export const initialServices = [
   {
-    id: 'svc-system-internal',
-    name: '知识工程内置 MCP Server',
-    serviceType: '系统内置',
-    endpoint: 'system://knowledge-engineering/internal-mcp',
-    transport: 'Streamable HTTP',
-    authType: '无鉴权',
-    version: 'V1.0.0',
-    status: '连接正常',
-    locked: true,
-    toolCount: 2,
-    toolNames: ['代码工具', '数据存储工具'],
-    lastSyncedAt: '2026-05-29 09:30',
-    description: '知识工程平台自研维护的系统工具服务，向 Agent 和流程引擎提供代码工具、数据存储工具。',
-    toolCategories: {
-      代码工具: '系统工具',
-      数据存储工具: '系统工具',
-    },
-    tools: [
-      { name: '代码工具', description: '接收前置工具输出，执行脚本后产出可被后续工具引用的变量。', enabled: true },
-      { name: '数据存储工具', description: '选择工具输出路径并写入 ES 等目标存储。', enabled: true },
-    ],
-  },
-  {
     id: 'svc-customer-doc',
     name: '客户自建文档处理 MCP',
     serviceType: '标准 MCP Server',
@@ -276,6 +368,54 @@ export const initialServices = [
     description: '客户侧自建 MCP Server，提供文档解析、切片和 QA 抽取等原始工具。',
     toolCategories: Object.fromEntries(higressDemoTools.map((tool) => [tool.name, tool.category || '未分类'])),
     tools: higressDemoTools,
+  },
+  {
+    id: 'svc-mineru-parse',
+    name: 'MinerU 文档解析 MCP',
+    serviceType: '标准 MCP Server',
+    endpoint: 'https://mcp.internal.com/mineru/sse',
+    transport: 'SSE',
+    authType: 'Bearer Token',
+    version: 'V1.0.3',
+    status: '连接正常',
+    toolCount: mineruDemoTools.length,
+    toolNames: mineruDemoTools.map((tool) => tool.name),
+    lastSyncedAt: '2026-05-28 14:16',
+    description: '封装 MinerU 类文档解析能力，提供 OCR、表格和版面结构识别工具。',
+    toolCategories: Object.fromEntries(mineruDemoTools.map((tool) => [tool.name, tool.category || '未分类'])),
+    tools: mineruDemoTools,
+  },
+  {
+    id: 'svc-vector-retrieval',
+    name: '向量检索能力 MCP',
+    serviceType: '标准 MCP Server',
+    endpoint: 'https://mcp.internal.com/vector/sse',
+    transport: 'SSE',
+    authType: 'Bearer Token',
+    version: 'V2.1.0',
+    status: '连接正常',
+    toolCount: vectorDemoTools.length,
+    toolNames: vectorDemoTools.map((tool) => tool.name),
+    lastSyncedAt: '2026-05-29 10:08',
+    description: '提供文本向量化、候选结果重排等检索增强工具。',
+    toolCategories: Object.fromEntries(vectorDemoTools.map((tool) => [tool.name, tool.category || '未分类'])),
+    tools: vectorDemoTools,
+  },
+  {
+    id: 'svc-quality-eval',
+    name: '知识质量评估 MCP',
+    serviceType: '标准 MCP Server',
+    endpoint: 'https://mcp.internal.com/quality/sse',
+    transport: 'Streamable HTTP',
+    authType: '无鉴权',
+    version: 'V1.2.0',
+    status: '连接正常',
+    toolCount: qualityDemoTools.length,
+    toolNames: qualityDemoTools.map((tool) => tool.name),
+    lastSyncedAt: '2026-05-30 16:24',
+    description: '提供切片质量、QA 质量等知识加工结果评估工具。',
+    toolCategories: Object.fromEntries(qualityDemoTools.map((tool) => [tool.name, tool.category || '未分类'])),
+    tools: qualityDemoTools,
   },
 ];
 
@@ -320,7 +460,8 @@ function makeManagedTool({
 
 function getRawSource(services, toolName) {
   const service = services.find((item) => !item.locked && item.tools?.some((tool) => tool.name === toolName));
-  const rawTool = service?.tools?.find((tool) => tool.name === toolName) || higressDemoTools.find((tool) => tool.name === toolName);
+  const fallbackTools = [...higressDemoTools, ...mineruDemoTools, ...vectorDemoTools, ...qualityDemoTools];
+  const rawTool = service?.tools?.find((tool) => tool.name === toolName) || fallbackTools.find((tool) => tool.name === toolName);
   return {
     serviceId: service?.id || 'svc-demo-mcp',
     serviceName: service?.name || '示例 MCP Server',
@@ -332,52 +473,18 @@ function getRawSource(services, toolName) {
 
 function initialManagedTools(services = initialServices) {
   const fileParse = getRawSource(services, '文件解析');
+  const ocrParse = getRawSource(services, 'OCR解析');
+  const tableParse = getRawSource(services, '表格解析');
   const chunking = getRawSource(services, '文本分片');
+  const knowledgeExtract = getRawSource(services, '知识点提取');
   const qaExtract = getRawSource(services, 'QA提取');
+  const vectorize = getRawSource(services, '文本向量化');
+  const chunkQuality = getRawSource(services, '切片质量评估');
   return [
     makeManagedTool({
-      id: 'ke-builtin-code-tool',
-      name: '代码工具',
-      description: '知识工程内置工具，用于在流程中执行少量参数转换、结果清洗和变量生成。',
-      category: '系统工具',
-      kind: '内置工具',
-      sourceType: '平台内置',
-      sourceServiceId: 'svc-system-internal',
-      sourceServiceName: '知识工程内置 MCP Server',
-      sourceToolName: '代码工具',
-      inputs: defaultToolInputs('代码工具'),
-      outputs: defaultToolOutputs('代码工具'),
-      storageContract: createStorageContract({ note: '执行结果默认作为流程变量传递，不强制存储。' }),
-      lastSyncedAt: '2026-05-29 09:30',
-    }),
-    makeManagedTool({
-      id: 'ke-builtin-storage-tool',
-      name: '数据存储工具',
-      description: '知识工程内置工具，用于把上游结果写入指定知识库、目录和存储结构，并返回存储引用。',
-      category: '结果存储',
-      kind: '内置工具',
-      sourceType: '平台内置',
-      sourceServiceId: 'svc-system-internal',
-      sourceServiceName: '知识工程内置 MCP Server',
-      sourceToolName: '数据存储工具',
-      inputs: defaultToolInputs('数据存储工具'),
-      outputs: defaultToolOutputs('数据存储工具'),
-      storageContract: createStorageContract({
-        enabled: true,
-        outputName: 'storageRef',
-        artifactType: '存储引用',
-        storageTargetType: '对象存储',
-        objectStorageAddress: 'oss://knowledge-engineering',
-        objectStoragePath: 'storage-ref/{run_id}/storage-result.json',
-        writeMode: '运行时选择',
-        note: '作为通用存储动作节点使用，具体存储目标在流程节点中配置。',
-      }),
-      lastSyncedAt: '2026-05-29 09:30',
-    }),
-    makeManagedTool({
       id: 'ke-standard-file-parse',
-      name: '政策文件解析工具',
-      description: '基于 MCP 原始工具“文件解析”创建的知识工程工具，统一输出文档章节、段落和元数据。',
+      name: '通用解析',
+      description: '解析常见 PDF、Word、图片文件，统一输出章节、段落和文件元数据。',
       category: '文档解析',
       sourceServiceId: fileParse.serviceId,
       sourceServiceName: fileParse.serviceName,
@@ -388,13 +495,254 @@ function initialManagedTools(services = initialServices) {
         createOutput('paragraphs', 'array<object>', '标准化段落列表，作为后续切片输入。'),
         createOutput('metadata', 'object', '文件名、页数、解析方式和解析耗时。'),
       ],
-      storageContract: createStorageContract({ note: '解析结果默认传递给下游切片节点，是否落库由流程决定。' }),
+      storageContract: createStorageContract({
+        enabled: true,
+        outputName: 'documentSections',
+        artifactType: '解析文档',
+        storageTargetType: '对象存储',
+        objectStorageAddress: 'oss://knowledge-engineering',
+        objectStoragePath: 'parsed-documents/{run_id}/document_sections.json',
+        writeMode: '覆盖',
+        rules: [
+          {
+            id: 'storage-document-sections',
+            outputName: 'documentSections',
+            artifactType: '解析文档',
+            storageTargetType: '对象存储',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_document_sections',
+            targetField: 'content',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'parsed-documents/{run_id}/document_sections.json',
+            writeMode: '覆盖',
+          },
+          {
+            id: 'storage-parse-metadata',
+            outputName: 'metadata',
+            artifactType: '元数据',
+            storageTargetType: 'Elasticsearch',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_document_metadata',
+            targetField: 'metadata',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'parsed-documents/{run_id}/metadata.json',
+            writeMode: 'upsert',
+          },
+        ],
+        note: '解析结果按章节写入对象存储，元数据写入 ES，供后续分片和追溯使用。',
+      }),
       lastSyncedAt: fileParse.lastSyncedAt,
     }),
     makeManagedTool({
+      id: 'ke-standard-multimodal-parse',
+      name: '多模态解析',
+      description: '面向图文混排、表格、版面信息较多的文件，输出文本、表格、图片说明和版面结构。',
+      category: '文档解析',
+      sourceServiceId: fileParse.serviceId,
+      sourceServiceName: fileParse.serviceName,
+      sourceToolName: fileParse.sourceToolName,
+      inputs: normalizeToolInputs(fileParse.rawTool || { name: '文件解析' }),
+      outputs: [
+        createOutput('documentBlocks', 'array<object>', '按阅读顺序输出的文本、表格、图片和标题块。'),
+        createOutput('tables', 'array<object>', '抽取出的表格结构和单元格内容。'),
+        createOutput('figures', 'array<object>', '图片、图注和所在页码。'),
+        createOutput('layout', 'object', '页面版面、区域坐标和阅读顺序信息。'),
+      ],
+      storageContract: createStorageContract({
+        enabled: true,
+        outputName: 'documentBlocks',
+        artifactType: '解析文档',
+        storageTargetType: '对象存储',
+        objectStorageAddress: 'oss://knowledge-engineering',
+        objectStoragePath: 'parsed-documents/{run_id}/document_blocks.json',
+        writeMode: '覆盖',
+        rules: [
+          {
+            id: 'storage-document-blocks',
+            outputName: 'documentBlocks',
+            artifactType: '解析文档',
+            storageTargetType: '对象存储',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_document_blocks',
+            targetField: 'content',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'parsed-documents/{run_id}/document_blocks.json',
+            writeMode: '覆盖',
+          },
+          {
+            id: 'storage-document-tables',
+            outputName: 'tables',
+            artifactType: '解析文档',
+            storageTargetType: 'Elasticsearch',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_document_tables',
+            targetField: 'table_json',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'parsed-documents/{run_id}/tables.json',
+            writeMode: 'upsert',
+          },
+        ],
+        note: '多模态解析结果按文本块和表格分别持久化，便于后续清洗、切片和人工核验。',
+      }),
+      lastSyncedAt: fileParse.lastSyncedAt,
+    }),
+    makeManagedTool({
+      id: 'ke-standard-ocr-parse',
+      name: '扫描件OCR解析',
+      description: '面向扫描件和图片型 PDF，输出页级 OCR 文本、坐标和识别置信度。',
+      category: '文档解析',
+      sourceServiceId: ocrParse.serviceId,
+      sourceServiceName: ocrParse.serviceName,
+      sourceToolName: ocrParse.sourceToolName,
+      inputs: normalizeToolInputs(ocrParse.rawTool || { name: 'OCR解析' }),
+      outputs: [
+        createOutput('ocrPages', 'array<object>', '页级 OCR 结果，包含文本、坐标和置信度。'),
+        createOutput('ocrMetadata', 'object', 'OCR 页数、语言、平均置信度和耗时。'),
+      ],
+      storageContract: createStorageContract({
+        enabled: true,
+        outputName: 'ocrPages',
+        artifactType: '解析文档',
+        storageTargetType: '对象存储',
+        objectStorageAddress: 'oss://knowledge-engineering',
+        objectStoragePath: 'ocr/{run_id}/ocr_pages.json',
+        writeMode: '覆盖',
+        rules: [
+          {
+            id: 'storage-ocr-pages',
+            outputName: 'ocrPages',
+            artifactType: '解析文档',
+            storageTargetType: '对象存储',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_ocr_pages',
+            targetField: 'content',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'ocr/{run_id}/ocr_pages.json',
+            writeMode: '覆盖',
+          },
+          {
+            id: 'storage-ocr-metadata',
+            outputName: 'ocrMetadata',
+            artifactType: '元数据',
+            storageTargetType: 'Elasticsearch',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_ocr_metadata',
+            targetField: 'metadata',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'ocr/{run_id}/metadata.json',
+            writeMode: 'upsert',
+          },
+        ],
+        note: 'OCR 文本写入对象存储，识别元数据写入 ES，便于后续追溯和抽检。',
+      }),
+      lastSyncedAt: ocrParse.lastSyncedAt,
+    }),
+    makeManagedTool({
+      id: 'ke-standard-table-parse',
+      name: '表格抽取',
+      description: '抽取文档中的表格结构、单元格内容和来源页码，供结构化知识加工使用。',
+      category: '文档解析',
+      sourceServiceId: tableParse.serviceId,
+      sourceServiceName: tableParse.serviceName,
+      sourceToolName: tableParse.sourceToolName,
+      inputs: normalizeToolInputs(tableParse.rawTool || { name: '表格解析' }),
+      outputs: [
+        createOutput('tables', 'array<object>', '表格集合，包含行列结构、单元格内容和来源页码。'),
+        createOutput('tableMetadata', 'object', '表格数量、失败页码和解析耗时。'),
+      ],
+      storageContract: createStorageContract({
+        enabled: true,
+        outputName: 'tables',
+        artifactType: '解析文档',
+        storageTargetType: 'Elasticsearch',
+        esAddress: 'http://es.internal:9200',
+        esIndex: 'ke_policy_tables',
+        writeMode: 'upsert',
+        rules: [
+          {
+            id: 'storage-tables',
+            outputName: 'tables',
+            artifactType: '解析文档',
+            storageTargetType: 'Elasticsearch',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_tables',
+            targetField: 'table_json',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'tables/{run_id}/tables.json',
+            writeMode: 'upsert',
+          },
+          {
+            id: 'storage-table-metadata',
+            outputName: 'tableMetadata',
+            artifactType: '元数据',
+            storageTargetType: 'Elasticsearch',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_table_metadata',
+            targetField: 'metadata',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'tables/{run_id}/metadata.json',
+            writeMode: 'upsert',
+          },
+        ],
+        note: '表格结构和解析元数据分别写入 ES，便于后续结构化检索和人工核验。',
+      }),
+      lastSyncedAt: tableParse.lastSyncedAt,
+    }),
+    makeManagedTool({
+      id: 'ke-standard-normal-chunk',
+      name: '普通切片',
+      description: '按长度和语义边界生成普通文本切片，适合常规文档检索场景。',
+      category: '文本分片',
+      sourceServiceId: chunking.serviceId,
+      sourceServiceName: chunking.serviceName,
+      sourceToolName: chunking.sourceToolName,
+      inputs: normalizeToolInputs(chunking.rawTool || { name: '文本分片' }),
+      outputs: [
+        createOutput('textChunks', 'array<object>', '普通文本切片集合，包含 text、page、source。'),
+        createOutput('chunkStats', 'object', '切片数量、平均长度和重叠配置。'),
+      ],
+      storageContract: createStorageContract({
+        enabled: true,
+        outputName: 'textChunks',
+        artifactType: '文本切片',
+        storageTargetType: 'Elasticsearch',
+        esAddress: 'http://es.internal:9200',
+        esIndex: 'ke_policy_text_chunks',
+        writeMode: 'upsert',
+        rules: [
+          {
+            id: 'storage-text-chunks',
+            outputName: 'textChunks',
+            artifactType: '文本切片',
+            storageTargetType: 'Elasticsearch',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_text_chunks',
+            targetField: 'content',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'chunks/{run_id}/text_chunks.json',
+            writeMode: 'upsert',
+          },
+          {
+            id: 'storage-chunk-stats',
+            outputName: 'chunkStats',
+            artifactType: '元数据',
+            storageTargetType: 'Elasticsearch',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_chunk_stats',
+            targetField: 'metadata',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'chunks/{run_id}/stats.json',
+            writeMode: 'upsert',
+          },
+        ],
+        note: '普通切片写入 ES，统计信息写入元数据索引。',
+      }),
+      lastSyncedAt: chunking.lastSyncedAt,
+    }),
+    makeManagedTool({
       id: 'ke-standard-parent-child-chunk',
-      name: '父子切片工具',
-      description: '基于 MCP 原始工具“文本分片”创建的知识工程工具，输出父片、子片和父子关系。',
+      name: '父子切片',
+      description: '输出父片、子片和父子关系，支持子片召回、父片进入上下文。',
       category: '文本分片',
       sourceServiceId: chunking.serviceId,
       sourceServiceName: chunking.serviceName,
@@ -439,6 +787,7 @@ function initialManagedTools(services = initialServices) {
             storageTargetType: 'Elasticsearch',
             esAddress: 'http://es.internal:9200',
             esIndex: 'ke_policy_child_chunks',
+            targetField: 'content',
             objectStorageAddress: 'oss://knowledge-engineering',
             objectStoragePath: 'chunks/{run_id}/child_chunks.json',
             writeMode: 'upsert',
@@ -450,6 +799,7 @@ function initialManagedTools(services = initialServices) {
             storageTargetType: '对象存储',
             esAddress: 'http://es.internal:9200',
             esIndex: 'ke_policy_parent_chunks',
+            targetField: 'content',
             objectStorageAddress: 'oss://knowledge-engineering',
             objectStoragePath: 'chunks/{run_id}/parent_chunks.json',
             writeMode: '覆盖',
@@ -460,9 +810,61 @@ function initialManagedTools(services = initialServices) {
       lastSyncedAt: chunking.lastSyncedAt,
     }),
     makeManagedTool({
+      id: 'ke-standard-knowledge-extract',
+      name: '知识点抽取',
+      description: '从文本切片中抽取政策知识点、适用对象和关键规则。',
+      category: '知识提取',
+      sourceServiceId: knowledgeExtract.serviceId,
+      sourceServiceName: knowledgeExtract.serviceName,
+      sourceToolName: knowledgeExtract.sourceToolName,
+      inputs: normalizeToolInputs(knowledgeExtract.rawTool || { name: '知识点提取' }),
+      outputs: [
+        createOutput('knowledgePoints', 'array<object>', '知识点条目，包含标题、正文、来源切片和适用对象。'),
+        createOutput('keyRules', 'array<string>', '关键规则列表。'),
+        createOutput('extractStats', 'object', '抽取数量、模型版本和过滤数量。'),
+      ],
+      storageContract: createStorageContract({
+        enabled: true,
+        outputName: 'knowledgePoints',
+        artifactType: '知识点',
+        storageTargetType: 'Elasticsearch',
+        esAddress: 'http://es.internal:9200',
+        esIndex: 'ke_policy_knowledge_points',
+        writeMode: 'upsert',
+        rules: [
+          {
+            id: 'storage-knowledge-points',
+            outputName: 'knowledgePoints',
+            artifactType: '知识点',
+            storageTargetType: 'Elasticsearch',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_knowledge_points',
+            targetField: 'content',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'knowledge-points/{run_id}/items.json',
+            writeMode: 'upsert',
+          },
+          {
+            id: 'storage-key-rules',
+            outputName: 'keyRules',
+            artifactType: '知识点',
+            storageTargetType: '对象存储',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_key_rules',
+            targetField: 'content',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'knowledge-points/{run_id}/key_rules.json',
+            writeMode: '覆盖',
+          },
+        ],
+        note: '知识点写入 ES，关键规则列表同步归档到对象存储。',
+      }),
+      lastSyncedAt: knowledgeExtract.lastSyncedAt,
+    }),
+    makeManagedTool({
       id: 'ke-standard-qa-extract',
-      name: 'QA 对抽取工具',
-      description: '基于 MCP 原始工具“QA提取”创建的知识工程工具，统一输出问题、答案和来源引用。',
+      name: 'QA抽取',
+      description: '从文本片段中抽取问题、答案和来源引用，形成可检索的 QA 对。',
       category: '知识提取',
       sourceServiceId: qaExtract.serviceId,
       sourceServiceName: qaExtract.serviceName,
@@ -502,6 +904,7 @@ function initialManagedTools(services = initialServices) {
             storageTargetType: 'Elasticsearch',
             esAddress: 'http://es.internal:9200',
             esIndex: 'ke_policy_qa_pairs',
+            targetField: 'question',
             objectStorageAddress: 'oss://knowledge-engineering',
             objectStoragePath: 'qa/{run_id}/qa_pairs.json',
             writeMode: 'upsert',
@@ -510,6 +913,108 @@ function initialManagedTools(services = initialServices) {
         note: 'QA 对作为独立知识结果存储，可被检索、评测和人工审核模块引用。',
       }),
       lastSyncedAt: qaExtract.lastSyncedAt,
+    }),
+    makeManagedTool({
+      id: 'ke-standard-vectorize',
+      name: '文本向量生成',
+      description: '对文本切片批量生成向量，输出 embedding 结果和生成统计。',
+      category: '向量处理',
+      sourceServiceId: vectorize.serviceId,
+      sourceServiceName: vectorize.serviceName,
+      sourceToolName: vectorize.sourceToolName,
+      inputs: normalizeToolInputs(vectorize.rawTool || { name: '文本向量化' }),
+      outputs: [
+        createOutput('embeddings', 'array<object>', '文本切片对应的向量结果。'),
+        createOutput('embeddingStats', 'object', '向量维度、成功数量和失败数量。'),
+      ],
+      storageContract: createStorageContract({
+        enabled: true,
+        outputName: 'embeddings',
+        artifactType: '向量结果',
+        storageTargetType: 'Elasticsearch',
+        esAddress: 'http://es.internal:9200',
+        esIndex: 'ke_policy_embeddings',
+        writeMode: 'upsert',
+        rules: [
+          {
+            id: 'storage-embeddings',
+            outputName: 'embeddings',
+            artifactType: '向量结果',
+            storageTargetType: 'Elasticsearch',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_embeddings',
+            targetField: 'vector',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'embeddings/{run_id}/vectors.json',
+            writeMode: 'upsert',
+          },
+          {
+            id: 'storage-embedding-stats',
+            outputName: 'embeddingStats',
+            artifactType: '元数据',
+            storageTargetType: 'Elasticsearch',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_embedding_stats',
+            targetField: 'metadata',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'embeddings/{run_id}/stats.json',
+            writeMode: 'upsert',
+          },
+        ],
+        note: '向量结果写入 ES 的向量字段，生成统计进入元数据索引。',
+      }),
+      lastSyncedAt: vectorize.lastSyncedAt,
+    }),
+    makeManagedTool({
+      id: 'ke-standard-chunk-quality',
+      name: '切片质量评估',
+      description: '评估切片长度、完整性、重复率和边界质量，输出质量报告和问题切片。',
+      category: '质量评估',
+      sourceServiceId: chunkQuality.serviceId,
+      sourceServiceName: chunkQuality.serviceName,
+      sourceToolName: chunkQuality.sourceToolName,
+      inputs: normalizeToolInputs(chunkQuality.rawTool || { name: '切片质量评估' }),
+      outputs: [
+        createOutput('chunkQualityReport', 'object', '切片质量评分、问题明细和改进建议。'),
+        createOutput('badChunks', 'array<object>', '质量较低的切片列表。'),
+      ],
+      storageContract: createStorageContract({
+        enabled: true,
+        outputName: 'chunkQualityReport',
+        artifactType: '质量报告',
+        storageTargetType: 'Elasticsearch',
+        esAddress: 'http://es.internal:9200',
+        esIndex: 'ke_policy_chunk_quality_reports',
+        writeMode: 'upsert',
+        rules: [
+          {
+            id: 'storage-chunk-quality-report',
+            outputName: 'chunkQualityReport',
+            artifactType: '质量报告',
+            storageTargetType: 'Elasticsearch',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_chunk_quality_reports',
+            targetField: 'report',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'quality/{run_id}/chunk_quality_report.json',
+            writeMode: 'upsert',
+          },
+          {
+            id: 'storage-bad-chunks',
+            outputName: 'badChunks',
+            artifactType: '质量报告',
+            storageTargetType: '对象存储',
+            esAddress: 'http://es.internal:9200',
+            esIndex: 'ke_policy_bad_chunks',
+            targetField: 'content',
+            objectStorageAddress: 'oss://knowledge-engineering',
+            objectStoragePath: 'quality/{run_id}/bad_chunks.json',
+            writeMode: '覆盖',
+          },
+        ],
+        note: '质量报告写入 ES，问题切片明细归档到对象存储。',
+      }),
+      lastSyncedAt: chunkQuality.lastSyncedAt,
     }),
   ];
 }
@@ -548,15 +1053,16 @@ export function loadServices() {
 function normalizeService(service) {
   const seed = initialServices.find((item) => item.id === service.id);
   if (seed && (!service.serviceType || service.type || service.endpoint !== seed.endpoint)) {
-    return { ...seed, status: service.status || seed.status };
+    return { ...seed, status: service.status === '已停用' ? '停用' : service.status || seed.status };
   }
   const serviceType = service.serviceType || service.type || '标准 MCP Server';
   const tools = service.tools || [];
+  const status = service.enabled === false ? '停用' : service.status === '已停用' ? '停用' : service.status || '连接中';
   return {
     ...service,
     serviceType,
     version: service.version || 'V1.0.0',
-    status: service.enabled === false ? '已停用' : service.status || '连接中',
+    status,
     toolCount: service.toolCount ?? tools.length,
     toolNames: service.toolNames || tools.map((tool) => tool.name),
     toolCategories: service.toolCategories || Object.fromEntries(tools.map((tool) => [tool.name, tool.category || '未分类'])),
@@ -634,11 +1140,11 @@ export function listRawMcpTools(services = loadServices()) {
 
 export function createKnowledgeToolFromRaw(source, overrides = {}) {
   const rawTool = source?.tool || {};
-  const name = overrides.name?.trim() || `${rawTool.name || 'MCP工具'}标准化工具`;
+  const name = overrides.name?.trim() || rawTool.name || '新建流程节点';
   return makeManagedTool({
     id: `ke-standard-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name,
-    description: overrides.description?.trim() || rawTool.description || '由 MCP 原始工具创建的知识工程工具。',
+    description: overrides.description?.trim() || rawTool.description || '由 MCP 原始工具创建的流程节点。',
     category: overrides.category || rawTool.category || '未分类',
     sourceServiceId: source?.serviceId || '',
     sourceServiceName: source?.serviceName || '',
@@ -706,7 +1212,15 @@ export function createEmptyServiceDraft() {
 
 export function syncService(service) {
   if (service.locked) return service;
-  if (!service || service.status === '连接失败') return { ...service, status: '连接失败' };
+  if (!service || service.status === '停用') return service;
+  const endpoint = String(service.endpoint || '').toLowerCase();
+  if (!endpoint || endpoint.includes('fail') || endpoint.includes('invalid') || endpoint.includes('timeout')) {
+    return {
+      ...service,
+      status: '连接失败',
+      lastSyncedAt: nowText(),
+    };
+  }
   const tools = service.tools?.length ? service.tools : higressDemoTools;
   const toolNames = tools.map((tool) => tool.name);
   const toolCategories = Object.fromEntries(tools.map((tool) => [tool.name, tool.category || '未分类']));
