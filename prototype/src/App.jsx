@@ -1313,8 +1313,8 @@ function ToolManagementPage({ notify }) {
       {detailTool ? (
         <Drawer title={detailTool.name} onClose={() => setDetailTool(null)} wide>
           <NodeDetailBasicInfo tool={detailTool} rawSource={detailRawSource} />
-          <NodeStorageDetailTable contract={detailTool.storageContract} />
-          <NodeMappingDetailTable tool={detailTool} />
+          <NodeInputMappingDetail tool={detailTool} rawSource={detailRawSource} />
+          <NodeOutputMappingDetail tool={detailTool} rawSource={detailRawSource} />
         </Drawer>
       ) : null}
     </>
@@ -2402,16 +2402,32 @@ function StorageContractCard({ contract }) {
 
 function NodeDetailBasicInfo({ tool, rawSource }) {
   const rawTool = rawSource?.tool || {};
-  const rows = [
+  const rawRows = [
+    ['MCP服务', tool.sourceServiceName || rawSource?.serviceName || tool.serviceName || '-'],
+    ['原始MCP工具', tool.sourceToolName || rawTool.name || '-'],
+    ['原始MCP工具描述信息', rawTool.description || tool.description || '-'],
+  ];
+  const nodeRows = [
     ['节点名称', tool.name || '-'],
+    ['节点类型', tool.category || '-'],
     ['节点描述', tool.description || '-'],
-    ['原始 MCP 服务', tool.sourceServiceName || tool.serviceName || '-'],
-    ['原始 MCP 工具名称', tool.sourceToolName || '-'],
-    ['原始 MCP 工具描述', rawTool.description || '-'],
   ];
   return (
     <section className="node-detail-section">
-      <h3>节点基本信息</h3>
+      <h3>流程节点绑定MCP工具</h3>
+      <div className="node-detail-binding-grid">
+        <NodeDetailInfoCard title="原始MCP工具" rows={rawRows} />
+        <div className="binding-arrow node-detail-arrow" aria-hidden="true" />
+        <NodeDetailInfoCard title="流程节点信息" rows={nodeRows} />
+      </div>
+    </section>
+  );
+}
+
+function NodeDetailInfoCard({ title, rows }) {
+  return (
+    <div className="schema-card node-detail-info-card">
+      <h4>{title}</h4>
       <div className="node-basic-fields">
         {rows.map(([label, value]) => (
           <div key={label} className="node-basic-field">
@@ -2420,7 +2436,7 @@ function NodeDetailBasicInfo({ tool, rawSource }) {
           </div>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -2513,10 +2529,123 @@ function NodeMappingDetailTable({ tool }) {
   );
 }
 
-function NodeMappingSubTable({ title, columns, rows }) {
+function NodeInputMappingDetail({ tool, rawSource }) {
+  const artifactPaths = new Set((tool.inputArtifacts || []).map((artifact) => artifact.sourcePath || artifact.sourceName).filter(Boolean));
+  const inputRows = (tool.inputArtifacts || []).map((artifact) => [
+    artifact.name || '-',
+    artifact.displayName || '-',
+    artifact.type || '-',
+    artifact.description || '-',
+  ]);
+  const configRows = (tool.inputs || [])
+    .filter((input) => !artifactPaths.has(input.name))
+    .map((input) => [
+      input.name || '-',
+      input.displayName || '-',
+      input.type || '-',
+      input.required ? '是' : '否',
+      input.defaultValue || '-',
+      input.description || '-',
+    ]);
+  const inputSchema = buildRawInputJsonSchema(rawSource?.tool?.inputs || tool.inputs || []);
+  return (
+    <section className="node-detail-section">
+      <h3>MCP工具入参映射</h3>
+      <div className="node-detail-two-column">
+        <div className="node-detail-stack">
+          <NodeMappingSubTable
+            title="节点输入"
+            tip="定义当前流程节点用于接收上游节点输出结果的参数。"
+            columns={['字段名称', '显示名称', '类型', '说明']}
+            rows={inputRows}
+          />
+          <NodeMappingSubTable
+            title="节点配置参数"
+            tip="定义当前流程节点对Agent和人暴露的配置项。"
+            columns={['参数名称', '显示名称', '类型', '必填', '默认值', '说明']}
+            rows={configRows}
+          />
+          <NodeDetailCodeBlock
+            title="参数映射代码"
+            tip="通过代码将流程节点的输入和配置参数映射到MCP工具的Input Schema。"
+            code={tool.parameterMappingCode || ''}
+          />
+        </div>
+        <NodeDetailSchemaBlock title="原始MCP input schema" schema={inputSchema} />
+      </div>
+    </section>
+  );
+}
+
+function NodeOutputMappingDetail({ tool, rawSource }) {
+  const storageRules = normalizeStorageRules(tool.storageContract, tool.outputs || []);
+  const outputRows = (tool.outputs || []).map((output) => [
+    output.name || '-',
+    output.displayName || '-',
+    output.type || '-',
+    output.codeOutput || output.path || output.name || '-',
+    output.description || '-',
+  ]);
+  const storageRows = storageRules.map((rule) => [
+    rule.outputName || '-',
+    rule.fieldType || 'string',
+    rule.artifactType || '-',
+    rule.nodeOutputRef ? '是' : '否',
+  ]);
+  const outputSchema = buildRawOutputJsonSchema(rawSource?.tool?.outputs || []);
+  return (
+    <section className="node-detail-section">
+      <h3>MCP工具返回映射</h3>
+      <div className="node-detail-two-column output-detail-grid">
+        <NodeDetailSchemaBlock title="原始MCP output schema" schema={outputSchema} />
+        <div className="node-detail-stack">
+          <NodeDetailCodeBlock
+            title="MCP工具结果解析提取代码"
+            tip="通过代码对MCP工具的返回结果做标准化解析和提取，再做持久化存储和节点输出映射。"
+            code={tool.storageContract?.standardizationCode || ''}
+          />
+          <NodeMappingSubTable
+            title="解析结果持久化存储"
+            tip="将提取代码处理后的结果持久化存储，系统会按所选知识形态完成存储落库。"
+            columns={['代码返回', '类型', '知识形态', '节点输出引用']}
+            rows={storageRows}
+          />
+          <NodeMappingSubTable
+            title="节点输出"
+            tip="将提取代码处理后的结果作为节点输出给下游节点使用。"
+            columns={['字段名称', '显示名称', '类型', '代码返回', '说明']}
+            rows={outputRows}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function NodeDetailCodeBlock({ title, tip, code }) {
   return (
     <div className="node-mapping-group">
       <h4>{title}</h4>
+      {tip ? <p className="plain-step-tip node-detail-tip">{tip}</p> : null}
+      <pre className="node-detail-code-preview">{code || '-'}</pre>
+    </div>
+  );
+}
+
+function NodeDetailSchemaBlock({ title, schema }) {
+  return (
+    <div className="schema-card standardization-panel schema-fill-panel node-detail-schema-card">
+      <div className="schema-head"><strong>{title}</strong></div>
+      <pre className="json-schema-preview">{JSON.stringify(schema, null, 2)}</pre>
+    </div>
+  );
+}
+
+function NodeMappingSubTable({ title, tip, columns, rows }) {
+  return (
+    <div className="node-mapping-group">
+      <h4>{title}</h4>
+      {tip ? <p className="plain-step-tip node-detail-tip">{tip}</p> : null}
       <table className="data-table compact-table node-detail-table node-mapping-table">
         <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
         <tbody>

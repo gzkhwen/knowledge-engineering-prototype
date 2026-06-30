@@ -344,6 +344,28 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .detail-grid label, .metric-card label { display: block; margin-bottom: 7px; color: #667085; font-size: 12px; }
 .node-detail-section { margin-bottom: 18px; }
 .node-detail-section h3 { margin: 0 0 10px; color: #111827; font-size: 15px; font-weight: 800; }
+.node-detail-binding-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  min-width: 0;
+}
+.node-detail-arrow { align-self: center; justify-self: center; }
+.node-detail-info-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  height: 100%;
+  margin-bottom: 0;
+}
+.node-detail-info-card h4 {
+  margin: 0;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+}
 .node-basic-fields { display: grid; gap: 10px; }
 .node-basic-field { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 14px; align-items: start; min-width: 0; }
 .node-basic-field label { color: #667085; font-size: 13px; line-height: 1.6; }
@@ -351,10 +373,51 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .node-detail-table { min-width: 0; width: 100%; background: #fff; }
 .node-detail-table td { vertical-align: top; }
 .node-detail-table th, .node-detail-table td { word-break: break-word; }
+.node-detail-two-column {
+  display: grid;
+  grid-template-columns: minmax(520px, 2fr) minmax(260px, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+.node-detail-two-column.output-detail-grid { grid-template-columns: minmax(260px, 1fr) minmax(520px, 2fr); }
+.node-detail-stack { display: grid; gap: 10px; min-width: 0; }
 .node-mapping-group { margin-top: 12px; }
 .node-mapping-group:first-of-type { margin-top: 0; }
 .node-mapping-group h4 { margin: 0 0 8px; color: #344054; font-size: 13px; font-weight: 800; }
+.node-detail-tip {
+  margin: -2px 0 8px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.45;
+}
 .node-mapping-table { min-width: 0; }
+.node-detail-code-preview {
+  min-height: 148px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #dbe6f3;
+  border-radius: 8px;
+  color: #1f2937;
+  background: #f8fafc;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow: auto;
+}
+.node-detail-schema-card {
+  position: sticky;
+  top: 0;
+  max-height: 620px;
+  margin-bottom: 0;
+}
+.node-detail-schema-card .json-schema-preview {
+  height: auto;
+  min-height: 360px;
+  max-height: 560px;
+  overflow: auto;
+}
 
 .schema-card { min-width: 0; padding: 14px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; }
 .schema-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
