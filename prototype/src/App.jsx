@@ -1129,7 +1129,7 @@ function ToolManagementPage({ notify }) {
   };
 
   const openCreateTool = () => {
-    const firstSource = rawSources[0];
+    const firstSource = rawSources.find(hasOutputSchema);
     setCreateDraft(makeKnowledgeToolDraft(firstSource, snapshot.categories[1] || snapshot.categories[0] || '未分类'));
   };
 
@@ -1190,7 +1190,9 @@ function ToolManagementPage({ notify }) {
       inputArtifacts: createDraft.inputArtifacts,
       inputs: createDraft.inputs,
       outputs: createDraft.outputs,
+      parameterMappingCode: createDraft.parameterMappingCode,
       storageRules: createDraft.storageRules,
+      standardizationCode: createDraft.standardizationCode,
       indexConfig: createDraft.indexConfig,
       exceptionRules: createDraft.exceptionRules,
     };
@@ -1201,6 +1203,10 @@ function ToolManagementPage({ notify }) {
       const source = rawSources.find((item) => item.id === createDraft.sourceId);
       if (!source) {
         notify('来源 MCP 工具不存在，请重新同步后再试', 'error');
+        return;
+      }
+      if (!hasOutputSchema(source)) {
+        notify('该 MCP 原始工具缺失 Output Schema，暂不支持注册为流程节点', 'error');
         return;
       }
       const nextTool = {
@@ -1330,9 +1336,15 @@ function makeKnowledgeToolDraft(source, category) {
     inputs: normalizeDraftInputs(source?.tool?.inputs || []),
     outputs: normalizeDraftOutputs(source?.tool?.outputs || []),
     storageRules: firstOutputName ? [createOutputRule(firstOutputName)] : [],
+    standardizationCode: createDefaultStandardizationCode(firstOutputName),
+    parameterMappingCode: createDefaultParameterMappingCode(source?.tool?.inputs || []),
     indexConfig: createIndexConfig(firstOutputName),
     exceptionRules: createDefaultExceptionRules(),
   };
+}
+
+function hasOutputSchema(source) {
+  return Boolean(source?.tool?.outputs?.length);
 }
 
 function makeKnowledgeToolEditDraft(tool) {
@@ -1350,6 +1362,8 @@ function makeKnowledgeToolEditDraft(tool) {
     inputs: normalizeDraftInputs(tool.inputs || []),
     outputs: normalizeDraftOutputs(tool.outputs || []),
     storageRules: normalizeStorageRules(tool.storageContract, tool.outputs || []),
+    standardizationCode: tool.storageContract?.standardizationCode || createDefaultStandardizationCode(tool.storageContract?.outputName || tool.outputs?.[0]?.name || ''),
+    parameterMappingCode: tool.parameterMappingCode || createDefaultParameterMappingCode(tool.inputs || []),
     indexConfig: normalizeIndexConfig(tool.storageContract, tool.outputs || []),
     exceptionRules: normalizeExceptionRules(tool.exceptionRules || []),
   };
@@ -1364,7 +1378,8 @@ function applyKnowledgeToolDraft(tool, draft) {
     inputArtifacts: draft.inputArtifacts || tool.inputArtifacts || [],
     inputs: draft.inputs || tool.inputs,
     outputs: draft.outputs || tool.outputs,
-    storageContract: buildStorageContractFromRules(draft.storageRules || [], draft.indexConfig, tool.storageContract),
+    parameterMappingCode: draft.parameterMappingCode || tool.parameterMappingCode || '',
+    storageContract: buildStorageContractFromRules(draft.storageRules || [], draft.indexConfig, tool.storageContract, draft.standardizationCode),
     exceptionRules: draft.exceptionRules || tool.exceptionRules || [],
     updatedAt: nowText(),
   };
@@ -1433,6 +1448,8 @@ function normalizeDraftInputs(inputs = []) {
 function normalizeDraftOutputs(outputs = []) {
   return outputs.map((output) => ({
     ...output,
+    type: output.type || 'string',
+    codeOutput: output.codeOutput || output.path || output.name || '',
     artifactType: output.artifactType || inferInputArtifactType(output.type),
     sourceType: output.sourceType || 'mcpReturn',
   }));
@@ -1456,6 +1473,27 @@ function createFieldExample(outputName = '') {
   if (value.includes('section') || value.includes('paragraph')) return { indexField: 'content', recallField: 'content', filterFields: 'documentId,page' };
   return { indexField: 'content', recallField: 'content', filterFields: 'documentId' };
 }
+
+function createDefaultStandardizationCode(outputName = 'result') {
+  const target = outputName || 'result';
+  return `function transform(mcpResult) {
+  return {
+    ${target}: mcpResult.${target} || mcpResult
+  };
+}`;
+}
+
+function createDefaultParameterMappingCode(inputs = []) {
+  const firstInput = inputs[0]?.name || 'input';
+  return `function mapParams(context) {
+  return {
+    ${firstInput}: context.${firstInput} || context.input
+  };
+}`;
+}
+
+const knowledgeShapeOptions = ['文本切片', 'QA对', '知识点', '父子切片', '二维表/结构化数据', '解析文档', '图片描述', '元数据', '原始结果'];
+const availableKnowledgeShapes = new Set(['文本切片', 'QA对', '知识点']);
 
 function createOutputRule(outputName = '') {
   return {
@@ -1544,7 +1582,7 @@ function normalizeIndexConfig(contract, outputs = []) {
   };
 }
 
-function buildStorageContractFromRules(rules = [], indexConfig = createIndexConfig(), fallback = {}) {
+function buildStorageContractFromRules(rules = [], indexConfig = createIndexConfig(), fallback = {}, standardizationCode = '') {
   const firstRule = rules[0] || {};
   return {
     ...(fallback || {}),
@@ -1568,6 +1606,7 @@ function buildStorageContractFromRules(rules = [], indexConfig = createIndexConf
     indexJoinField: indexConfig?.indexJoinField || '',
     recallJoinField: indexConfig?.recallJoinField || '',
     indexConfig: indexConfig || createIndexConfig(),
+    standardizationCode,
     rules,
   };
 }
@@ -1583,15 +1622,16 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   const configInputRows = (draft.inputs || [])
     .map((input, index) => ({ ...input, __draftIndex: index }))
     .filter((input) => !selectedArtifactSources.has(input.sourceName || input.name));
-  const steps = ['节点基础信息', '工具结果存储', '参数映射'];
+  const steps = ['节点基础信息', '输出结果标准化', '参数映射'];
   const activeStep = Math.min(draft.step || 0, steps.length - 1);
   const setStep = (step) => setDraft((current) => ({ ...current, step }));
   const selectSource = (sourceId) => {
     const source = sources.find((item) => item.id === sourceId);
+    if (!hasOutputSchema(source)) return;
     setDraft({ ...makeKnowledgeToolDraft(source, draft.category || categories[0] || '未分类'), selectedMcpId: source?.serviceId || '', step: 0 });
   };
   const selectMcp = (serviceId) => {
-    const source = sources.find((item) => item.serviceId === serviceId);
+    const source = sources.find((item) => item.serviceId === serviceId && hasOutputSchema(item));
     setDraft({ ...makeKnowledgeToolDraft(source, draft.category || categories[0] || '未分类'), selectedMcpId: serviceId, step: 0 });
   };
   const updateParam = (kind, index, key, value) => {
@@ -1620,7 +1660,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   };
   const addOutput = () => setDraft((current) => ({
     ...current,
-    outputs: [...current.outputs, { name: '', artifactType: '', type: '', sourceType: '', description: '', path: '' }],
+    outputs: [...current.outputs, { name: '', type: 'string', codeOutput: '', description: '' }],
   }));
   const removeOutput = (index) => {
     setDraft((current) => ({
@@ -1633,6 +1673,12 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
       ...current,
       storageRules: (current.storageRules || []).map((rule) => (rule.id === ruleId ? { ...rule, ...patch } : rule)),
     }));
+  };
+  const updateStandardizationCode = (standardizationCode) => {
+    setDraft((current) => ({ ...current, standardizationCode }));
+  };
+  const updateParameterMappingCode = (parameterMappingCode) => {
+    setDraft((current) => ({ ...current, parameterMappingCode }));
   };
   const updateIndexConfig = (patch) => {
     setDraft((current) => ({
@@ -1697,54 +1743,57 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
                 </Field>
                 <Field label="原始MCP工具" required>
                   <SelectField value={draft.sourceId} onChange={selectSource}>
-                    {filteredSources.map((source) => <option key={source.id} value={source.id}>{source.tool.name}</option>)}
+                    <option value="" disabled>请选择原始MCP工具</option>
+                    {filteredSources.map((source) => {
+                      const missingOutputSchema = !hasOutputSchema(source);
+                      return (
+                        <option key={source.id} value={source.id} disabled={missingOutputSchema}>
+                          <span className="mcp-tool-option">
+                            <span>{source.tool.name}</span>
+                            {missingOutputSchema ? <span className="missing-output-schema">缺失Output Schema</span> : null}
+                          </span>
+                        </option>
+                      );
+                    })}
                   </SelectField>
                 </Field>
               </div>
             ) : <p className="empty-hint">当前还没有可用的外部 MCP 原始工具。请先在“MCP Server 接入”页完成服务同步。</p>}
-            <Field label="节点类型" required><SelectField value={draft.category} onChange={(category) => setDraft({ ...draft, category })}>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</SelectField></Field>
-            <Field label="节点名称" required><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+            <div className="form-grid two">
+              <Field label="节点类型" required><SelectField value={draft.category} onChange={(category) => setDraft({ ...draft, category })}>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</SelectField></Field>
+              <Field label="节点名称" required><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+            </div>
             <Field label="节点描述" required><textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></Field>
             {selectedSource ? <RawMcpToolPreview source={selectedSource} /> : null}
           </section>
         ) : null}
         {activeStep === 1 ? (
-          <OutputRuleList
+          <OutputStandardizationPanel
+            source={selectedSource}
             rules={draft.storageRules || []}
+            code={draft.standardizationCode || ''}
+            outputs={draft.outputs || []}
+            onCodeChange={updateStandardizationCode}
             onAdd={addStorageRule}
             onRemove={removeStorageRule}
             onChange={updateStorageRule}
+            onOutputChange={updateParam}
+            onOutputAdd={addOutput}
+            onOutputRemove={removeOutput}
           />
         ) : null}
         {activeStep === 2 ? (
-          <div className="standard-step-stack">
-            <NodeInputArtifactTable
-              artifacts={draft.inputArtifacts || []}
-              onAdd={addInputArtifact}
-              onRemove={removeInputArtifact}
-              onChange={updateInputArtifact}
-            />
-            <EditableParamTable
-              title="配置参数"
-              tip="配置参数用于声明节点运行时可配置的 MCP 工具入参。已被节点输入占用的入参路径会自动从此处排除。"
-              rows={configInputRows}
-              kind="inputs"
-              columns={['配置名称', '类型', 'MCP工具入参路径', '必填', '默认值', '说明', '允许修改']}
-              sourceInputs={rawInputOptions}
-              onChange={updateParam}
-            />
-            <EditableParamTable
-              title="节点输出"
-              tip="节点输出用于声明后续节点可引用的标准制品，来源可以是 MCP 工具返回值，也可以是前一步生成的存储引用。"
-              rows={draft.outputs}
-              kind="outputs"
-              columns={['输出名称', '输出类型', '输出来源', 'MCP工具返回路径/存储引用', '说明']}
-              storageRules={draft.storageRules || []}
-              onChange={updateParam}
-              onAdd={addOutput}
-              onRemove={removeOutput}
-            />
-          </div>
+          <InputMappingPanel
+            source={selectedSource}
+            code={draft.parameterMappingCode || ''}
+            artifacts={draft.inputArtifacts || []}
+            configRows={configInputRows}
+            onCodeChange={updateParameterMappingCode}
+            onArtifactAdd={addInputArtifact}
+            onArtifactRemove={removeInputArtifact}
+            onArtifactChange={updateInputArtifact}
+            onParamChange={updateParam}
+          />
         ) : null}
       </div>
     </Modal>
@@ -1758,14 +1807,13 @@ function NodeInputArtifactTable({ artifacts, onAdd, onRemove, onChange }) {
         <strong>节点输入</strong>
         <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加节点输入</button>
       </div>
-      <p className="plain-step-tip">节点输入用于承接上游节点输出，并写入 MCP 工具入参路径。</p>
+      <p className="plain-step-tip">节点输入用于声明该流程节点可承接的上游输出。</p>
       {artifacts.length ? (
         <table className="data-table compact-table editable-schema-table input-artifact-table">
           <thead>
             <tr>
               <th>输入名称</th>
               <th>输入类型</th>
-              <th>MCP工具入参路径</th>
               <th>输入描述</th>
               <th>操作</th>
             </tr>
@@ -1780,14 +1828,52 @@ function NodeInputArtifactTable({ artifacts, onAdd, onRemove, onChange }) {
                     {inputArtifactTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </SelectField>
                 </td>
-                <td><input value={artifact.sourcePath || artifact.sourceName || ''} placeholder="例如 file.content" onChange={(event) => onChange(artifact.id, { sourcePath: event.target.value })} /></td>
                 <td><input value={artifact.description || ''} onChange={(event) => onChange(artifact.id, { description: event.target.value })} /></td>
                 <td><button type="button" className="danger-link" onClick={() => onRemove(artifact.id)}>删除</button></td>
               </tr>
             ))}
           </tbody>
         </table>
-      ) : <p className="empty-hint">暂无节点输入。可添加后配置输入名称、制品类型和 MCP 工具入参路径。</p>}
+      ) : <p className="empty-hint">暂无节点输入。可添加后配置输入名称、输入类型和输入描述。</p>}
+    </section>
+  );
+}
+
+function InputMappingPanel({ source, code, artifacts, configRows, onCodeChange, onArtifactAdd, onArtifactRemove, onArtifactChange, onParamChange }) {
+  const inputSchema = buildRawInputJsonSchema(source?.tool?.inputs || []);
+  return (
+    <section className="standardization-grid">
+      <div className="schema-card standardization-panel output-schema-panel">
+        <div className="schema-head"><strong>原始MCP input schema</strong></div>
+        <pre className="json-schema-preview">{JSON.stringify(inputSchema, null, 2)}</pre>
+      </div>
+      <div className="standardization-right-stack">
+        <div className="schema-card standardization-panel code-editor-panel">
+          <div className="schema-head"><strong>参数映射代码</strong></div>
+          <textarea
+            className="standardization-code-editor"
+            spellCheck={false}
+            value={code}
+            onChange={(event) => onCodeChange(event.target.value)}
+          />
+        </div>
+        <div className="input-config-stack">
+          <NodeInputArtifactTable
+            artifacts={artifacts}
+            onAdd={onArtifactAdd}
+            onRemove={onArtifactRemove}
+            onChange={onArtifactChange}
+          />
+          <EditableParamTable
+            title="配置参数"
+            tip="配置参数用于声明节点运行时可配置的 MCP 工具入参。"
+            rows={configRows}
+            kind="inputs"
+            columns={['配置名称', '类型', '必填', '默认值', '说明', '允许修改']}
+            onChange={onParamChange}
+          />
+        </div>
+      </div>
     </section>
   );
 }
@@ -1800,7 +1886,7 @@ function RawMcpToolPreview({ source }) {
   const outputSchema = buildRawOutputJsonSchema(outputs);
   return (
     <div className="raw-tool-preview">
-      <div className="schema-head"><strong>MCP工具信息</strong></div>
+      <div className="schema-head"><strong>原始MCP工具信息</strong></div>
       <div className="raw-tool-summary">
         <div>
           <label>工具名称</label>
@@ -1825,83 +1911,114 @@ function RawMcpToolPreview({ source }) {
   );
 }
 
-function getRuleFieldOptions(rule) {
-  return rule?.outputName ? [rule.outputName] : ['content'];
-}
-
-function OutputRuleList({ rules, onAdd, onRemove, onChange }) {
+function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange, onAdd, onRemove, onChange, onOutputChange, onOutputAdd, onOutputRemove }) {
+  const outputSchema = buildRawOutputJsonSchema(source?.tool?.outputs || []);
   return (
-    <section className="schema-card output-rule-section">
-      <p className="step-tip">工具结果存储直接基于 MCP 工具原始返回配置。这里的持久化结果不等于节点输出，但后续节点输出可以引用这里产生的存储地址。</p>
-      <div className="output-rule-list">
-        <div className="rule-subsection">
-          <div className="rule-section-head">
-            <div className="rule-subtitle">存储设置</div>
-            <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加存储配置</button>
+    <section className="standardization-grid">
+      <div className="schema-card standardization-panel output-schema-panel">
+        <div className="schema-head"><strong>原始MCP output schema</strong></div>
+        <pre className="json-schema-preview">{JSON.stringify(outputSchema, null, 2)}</pre>
+      </div>
+      <div className="standardization-right-stack">
+        <div className="schema-card standardization-panel code-editor-panel">
+          <div className="schema-head"><strong>MCP工具结果解析提取代码</strong></div>
+          <textarea
+            className="standardization-code-editor"
+            spellCheck={false}
+            value={code}
+            onChange={(event) => onCodeChange(event.target.value)}
+          />
+        </div>
+        <div className="schema-card standardization-panel binding-panel">
+          <div className="schema-head">
+            <strong>解析结果持久化存储</strong>
+            <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加绑定</button>
           </div>
-          {rules.length ? (
-            <table className="data-table compact-table editable-schema-table storage-rule-table">
-              <thead>
-                <tr>
-                  <th>MCP工具返回路径</th>
-                  <th>存储的知识形态</th>
-                  <th>存储目标</th>
-                  <th>存储地址</th>
-                  <th>存储位置</th>
-                  <th>目标字段</th>
-                  <th>写入方式</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rules.map((rule) => {
-                  const storageTargetType = rule.storageTargetType || '';
-                  return (
+          <p className="plain-step-tip">将标准化代码输出绑定到平台知识形态，系统按知识形态套用全局存储规则。</p>
+          <div className="binding-list">
+            {rules.length ? (
+              <table className="data-table compact-table editable-schema-table output-binding-table">
+                <thead>
+                  <tr>
+                    <th>代码输出</th>
+                    <th>知识形态</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rules.map((rule) => (
                     <tr key={rule.id}>
-                      <td><input value={rule.outputName || ''} placeholder="例如 data.pages[]" onChange={(event) => onChange(rule.id, { outputName: event.target.value })} /></td>
+                      <td><input value={rule.outputName || ''} placeholder="例如 chunks 或 result.qaPairs" onChange={(event) => onChange(rule.id, { outputName: event.target.value })} /></td>
                       <td>
                         <SelectField value={rule.artifactType || ''} onChange={(artifactType) => onChange(rule.id, { artifactType })}>
                           <option value="">请选择</option>
-                          {['文本切片', '父子切片', 'QA对', '解析文档', '知识点', '元数据', '原始结果'].map((item) => <option key={item} value={item}>{item}</option>)}
-                        </SelectField>
-                      </td>
-                      <td>
-                        <SelectField value={storageTargetType} onChange={(value) => onChange(rule.id, { storageTargetType: value })}>
-                          <option value="">请选择</option>
-                          {['Elasticsearch', '对象存储'].map((item) => <option key={item} value={item}>{item}</option>)}
-                        </SelectField>
-                      </td>
-                      <td>
-                        {storageTargetType === '对象存储'
-                          ? <input placeholder="Bucket 地址" value={rule.objectStorageAddress || ''} onChange={(event) => onChange(rule.id, { objectStorageAddress: event.target.value })} />
-                          : storageTargetType === 'Elasticsearch'
-                          ? <input placeholder="ES 地址" value={rule.esAddress || ''} onChange={(event) => onChange(rule.id, { esAddress: event.target.value })} />
-                          : <input placeholder="存储地址" value="" readOnly />}
-                      </td>
-                      <td>
-                        {storageTargetType === '对象存储'
-                          ? <input placeholder="路径规则" value={rule.objectStoragePath || ''} onChange={(event) => onChange(rule.id, { objectStoragePath: event.target.value })} />
-                          : storageTargetType === 'Elasticsearch'
-                          ? <input placeholder="Index 名称" value={rule.esIndex || ''} onChange={(event) => onChange(rule.id, { esIndex: event.target.value })} />
-                          : <input placeholder="存储位置" value="" readOnly />}
-                      </td>
-                      <td><input placeholder="例如 content" value={rule.targetField || ''} onChange={(event) => onChange(rule.id, { targetField: event.target.value })} /></td>
-                      <td>
-                        <SelectField value={rule.writeMode || ''} onChange={(writeMode) => onChange(rule.id, { writeMode })}>
-                          <option value="">请选择</option>
-                          {['新增', '覆盖', 'upsert'].map((item) => <option key={item} value={item}>{item}</option>)}
+                          {knowledgeShapeOptions.map((item) => {
+                            const disabled = !availableKnowledgeShapes.has(item);
+                            return (
+                              <option key={item} value={item} disabled={disabled}>
+                                <span className="knowledge-shape-option">
+                                  <span>{item}</span>
+                                  {disabled ? <span className="developing-option">开发中</span> : null}
+                                </span>
+                              </option>
+                            );
+                          })}
                         </SelectField>
                       </td>
                       <td><button type="button" className="danger-link" onClick={() => onRemove(rule.id)}>删除</button></td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : null}
-          {rules.length === 0 ? <p className="empty-hint">暂无存储配置。未配置时，MCP 返回结果只参与后续参数映射，不会持久化。</p> : null}
+                  ))}
+                </tbody>
+              </table>
+            ) : null}
+            {rules.length === 0 ? <p className="empty-hint">暂无绑定。请添加代码输出，并选择对应知识形态。</p> : null}
+          </div>
         </div>
+        <NodeOutputTable
+          outputs={outputs}
+          onChange={onOutputChange}
+          onAdd={onOutputAdd}
+          onRemove={onOutputRemove}
+        />
       </div>
+    </section>
+  );
+}
+
+function NodeOutputTable({ outputs, onChange, onAdd, onRemove }) {
+  return (
+    <section className="schema-card standardization-panel node-output-panel">
+      <div className="schema-head">
+        <strong>节点输出</strong>
+        <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加节点输出</button>
+      </div>
+      <table className="data-table compact-table editable-schema-table node-output-table">
+        <thead>
+          <tr>
+            <th>输出名称</th>
+            <th>字段类型</th>
+            <th>代码输出</th>
+            <th>说明</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {outputs.map((output, index) => (
+            <tr key={`output-${index}`}>
+              <td><input value={output.name || ''} onChange={(event) => onChange('outputs', index, 'name', event.target.value)} /></td>
+              <td>
+                <SelectField value={output.type || 'string'} onChange={(type) => onChange('outputs', index, 'type', type)}>
+                  {outputFieldTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
+                </SelectField>
+              </td>
+              <td><input value={output.codeOutput || output.path || ''} placeholder="例如 chunks 或 result.qaPairs" onChange={(event) => onChange('outputs', index, 'codeOutput', event.target.value)} /></td>
+              <td><input value={output.description || ''} onChange={(event) => onChange('outputs', index, 'description', event.target.value)} /></td>
+              <td><button type="button" className="danger-link" onClick={() => onRemove(index)}>删除</button></td>
+            </tr>
+          ))}
+          {outputs.length === 0 ? <tr><td colSpan={5} className="empty-table-cell">暂无节点输出</td></tr> : null}
+        </tbody>
+      </table>
     </section>
   );
 }
@@ -1956,6 +2073,7 @@ function toJsonSchemaType(type = 'object') {
 }
 
 const inputTypeOptions = ['string', 'number', 'integer', 'boolean', 'object', 'array<object>', 'array<string>'];
+const outputFieldTypeOptions = ['string', 'number', 'integer', 'boolean', 'object', 'array<object>', 'array<string>', 'file', 'url'];
 const inputArtifactTypeOptions = [
   { value: 'file_object', label: '文件对象', type: 'object' },
   { value: 'file_url', label: '文件地址', type: 'url' },
@@ -2017,7 +2135,6 @@ function EditableParamTable({ title, tip, rows, kind, columns, sourceInputs = []
                       {inputTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
                     </SelectField>
                   </td>
-                  <td><input value={row.sourceName || row.name || ''} placeholder="例如 options.chunkSize" onChange={(event) => onChange(kind, row.__draftIndex ?? index, 'sourceName', event.target.value)} /></td>
                   <td>
                     <button type="button" className={`switch-control ${row.required ? 'active' : ''}`} onClick={() => onChange(kind, row.__draftIndex ?? index, 'required', !row.required)} aria-pressed={Boolean(row.required)}>
                       <span />

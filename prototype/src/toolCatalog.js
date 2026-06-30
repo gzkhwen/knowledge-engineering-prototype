@@ -1,6 +1,6 @@
-const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v16';
-const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v16';
-const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v16';
+const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v17';
+const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v17';
+const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v17';
 const CATALOG_EVENT = 'knowledge-engineering-managed-tool-catalog-changed';
 const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v4',
@@ -39,6 +39,9 @@ const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v15',
   'knowledge-engineering-demo-higress-managed-tools-v15',
   'knowledge-engineering-demo-higress-managed-tool-categories-v15',
+  'knowledge-engineering-demo-higress-mcp-services-v16',
+  'knowledge-engineering-demo-higress-managed-tools-v16',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v16',
 ];
 
 export const defaultCategories = ['文档解析', '文本分片', '知识提取', '向量处理', '质量评估'];
@@ -88,10 +91,11 @@ function createStorageContract({
   indexJoinField = '',
   recallJoinField = '',
   indexConfig = null,
+  standardizationCode = '',
   note = '',
   rules = [],
 } = {}) {
-  return { enabled, outputName, artifactType, storageTargetType, storageType: storageTargetType, esAddress, esIndex, objectStorageAddress, objectStoragePath, knowledgeBase, database, directory, writeMode, indexEnabled, indexSource, indexField, recallSource, recallField, indexFields, filterFields, indexJoinField, recallJoinField, indexConfig, note, rules };
+  return { enabled, outputName, artifactType, storageTargetType, storageType: storageTargetType, esAddress, esIndex, objectStorageAddress, objectStoragePath, knowledgeBase, database, directory, writeMode, indexEnabled, indexSource, indexField, recallSource, recallField, indexFields, filterFields, indexJoinField, recallJoinField, indexConfig, standardizationCode, note, rules };
 }
 
 function normalizeStorageContract(contract) {
@@ -116,6 +120,17 @@ const higressDemoTools = [
       createOutput('paragraphs', 'array<object>', '标准化段落列表，包含 id、heading、text。'),
       createOutput('metadata', 'object', '页数、文件名、解析耗时等元信息。'),
     ],
+  },
+  {
+    name: '遗留解析工具',
+    description: '客户侧旧版解析接口，仅返回运行时结果，未声明 Output Schema。',
+    category: '未分类',
+    enabled: true,
+    inputs: [
+      createInput('file', 'object', true, '待解析文件信息。'),
+      createInput('mode', 'string', false, '解析模式。'),
+    ],
+    outputs: [],
   },
   {
     name: '文本分片',
@@ -338,6 +353,7 @@ function normalizeToolInputs(tool) {
 }
 
 function normalizeToolOutputs(tool) {
+  if (Array.isArray(tool.outputs) && tool.outputs.length === 0) return [];
   const defaults = defaultToolOutputs(tool.name);
   const defaultByName = new Map(defaults.map((output) => [output.name, output]));
   const source = tool.outputs?.length ? tool.outputs : defaults;
@@ -431,6 +447,7 @@ function makeManagedTool({
   sourceToolName = '',
   inputs = [],
   outputs = [],
+  parameterMappingCode = '',
   storageContract,
   lastSyncedAt = '-',
   version = 'v1',
@@ -454,6 +471,7 @@ function makeManagedTool({
     lastSyncedAt,
     inputs: normalizeToolInputs({ name, inputs }),
     outputs: normalizeToolOutputs({ name, outputs }),
+    parameterMappingCode,
     storageContract: normalizeStorageContract(storageContract),
   };
 }
@@ -1151,6 +1169,7 @@ export function createKnowledgeToolFromRaw(source, overrides = {}) {
     sourceToolName: rawTool.name || '',
     inputs: overrides.inputs || rawTool.inputs || defaultToolInputs(rawTool.name || ''),
     outputs: overrides.outputs || rawTool.outputs || defaultToolOutputs(rawTool.name || ''),
+    parameterMappingCode: overrides.parameterMappingCode || '',
     storageContract: createStorageContract({
       enabled: Boolean(overrides.storageRules?.length),
       outputName: overrides.storageRules?.[0]?.outputName || rawTool.outputs?.[0]?.name || '',
@@ -1173,6 +1192,7 @@ export function createKnowledgeToolFromRaw(source, overrides = {}) {
       indexJoinField: overrides.indexConfig?.indexJoinField || '',
       recallJoinField: overrides.indexConfig?.recallJoinField || '',
       indexConfig: overrides.indexConfig || null,
+      standardizationCode: overrides.standardizationCode || '',
       rules: overrides.storageRules || [],
       note: overrides.storageNote || '创建后可在工具详情中继续完善结果存储设置。',
     }),
