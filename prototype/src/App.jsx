@@ -78,7 +78,7 @@ function SearchBox({ value, onChange, placeholder }) {
   );
 }
 
-function SelectField({ value, onChange, children, className = '' }) {
+function SelectField({ value, onChange, children, className = '', disabled = false }) {
   const [open, setOpen] = useState(false);
   const [dropdownStyle, setDropdownStyle] = useState(null);
   const rootRef = useRef(null);
@@ -130,14 +130,14 @@ function SelectField({ value, onChange, children, className = '' }) {
   }, [open]);
 
   const chooseOption = (option) => {
-    if (option.disabled) return;
+    if (disabled || option.disabled) return;
     onChange(option.value);
     setOpen(false);
   };
 
   return (
-    <span ref={rootRef} className={`select-field-wrap ${open ? 'open' : ''} ${className}`.trim()}>
-      <button type="button" className={`select-field ${className}`.trim()} onClick={() => setOpen((current) => !current)}>
+    <span ref={rootRef} className={`select-field-wrap ${open ? 'open' : ''} ${disabled ? 'disabled' : ''} ${className}`.trim()}>
+      <button type="button" className={`select-field ${disabled ? 'readonly' : ''} ${className}`.trim()} disabled={disabled} onClick={() => setOpen((current) => !current)}>
         <span>{selected?.label}</span>
         <DownOutlined />
       </button>
@@ -1686,13 +1686,49 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
     setDraft((current) => ({
       ...current,
       outputs: current.outputs.filter((_, itemIndex) => itemIndex !== index),
+      storageRules: current.outputs[index]?.storageRuleId
+        ? (current.storageRules || []).map((rule) => (rule.id === current.outputs[index].storageRuleId ? { ...rule, nodeOutputRef: false } : rule))
+        : current.storageRules,
     }));
   };
   const updateStorageRule = (ruleId, patch) => {
     setDraft((current) => ({
       ...current,
       storageRules: (current.storageRules || []).map((rule) => (rule.id === ruleId ? { ...rule, ...patch } : rule)),
+      outputs: (current.outputs || []).map((output) => (
+        output.storageRuleId === ruleId
+          ? {
+            ...output,
+            ...(patch.fieldType ? { type: patch.fieldType } : {}),
+            ...(Object.prototype.hasOwnProperty.call(patch, 'outputName') ? { codeOutput: patch.outputName } : {}),
+          }
+          : output
+      )),
     }));
+  };
+  const toggleStorageRuleOutputRef = (ruleId) => {
+    setDraft((current) => {
+      const rule = (current.storageRules || []).find((item) => item.id === ruleId);
+      if (!rule) return current;
+      const nextEnabled = !rule.nodeOutputRef;
+      return {
+        ...current,
+        storageRules: (current.storageRules || []).map((item) => (item.id === ruleId ? { ...item, nodeOutputRef: nextEnabled } : item)),
+        outputs: nextEnabled
+          ? [
+            ...(current.outputs || []).filter((output) => output.storageRuleId !== ruleId),
+            {
+              name: '',
+              displayName: '',
+              type: rule.fieldType || 'string',
+              codeOutput: rule.outputName || '',
+              description: '',
+              storageRuleId: ruleId,
+            },
+          ]
+          : (current.outputs || []).filter((output) => output.storageRuleId !== ruleId),
+      };
+    });
   };
   const updateStandardizationCode = (standardizationCode) => {
     setDraft((current) => ({ ...current, standardizationCode }));
@@ -1713,6 +1749,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   const removeStorageRule = (ruleId) => setDraft((current) => ({
     ...current,
     storageRules: (current.storageRules || []).filter((rule) => rule.id !== ruleId),
+    outputs: (current.outputs || []).filter((output) => output.storageRuleId !== ruleId),
   }));
   return (
     <Modal
@@ -1786,6 +1823,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
             onAdd={addStorageRule}
             onRemove={removeStorageRule}
             onChange={updateStorageRule}
+            onToggleOutputRef={toggleStorageRuleOutputRef}
             onOutputChange={updateParam}
             onOutputAdd={addOutput}
             onOutputRemove={removeOutput}
@@ -1833,9 +1871,12 @@ function NodeBindingStep({ draft, setDraft, sources, selectedSource, selectedMcp
               </Field>
             </>
           ) : <p className="empty-hint">当前还没有可用的外部 MCP 原始工具。请先在“MCP Server 接入”页完成服务同步。</p>}
-          <div className="mcp-description-box">{toolDescription}</div>
+          <Field label="原始名称工具描述信息">
+            <div className="mcp-description-box">{toolDescription}</div>
+          </Field>
         </div>
       </div>
+      <div className="binding-arrow" aria-hidden="true" />
       <div className="binding-column">
         <h3>请设置流程节点信息</h3>
         <div className="schema-card binding-box">
@@ -1855,7 +1896,7 @@ function NodeInputArtifactTable({ artifacts, onAdd, onRemove, onChange }) {
         <strong>节点输入</strong>
         <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加节点输入</button>
       </div>
-      <p className="plain-step-tip">节点输入用于声明该流程节点可承接的上游输出。</p>
+      <p className="plain-step-tip">定义当前流程节点用于接收上游节点输出结果的参数。</p>
       {artifacts.length ? (
         <table className="data-table compact-table editable-schema-table input-artifact-table">
           <thead>
@@ -1909,6 +1950,7 @@ function InputMappingPanel({ source, code, artifacts, configRows, onCodeChange, 
         </div>
         <div className="schema-card standardization-panel code-editor-panel">
           <div className="schema-head"><strong>参数映射代码</strong></div>
+          <p className="plain-step-tip">通过代码将流程节点的输入和配置参数映射到MCP工具的Input Schema。</p>
           <textarea
             className="standardization-code-editor"
             spellCheck={false}
@@ -1929,10 +1971,10 @@ function ConfigParamTable({ rows, onChange, onAdd, onRemove }) {
   return (
     <section className="schema-card editable-schema-card">
       <div className="schema-head">
-        <strong>配置参数</strong>
+        <strong>节点配置参数</strong>
         <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加配置参数</button>
       </div>
-      <p className="plain-step-tip">配置参数用于声明节点运行时可配置的 MCP 工具入参。</p>
+      <p className="plain-step-tip">定义当前流程节点对Agent和人暴露的配置项。</p>
       <table className="data-table compact-table editable-schema-table input-schema-table">
         <thead>
           <tr>
@@ -1941,7 +1983,6 @@ function ConfigParamTable({ rows, onChange, onAdd, onRemove }) {
             <th>类型</th>
             <th>必填</th>
             <th>默认值</th>
-            <th>允许修改</th>
             <th>说明</th>
             <th>操作</th>
           </tr>
@@ -1964,17 +2005,12 @@ function ConfigParamTable({ rows, onChange, onAdd, onRemove }) {
                   </button>
                 </td>
                 <td><input value={row.defaultValue || ''} onChange={(event) => onChange('inputs', rowIndex, 'defaultValue', event.target.value)} /></td>
-                <td>
-                  <button type="button" className={`switch-control ${row.exposed ?? true ? 'active' : ''}`} onClick={() => onChange('inputs', rowIndex, 'exposed', !(row.exposed ?? true))} aria-pressed={row.exposed ?? true}>
-                    <span />
-                  </button>
-                </td>
                 <td><input value={row.description || ''} onChange={(event) => onChange('inputs', rowIndex, 'description', event.target.value)} /></td>
                 <td><button type="button" className="danger-link" onClick={() => onRemove(rowIndex)}>删除</button></td>
               </tr>
             );
           })}
-          {rows.length === 0 ? <tr><td colSpan={8} className="empty-table-cell">暂无配置参数</td></tr> : null}
+          {rows.length === 0 ? <tr><td colSpan={7} className="empty-table-cell">暂无配置参数</td></tr> : null}
         </tbody>
       </table>
     </section>
@@ -2014,7 +2050,7 @@ function RawMcpToolPreview({ source }) {
   );
 }
 
-function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange, onAdd, onRemove, onChange, onOutputChange, onOutputAdd, onOutputRemove }) {
+function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange, onAdd, onRemove, onChange, onToggleOutputRef, onOutputChange, onOutputAdd, onOutputRemove }) {
   const outputSchema = buildRawOutputJsonSchema(source?.tool?.outputs || []);
   return (
     <section className="standardization-grid">
@@ -2046,6 +2082,7 @@ function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange
                     <th>代码输出</th>
                     <th>类型</th>
                     <th>知识形态</th>
+                    <th>节点输出引用</th>
                     <th>操作</th>
                   </tr>
                 </thead>
@@ -2073,6 +2110,11 @@ function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange
                             );
                           })}
                         </SelectField>
+                      </td>
+                      <td>
+                        <button type="button" className={`switch-control ${rule.nodeOutputRef ? 'active' : ''}`} onClick={() => onToggleOutputRef(rule.id)} aria-pressed={Boolean(rule.nodeOutputRef)}>
+                          <span />
+                        </button>
                       </td>
                       <td><button type="button" className="danger-link" onClick={() => onRemove(rule.id)}>删除</button></td>
                     </tr>
@@ -2118,11 +2160,11 @@ function NodeOutputTable({ outputs, onChange, onAdd, onRemove }) {
               <td><input value={output.name || ''} onChange={(event) => onChange('outputs', index, 'name', event.target.value)} /></td>
               <td><input value={output.displayName || ''} onChange={(event) => onChange('outputs', index, 'displayName', event.target.value)} /></td>
               <td>
-                <SelectField value={output.type || 'string'} onChange={(type) => onChange('outputs', index, 'type', type)}>
+                <SelectField value={output.type || 'string'} onChange={(type) => onChange('outputs', index, 'type', type)} disabled={Boolean(output.storageRuleId)}>
                   {outputFieldTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
                 </SelectField>
               </td>
-              <td><input value={output.codeOutput || output.path || ''} placeholder="例如 chunks 或 result.qaPairs" onChange={(event) => onChange('outputs', index, 'codeOutput', event.target.value)} /></td>
+              <td><input value={output.codeOutput || output.path || ''} placeholder="例如 chunks 或 result.qaPairs" readOnly={Boolean(output.storageRuleId)} onChange={(event) => onChange('outputs', index, 'codeOutput', event.target.value)} /></td>
               <td><input value={output.description || ''} onChange={(event) => onChange('outputs', index, 'description', event.target.value)} /></td>
               <td><button type="button" className="danger-link" onClick={() => onRemove(index)}>删除</button></td>
             </tr>
