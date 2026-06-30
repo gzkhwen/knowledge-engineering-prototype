@@ -1,6 +1,6 @@
-const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v18';
-const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v18';
-const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v18';
+const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v19';
+const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v19';
+const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v19';
 const CATALOG_EVENT = 'knowledge-engineering-managed-tool-catalog-changed';
 const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v4',
@@ -45,6 +45,9 @@ const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v17',
   'knowledge-engineering-demo-higress-managed-tools-v17',
   'knowledge-engineering-demo-higress-managed-tool-categories-v17',
+  'knowledge-engineering-demo-higress-mcp-services-v18',
+  'knowledge-engineering-demo-higress-managed-tools-v18',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v18',
 ];
 
 export const defaultCategories = ['文档解析', '文本分片', '知识提取', '向量处理', '质量评估'];
@@ -152,6 +155,85 @@ function createStorageContract({
 
 function normalizeStorageContract(contract) {
   return createStorageContract(contract || {});
+}
+
+function createDemoInputArtifacts(inputs = []) {
+  const mainInput = inputs.find((input) => input.required) || inputs[0];
+  if (!mainInput) return [];
+  const normalizedName = String(mainInput.name || '').toLowerCase();
+  const normalizedType = String(mainInput.type || '').toLowerCase();
+  const artifactType = normalizedName.includes('qa') ? 'qa_pairs'
+    : normalizedName.includes('chunk') ? 'text_chunks'
+      : normalizedName === 'input' || normalizedType.includes('array') ? 'text_blocks'
+        : normalizedType === 'url' ? 'file_url'
+          : normalizedType === 'string' ? 'text'
+            : 'file_object';
+  return [{
+    id: `input-artifact-${mainInput.name}`,
+    name: mainInput.name,
+    displayName: mainInput.displayName || demoFieldDisplayNames[mainInput.name] || mainInput.name,
+    type: mainInput.type || 'object',
+    artifactType,
+    sourcePath: mainInput.name,
+    sourceName: mainInput.name,
+    description: mainInput.description || '承接上游节点输出结果。',
+  }];
+}
+
+function createDemoParameterMappingCode(inputs = []) {
+  const pairs = inputs.map((input) => {
+    const source = input.required ? `context.nodeInput.${input.name}` : `context.config.${input.name}`;
+    const fallback = input.defaultValue !== undefined && input.defaultValue !== '' ? ` ?? ${JSON.stringify(input.defaultValue)}` : '';
+    return `    ${input.name}: ${source}${fallback}`;
+  });
+  return `function mapParams(context) {
+  return {
+${pairs.join(',\n')}
+  };
+}`;
+}
+
+function createDemoStandardizationCode(rules = [], outputs = []) {
+  const names = (rules.length ? rules.map((rule) => rule.outputName) : outputs.map((output) => output.name)).filter(Boolean);
+  const pairs = names.map((name) => `    ${name}: mcpResult.${name} || mcpResult.data?.${name}`);
+  return `function transform(mcpResult) {
+  return {
+${pairs.join(',\n')}
+  };
+}`;
+}
+
+function applyDemoNodeOutputRefs(contract, outputs = []) {
+  const outputByName = new Map(outputs.map((output) => [output.name, output]));
+  const rules = (contract.rules || []).map((rule, index) => {
+    const matchedOutput = outputByName.get(rule.outputName);
+    return {
+      ...rule,
+      fieldType: rule.fieldType || matchedOutput?.type || 'object',
+      nodeOutputRef: rule.nodeOutputRef ?? index === 0,
+    };
+  });
+  const enrichedOutputs = outputs.map((output) => {
+    const linkedRule = rules.find((rule) => rule.nodeOutputRef && rule.outputName === output.name);
+    return {
+      ...output,
+      displayName: output.displayName || demoFieldDisplayNames[output.name] || output.name,
+      codeOutput: output.codeOutput || output.path || output.name,
+      ...(linkedRule ? { storageRuleId: linkedRule.id } : {}),
+    };
+  });
+  rules.forEach((rule) => {
+    if (!rule.nodeOutputRef || outputByName.has(rule.outputName)) return;
+    enrichedOutputs.push({
+      name: rule.outputName,
+      displayName: demoFieldDisplayNames[rule.outputName] || rule.outputName,
+      type: rule.fieldType || 'object',
+      codeOutput: rule.outputName,
+      description: `${rule.artifactType || '结果'}输出。`,
+      storageRuleId: rule.id,
+    });
+  });
+  return [{ ...contract, rules }, enrichedOutputs];
 }
 
 const higressDemoTools = [
@@ -396,6 +478,7 @@ function normalizeToolInputs(tool) {
     const fallback = defaultByName.get(input.name) || defaults[index] || {};
     return {
       ...input,
+      displayName: input.displayName || fallback.displayName || demoFieldDisplayNames[input.name] || input.name,
       type: input.type || fallback.type || 'object',
       required: input.required ?? fallback.required ?? true,
       description: input.description || fallback.description || '',
@@ -413,9 +496,11 @@ function normalizeToolOutputs(tool) {
     const fallback = defaultByName.get(output.name) || defaults[index] || {};
     return {
       ...output,
+      displayName: output.displayName || fallback.displayName || demoFieldDisplayNames[output.name] || output.name,
       type: output.type || fallback.type || 'object',
       description: output.description || fallback.description || '',
       path: output.path || fallback.path || output.name || fallback.name || 'result',
+      codeOutput: output.codeOutput || output.path || fallback.path || output.name || fallback.name || 'result',
     };
   });
 }
@@ -499,11 +584,20 @@ function makeManagedTool({
   sourceToolName = '',
   inputs = [],
   outputs = [],
+  inputArtifacts,
   parameterMappingCode = '',
   storageContract,
   lastSyncedAt = '-',
   version = 'v1',
 }) {
+  const normalizedInputs = normalizeToolInputs({ name, inputs });
+  const normalizedOutputs = normalizeToolOutputs({ name, outputs });
+  const baseStorageContract = normalizeStorageContract(storageContract);
+  const storageWithCode = {
+    ...baseStorageContract,
+    standardizationCode: baseStorageContract.standardizationCode || createDemoStandardizationCode(baseStorageContract.rules, normalizedOutputs),
+  };
+  const [linkedStorageContract, linkedOutputs] = applyDemoNodeOutputRefs(storageWithCode, normalizedOutputs);
   return {
     id,
     name,
@@ -521,10 +615,11 @@ function makeManagedTool({
     enabled: true,
     version,
     lastSyncedAt,
-    inputs: normalizeToolInputs({ name, inputs }),
-    outputs: normalizeToolOutputs({ name, outputs }),
-    parameterMappingCode,
-    storageContract: normalizeStorageContract(storageContract),
+    inputArtifacts: inputArtifacts || createDemoInputArtifacts(normalizedInputs),
+    inputs: normalizedInputs,
+    outputs: linkedOutputs,
+    parameterMappingCode: parameterMappingCode || createDemoParameterMappingCode(normalizedInputs),
+    storageContract: linkedStorageContract,
   };
 }
 
