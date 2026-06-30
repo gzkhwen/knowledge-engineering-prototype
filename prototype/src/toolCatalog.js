@@ -1,6 +1,6 @@
-const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v17';
-const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v17';
-const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v17';
+const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v18';
+const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v18';
+const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v18';
 const CATALOG_EVENT = 'knowledge-engineering-managed-tool-catalog-changed';
 const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v4',
@@ -42,6 +42,9 @@ const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v16',
   'knowledge-engineering-demo-higress-managed-tools-v16',
   'knowledge-engineering-demo-higress-managed-tool-categories-v16',
+  'knowledge-engineering-demo-higress-mcp-services-v17',
+  'knowledge-engineering-demo-higress-managed-tools-v17',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v17',
 ];
 
 export const defaultCategories = ['文档解析', '文本分片', '知识提取', '向量处理', '质量评估'];
@@ -60,12 +63,61 @@ function purgeLegacyDemoStorage() {
 
 purgeLegacyDemoStorage();
 
+const demoFieldDisplayNames = {
+  applicableUsers: '适用对象',
+  badChunks: '低质切片列表',
+  batch_size: '批处理大小',
+  candidates: '候选召回结果',
+  chunk_size: '切片长度',
+  chunkQualityReport: '切片质量报告',
+  chunks: '文本切片集合',
+  content: '政策正文',
+  embeddings: '向量结果',
+  embeddingStats: '向量统计信息',
+  enable_layout: '启用版面识别',
+  file: '文件对象',
+  input: '输入内容',
+  keyRules: '关键规则',
+  language: '文档语言',
+  lowQualityQaPairs: '低质QA对列表',
+  metadata: '文件元数据',
+  metrics: '评估指标',
+  mode: '解析模式',
+  model: '模型标识',
+  ocr_language: 'OCR语言',
+  ocrMetadata: 'OCR元数据',
+  ocrPages: 'OCR页结果',
+  overlap: '重叠长度',
+  pages: '页级内容',
+  paragraphs: '标准段落',
+  parse_mode: '解析模式',
+  qaPairs: 'QA对集合',
+  qaQualityReport: 'QA质量报告',
+  qaResult: 'QA结果',
+  query: '检索问题',
+  rerankedResults: '重排结果',
+  rerankStats: '重排统计信息',
+  sections: '政策章节',
+  sourceChunks: '来源切片',
+  stats: '切片统计信息',
+  summary: '知识点摘要',
+  summary_type: '摘要类型',
+  summaryResult: '知识点列表',
+  system_prompt: '系统提示词',
+  table_mode: '表格解析模式',
+  tableMetadata: '表格元数据',
+  tables: '表格集合',
+  textChunkResult: '文本切片结果',
+  title: '文件标题',
+  top_k: '返回数量',
+};
+
 function createInput(name, type, required = true, description = '', defaultValue = '') {
-  return { name, type, required, description, defaultValue };
+  return { name, displayName: demoFieldDisplayNames[name] || name, type, required, description, defaultValue };
 }
 
 function createOutput(name, type, description = '', path) {
-  return { name, type, description, path: path || name };
+  return { name, displayName: demoFieldDisplayNames[name] || name, type, description, path: path || name };
 }
 
 function createStorageContract({

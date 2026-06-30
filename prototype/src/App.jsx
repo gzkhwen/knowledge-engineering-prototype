@@ -2061,6 +2061,7 @@ function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange
       <div className="standardization-right-stack">
         <div className="schema-card standardization-panel code-editor-panel">
           <div className="schema-head"><strong>MCP工具结果解析提取代码</strong></div>
+          <p className="plain-step-tip">通过代码对MCP工具的返回结果做标准化解析和提取，再做持久化存储和节点输出映射。</p>
           <textarea
             className="standardization-code-editor"
             spellCheck={false}
@@ -2073,13 +2074,13 @@ function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange
             <strong>解析结果持久化存储</strong>
             <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加绑定</button>
           </div>
-          <p className="plain-step-tip">将标准化代码输出绑定到平台知识形态，系统按知识形态套用全局存储规则。</p>
+          <p className="plain-step-tip">将提取代码处理后的结果持久化存储，系统会按所选知识形态完成存储落库。</p>
           <div className="binding-list">
             {rules.length ? (
               <table className="data-table compact-table editable-schema-table output-binding-table">
                 <thead>
                   <tr>
-                    <th>代码输出</th>
+                    <th>代码返回</th>
                     <th>类型</th>
                     <th>知识形态</th>
                     <th>节点输出引用</th>
@@ -2143,13 +2144,14 @@ function NodeOutputTable({ outputs, onChange, onAdd, onRemove }) {
         <strong>节点输出</strong>
         <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加节点输出</button>
       </div>
+      <p className="plain-step-tip">将提取代码处理后的结果作为节点输出给下游节点使用。</p>
       <table className="data-table compact-table editable-schema-table node-output-table">
         <thead>
           <tr>
             <th>字段名称</th>
             <th>显示名称</th>
             <th>类型</th>
-            <th>代码输出</th>
+            <th>代码返回</th>
             <th>说明</th>
             <th>操作</th>
           </tr>
@@ -2164,7 +2166,7 @@ function NodeOutputTable({ outputs, onChange, onAdd, onRemove }) {
                   {outputFieldTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
                 </SelectField>
               </td>
-              <td><input value={output.codeOutput || output.path || ''} placeholder="例如 chunks 或 result.qaPairs" readOnly={Boolean(output.storageRuleId)} onChange={(event) => onChange('outputs', index, 'codeOutput', event.target.value)} /></td>
+              <td><input value={output.codeOutput || output.path || ''} placeholder="例如 chunks 或 result.qaPairs" disabled={Boolean(output.storageRuleId)} onChange={(event) => onChange('outputs', index, 'codeOutput', event.target.value)} /></td>
               <td><input value={output.description || ''} onChange={(event) => onChange('outputs', index, 'description', event.target.value)} /></td>
               <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(index)}><DeleteOutlined /></button></td>
             </tr>
