@@ -1919,7 +1919,7 @@ function NodeInputArtifactTable({ artifacts, onAdd, onRemove, onChange }) {
                   </SelectField>
                 </td>
                 <td><input value={artifact.description || ''} onChange={(event) => onChange(artifact.id, { description: event.target.value })} /></td>
-                <td><button type="button" className="danger-link" onClick={() => onRemove(artifact.id)}>删除</button></td>
+                <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(artifact.id)}><DeleteOutlined /></button></td>
               </tr>
             ))}
           </tbody>
@@ -2006,7 +2006,7 @@ function ConfigParamTable({ rows, onChange, onAdd, onRemove }) {
                 </td>
                 <td><input value={row.defaultValue || ''} onChange={(event) => onChange('inputs', rowIndex, 'defaultValue', event.target.value)} /></td>
                 <td><input value={row.description || ''} onChange={(event) => onChange('inputs', rowIndex, 'description', event.target.value)} /></td>
-                <td><button type="button" className="danger-link" onClick={() => onRemove(rowIndex)}>删除</button></td>
+                <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(rowIndex)}><DeleteOutlined /></button></td>
               </tr>
             );
           })}
@@ -2116,7 +2116,7 @@ function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange
                           <span />
                         </button>
                       </td>
-                      <td><button type="button" className="danger-link" onClick={() => onRemove(rule.id)}>删除</button></td>
+                      <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(rule.id)}><DeleteOutlined /></button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -2166,7 +2166,7 @@ function NodeOutputTable({ outputs, onChange, onAdd, onRemove }) {
               </td>
               <td><input value={output.codeOutput || output.path || ''} placeholder="例如 chunks 或 result.qaPairs" readOnly={Boolean(output.storageRuleId)} onChange={(event) => onChange('outputs', index, 'codeOutput', event.target.value)} /></td>
               <td><input value={output.description || ''} onChange={(event) => onChange('outputs', index, 'description', event.target.value)} /></td>
-              <td><button type="button" className="danger-link" onClick={() => onRemove(index)}>删除</button></td>
+              <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(index)}><DeleteOutlined /></button></td>
             </tr>
           ))}
           {outputs.length === 0 ? <tr><td colSpan={6} className="empty-table-cell">暂无节点输出</td></tr> : null}

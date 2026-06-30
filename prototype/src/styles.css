@@ -1488,6 +1488,19 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   border: 1px solid #d6deea;
   border-radius: 6px;
 }
+.table-delete-button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 auto;
+  border: 0;
+  border-radius: 6px;
+  color: #d92d20;
+  background: transparent;
+  font-size: 14px;
+}
+.table-delete-button:hover { background: #fef2f2; }
 .standard-tool-form textarea {
   width: 100%;
   min-height: 72px;
