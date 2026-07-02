@@ -3464,7 +3464,7 @@ const baseTools = [
       makeParam('script', '代码脚本', 'function transform(input) {\n  return {\n    cleanBlocks: input.map(item => ({\n      title: item.title,\n      text: item.content || item.text,\n      page: item.page\n    }))\n  };\n}', { type: 'textarea', required: true }),
       makeParam('outputVariables', '输出变量声明', '[{ "name": "cleanBlocks", "type": "Array<json>", "path": "data.cleanBlocks" }]', { type: 'textarea', required: true }),
     ],
-    outputs: [makeOutput('scriptResult', '脚本处理结果', 'json，代码脚本返回的完整结果。', 'data.scriptResult'), makeOutput('cleanBlocks', '标准文本块', 'Array<json>，可作为后置分片或抽取工具输入。', 'data.cleanBlocks')],
+    outputs: [makeOutput('scriptResult', '脚本处理结果', '代码脚本返回的完整结果。', 'data.scriptResult', 'json'), makeOutput('cleanBlocks', '标准文本块', '可作为后置分片或抽取工具输入。', 'data.cleanBlocks', 'Array<json>')],
   },
   {
     id: 'system-storage',
@@ -5085,17 +5085,29 @@ function SimpleNodeConfigParam({ param, onChange }) {
 function NodeOutputReadonlyTable({ outputs }) {
   return (
     <div className="output-schema">
-      {outputs.length ? outputs.map((output) => (
-        <span className="output-item" key={output.path || output.id || output.name}>
-          <span className="output-item-title">
-            <code>{output.label || output.name || '-'}</code>
-            <strong>{output.type || '-'}</strong>
+      {outputs.length ? outputs.map((output) => {
+        const display = getOutputDisplay(output);
+        return (
+          <span className="output-item" key={output.path || output.id || output.name}>
+            <span className="output-item-title">
+              <code>{output.label || output.name || '-'}</code>
+              {display.type ? <strong>{display.type}</strong> : null}
+            </span>
+            <small>{display.description || '-'}</small>
           </span>
-          <small>{output.desc || output.description || '-'}</small>
-        </span>
-      )) : <div className="empty-mini">暂无节点输出</div>}
+        );
+      }) : <div className="empty-mini">暂无节点输出</div>}
     </div>
   );
+}
+
+function getOutputDisplay(output) {
+  const description = output.desc || output.description || '';
+  const [typePrefix, ...rest] = description.split('，');
+  const inferredType = typePrefix && /^[A-Za-z][A-Za-z0-9_<>{}[\]().|,-]*$/.test(typePrefix.trim()) ? typePrefix.trim() : '';
+  const type = output.type || inferredType;
+  const cleanedDescription = type && inferredType === type ? rest.join('，') : description;
+  return { type, description: cleanedDescription };
 }
 
 function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, inlineSource = false, showHeader = true, showFx = true }) {
@@ -5331,7 +5343,7 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
                     <SelectField value={output.type} onChange={(value) => updateCodeOutput(output.id, { type: value })}>{['string', 'number', 'boolean', 'object', 'json', 'Array<json>'].map((type) => <option key={type} value={type}>{type}</option>)}</SelectField>
                   </label>
                   <label className="code-output-field">
-                    <span>{index === 0 ? '参数值' : ''}</span>
+                    <span>{index === 0 ? '脚本返回' : ''}</span>
                     <input value={output.value} onChange={(event) => updateCodeOutput(output.id, { value: event.target.value })} />
                   </label>
                   <button type="button" onClick={() => removeCodeOutput(output.id)}><DeleteOutlined /></button>
@@ -5365,7 +5377,7 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
 }
 
 function syncCodeOutputs(node, codeOutputs) {
-  const outputs = [makeOutput('scriptResult', '脚本处理结果', 'json，代码脚本返回的完整结果。', 'data.scriptResult'), ...codeOutputs.map((output) => makeOutput(output.id, output.name, `${output.type}，代码执行器输出变量。`, output.value))];
+  const outputs = [makeOutput('scriptResult', '脚本处理结果', '代码脚本返回的完整结果。', 'data.scriptResult', 'json'), ...codeOutputs.map((output) => makeOutput(output.id, output.name, '代码执行器输出变量。', output.value, output.type))];
   const outputVariables = JSON.stringify(codeOutputs.map((output) => ({ name: output.name, type: output.type, path: output.value })), null, 2);
   return {
     ...node,
