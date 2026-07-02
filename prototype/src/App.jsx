@@ -3183,9 +3183,9 @@ function RightChevron() {
   return <span className="right-chevron">›</span>;
 }
 
-const workflowCategoryOrder = ['文档解析', '文本分片', '系统工具', '知识提取', '质量评估'];
-const toolDialogCategoryOrder = ['文档解析', '文本分片', '知识提取', '质量评估', '系统工具', '未分类'];
-const categoryAliases = { 内容处理: '文本分片', 智能生成: '知识提取' };
+const workflowCategoryOrder = ['文档解析', '文本分片', '系统节点', '知识提取', '质量评估'];
+const toolDialogCategoryOrder = ['文档解析', '文本分片', '知识提取', '质量评估', '系统节点', '未分类'];
+const categoryAliases = { 内容处理: '文本分片', 智能生成: '知识提取', 系统工具: '系统节点' };
 const sampleDemoFile = { id: 'demo-policy-sample', name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB', status: '已上传' };
 const initialAgentEvents = [{
   id: 'welcome',
@@ -3196,11 +3196,11 @@ const initialAgentEvents = [{
 }];
 const generatedAgentEvents = [
   { id: 'qa-parse', role: 'thought', title: '分析样例文件', content: '样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。', status: 'done' },
-  { id: 'qa-query', role: 'thought', title: '工具目录查询', content: '查询结果：命中可用工具，其中包含系统工具和外部接入工具。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-query', role: 'thought', title: '工具目录查询', content: '查询结果：命中可用工具，其中包含系统节点和外部接入节点。', status: 'done', kind: 'toolCall' },
   { id: 'qa-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建文档解析和文本分片主链路，再检查工具输出与下游入参是否需要适配。', status: 'done', flowSteps: ['文档解析', '文本分片'] },
   { id: 'qa-check-edge', role: 'thought', title: '检查节点承接', content: '发现适配问题：文件解析返回 sections[].content，分片工具需要 data.cleanBlocks。', status: 'done' },
-  { id: 'qa-fix-edge', role: 'thought', title: '修复节点承接', content: '已插入代码工具，将解析结果转换为 data.cleanBlocks，然后继续添加后置存储和 QA 提取节点。', status: 'done', kind: 'toolCall' },
-  { id: 'qa-config-storage', role: 'thought', title: '参数配置：数据存储工具', content: '参数配置完成：数据存储工具 已形成当前方案中的 Step 执行契约。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-fix-edge', role: 'thought', title: '修复节点承接', content: '已插入代码执行器，将解析结果转换为 data.cleanBlocks，然后继续添加后置存储和 QA 提取节点。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-config-storage', role: 'thought', title: '参数配置：数据存储器', content: '参数配置完成：数据存储器 已形成当前方案中的 Step 执行契约。', status: 'done', kind: 'toolCall' },
   { id: 'qa-config-knowledge', role: 'thought', title: '参数配置：QA提取', content: '参数配置完成：QA提取 已形成当前方案中的 Step 执行契约。', status: 'done', kind: 'toolCall' },
   { id: 'qa-check', role: 'thought', title: '检查完整方案', content: '方案检查通过：节点顺序、工具参数、变量承接和存储策略均可执行。', status: 'done' },
   { id: 'qa-run', role: 'thought', title: '样例试跑', content: '试跑结果：所有工具执行成功；分片结果已写入 ES；问答结果已生成。', status: 'done', kind: 'toolCall' },
@@ -3208,9 +3208,9 @@ const generatedAgentEvents = [
 ];
 const runningAgentEvents = [
   { id: 'run-parse', role: 'thought', title: '分析样例文件', content: '样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。', status: 'done' },
-  { id: 'run-query', role: 'thought', title: '工具目录查询', content: '查询结果：命中可用工具，其中包含系统工具和外部接入工具。', status: 'done', kind: 'toolCall' },
-  { id: 'run-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建主链路，再检查工具输出与下游入参是否需要适配。', status: 'done', flowSteps: ['文档解析', '文本分片', '系统工具', '知识提取'] },
-  { id: 'run-config-storage', role: 'thought', title: '参数配置：数据存储工具', content: '配置依据：工具参数定义、样例分析结果、上游输出路径。配置项：存储对象、存储方式、写入模式。', status: 'running', kind: 'toolCall' },
+  { id: 'run-query', role: 'thought', title: '工具目录查询', content: '查询结果：命中可用工具，其中包含系统节点和外部接入节点。', status: 'done', kind: 'toolCall' },
+  { id: 'run-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建主链路，再检查工具输出与下游入参是否需要适配。', status: 'done', flowSteps: ['文档解析', '文本分片', '系统节点', '知识提取'] },
+  { id: 'run-config-storage', role: 'thought', title: '参数配置：数据存储器', content: '配置依据：节点参数定义、样例分析结果、上游输出路径。配置项：存储对象、存储方式、写入模式。', status: 'running', kind: 'toolCall' },
 ];
 
 function normalizeWorkbenchCategory(category) {
@@ -3233,7 +3233,7 @@ function makeOutput(idValue, label, desc, path, type) {
 const defaultParamDescriptions = {
   parseObject: '样例文件对象，包含文件地址、文件名和文件类型，通常由上传文件自动带入。',
   parseStrategy: '选择解析能力组合，用于控制是否提取正文、版面、图片或表格内容。',
-  chunkObject: '待分片的上游文本或结构化内容，可引用文档解析或代码工具输出。',
+  chunkObject: '待分片的上游文本或结构化内容，可引用文档解析或代码执行器输出。',
   chunkSize: '每个文本片段的目标长度，用于控制切片粒度。',
   mode: '选择分片时是否关联原始文件信息或保留父子切片结构。',
   sliceSeparators: '按优先级使用的切片分隔符，用于优先保留段落、条款等语义边界。',
@@ -3449,8 +3449,8 @@ const baseTools = [
   },
   {
     id: 'system-code',
-    name: '代码工具',
-    category: '系统工具',
+    name: '代码执行器',
+    category: '系统节点',
     sourceType: 'system',
     serviceName: '流程引擎默认节点',
     summary: '接收前置工具输出，通过代码脚本完成清洗、转换、合并，并声明后置工具可引用的输出变量。',
@@ -3468,8 +3468,8 @@ const baseTools = [
   },
   {
     id: 'system-storage',
-    name: '数据存储工具',
-    category: '系统工具',
+    name: '数据存储器',
+    category: '系统节点',
     sourceType: 'system',
     serviceName: '流程引擎默认节点',
     summary: '选择前置工具输出中的指定路径，将结果写入 ES。',
@@ -3617,7 +3617,10 @@ function managedToolToWorkbenchTool(tool) {
 
 function readWorkbenchCatalog() {
   const managed = readCatalog().tools.filter((tool) => tool.status === '可用' || tool.enabled);
-  return managed.map(managedToolToWorkbenchTool).map((tool) => ({
+  const managedTools = managed.map(managedToolToWorkbenchTool);
+  const systemTools = baseTools.filter((tool) => tool.sourceType === 'system');
+  const byId = new Map([...managedTools, ...systemTools].map((tool) => [tool.id, tool]));
+  return Array.from(byId.values()).map((tool) => ({
     ...tool,
     category: normalizeWorkbenchCategory(tool.category),
   }));
@@ -4100,8 +4103,8 @@ function createSampleResult(file, options = {}) {
         outputFull: JSON.stringify({ title: '医保政策样例', sections: [{ title: '适用范围', page: 1, content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' }, { title: '办理条件', page: 2, content: '参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可申请备案。' }], paragraphs: [{ id: 'p1', heading: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' }], metadata: { fileName: file.name, pageCount: 4, parserVersion: 'policy-parser-1.0', elapsedMs: 128 } }, null, 2),
       },
       {
-        toolName: '代码工具',
-        category: '系统工具',
+        toolName: '代码执行器',
+        category: '系统节点',
         outputPath: 'data.cleanBlocks',
         parameters: [{ name: 'input', value: 'sections' }, { name: 'script', value: 'return { cleanBlocks: sections.map(...) }' }],
         status: '成功',
@@ -4116,8 +4119,8 @@ function createSampleResult(file, options = {}) {
         outputFull: JSON.stringify({ textChunkResult: [{ chunkId: 'chunk-001', title: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 }, { chunkId: 'chunk-002', title: '办理条件', text: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 }], stats: { chunkCount: 2, chunkSize: 800, overlap: 80 } }, null, 2),
       },
       {
-        toolName: '数据存储工具',
-        category: '系统工具',
+        toolName: '数据存储器',
+        category: '系统节点',
         outputPath: 'data.storageRef',
         parameters: [{ name: '存储对象', value: 'textChunkResult' }, { name: '存储方式', value: '写入ES' }, { name: '写入模式', value: 'upsert' }],
         status: '成功',
@@ -4417,14 +4420,14 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
     step(3200, () => {
       updateEvent(parseEventId, { status: 'done', content: '结构识别完成：需要先解析文档，再做结构适配、分片、存储，并基于分片结果生成问答。' });
       setSampleFiles((current) => current.map((file) => ({ ...file, status: '试跑中' })));
-      queryEventId = pushEvent({ role: 'thought', title: '工具目录查询', content: '输入：工具状态=可用，分类=文档解析/文本分片/知识提取/系统工具；输出：候选工具清单。', status: 'running', kind: 'toolCall' });
+      queryEventId = pushEvent({ role: 'thought', title: '工具目录查询', content: '输入：工具状态=可用，分类=文档解析/文本分片/知识提取/系统节点；输出：候选节点清单。', status: 'running', kind: 'toolCall' });
     });
     step(3000, () => {
-      updateEvent(queryEventId, { status: 'done', content: `查询结果：命中 ${catalog.filter((tool) => tool.status === '可用').length} 个可用工具，其中包含系统工具和外部接入工具。` });
+      updateEvent(queryEventId, { status: 'done', content: `查询结果：命中 ${catalog.filter((tool) => tool.status === '可用').length} 个可用节点，其中包含系统节点和外部接入节点。` });
       designEventId = pushEvent({ role: 'thought', title: '开始设计处理方案', content: '我会先生成主链路，再检查工具返回能否被后置工具直接消费。', status: 'running' });
     });
     step(3300, () => {
-      updateEvent(designEventId, { status: 'done', content: '方案设计完成。先搭建主链路，再检查工具输出与下游入参是否需要适配。', kind: 'flow', flowSteps: ['文档解析', '文本分片', '系统工具', '知识提取'] });
+      updateEvent(designEventId, { status: 'done', content: '方案设计完成。先搭建主链路，再检查工具输出与下游入参是否需要适配。', kind: 'flow', flowSteps: ['文档解析', '文本分片', '系统节点', '知识提取'] });
     });
 
     buildAndSelectToolNode([parser], [parser], '文档解析节点', '候选工具=文件解析；选择原因=该工具与 Higress 已发布的文件解析能力一致。');
@@ -4441,28 +4444,28 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
     });
     step(2800, () => {
       updateEvent(issueAnalysisEventId, { status: 'done', content: '问题原因已确认：上游工具未声明稳定 outputSchema，实际返回字段需要先转换成平台可识别的 cleanBlocks。' });
-      pushEvent({ role: 'thought', title: '输出解决方案', content: '解决方案：在文档解析节点和文本分片节点之间插入系统代码工具，生成 data.cleanBlocks 作为分片工具输入。', status: 'done' });
+      pushEvent({ role: 'thought', title: '输出解决方案', content: '解决方案：在文档解析节点和文本分片节点之间插入代码执行器，生成 data.cleanBlocks 作为分片工具输入。', status: 'done' });
     });
     step(1600, () => {
-      resolveEventId = pushEvent({ role: 'thought', title: '开始解决适配问题', content: '我会在文档解析和文本分片之间插入代码工具，把解析结果转换成分片工具可识别的数据结构。', status: 'running' });
-      setConnectionStates({ [getConnectionKey(parser.category, splitter.category)]: { status: 'resolving', reason: '正在插入代码工具解决结构适配问题。' } });
+      resolveEventId = pushEvent({ role: 'thought', title: '开始解决适配问题', content: '我会在文档解析和文本分片之间插入代码执行器，把解析结果转换成分片工具可识别的数据结构。', status: 'running' });
+      setConnectionStates({ [getConnectionKey(parser.category, splitter.category)]: { status: 'resolving', reason: '正在插入代码执行器解决结构适配问题。' } });
     });
 
-    buildToolNode([adapter].filter(Boolean), adaptedNodes, '系统工具节点', '候选工具=代码工具；选择原因=需要把 sections[].content 转换为 data.cleanBlocks。');
+    buildToolNode([adapter].filter(Boolean), adaptedNodes, '系统节点', '候选节点=代码执行器；选择原因=需要把 sections[].content 转换为 data.cleanBlocks。');
     configureToolNode([splitter]);
 
     step(2000, () => {
       setConnectionStates({
-        [getConnectionKey(parser.category, adapter.category)]: { status: 'resolved', reason: '代码工具输出 data.cleanBlocks，分片工具可直接引用。' },
+        [getConnectionKey(parser.category, adapter.category)]: { status: 'resolved', reason: '代码执行器输出 data.cleanBlocks，分片工具可直接引用。' },
         [getConnectionKey(adapter.category, splitter.category)]: { status: 'resolved', reason: '分片工具输入已改为 data.cleanBlocks。' },
       });
-      updateEvent(resolveEventId, { status: 'done', content: '适配问题已解决：代码工具输出 data.cleanBlocks，分片工具可直接引用。' });
+      updateEvent(resolveEventId, { status: 'done', content: '适配问题已解决：代码执行器输出 data.cleanBlocks，分片工具可直接引用。' });
     });
     step(2200, () => {
       setConnectionStates({});
     });
 
-    buildToolNode([storage], storageNodes, '系统工具节点', '候选工具=数据存储工具；选择原因=需要把分片结果写入 ES 供后续检索使用。');
+    buildToolNode([storage], storageNodes, '系统节点', '候选节点=数据存储器；选择原因=需要把分片结果写入 ES 供后续检索使用。');
     buildToolNode([qa].filter(Boolean), finalNodes, '知识提取节点', '候选工具=QA提取；选择原因=自动方案先完成问答抽取，知识点提取可在后续手动添加。');
 
     step(2200, () => {
@@ -4985,7 +4988,7 @@ function ToolRuntimeRow({ node, nodes, warnings, needsSmartHandling, runtime, ca
 function AddToolDialog({ tools, categories, nodes, confirmed, onClose, onAdd }) {
   const [category, setCategory] = useState(allToolsCategory);
   const [selectedId, setSelectedId] = useState(tools[0]?.id || '');
-  const cats = [allToolsCategory, ...sortWorkbenchCategories(categories || [])];
+  const cats = [allToolsCategory, ...sortWorkbenchCategories(Array.from(new Set([...(categories || []), ...tools.map((tool) => normalizeWorkbenchCategory(tool.category))].filter(Boolean))))];
   const filtered = category === allToolsCategory ? tools : tools.filter((tool) => tool.category === category);
   const current = tools.find((tool) => tool.id === selectedId) || filtered[0];
   const addedToolIds = new Set(nodes.map((node) => node.toolId));
@@ -5362,7 +5365,7 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
 }
 
 function syncCodeOutputs(node, codeOutputs) {
-  const outputs = [makeOutput('scriptResult', '脚本处理结果', 'json，代码脚本返回的完整结果。', 'data.scriptResult'), ...codeOutputs.map((output) => makeOutput(output.id, output.name, `${output.type}，代码工具输出变量。`, output.value))];
+  const outputs = [makeOutput('scriptResult', '脚本处理结果', 'json，代码脚本返回的完整结果。', 'data.scriptResult'), ...codeOutputs.map((output) => makeOutput(output.id, output.name, `${output.type}，代码执行器输出变量。`, output.value))];
   const outputVariables = JSON.stringify(codeOutputs.map((output) => ({ name: output.name, type: output.type, path: output.value })), null, 2);
   return {
     ...node,
