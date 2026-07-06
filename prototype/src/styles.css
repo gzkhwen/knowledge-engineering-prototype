@@ -423,8 +423,8 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 }
 .schema-tree-list.nested {
   position: relative;
-  margin-left: 7px;
-  padding-left: 18px;
+  margin-left: 6px;
+  padding-left: 16px;
 }
 .schema-tree-item {
   position: relative;
@@ -439,29 +439,32 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   top: 17px;
   bottom: -10px;
   left: 3px;
-  border-left: 1px solid #9aa4b2;
+  border-left: 1px solid #d8dee8;
 }
 .schema-tree-item:last-child::after { display: none; }
 .schema-tree-list.nested > .schema-tree-item::before {
   content: "";
   position: absolute;
   top: 17px;
-  left: -18px;
-  width: 18px;
-  border-top: 1px solid #9aa4b2;
+  left: -16px;
+  width: 16px;
+  border-top: 1px solid #d8dee8;
 }
 .schema-tree-row {
   display: grid;
-  grid-template-columns: 7px 10px minmax(0, max-content) auto auto;
+  grid-template-columns: 7px 8px minmax(0, max-content) max-content max-content;
   align-items: center;
-  column-gap: 5px;
+  column-gap: 4px;
   min-width: 0;
+  width: max-content;
+  max-width: 100%;
   color: #111827;
   font-size: 13px;
   line-height: 1.35;
 }
 .schema-tree-row strong {
   min-width: 0;
+  max-width: 320px;
   color: #1f2937;
   font-size: 13px;
   font-weight: 800;
@@ -471,10 +474,10 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   flex: 0 0 auto;
   position: relative;
   z-index: 1;
-  width: 7px;
-  height: 7px;
+  width: 5px;
+  height: 5px;
   border-radius: 999px;
-  background: #5f6368;
+  background: #a8b0bd;
 }
 .schema-tree-toggle,
 .schema-tree-toggle-placeholder {
@@ -502,6 +505,8 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   align-items: center;
   flex: 0 0 auto;
   min-height: 20px;
+  width: fit-content;
+  max-width: max-content;
   padding: 2px 7px;
   border-radius: 6px;
   font-size: 11px;
@@ -524,7 +529,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   background: #fff7f6;
 }
 .schema-tree-desc {
-  margin: 0 0 0 22px !important;
+  margin: 0 0 0 23px !important;
   color: #344054 !important;
   font-size: 12px;
   line-height: 1.55 !important;

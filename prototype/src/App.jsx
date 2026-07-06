@@ -2322,8 +2322,9 @@ function buildRawInputJsonSchema(inputs = []) {
   const required = [];
   inputs.forEach((input) => {
     if (!input.name) return;
+    const schema = input.schema || toJsonSchemaType(input.type);
     properties[input.name] = {
-      ...toJsonSchemaType(input.type),
+      ...schema,
       ...(input.description ? { description: input.description } : {}),
       ...(input.defaultValue ? { default: input.defaultValue } : {}),
     };
@@ -2340,8 +2341,9 @@ function buildRawOutputJsonSchema(outputs = []) {
   const properties = {};
   outputs.forEach((output) => {
     if (!output.name) return;
+    const schema = output.schema || toJsonSchemaType(output.type);
     properties[output.name] = {
-      ...toJsonSchemaType(output.type),
+      ...schema,
       ...(output.description ? { description: output.description } : {}),
       ...(output.path && output.path !== output.name ? { sourcePath: output.path } : {}),
     };

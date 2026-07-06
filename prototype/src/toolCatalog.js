@@ -1,6 +1,6 @@
-const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v19';
-const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v19';
-const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v19';
+const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v20';
+const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v20';
+const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v20';
 const CATALOG_EVENT = 'knowledge-engineering-managed-tool-catalog-changed';
 const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v4',
@@ -48,9 +48,12 @@ const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v18',
   'knowledge-engineering-demo-higress-managed-tools-v18',
   'knowledge-engineering-demo-higress-managed-tool-categories-v18',
+  'knowledge-engineering-demo-higress-mcp-services-v19',
+  'knowledge-engineering-demo-higress-managed-tools-v19',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v19',
 ];
 
-export const defaultCategories = ['文档解析', '文本分片', '知识提取', '向量处理', '质量评估'];
+export const defaultCategories = ['文档转换', '文档解析', '内容处理'];
 
 function nowText() {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -78,13 +81,23 @@ const demoFieldDisplayNames = {
   embeddings: '向量结果',
   embeddingStats: '向量统计信息',
   enable_layout: '启用版面识别',
+  code: '状态码',
+  content_url: '文件访问地址',
+  data: '结果数据',
+  end_section: '结束标题',
   file: '文件对象',
+  file_name: '文件名称',
+  file_size: '文件大小',
+  file_type: '文件类型',
+  files: '文件列表',
   input: '输入内容',
   keyRules: '关键规则',
   language: '文档语言',
   lowQualityQaPairs: '低质QA对列表',
   metadata: '文件元数据',
   metrics: '评估指标',
+  message: '提示信息',
+  mime_type: 'MIME类型',
   mode: '解析模式',
   model: '模型标识',
   ocr_language: 'OCR语言',
@@ -94,14 +107,17 @@ const demoFieldDisplayNames = {
   pages: '页级内容',
   paragraphs: '标准段落',
   parse_mode: '解析模式',
+  prompt: '提示词',
   qaPairs: 'QA对集合',
   qaQualityReport: 'QA质量报告',
   qaResult: 'QA结果',
   query: '检索问题',
   rerankedResults: '重排结果',
+  response: '接口返回结果',
   rerankStats: '重排统计信息',
   sections: '政策章节',
   sourceChunks: '来源切片',
+  specified_section: '指定标题',
   stats: '切片统计信息',
   summary: '知识点摘要',
   summary_type: '摘要类型',
@@ -113,14 +129,15 @@ const demoFieldDisplayNames = {
   textChunkResult: '文本切片结果',
   title: '文件标题',
   top_k: '返回数量',
+  user_id: '用户ID',
 };
 
-function createInput(name, type, required = true, description = '', defaultValue = '') {
-  return { name, displayName: demoFieldDisplayNames[name] || name, type, required, description, defaultValue };
+function createInput(name, type, required = true, description = '', defaultValue = '', schema = null) {
+  return { name, displayName: demoFieldDisplayNames[name] || name, type, required, description, defaultValue, ...(schema ? { schema } : {}) };
 }
 
-function createOutput(name, type, description = '', path) {
-  return { name, displayName: demoFieldDisplayNames[name] || name, type, description, path: path || name };
+function createOutput(name, type, description = '', path, schema = null) {
+  return { name, displayName: demoFieldDisplayNames[name] || name, type, description, path: path || name, ...(schema ? { schema } : {}) };
 }
 
 function createStorageContract({
@@ -236,181 +253,223 @@ function applyDemoNodeOutputRefs(contract, outputs = []) {
   return [{ ...contract, rules }, enrichedOutputs];
 }
 
-const higressDemoTools = [
+const fileUploadItemSchema = {
+  type: 'object',
+  description: '上传文件对象。',
+  properties: {
+    file_name: { type: 'string', description: '文件名称。' },
+    file_type: { type: 'string', description: '文件扩展名，如 pdf、docx、ofd、md。' },
+    file_size: { type: 'integer', description: '文件大小，单位 Byte。' },
+    content_url: { type: 'string', description: '文件下载或临时访问地址。' },
+    mime_type: { type: 'string', description: '文件 MIME 类型。' },
+  },
+  required: ['file_name', 'content_url'],
+};
+
+const filesInputSchema = {
+  type: 'array',
+  description: '待处理文件列表。',
+  items: fileUploadItemSchema,
+};
+
+function createFilesInput(description = '待处理文件列表。') {
+  return createInput('files', 'array<object>', true, description, '', filesInputSchema);
+}
+
+function createUserIdInput() {
+  return createInput('user_id', 'string', true, '调用用户标识，用于审计、权限校验或任务追踪。');
+}
+
+function createModeInput(required = true) {
+  return createInput('mode', 'string', required, '处理模式。markdown_chunk 支持 level1、level2、adaptive、level3；标题内容抽取支持 self、after、mid。');
+}
+
+function createPromptInput(description = '可选提示词，用于补充 OCR 或多模态理解任务要求。') {
+  return createInput('prompt', 'string', false, description);
+}
+
+function responseOutputSchema({ dataDescription = '结果文件列表。', dataFileType = 'md' } = {}) {
+  return {
+    type: 'object',
+    description: '接口统一返回对象。',
+    properties: {
+      code: { type: 'integer', description: '业务状态码。' },
+      data: {
+        type: 'array',
+        description: dataDescription,
+        items: {
+          type: 'object',
+          description: '单个结果文件信息。',
+          properties: {
+            file_name: { type: 'string', description: '结果文件名称。' },
+            file_url: { type: 'string', description: '结果文件访问地址。' },
+            file_type: { type: 'string', description: `结果文件类型，示例：${dataFileType}。` },
+          },
+          required: ['file_name', 'file_type'],
+        },
+      },
+      message: { type: 'string', description: '接口提示信息。' },
+    },
+    required: ['code', 'data', 'message'],
+  };
+}
+
+function createResponseOutput(description, options = {}) {
+  return createOutput('response', 'object', description, 'response', responseOutputSchema(options));
+}
+
+const idpDocumentTools = [
   {
-    name: '文件解析',
-    description: '解析政策文件，输出章节、段落和文件元数据。',
-    category: '未分类',
+    slug: 'document-to-pdf',
+    name: '转pdf接口',
+    description: '将 Word、图片或其他文档批量转换为 PDF 文件。',
+    category: '文档转换',
     enabled: true,
-    inputs: [
-      createInput('file', 'object', true, '待解析文件信息。'),
-      createInput('parse_mode', 'string', false, '解析模式，默认 policy_clause。'),
-      createInput('language', 'string', false, '文档语言，默认 zh-CN。'),
-      createInput('content', 'string', false, '直接传入的政策正文。'),
-    ],
-    outputs: [
-      createOutput('title', 'string', '解析得到的政策文件标题。'),
-      createOutput('sections', 'array<object>', '解析后的政策章节结构，包含 title、content、page。'),
-      createOutput('paragraphs', 'array<object>', '标准化段落列表，包含 id、heading、text。'),
-      createOutput('metadata', 'object', '页数、文件名、解析耗时等元信息。'),
-    ],
+    endpoint: 'api/general/document_to_pdf',
+    method: 'POST',
+    inputs: [createFilesInput('待转换的文档文件列表。'), createUserIdInput()],
+    outputs: [createResponseOutput('PDF 转换结果。', { dataDescription: '转换后的 PDF 文件列表。', dataFileType: 'pdf' })],
   },
   {
-    name: '遗留解析工具',
-    description: '客户侧旧版解析接口，仅返回运行时结果，未声明 Output Schema。',
-    category: '未分类',
+    slug: 'mx-ocr',
+    name: '公司自研OCR解析接口',
+    description: '使用公司自研 OCR 能力解析文件，输出 Markdown 结果。',
+    category: '文档解析',
     enabled: true,
-    inputs: [
-      createInput('file', 'object', true, '待解析文件信息。'),
-      createInput('mode', 'string', false, '解析模式。'),
-    ],
-    outputs: [],
+    endpoint: 'api/document_parser/mx_ocr',
+    method: 'POST',
+    inputs: [createFilesInput('待 OCR 解析的文件列表。'), createUserIdInput()],
+    outputs: [createResponseOutput('OCR 解析后的 Markdown 文件列表。', { dataDescription: 'OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
   },
   {
-    name: '文本分片',
-    description: '将政策文本按章节、语义边界和长度上限切分为知识片段。',
-    category: '未分类',
+    slug: 'dots-ocr',
+    name: '小红书多模态OCR接口',
+    description: '调用小红书多模态 OCR 能力解析文件，输出 Markdown 结果。',
+    category: '文档解析',
     enabled: true,
-    inputs: [
-      createInput('input', 'array', true, '待切片段落列表。'),
-      createInput('chunk_size', 'integer', false, '单个片段目标长度。'),
-      createInput('overlap', 'integer', false, '相邻片段重叠长度。'),
-    ],
-    outputs: [
-      createOutput('textChunkResult', 'array<object>', '分片后的文本片段集合。'),
-      createOutput('stats', 'object', '分片数量、目标长度和重叠配置。'),
-    ],
+    endpoint: 'api/document_parser/dots_ocr',
+    method: 'POST',
+    inputs: [createFilesInput('待多模态 OCR 解析的文件列表。'), createUserIdInput()],
+    outputs: [createResponseOutput('多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: '多模态 OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
   },
   {
-    name: '知识点提取',
-    description: '从政策知识片段中提取知识点、适用对象和关键规则。',
-    category: '未分类',
+    slug: 'mineru-ocr',
+    name: 'minnerU解析接口',
+    description: '调用 MinerU 文档解析能力，输出 Markdown 结果。',
+    category: '文档解析',
     enabled: true,
-    inputs: [
-      createInput('input', 'array', true, '知识片段列表。'),
-      createInput('summary_type', 'string', false, '摘要类型。'),
-      createInput('model', 'string', false, '模型标识。'),
-    ],
-    outputs: [
-      createOutput('summary', 'string', '政策知识点摘要正文。'),
-      createOutput('summaryResult', 'array<object>', '知识点条目和来源引用，包含 title、content、sourceChunkIds。'),
-      createOutput('applicableUsers', 'array<string>', '适用对象列表。'),
-      createOutput('keyRules', 'array<string>', '关键规则列表。'),
-    ],
+    endpoint: 'api/document_parser/mineru_ocr',
+    method: 'POST',
+    inputs: [createFilesInput('待 MinerU 解析的文件列表。'), createUserIdInput()],
+    outputs: [createResponseOutput('MinerU 解析后的 Markdown 文件列表。', { dataDescription: 'MinerU 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
   },
   {
-    name: 'QA提取',
-    description: '从政策知识片段中提取问答对。',
-    category: '未分类',
+    slug: 'markdown-chunk',
+    name: 'makdown结构化分块接口',
+    description: '将 Markdown 文档按指定模式进行结构化分块。',
+    category: '内容处理',
     enabled: true,
+    endpoint: 'api/general/markdown_chunk',
+    method: 'POST',
+    inputs: [createFilesInput('待结构化分块的 Markdown 文件列表。'), createModeInput(true), createUserIdInput()],
+    outputs: [createResponseOutput('结构化分块后的 Markdown 文件列表。', { dataDescription: '结构化分块后的 Markdown 文件列表。', dataFileType: 'md' })],
+  },
+  {
+    slug: 'extract-md-content-by-title',
+    name: 'makdown根据输入标题抽取内容接口',
+    description: '根据输入标题从 Markdown 文档中抽取指定段落内容。',
+    category: '内容处理',
+    enabled: true,
+    endpoint: 'api/document_content_analysis/extract_md_content_by_titile',
+    method: 'POST',
     inputs: [
-      createInput('input', 'array', true, '知识片段列表。'),
-      createInput('model', 'string', false, '模型标识。'),
-      createInput('system_prompt', 'string', false, '问答提取提示词。'),
+      createFilesInput('待抽取内容的 Markdown 文件列表。'),
+      createInput('specified_section', 'string', true, '开始抽取的标题。'),
+      createModeInput(false),
+      createInput('end_section', 'string', false, '结束标题，mode 为 mid 时需要填写。'),
+      createUserIdInput(),
     ],
-    outputs: [
-      createOutput('qaResult', 'array<object>', '问题、答案和来源分片，包含 question、answer、sourceChunkId。'),
-    ],
+    outputs: [createResponseOutput('按标题抽取后的 Markdown 文件列表。', { dataDescription: '按标题抽取后的 Markdown 文件列表。', dataFileType: 'md' })],
+  },
+  {
+    slug: 'paddle-ocr',
+    name: '百度paddle多模态OCR接口',
+    description: '调用百度 Paddle 多模态 OCR 能力解析文件，支持传入可选提示词。',
+    category: '文档解析',
+    enabled: true,
+    endpoint: 'api/document_parser/paddle_ocr',
+    method: 'POST',
+    inputs: [createFilesInput('待 Paddle OCR 解析的文件列表。'), createPromptInput(), createUserIdInput()],
+    outputs: [createResponseOutput('Paddle 多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: 'Paddle OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+  },
+  {
+    slug: 'deepseek-ocr',
+    name: 'DeepSeek多模态OCR接口(已更新v2版本)',
+    description: '调用 DeepSeek v2 多模态 OCR 能力解析文件，支持传入可选提示词。',
+    category: '文档解析',
+    enabled: true,
+    endpoint: 'api/document_parser/deepseek_ocr',
+    method: 'POST',
+    inputs: [createFilesInput('待 DeepSeek 多模态 OCR 解析的文件列表。'), createPromptInput(), createUserIdInput()],
+    outputs: [createResponseOutput('DeepSeek 多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: 'DeepSeek OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+  },
+  {
+    slug: 'ofd-to-pdf',
+    name: 'OFD文档转PDF文档接口',
+    description: '将 OFD 文档批量转换为 PDF 文档。',
+    category: '文档转换',
+    enabled: true,
+    endpoint: 'api/general/ofd_to_pdf',
+    method: 'POST',
+    inputs: [createFilesInput('待转换的 OFD 文件列表。'), createUserIdInput()],
+    outputs: [createResponseOutput('OFD 转 PDF 结果。', { dataDescription: '转换后的 PDF 文件列表。', dataFileType: 'pdf' })],
+  },
+  {
+    slug: 'extract-footnote',
+    name: '保险类条款文档脚注提取api',
+    description: '提取保险类条款文档中的脚注内容，输出 Markdown 结果。',
+    category: '内容处理',
+    enabled: true,
+    endpoint: 'api/document_content_analysis/extract_footnote',
+    method: 'POST',
+    inputs: [createFilesInput('待提取脚注的保险条款文件列表。'), createUserIdInput()],
+    outputs: [createResponseOutput('脚注提取后的 Markdown 文件列表。', { dataDescription: '脚注提取后的 Markdown 文件列表。', dataFileType: 'md' })],
+  },
+  {
+    slug: 'hunyuan-ocr',
+    name: '腾讯hunyuan多模态ocr接口',
+    description: '调用腾讯 Hunyuan 多模态 OCR 能力解析文件，prompt 可用于指定定位、解析、信息抽取或翻译任务。',
+    category: '文档解析',
+    enabled: true,
+    endpoint: 'api/document_parser/hunyuan_ocr',
+    method: 'POST',
+    inputs: [createFilesInput('待 Hunyuan 多模态 OCR 解析的文件列表。'), createUserIdInput(), createPromptInput('建议暴露的提示词参数，可用于定位、解析、信息抽取或翻译任务。')],
+    outputs: [createResponseOutput('Hunyuan 多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: 'Hunyuan OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+  },
+  {
+    slug: 'glm-ocr',
+    name: '智谱GLM多模态ocr接口',
+    description: '调用智谱 GLM 多模态 OCR 能力解析文件，输出 Markdown 结果。',
+    category: '文档解析',
+    enabled: true,
+    endpoint: 'api/document_parser/glm_ocr',
+    method: 'POST',
+    inputs: [createFilesInput('待 GLM 多模态 OCR 解析的文件列表。'), createUserIdInput()],
+    outputs: [createResponseOutput('GLM 多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: 'GLM OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+  },
+  {
+    slug: 'qianfan-ocr',
+    name: 'qianfan多模态OCR接口（已下架）',
+    description: '千帆多模态 OCR 接口，文档标记为已下架，仅作为历史工具样例展示。',
+    category: '文档解析',
+    enabled: false,
+    status: '不可用',
+    endpoint: 'api/document_parser/qianfan_ocr',
+    method: 'POST',
+    inputs: [createFilesInput('待千帆多模态 OCR 解析的文件列表。'), createPromptInput(), createUserIdInput()],
+    outputs: [createResponseOutput('千帆多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: '千帆 OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
   },
 ];
-
-const mineruDemoTools = [
-  {
-    name: 'OCR解析',
-    description: '对扫描件、图片型 PDF 进行 OCR 识别，输出页级文本、坐标和置信度。',
-    category: '未分类',
-    enabled: true,
-    inputs: [
-      createInput('file', 'object', true, '待 OCR 的文件对象。'),
-      createInput('ocr_language', 'string', false, 'OCR 语言，默认 zh-CN。'),
-      createInput('enable_layout', 'boolean', false, '是否同时识别版面坐标。'),
-    ],
-    outputs: [
-      createOutput('ocrPages', 'array<object>', '页级 OCR 结果，包含 text、bbox、confidence。'),
-      createOutput('ocrMetadata', 'object', 'OCR 语言、页数、平均置信度和耗时。'),
-    ],
-  },
-  {
-    name: '表格解析',
-    description: '识别文档中的表格区域，输出表格结构、单元格文本和来源页码。',
-    category: '未分类',
-    enabled: true,
-    inputs: [
-      createInput('file', 'object', true, '待解析文件对象。'),
-      createInput('pages', 'array<object>', false, '可选的页级文本或版面块。'),
-      createInput('table_mode', 'string', false, '表格解析模式。'),
-    ],
-    outputs: [
-      createOutput('tables', 'array<object>', '表格集合，包含行列结构、单元格内容和页码。'),
-      createOutput('tableMetadata', 'object', '表格数量、失败页码和解析耗时。'),
-    ],
-  },
-];
-
-const vectorDemoTools = [
-  {
-    name: '文本向量化',
-    description: '对文本片段批量生成向量，输出 embedding 和向量生成统计信息。',
-    category: '未分类',
-    enabled: true,
-    inputs: [
-      createInput('chunks', 'array<object>', true, '待向量化的文本片段集合。'),
-      createInput('model', 'string', false, '向量模型名称。'),
-      createInput('batch_size', 'integer', false, '批处理大小。'),
-    ],
-    outputs: [
-      createOutput('embeddings', 'array<object>', '每个文本片段对应的向量结果。'),
-      createOutput('embeddingStats', 'object', '向量维度、成功数量和失败数量。'),
-    ],
-  },
-  {
-    name: '召回重排',
-    description: '对候选召回结果进行相关性重排，输出排序后的候选片段。',
-    category: '未分类',
-    enabled: true,
-    inputs: [
-      createInput('query', 'string', true, '用户问题或检索 query。'),
-      createInput('candidates', 'array<object>', true, '候选召回结果。'),
-      createInput('top_k', 'integer', false, '返回数量。'),
-    ],
-    outputs: [
-      createOutput('rerankedResults', 'array<object>', '重排后的候选结果。'),
-      createOutput('rerankStats', 'object', '候选数量、返回数量和模型耗时。'),
-    ],
-  },
-];
-
-const qualityDemoTools = [
-  {
-    name: '切片质量评估',
-    description: '评估文本切片的长度、完整性、重复率和边界质量。',
-    category: '未分类',
-    enabled: true,
-    inputs: [
-      createInput('chunks', 'array<object>', true, '待评估的文本切片集合。'),
-      createInput('metrics', 'array<string>', false, '评估指标列表。'),
-    ],
-    outputs: [
-      createOutput('chunkQualityReport', 'object', '切片质量评分、问题明细和改进建议。'),
-      createOutput('badChunks', 'array<object>', '质量较低的切片列表。'),
-    ],
-  },
-  {
-    name: 'QA质量评估',
-    description: '评估 QA 对的问题清晰度、答案完整性和来源一致性。',
-    category: '未分类',
-    enabled: true,
-    inputs: [
-      createInput('qaPairs', 'array<object>', true, '待评估的 QA 对集合。'),
-      createInput('sourceChunks', 'array<object>', false, 'QA 对对应的来源片段。'),
-    ],
-    outputs: [
-      createOutput('qaQualityReport', 'object', 'QA 质量评分、问题类型和审核建议。'),
-      createOutput('lowQualityQaPairs', 'array<object>', '低质量 QA 对列表。'),
-    ],
-  },
-];
-
 function defaultToolInputs(toolName) {
   if (toolName.includes('解析')) {
     return [
@@ -507,68 +566,20 @@ function normalizeToolOutputs(tool) {
 
 export const initialServices = [
   {
-    id: 'svc-customer-doc',
-    name: '客户自建文档处理 MCP',
+    id: 'svc-idp-document-processing',
+    name: 'IDP 文档处理 MCP',
     serviceType: '标准 MCP Server',
-    endpoint: 'https://mcp.customer.com/document/sse',
+    endpoint: 'https://mcp.internal.com/idp-document/sse',
     transport: 'SSE',
     authType: 'Bearer Token',
-    version: 'V1.1.0',
+    version: 'V1.0.0',
     status: '连接正常',
-    toolCount: higressDemoTools.length,
-    toolNames: higressDemoTools.map((tool) => tool.name),
-    lastSyncedAt: '2026-05-27 09:42',
-    description: '客户侧自建 MCP Server，提供文档解析、切片和 QA 抽取等原始工具。',
-    toolCategories: Object.fromEntries(higressDemoTools.map((tool) => [tool.name, tool.category || '未分类'])),
-    tools: higressDemoTools,
-  },
-  {
-    id: 'svc-mineru-parse',
-    name: 'MinerU 文档解析 MCP',
-    serviceType: '标准 MCP Server',
-    endpoint: 'https://mcp.internal.com/mineru/sse',
-    transport: 'SSE',
-    authType: 'Bearer Token',
-    version: 'V1.0.3',
-    status: '连接正常',
-    toolCount: mineruDemoTools.length,
-    toolNames: mineruDemoTools.map((tool) => tool.name),
-    lastSyncedAt: '2026-05-28 14:16',
-    description: '封装 MinerU 类文档解析能力，提供 OCR、表格和版面结构识别工具。',
-    toolCategories: Object.fromEntries(mineruDemoTools.map((tool) => [tool.name, tool.category || '未分类'])),
-    tools: mineruDemoTools,
-  },
-  {
-    id: 'svc-vector-retrieval',
-    name: '向量检索能力 MCP',
-    serviceType: '标准 MCP Server',
-    endpoint: 'https://mcp.internal.com/vector/sse',
-    transport: 'SSE',
-    authType: 'Bearer Token',
-    version: 'V2.1.0',
-    status: '连接正常',
-    toolCount: vectorDemoTools.length,
-    toolNames: vectorDemoTools.map((tool) => tool.name),
-    lastSyncedAt: '2026-05-29 10:08',
-    description: '提供文本向量化、候选结果重排等检索增强工具。',
-    toolCategories: Object.fromEntries(vectorDemoTools.map((tool) => [tool.name, tool.category || '未分类'])),
-    tools: vectorDemoTools,
-  },
-  {
-    id: 'svc-quality-eval',
-    name: '知识质量评估 MCP',
-    serviceType: '标准 MCP Server',
-    endpoint: 'https://mcp.internal.com/quality/sse',
-    transport: 'Streamable HTTP',
-    authType: '无鉴权',
-    version: 'V1.2.0',
-    status: '连接正常',
-    toolCount: qualityDemoTools.length,
-    toolNames: qualityDemoTools.map((tool) => tool.name),
-    lastSyncedAt: '2026-05-30 16:24',
-    description: '提供切片质量、QA 质量等知识加工结果评估工具。',
-    toolCategories: Object.fromEntries(qualityDemoTools.map((tool) => [tool.name, tool.category || '未分类'])),
-    tools: qualityDemoTools,
+    toolCount: idpDocumentTools.length,
+    toolNames: idpDocumentTools.map((tool) => tool.name),
+    lastSyncedAt: '2026-07-06 16:20',
+    description: '基于飞书工具配置整理的 IDP 文档转换、OCR 解析和内容处理 MCP 工具样例。',
+    toolCategories: Object.fromEntries(idpDocumentTools.map((tool) => [tool.name, tool.category || '未分类'])),
+    tools: idpDocumentTools,
   },
 ];
 
@@ -625,563 +636,66 @@ function makeManagedTool({
 
 function getRawSource(services, toolName) {
   const service = services.find((item) => !item.locked && item.tools?.some((tool) => tool.name === toolName));
-  const fallbackTools = [...higressDemoTools, ...mineruDemoTools, ...vectorDemoTools, ...qualityDemoTools];
+  const fallbackTools = idpDocumentTools;
   const rawTool = service?.tools?.find((tool) => tool.name === toolName) || fallbackTools.find((tool) => tool.name === toolName);
   return {
-    serviceId: service?.id || 'svc-demo-mcp',
-    serviceName: service?.name || '示例 MCP Server',
+    serviceId: service?.id || 'svc-idp-document-processing',
+    serviceName: service?.name || 'IDP 文档处理 MCP',
     sourceToolName: rawTool?.name || toolName,
-    lastSyncedAt: service?.lastSyncedAt || '-',
+    lastSyncedAt: service?.lastSyncedAt || '2026-07-06 16:20',
     rawTool,
   };
 }
 
+function managedToolStorageFor(rawTool, index) {
+  const isConverter = rawTool.category === '文档转换';
+  if (isConverter) return createStorageContract({ enabled: false, rules: [] });
+  const artifactType = rawTool.name.includes('脚注') ? '知识点' : '文本切片';
+  return createStorageContract({
+    enabled: true,
+    outputName: 'response',
+    artifactType,
+    storageTargetType: '对象存储',
+    objectStorageAddress: 'oss://knowledge-engineering',
+    objectStoragePath: `idp-tools/${rawTool.slug || index + 1}/{run_id}/response.json`,
+    writeMode: '覆盖',
+    rules: [
+      {
+        id: `storage-${rawTool.slug || index + 1}`,
+        outputName: 'response',
+        artifactType,
+        storageTargetType: '对象存储',
+        esAddress: 'http://es.internal:9200',
+        esIndex: `ke_idp_${String(rawTool.slug || index + 1).replace(/-/g, '_')}`,
+        targetField: 'content',
+        objectStorageAddress: 'oss://knowledge-engineering',
+        objectStoragePath: `idp-tools/${rawTool.slug || index + 1}/{run_id}/response.json`,
+        writeMode: '覆盖',
+      },
+    ],
+    note: '对 MCP 工具返回结果做标准化提取后，按所选知识形态完成存储落库。',
+  });
+}
+
 function initialManagedTools(services = initialServices) {
-  const fileParse = getRawSource(services, '文件解析');
-  const ocrParse = getRawSource(services, 'OCR解析');
-  const tableParse = getRawSource(services, '表格解析');
-  const chunking = getRawSource(services, '文本分片');
-  const knowledgeExtract = getRawSource(services, '知识点提取');
-  const qaExtract = getRawSource(services, 'QA提取');
-  const vectorize = getRawSource(services, '文本向量化');
-  const chunkQuality = getRawSource(services, '切片质量评估');
-  return [
-    makeManagedTool({
-      id: 'ke-standard-file-parse',
-      name: '通用解析',
-      description: '解析常见 PDF、Word、图片文件，统一输出章节、段落和文件元数据。',
-      category: '文档解析',
-      sourceServiceId: fileParse.serviceId,
-      sourceServiceName: fileParse.serviceName,
-      sourceToolName: fileParse.sourceToolName,
-      inputs: normalizeToolInputs(fileParse.rawTool || { name: '文件解析' }),
-      outputs: [
-        createOutput('documentSections', 'array<object>', '标准化章节结构，包含标题、正文、页码和层级。'),
-        createOutput('paragraphs', 'array<object>', '标准化段落列表，作为后续切片输入。'),
-        createOutput('metadata', 'object', '文件名、页数、解析方式和解析耗时。'),
-      ],
-      storageContract: createStorageContract({
-        enabled: true,
-        outputName: 'documentSections',
-        artifactType: '解析文档',
-        storageTargetType: '对象存储',
-        objectStorageAddress: 'oss://knowledge-engineering',
-        objectStoragePath: 'parsed-documents/{run_id}/document_sections.json',
-        writeMode: '覆盖',
-        rules: [
-          {
-            id: 'storage-document-sections',
-            outputName: 'documentSections',
-            artifactType: '解析文档',
-            storageTargetType: '对象存储',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_document_sections',
-            targetField: 'content',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'parsed-documents/{run_id}/document_sections.json',
-            writeMode: '覆盖',
-          },
-          {
-            id: 'storage-parse-metadata',
-            outputName: 'metadata',
-            artifactType: '元数据',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_document_metadata',
-            targetField: 'metadata',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'parsed-documents/{run_id}/metadata.json',
-            writeMode: 'upsert',
-          },
-        ],
-        note: '解析结果按章节写入对象存储，元数据写入 ES，供后续分片和追溯使用。',
-      }),
-      lastSyncedAt: fileParse.lastSyncedAt,
-    }),
-    makeManagedTool({
-      id: 'ke-standard-multimodal-parse',
-      name: '多模态解析',
-      description: '面向图文混排、表格、版面信息较多的文件，输出文本、表格、图片说明和版面结构。',
-      category: '文档解析',
-      sourceServiceId: fileParse.serviceId,
-      sourceServiceName: fileParse.serviceName,
-      sourceToolName: fileParse.sourceToolName,
-      inputs: normalizeToolInputs(fileParse.rawTool || { name: '文件解析' }),
-      outputs: [
-        createOutput('documentBlocks', 'array<object>', '按阅读顺序输出的文本、表格、图片和标题块。'),
-        createOutput('tables', 'array<object>', '抽取出的表格结构和单元格内容。'),
-        createOutput('figures', 'array<object>', '图片、图注和所在页码。'),
-        createOutput('layout', 'object', '页面版面、区域坐标和阅读顺序信息。'),
-      ],
-      storageContract: createStorageContract({
-        enabled: true,
-        outputName: 'documentBlocks',
-        artifactType: '解析文档',
-        storageTargetType: '对象存储',
-        objectStorageAddress: 'oss://knowledge-engineering',
-        objectStoragePath: 'parsed-documents/{run_id}/document_blocks.json',
-        writeMode: '覆盖',
-        rules: [
-          {
-            id: 'storage-document-blocks',
-            outputName: 'documentBlocks',
-            artifactType: '解析文档',
-            storageTargetType: '对象存储',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_document_blocks',
-            targetField: 'content',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'parsed-documents/{run_id}/document_blocks.json',
-            writeMode: '覆盖',
-          },
-          {
-            id: 'storage-document-tables',
-            outputName: 'tables',
-            artifactType: '解析文档',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_document_tables',
-            targetField: 'table_json',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'parsed-documents/{run_id}/tables.json',
-            writeMode: 'upsert',
-          },
-        ],
-        note: '多模态解析结果按文本块和表格分别持久化，便于后续清洗、切片和人工核验。',
-      }),
-      lastSyncedAt: fileParse.lastSyncedAt,
-    }),
-    makeManagedTool({
-      id: 'ke-standard-ocr-parse',
-      name: '扫描件OCR解析',
-      description: '面向扫描件和图片型 PDF，输出页级 OCR 文本、坐标和识别置信度。',
-      category: '文档解析',
-      sourceServiceId: ocrParse.serviceId,
-      sourceServiceName: ocrParse.serviceName,
-      sourceToolName: ocrParse.sourceToolName,
-      inputs: normalizeToolInputs(ocrParse.rawTool || { name: 'OCR解析' }),
-      outputs: [
-        createOutput('ocrPages', 'array<object>', '页级 OCR 结果，包含文本、坐标和置信度。'),
-        createOutput('ocrMetadata', 'object', 'OCR 页数、语言、平均置信度和耗时。'),
-      ],
-      storageContract: createStorageContract({
-        enabled: true,
-        outputName: 'ocrPages',
-        artifactType: '解析文档',
-        storageTargetType: '对象存储',
-        objectStorageAddress: 'oss://knowledge-engineering',
-        objectStoragePath: 'ocr/{run_id}/ocr_pages.json',
-        writeMode: '覆盖',
-        rules: [
-          {
-            id: 'storage-ocr-pages',
-            outputName: 'ocrPages',
-            artifactType: '解析文档',
-            storageTargetType: '对象存储',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_ocr_pages',
-            targetField: 'content',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'ocr/{run_id}/ocr_pages.json',
-            writeMode: '覆盖',
-          },
-          {
-            id: 'storage-ocr-metadata',
-            outputName: 'ocrMetadata',
-            artifactType: '元数据',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_ocr_metadata',
-            targetField: 'metadata',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'ocr/{run_id}/metadata.json',
-            writeMode: 'upsert',
-          },
-        ],
-        note: 'OCR 文本写入对象存储，识别元数据写入 ES，便于后续追溯和抽检。',
-      }),
-      lastSyncedAt: ocrParse.lastSyncedAt,
-    }),
-    makeManagedTool({
-      id: 'ke-standard-table-parse',
-      name: '表格抽取',
-      description: '抽取文档中的表格结构、单元格内容和来源页码，供结构化知识加工使用。',
-      category: '文档解析',
-      sourceServiceId: tableParse.serviceId,
-      sourceServiceName: tableParse.serviceName,
-      sourceToolName: tableParse.sourceToolName,
-      inputs: normalizeToolInputs(tableParse.rawTool || { name: '表格解析' }),
-      outputs: [
-        createOutput('tables', 'array<object>', '表格集合，包含行列结构、单元格内容和来源页码。'),
-        createOutput('tableMetadata', 'object', '表格数量、失败页码和解析耗时。'),
-      ],
-      storageContract: createStorageContract({
-        enabled: true,
-        outputName: 'tables',
-        artifactType: '解析文档',
-        storageTargetType: 'Elasticsearch',
-        esAddress: 'http://es.internal:9200',
-        esIndex: 'ke_policy_tables',
-        writeMode: 'upsert',
-        rules: [
-          {
-            id: 'storage-tables',
-            outputName: 'tables',
-            artifactType: '解析文档',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_tables',
-            targetField: 'table_json',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'tables/{run_id}/tables.json',
-            writeMode: 'upsert',
-          },
-          {
-            id: 'storage-table-metadata',
-            outputName: 'tableMetadata',
-            artifactType: '元数据',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_table_metadata',
-            targetField: 'metadata',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'tables/{run_id}/metadata.json',
-            writeMode: 'upsert',
-          },
-        ],
-        note: '表格结构和解析元数据分别写入 ES，便于后续结构化检索和人工核验。',
-      }),
-      lastSyncedAt: tableParse.lastSyncedAt,
-    }),
-    makeManagedTool({
-      id: 'ke-standard-normal-chunk',
-      name: '普通切片',
-      description: '按长度和语义边界生成普通文本切片，适合常规文档检索场景。',
-      category: '文本分片',
-      sourceServiceId: chunking.serviceId,
-      sourceServiceName: chunking.serviceName,
-      sourceToolName: chunking.sourceToolName,
-      inputs: normalizeToolInputs(chunking.rawTool || { name: '文本分片' }),
-      outputs: [
-        createOutput('textChunks', 'array<object>', '普通文本切片集合，包含 text、page、source。'),
-        createOutput('chunkStats', 'object', '切片数量、平均长度和重叠配置。'),
-      ],
-      storageContract: createStorageContract({
-        enabled: true,
-        outputName: 'textChunks',
-        artifactType: '文本切片',
-        storageTargetType: 'Elasticsearch',
-        esAddress: 'http://es.internal:9200',
-        esIndex: 'ke_policy_text_chunks',
-        writeMode: 'upsert',
-        rules: [
-          {
-            id: 'storage-text-chunks',
-            outputName: 'textChunks',
-            artifactType: '文本切片',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_text_chunks',
-            targetField: 'content',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'chunks/{run_id}/text_chunks.json',
-            writeMode: 'upsert',
-          },
-          {
-            id: 'storage-chunk-stats',
-            outputName: 'chunkStats',
-            artifactType: '元数据',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_chunk_stats',
-            targetField: 'metadata',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'chunks/{run_id}/stats.json',
-            writeMode: 'upsert',
-          },
-        ],
-        note: '普通切片写入 ES，统计信息写入元数据索引。',
-      }),
-      lastSyncedAt: chunking.lastSyncedAt,
-    }),
-    makeManagedTool({
-      id: 'ke-standard-parent-child-chunk',
-      name: '父子切片',
-      description: '输出父片、子片和父子关系，支持子片召回、父片进入上下文。',
-      category: '文本分片',
-      sourceServiceId: chunking.serviceId,
-      sourceServiceName: chunking.serviceName,
-      sourceToolName: chunking.sourceToolName,
-      inputs: normalizeToolInputs(chunking.rawTool || { name: '文本分片' }),
-      outputs: [
-        createOutput('parentChunks', 'array<object>', '父片集合，用于进入最终上下文。'),
-        createOutput('childChunks', 'array<object>', '子片集合，用于向量召回。'),
-        createOutput('chunkRelations', 'array<object>', '父片与子片的映射关系。'),
-      ],
-      storageContract: createStorageContract({
-        enabled: true,
-        outputName: 'childChunks',
-        artifactType: '父子切片',
-        storageTargetType: 'Elasticsearch',
-        esAddress: 'http://es.internal:9200',
-        esIndex: 'ke_policy_child_chunks',
-        writeMode: 'upsert',
-        indexEnabled: true,
-        indexSource: 'childChunks',
-        indexField: 'text',
-        recallSource: 'parentChunks',
-        recallField: 'text',
-        filterFields: 'documentId,page,parentChunkId',
-        indexJoinField: 'parentChunkId',
-        recallJoinField: 'parentChunkId',
-        indexConfig: {
-          indexEnabled: true,
-          indexSource: 'childChunks',
-          indexField: 'text',
-          recallSource: 'parentChunks',
-          recallField: 'text',
-          filterFields: 'documentId,page,parentChunkId',
-          indexJoinField: 'parentChunkId',
-          recallJoinField: 'parentChunkId',
-        },
-        rules: [
-          {
-            id: 'storage-child-chunks',
-            outputName: 'childChunks',
-            artifactType: '文本切片',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_child_chunks',
-            targetField: 'content',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'chunks/{run_id}/child_chunks.json',
-            writeMode: 'upsert',
-          },
-          {
-            id: 'storage-parent-chunks',
-            outputName: 'parentChunks',
-            artifactType: '文本切片',
-            storageTargetType: '对象存储',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_parent_chunks',
-            targetField: 'content',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'chunks/{run_id}/parent_chunks.json',
-            writeMode: '覆盖',
-          },
-        ],
-        note: '子片进入索引，命中后通过 parentChunkId 找到父片并返回父片正文。',
-      }),
-      lastSyncedAt: chunking.lastSyncedAt,
-    }),
-    makeManagedTool({
-      id: 'ke-standard-knowledge-extract',
-      name: '知识点抽取',
-      description: '从文本切片中抽取政策知识点、适用对象和关键规则。',
-      category: '知识提取',
-      sourceServiceId: knowledgeExtract.serviceId,
-      sourceServiceName: knowledgeExtract.serviceName,
-      sourceToolName: knowledgeExtract.sourceToolName,
-      inputs: normalizeToolInputs(knowledgeExtract.rawTool || { name: '知识点提取' }),
-      outputs: [
-        createOutput('knowledgePoints', 'array<object>', '知识点条目，包含标题、正文、来源切片和适用对象。'),
-        createOutput('keyRules', 'array<string>', '关键规则列表。'),
-        createOutput('extractStats', 'object', '抽取数量、模型版本和过滤数量。'),
-      ],
-      storageContract: createStorageContract({
-        enabled: true,
-        outputName: 'knowledgePoints',
-        artifactType: '知识点',
-        storageTargetType: 'Elasticsearch',
-        esAddress: 'http://es.internal:9200',
-        esIndex: 'ke_policy_knowledge_points',
-        writeMode: 'upsert',
-        rules: [
-          {
-            id: 'storage-knowledge-points',
-            outputName: 'knowledgePoints',
-            artifactType: '知识点',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_knowledge_points',
-            targetField: 'content',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'knowledge-points/{run_id}/items.json',
-            writeMode: 'upsert',
-          },
-          {
-            id: 'storage-key-rules',
-            outputName: 'keyRules',
-            artifactType: '知识点',
-            storageTargetType: '对象存储',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_key_rules',
-            targetField: 'content',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'knowledge-points/{run_id}/key_rules.json',
-            writeMode: '覆盖',
-          },
-        ],
-        note: '知识点写入 ES，关键规则列表同步归档到对象存储。',
-      }),
-      lastSyncedAt: knowledgeExtract.lastSyncedAt,
-    }),
-    makeManagedTool({
-      id: 'ke-standard-qa-extract',
-      name: 'QA抽取',
-      description: '从文本片段中抽取问题、答案和来源引用，形成可检索的 QA 对。',
-      category: '知识提取',
-      sourceServiceId: qaExtract.serviceId,
-      sourceServiceName: qaExtract.serviceName,
-      sourceToolName: qaExtract.sourceToolName,
-      inputs: normalizeToolInputs(qaExtract.rawTool || { name: 'QA提取' }),
-      outputs: [
-        createOutput('qaPairs', 'array<object>', '标准 QA 对，包含 question、answer、sourceChunkId 和置信度。'),
-        createOutput('qaStats', 'object', 'QA 数量、过滤数量和模型版本。'),
-      ],
-      storageContract: createStorageContract({
-        enabled: true,
-        outputName: 'qaPairs',
-        artifactType: 'QA对',
-        storageTargetType: 'Elasticsearch',
-        esAddress: 'http://es.internal:9200',
-        esIndex: 'ke_policy_qa_pairs',
-        writeMode: 'upsert',
-        indexEnabled: true,
-        indexSource: 'qaPairs',
-        indexField: 'question',
-        recallSource: 'qaPairs',
-        recallField: 'answer',
-        filterFields: 'sourceChunkId,documentId',
-        indexConfig: {
-          indexEnabled: true,
-          indexSource: 'qaPairs',
-          indexField: 'question',
-          recallSource: 'qaPairs',
-          recallField: 'answer',
-          filterFields: 'sourceChunkId,documentId',
-        },
-        rules: [
-          {
-            id: 'storage-qa-pairs',
-            outputName: 'qaPairs',
-            artifactType: 'QA对',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_qa_pairs',
-            targetField: 'question',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'qa/{run_id}/qa_pairs.json',
-            writeMode: 'upsert',
-          },
-        ],
-        note: 'QA 对作为独立知识结果存储，可被检索、评测和人工审核模块引用。',
-      }),
-      lastSyncedAt: qaExtract.lastSyncedAt,
-    }),
-    makeManagedTool({
-      id: 'ke-standard-vectorize',
-      name: '文本向量生成',
-      description: '对文本切片批量生成向量，输出 embedding 结果和生成统计。',
-      category: '向量处理',
-      sourceServiceId: vectorize.serviceId,
-      sourceServiceName: vectorize.serviceName,
-      sourceToolName: vectorize.sourceToolName,
-      inputs: normalizeToolInputs(vectorize.rawTool || { name: '文本向量化' }),
-      outputs: [
-        createOutput('embeddings', 'array<object>', '文本切片对应的向量结果。'),
-        createOutput('embeddingStats', 'object', '向量维度、成功数量和失败数量。'),
-      ],
-      storageContract: createStorageContract({
-        enabled: true,
-        outputName: 'embeddings',
-        artifactType: '向量结果',
-        storageTargetType: 'Elasticsearch',
-        esAddress: 'http://es.internal:9200',
-        esIndex: 'ke_policy_embeddings',
-        writeMode: 'upsert',
-        rules: [
-          {
-            id: 'storage-embeddings',
-            outputName: 'embeddings',
-            artifactType: '向量结果',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_embeddings',
-            targetField: 'vector',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'embeddings/{run_id}/vectors.json',
-            writeMode: 'upsert',
-          },
-          {
-            id: 'storage-embedding-stats',
-            outputName: 'embeddingStats',
-            artifactType: '元数据',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_embedding_stats',
-            targetField: 'metadata',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'embeddings/{run_id}/stats.json',
-            writeMode: 'upsert',
-          },
-        ],
-        note: '向量结果写入 ES 的向量字段，生成统计进入元数据索引。',
-      }),
-      lastSyncedAt: vectorize.lastSyncedAt,
-    }),
-    makeManagedTool({
-      id: 'ke-standard-chunk-quality',
-      name: '切片质量评估',
-      description: '评估切片长度、完整性、重复率和边界质量，输出质量报告和问题切片。',
-      category: '质量评估',
-      sourceServiceId: chunkQuality.serviceId,
-      sourceServiceName: chunkQuality.serviceName,
-      sourceToolName: chunkQuality.sourceToolName,
-      inputs: normalizeToolInputs(chunkQuality.rawTool || { name: '切片质量评估' }),
-      outputs: [
-        createOutput('chunkQualityReport', 'object', '切片质量评分、问题明细和改进建议。'),
-        createOutput('badChunks', 'array<object>', '质量较低的切片列表。'),
-      ],
-      storageContract: createStorageContract({
-        enabled: true,
-        outputName: 'chunkQualityReport',
-        artifactType: '质量报告',
-        storageTargetType: 'Elasticsearch',
-        esAddress: 'http://es.internal:9200',
-        esIndex: 'ke_policy_chunk_quality_reports',
-        writeMode: 'upsert',
-        rules: [
-          {
-            id: 'storage-chunk-quality-report',
-            outputName: 'chunkQualityReport',
-            artifactType: '质量报告',
-            storageTargetType: 'Elasticsearch',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_chunk_quality_reports',
-            targetField: 'report',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'quality/{run_id}/chunk_quality_report.json',
-            writeMode: 'upsert',
-          },
-          {
-            id: 'storage-bad-chunks',
-            outputName: 'badChunks',
-            artifactType: '质量报告',
-            storageTargetType: '对象存储',
-            esAddress: 'http://es.internal:9200',
-            esIndex: 'ke_policy_bad_chunks',
-            targetField: 'content',
-            objectStorageAddress: 'oss://knowledge-engineering',
-            objectStoragePath: 'quality/{run_id}/bad_chunks.json',
-            writeMode: '覆盖',
-          },
-        ],
-        note: '质量报告写入 ES，问题切片明细归档到对象存储。',
-      }),
-      lastSyncedAt: chunkQuality.lastSyncedAt,
-    }),
-  ];
+  const rawTools = services
+    .filter((service) => !service.locked && service.status !== '停用')
+    .flatMap((service) => (service.tools || []).map((tool) => ({ service, tool })))
+    .filter(({ tool }) => tool.enabled !== false && tool.status !== '不可用');
+
+  return rawTools.map(({ service, tool }, index) => makeManagedTool({
+    id: `ke-idp-${tool.slug || index + 1}`,
+    name: tool.name.replace(/接口$/, ''),
+    description: tool.description,
+    category: tool.category || '未分类',
+    sourceServiceId: service.id,
+    sourceServiceName: service.name,
+    sourceToolName: tool.name,
+    inputs: normalizeToolInputs(tool),
+    outputs: normalizeToolOutputs(tool),
+    storageContract: managedToolStorageFor(tool, index),
+    lastSyncedAt: service.lastSyncedAt,
+  }));
 }
 
 function normalizeStoredTools(tools) {
