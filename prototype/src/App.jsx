@@ -1195,21 +1195,11 @@ function ToolManagementPage({ notify }) {
   };
 
   const saveKnowledgeTool = () => {
-    if (!createDraft?.id && !createDraft?.sourceId) {
-      notify('请先选择 MCP 原始工具', 'error');
-      return;
-    }
-    if (!createDraft.name.trim()) {
-      notify('节点名称不能为空', 'error');
-      return;
-    }
-    if (!createDraft.category) {
-      notify('节点类型不能为空', 'error');
-      return;
-    }
-    if (!createDraft.description.trim()) {
-      notify('节点描述不能为空', 'error');
-      return;
+    for (let step = 0; step < 3; step += 1) {
+      if (!validateKnowledgeToolDraftStep(createDraft, step)) {
+        notify(requiredFieldMessage, 'error');
+        return;
+      }
     }
     const overrides = {
       name: createDraft.name,
@@ -1375,6 +1365,7 @@ function ToolManagementPage({ notify }) {
           categories={snapshot.categories}
           onClose={() => setCreateDraft(null)}
           onSave={saveKnowledgeTool}
+          notify={notify}
         />
       ) : null}
       {detailTool ? (
@@ -1691,18 +1682,78 @@ function buildStorageContractFromRules(rules = [], indexConfig = createIndexConf
   };
 }
 
-function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClose, onSave }) {
+const requiredFieldMessage = '必填项不允许为空';
+const hasText = (value) => String(value ?? '').trim().length > 0;
+
+function getDraftConfigRows(draft) {
+  const selectedArtifactSources = new Set((draft.inputArtifacts || []).map((artifact) => artifact.sourcePath || artifact.sourceName).filter(Boolean));
+  return (draft.inputs || [])
+    .map((input, index) => ({ ...input, __draftIndex: index }))
+    .filter((input) => !selectedArtifactSources.has(input.sourceName || input.name));
+}
+
+function validateKnowledgeToolDraftStep(draft, step) {
+  if (!draft) return false;
+  if (step === 0) {
+    return Boolean(hasText(draft.selectedMcpId) && hasText(draft.sourceId) && hasText(draft.name) && hasText(draft.category) && hasText(draft.description));
+  }
+  if (step === 1) {
+    const artifacts = draft.inputArtifacts || [];
+    const configRows = getDraftConfigRows(draft);
+    const validArtifacts = artifacts.length > 0 && artifacts.every((artifact) => (
+      hasText(artifact.name) && hasText(artifact.displayName) && hasText(artifact.type) && hasText(artifact.description)
+    ));
+    const validConfigRows = configRows.every((row) => (
+      hasText(row.name) && hasText(row.displayName) && hasText(row.description)
+    ));
+    return Boolean(validArtifacts && validConfigRows && hasText(draft.parameterMappingCode));
+  }
+  if (step === 2) {
+    const rules = draft.storageRules || [];
+    const outputs = draft.outputs || [];
+    const validRules = rules.every((rule) => hasText(rule.outputName) && hasText(rule.artifactType));
+    const validOutputs = outputs.length > 0 && outputs.every((output) => (
+      hasText(output.name) && hasText(output.displayName) && hasText(output.codeOutput || output.path) && hasText(output.description)
+    ));
+    return Boolean(hasText(draft.standardizationCode) && validRules && validOutputs);
+  }
+  return true;
+}
+
+function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClose, onSave, notify }) {
   const selectedSource = sources.find((item) => item.id === draft.sourceId);
   const mcpOptions = Array.from(new Map(sources.map((source) => [source.serviceId, { id: source.serviceId, name: source.serviceName }])).values());
   const selectedMcpId = draft.selectedMcpId || selectedSource?.serviceId || mcpOptions[0]?.id || '';
   const filteredSources = sources.filter((source) => source.serviceId === selectedMcpId);
-  const selectedArtifactSources = new Set((draft.inputArtifacts || []).map((artifact) => artifact.sourcePath || artifact.sourceName).filter(Boolean));
-  const configInputRows = (draft.inputs || [])
-    .map((input, index) => ({ ...input, __draftIndex: index }))
-    .filter((input) => !selectedArtifactSources.has(input.sourceName || input.name));
+  const configInputRows = getDraftConfigRows(draft);
   const steps = ['流程节点绑定MCP工具', 'MCP工具入参映射', 'MCP工具返回映射'];
   const activeStep = Math.min(draft.step || 0, steps.length - 1);
-  const setStep = (step) => setDraft((current) => ({ ...current, step }));
+  const showRequiredError = () => notify?.(requiredFieldMessage, 'error');
+  const validateStepsBefore = (targetStep) => {
+    for (let step = 0; step < targetStep; step += 1) {
+      if (!validateKnowledgeToolDraftStep(draft, step)) {
+        showRequiredError();
+        return false;
+      }
+    }
+    return true;
+  };
+  const setStep = (step) => {
+    if (step <= activeStep || validateStepsBefore(step)) {
+      setDraft((current) => ({ ...current, step }));
+    }
+  };
+  const goNext = () => {
+    if (!validateKnowledgeToolDraftStep(draft, activeStep)) {
+      showRequiredError();
+      return;
+    }
+    setDraft((current) => ({ ...current, step: activeStep + 1 }));
+  };
+  const submit = () => {
+    if (!validateStepsBefore(steps.length)) return;
+    onSave();
+  };
   const selectSource = (sourceId) => {
     const source = sources.find((item) => item.id === sourceId);
     if (!hasOutputSchema(source)) return;
@@ -1828,9 +1879,9 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
           <button type="button" className="secondary" onClick={onClose}>取消</button>
           {activeStep > 0 ? <button type="button" className="secondary" onClick={() => setStep(activeStep - 1)}>上一步</button> : null}
           {activeStep < steps.length - 1 ? (
-            <button type="button" className="primary" onClick={() => setStep(activeStep + 1)}>下一步</button>
+            <button type="button" className="primary" onClick={goNext}>下一步</button>
           ) : (
-            <button type="button" className="primary" onClick={onSave}>{draft.mode === 'edit' ? '保存' : '创建'}</button>
+            <button type="button" className="primary" onClick={submit}>{draft.mode === 'edit' ? '保存' : '创建'}</button>
           )}
         </>
       )}
