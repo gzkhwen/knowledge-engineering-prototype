@@ -216,15 +216,15 @@ function Drawer({ title, children, onClose, wide = false, className = '' }) {
   );
 }
 
-function ConfirmDialog({ title, message, danger, onCancel, onConfirm }) {
+function ConfirmDialog({ title, message, danger, cancelText = '取消', confirmText = '确认', onCancel, onConfirm }) {
   return (
     <Modal
       title={title}
       onClose={onCancel}
       footer={(
         <>
-          <button type="button" className="secondary" onClick={onCancel}>取消</button>
-          <button type="button" className={danger ? 'danger-button' : 'primary'} onClick={onConfirm}>确认</button>
+          {cancelText ? <button type="button" className="secondary" onClick={onCancel}>{cancelText}</button> : null}
+          <button type="button" className={danger ? 'danger-button' : 'primary'} onClick={onConfirm}>{confirmText}</button>
         </>
       )}
     >
@@ -1051,6 +1051,8 @@ function ToolManagementPage({ notify }) {
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(allToolsCategory);
   const [categoryDraft, setCategoryDraft] = useState(null);
+  const [categoryDeleteDialog, setCategoryDeleteDialog] = useState(null);
+  const [toolDisableDialog, setToolDisableDialog] = useState(null);
   const [detailTool, setDetailTool] = useState(null);
   const [createDraft, setCreateDraft] = useState(null);
 
@@ -1121,13 +1123,17 @@ function ToolManagementPage({ notify }) {
 
   const deleteCategory = (category) => {
     if ((categoryCounts[category] || 0) > 0) {
-      window.alert('当前节点类型下存在流程节点，请先迁移或删除分类下节点后再删除分类');
+      setCategoryDeleteDialog({ type: 'blocked', category });
       return;
     }
-    if (!window.confirm(`确定删除节点类型「${category}」吗？`)) return;
+    setCategoryDeleteDialog({ type: 'confirm', category });
+  };
+
+  const confirmDeleteCategory = (category) => {
     const categoriesNext = snapshot.categories.filter((item) => item !== category);
     persist(snapshot.tools, categoriesNext);
     setSelectedCategory(allToolsCategory);
+    setCategoryDeleteDialog(null);
     notify('节点类型已删除', 'success');
   };
 
@@ -1159,14 +1165,33 @@ function ToolManagementPage({ notify }) {
   };
 
   const toggleToolEnabled = (tool) => {
-    const nextEnabled = !tool.enabled;
+    if (tool.enabled) {
+      const references = dataStore.getFormalPlanReferencesByToolId(tool.id);
+      if (references.spaceCount > 0) {
+        setToolDisableDialog({ type: 'blocked', tool, references });
+        return;
+      }
+      setToolDisableDialog({ type: 'confirm', tool });
+      return;
+    }
     persist(snapshot.tools.map((item) => (item.id === tool.id ? {
       ...item,
-      enabled: nextEnabled,
-      status: nextEnabled ? '可用' : '不可用',
+      enabled: true,
+      status: '可用',
       updatedAt: nowText(),
     } : item)));
-    notify(nextEnabled ? '流程节点已启用' : '流程节点已停用', 'success');
+    notify('流程节点已启用', 'success');
+  };
+
+  const confirmDisableTool = (tool) => {
+    persist(snapshot.tools.map((item) => (item.id === tool.id ? {
+      ...item,
+      enabled: false,
+      status: '不可用',
+      updatedAt: nowText(),
+    } : item)));
+    setToolDisableDialog(null);
+    notify('流程节点已停用', 'success');
   };
 
   const saveKnowledgeTool = () => {
@@ -1302,6 +1327,45 @@ function ToolManagementPage({ notify }) {
         >
           <Field label="节点类型名称" required><input value={categoryDraft.name} onChange={(event) => setCategoryDraft({ ...categoryDraft, name: event.target.value })} /></Field>
         </Modal>
+      ) : null}
+      {categoryDeleteDialog?.type === 'blocked' ? (
+        <ConfirmDialog
+          title="无法删除节点类型"
+          message="当前节点类型下存在流程节点，请先迁移或删除分类下节点后再删除分类"
+          cancelText=""
+          confirmText="知道了"
+          onCancel={() => setCategoryDeleteDialog(null)}
+          onConfirm={() => setCategoryDeleteDialog(null)}
+        />
+      ) : null}
+      {categoryDeleteDialog?.type === 'confirm' ? (
+        <ConfirmDialog
+          danger
+          title="删除节点类型"
+          message={`确定删除节点类型「${categoryDeleteDialog.category}」吗？`}
+          confirmText="确定删除"
+          onCancel={() => setCategoryDeleteDialog(null)}
+          onConfirm={() => confirmDeleteCategory(categoryDeleteDialog.category)}
+        />
+      ) : null}
+      {toolDisableDialog?.type === 'blocked' ? (
+        <ConfirmDialog
+          title="无法停用流程节点"
+          message={`当前节点已被${toolDisableDialog.references.spaceCount}个知识空间的处理方案引用，禁止停用。`}
+          cancelText=""
+          confirmText="知道了"
+          onCancel={() => setToolDisableDialog(null)}
+          onConfirm={() => setToolDisableDialog(null)}
+        />
+      ) : null}
+      {toolDisableDialog?.type === 'confirm' ? (
+        <ConfirmDialog
+          title="停用流程节点"
+          message="节点停用后，运营端配置处理方案将无法使用此节点，确定停用？"
+          confirmText="确定停用"
+          onCancel={() => setToolDisableDialog(null)}
+          onConfirm={() => confirmDisableTool(toolDisableDialog.tool)}
+        />
       ) : null}
       {createDraft ? (
         <KnowledgeToolCreateModal
@@ -2923,11 +2987,13 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
   const solution = dataStore.getProjectSolution(project.id);
   const categories = solution ? dataStore.getProjectCategories(solution.id).sort((a, b) => (a.level - b.level) || a.name.localeCompare(b.name, 'zh-CN')) : [];
+  const categoryPlans = solution ? dataStore.getCategoryPlans(solution.id) : [];
   const refresh = () => setVersion((item) => item + 1);
   const childrenOf = (parentId) => categories.filter((item) => item.parentId === parentId).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
   const isLeaf = (cat) => childrenOf(cat.id).length === 0;
   const leafCategories = categories.filter((cat) => isLeaf(cat));
-  const unconfirmedPlanCount = solution?.status === 'active' ? 0 : leafCategories.reduce((sum, cat) => sum + Math.max(cat.formTypes.length, 1), 0);
+  const hasActiveCategoryPlan = (categoryId, formType) => categoryPlans.some((plan) => plan.categoryId === categoryId && plan.formType === formType && plan.status === 'active');
+  const unconfirmedPlanCount = leafCategories.reduce((sum, cat) => sum + cat.formTypes.filter((formType) => !hasActiveCategoryPlan(cat.id, formType)).length, 0);
   const rootCategories = childrenOf(null);
   const availableParents = categories.filter((cat) => cat.level < 5);
   const stats = {
@@ -3044,12 +3110,12 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
             <Badge>第 {cat.level} 层</Badge>
             <Badge tone={leaf ? 'success' : 'neutral'}>{leaf ? '末级' : `${children.length} 个子类目`}</Badge>
             {cat.hasContent ? <Badge tone="warning">有构建结果</Badge> : null}
-            {leaf ? <Badge tone={solution.status === 'active' ? 'success' : 'warning'}>{solution.status === 'active' ? '已确认' : '未确认'}</Badge> : null}
+            {leaf ? <Badge tone={cat.formTypes.some((formType) => hasActiveCategoryPlan(cat.id, formType)) ? 'success' : 'warning'}>{cat.formTypes.some((formType) => hasActiveCategoryPlan(cat.id, formType)) ? '已生成处理方案' : '未确认'}</Badge> : null}
           </div>
           <div className="category-actions viewer-category-actions">
             {leaf ? cat.formTypes.map((form) => (
               <div className="form-action" key={form}>
-                <Badge tone={form === '非结构化切片' ? 'warning' : 'blue'}>{form}</Badge>
+                <Badge tone={hasActiveCategoryPlan(cat.id, form) ? 'success' : form === '非结构化切片' ? 'warning' : 'blue'}>{hasActiveCategoryPlan(cat.id, form) ? `${form} · 已确认` : form}</Badge>
                 <button type="button" onClick={() => onWorkbench(project.id, cat.id, form)}>生成处理方案</button>
               </div>
             )) : <span className="category-note">知识形态由末级类目指定</span>}
@@ -4212,19 +4278,21 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
   const qaAddToolOpen = qaMode && qaParams.get('addTool') === '1';
   const qaConnectionStatus = qaMode ? qaParams.get('connection') : null;
   const qaAgentTask = qaMode ? qaParams.get('agentTask') : null;
+  const savedCategoryPlan = dataStore.getCategoryPlan(categoryId, formType);
+  const hasSavedCategoryPlan = savedCategoryPlan?.status === 'active';
   const [catalog, setCatalog] = useState(() => readWorkbenchCatalog());
-  const [sampleFiles, setSampleFiles] = useState(() => (qaGeneratedState || qaRunningState ? [{ ...sampleDemoFile, status: qaGeneratedState ? '已完成' : '试跑中' }] : []));
-  const [events, setEvents] = useState(() => (qaGeneratedState ? generatedAgentEvents : qaRunningState ? runningAgentEvents : initialAgentEvents));
+  const [sampleFiles, setSampleFiles] = useState(() => (qaGeneratedState || qaRunningState || hasSavedCategoryPlan ? [{ ...sampleDemoFile, status: qaGeneratedState || hasSavedCategoryPlan ? '已完成' : '试跑中' }] : []));
+  const [events, setEvents] = useState(() => (qaGeneratedState || hasSavedCategoryPlan ? generatedAgentEvents : qaRunningState ? runningAgentEvents : initialAgentEvents));
   const [planNodes, setPlanNodes] = useState(() => {
-    if (qaGeneratedState) return createAgentDemoNodes(readWorkbenchCatalog());
+    if (qaGeneratedState || hasSavedCategoryPlan) return createAgentDemoNodes(readWorkbenchCatalog());
     if (qaRunningState) return createAgentDemoNodes(readWorkbenchCatalog()).slice(0, 4);
     return [];
   });
   const [rightTab, setRightTab] = useState(() => (['样例', '方案', '结果预览', '历史版本'].includes(qaRightTab) ? qaRightTab : '方案'));
   const [running, setRunning] = useState(qaRunningState);
   const [testing, setTesting] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
-  const [results, setResults] = useState(() => (qaGeneratedState ? [createSampleResult({ ...sampleDemoFile, status: '已完成' })] : []));
+  const [confirmed, setConfirmed] = useState(hasSavedCategoryPlan);
+  const [results, setResults] = useState(() => (qaGeneratedState || hasSavedCategoryPlan ? [createSampleResult({ ...sampleDemoFile, status: '已完成' })] : []));
   const [connectionStates, setConnectionStates] = useState(() => {
     if (!['error', 'resolving', 'resolved'].includes(qaConnectionStatus)) return {};
     const [fromSection, toSection] = getCategorySections(planNodes);
@@ -4643,6 +4711,20 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
     if (!canSave) {
       notify('当前方案仍存在校验问题', 'error');
       return;
+    }
+    if (solution && category) {
+      dataStore.upsertCategoryPlan({
+        projectId: project.id,
+        solutionId: solution.id,
+        categoryId: category.id,
+        formType: decodeURIComponent(formType || '问答库'),
+        status: 'active',
+        name: `${category.name}${decodeURIComponent(formType || '问答库')}处理方案`,
+        nodes: planNodes.filter((node) => node.toolId && !node.toolId.startsWith('system-')).map((node) => ({
+          toolId: node.toolId,
+          toolName: node.toolName,
+        })),
+      });
     }
     setConfirmed(true);
     notify('处理方案已保存', 'success');
@@ -5448,11 +5530,11 @@ export function App() {
   const params = new URLSearchParams(window.location.search);
   const [active, setActive] = useState(params.get('screen') || 'ops-projects');
   const [projectId, setProjectId] = useState(dataStore.getProjects()[0]?.id);
-  const [workbenchTarget, setWorkbenchTarget] = useState({ projectId: dataStore.getProjects()[0]?.id, categoryId: 'cat-finance-product', formType: '问答库' });
+  const [workbenchTarget, setWorkbenchTarget] = useState({ projectId: dataStore.getProjects()[0]?.id, categoryId: 'cat-wealth-fund', formType: '问答库' });
   const [toast, setToast] = useState(null);
   const notify = (message, type = 'info') => setToast({ message, type });
   const openSolution = (id) => { setProjectId(id); setActive('ops-category'); };
-  const openWorkbench = (id, categoryId = 'cat-finance-product', formType = '问答库') => { setWorkbenchTarget({ projectId: id, categoryId, formType }); setActive('ops-workbench'); };
+  const openWorkbench = (id, categoryId = 'cat-wealth-fund', formType = '问答库') => { setWorkbenchTarget({ projectId: id, categoryId, formType }); setActive('ops-workbench'); };
 
   let content;
   if (active === 'admin-mcp') content = <McpServicePage notify={notify} />;
@@ -5468,7 +5550,7 @@ export function App() {
   return (
     <Shell active={active} onNavigate={(key) => {
       if (key === 'ops-category') setProjectId(projectId || dataStore.getProjects()[0]?.id);
-      if (key === 'ops-workbench') setWorkbenchTarget((current) => ({ projectId: current.projectId || dataStore.getProjects()[0]?.id, categoryId: current.categoryId || 'cat-finance-product', formType: current.formType || '问答库' }));
+      if (key === 'ops-workbench') setWorkbenchTarget((current) => ({ projectId: current.projectId || dataStore.getProjects()[0]?.id, categoryId: current.categoryId || 'cat-wealth-fund', formType: current.formType || '问答库' }));
       setActive(key === 'ops-result' ? 'ops-knowledge-points' : key);
     }}>
       {content}

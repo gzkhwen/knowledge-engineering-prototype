@@ -4,9 +4,10 @@ const keys = {
   scenarios: 'ke-scenarios',
   relationships: 'ke-relationships',
   templates: 'ke-templates',
-  projects: 'ke-projects',
-  projectSolutions: 'ke-project-solutions',
-  projectCategories: 'ke-project-categories',
+  projects: 'ke-projects-v2',
+  projectSolutions: 'ke-project-solutions-v2',
+  projectCategories: 'ke-project-categories-v2',
+  categoryPlans: 'ke-category-plans-v2',
 };
 
 const formTypes = ['问答库', '术语库', '非结构化切片', '二维表', '分类树', '决策表', 'SOP', '知识图谱'];
@@ -58,37 +59,42 @@ const seed = {
     { id: 'tpl-mixue', name: '蜜雪冰城', description: '蜜雪冰城品牌加盟知识空间模板', relationshipId: 'rel-food-milk-brand', enabled: true },
   ],
   projects: [
-    { id: 'proj-finance', name: '未末银行', description: '无', relationshipId: 'rel-bank-marketing-qa', templateId: 'tpl-bank-marketing', vectorModel: 'maip2.0_pa-multilingual-e5-large', completion: '0/1', projectStatus: '已完成', enabled: true, hasContent: true, hasSolution: true, createdAt: '2026-06-02 10:20' },
-    { id: 'proj-risk', name: '重庆银行', description: '测试', relationshipId: 'rel-insurance-training-qa', templateId: '', vectorModel: 'maip2.0_pa-multilingual-e5-large', completion: '0/2', projectStatus: '草稿', enabled: true, hasContent: false, hasSolution: true, createdAt: '2026-06-02 10:20' },
-    { id: 'proj-test', name: 'test', description: '-', relationshipId: 'rel-insurance-training-qa', templateId: 'tpl-general', vectorModel: 'maip_bge-m3-v1', completion: '1/2', projectStatus: '已完成', enabled: true, hasContent: true, hasSolution: true, createdAt: '2026-05-29 10:20' },
-    { id: 'proj-529-full', name: '529集合集合', description: '1', relationshipId: 'rel-test-one-one', templateId: 'tpl-general', vectorModel: 'maip_embedding-peg', completion: '2/2', projectStatus: '已完成', enabled: true, hasContent: true, hasSolution: true, createdAt: '2026-05-29 10:20' },
-    { id: 'proj-529', name: '529集合', description: '529last day', relationshipId: 'rel-test-one-one', templateId: 'tpl-general', vectorModel: 'maip_embedding-peg', completion: '1/1', projectStatus: '已完成', enabled: true, hasContent: true, hasSolution: true, createdAt: '2026-05-29 10:20' },
-    { id: 'proj-mixue', name: '蜜雪冰城', description: '-', relationshipId: 'rel-food-milk-brand', templateId: 'tpl-mixue', vectorModel: 'maip_qwen3-embedding-0.6b', completion: '1/2', projectStatus: '已完成', enabled: true, hasContent: true, hasSolution: true, createdAt: '2026-05-29 10:20' },
-    { id: 'proj-script', name: '<script>alert(1)</script>', description: '<script>alert(1)</script>', relationshipId: 'rel-test-one-one', templateId: '', vectorModel: 'maip_bge-m3-v1', completion: '0/1', projectStatus: '草稿', enabled: true, hasContent: false, hasSolution: true, createdAt: '2026-05-29 10:20' },
+    { id: 'proj-main', name: '长安银行知识空间', description: '银行营销、产品和流程知识的统一知识空间。', relationshipId: 'rel-bank-marketing-qa', templateId: 'tpl-bank-marketing', vectorModel: 'maip2.0_pa-multilingual-e5-large', completion: '1/7', projectStatus: '配置中', enabled: true, hasContent: true, hasSolution: true, createdAt: '2026-06-02 10:20' },
   ],
   projectSolutions: [
-    { id: 'sol-finance', projectId: 'proj-finance', status: 'active', enabled: true, templateId: 'tpl-bank-marketing', createdAt: '2026-06-02 10:22', updatedAt: '2026-06-02 17:11' },
-    { id: 'sol-risk', projectId: 'proj-risk', status: 'draft', enabled: true, templateId: '', createdAt: '2026-06-02 10:22', updatedAt: '2026-06-02 17:11' },
-    { id: 'sol-test', projectId: 'proj-test', status: 'active', enabled: true, templateId: 'tpl-general', createdAt: '2026-05-29 10:22', updatedAt: '2026-05-29 17:11' },
-    { id: 'sol-529-full', projectId: 'proj-529-full', status: 'active', enabled: true, templateId: 'tpl-general', createdAt: '2026-05-29 10:22', updatedAt: '2026-05-29 17:11' },
-    { id: 'sol-529', projectId: 'proj-529', status: 'active', enabled: true, templateId: 'tpl-general', createdAt: '2026-05-29 10:22', updatedAt: '2026-05-29 17:11' },
-    { id: 'sol-mixue', projectId: 'proj-mixue', status: 'active', enabled: true, templateId: 'tpl-mixue', createdAt: '2026-05-29 10:22', updatedAt: '2026-05-29 17:11' },
-    { id: 'sol-script', projectId: 'proj-script', status: 'draft', enabled: true, templateId: '', createdAt: '2026-05-29 10:22', updatedAt: '2026-05-29 17:11' },
+    { id: 'sol-main', projectId: 'proj-main', status: 'draft', enabled: true, templateId: 'tpl-bank-marketing', createdAt: '2026-06-02 10:22', updatedAt: '2026-06-02 17:11' },
   ],
   projectCategories: [
-    { id: 'cat-product', solutionId: 'sol-finance', parentId: null, name: '产品知识', level: 1, formTypes: [], hasContent: false },
-    { id: 'cat-finance-product', solutionId: 'sol-finance', parentId: 'cat-product', name: '理财产品', level: 2, formTypes: ['问答库', '非结构化切片'], hasContent: true },
-    { id: 'cat-card-product', solutionId: 'sol-finance', parentId: 'cat-product', name: '信用卡产品', level: 2, formTypes: ['问答库'], hasContent: false },
-    { id: 'cat-process', solutionId: 'sol-finance', parentId: null, name: '业务流程', level: 1, formTypes: [], hasContent: false },
-    { id: 'cat-open-account', solutionId: 'sol-finance', parentId: 'cat-process', name: '开户流程', level: 2, formTypes: ['SOP', '问答库'], hasContent: false },
-    { id: 'cat-risk-rule', solutionId: 'sol-risk', parentId: null, name: '风控规则', level: 1, formTypes: ['决策表', '非结构化切片'], hasContent: false },
-    { id: 'cat-risk-loan', solutionId: 'sol-risk', parentId: null, name: '贷后规则', level: 1, formTypes: ['问答库'], hasContent: false },
-    { id: 'cat-test-root', solutionId: 'sol-test', parentId: null, name: '测试类目', level: 1, formTypes: ['问答库', '非结构化切片'], hasContent: true },
-    { id: 'cat-529-full-root', solutionId: 'sol-529-full', parentId: null, name: '测试类目', level: 1, formTypes: ['问答库'], hasContent: true },
-    { id: 'cat-529-root', solutionId: 'sol-529', parentId: null, name: '测试类目', level: 1, formTypes: ['问答库'], hasContent: true },
-    { id: 'cat-mixue-product', solutionId: 'sol-mixue', parentId: null, name: '产品知识', level: 1, formTypes: [], hasContent: false },
-    { id: 'cat-mixue-franchise', solutionId: 'sol-mixue', parentId: 'cat-mixue-product', name: '加盟政策', level: 2, formTypes: ['问答库', '非结构化切片'], hasContent: true },
-    { id: 'cat-script-root', solutionId: 'sol-script', parentId: null, name: '测试类目', level: 1, formTypes: ['问答库'], hasContent: false },
+    { id: 'cat-product', solutionId: 'sol-main', parentId: null, name: '产品知识', level: 1, formTypes: [], hasContent: false },
+    { id: 'cat-wealth', solutionId: 'sol-main', parentId: 'cat-product', name: '财富管理', level: 2, formTypes: [], hasContent: false },
+    { id: 'cat-wealth-fund', solutionId: 'sol-main', parentId: 'cat-wealth', name: '理财产品', level: 3, formTypes: ['问答库', '非结构化切片'], hasContent: true },
+    { id: 'cat-wealth-fund-risk', solutionId: 'sol-main', parentId: 'cat-wealth', name: '风险揭示', level: 3, formTypes: ['问答库'], hasContent: false },
+    { id: 'cat-credit', solutionId: 'sol-main', parentId: 'cat-product', name: '信贷产品', level: 2, formTypes: [], hasContent: false },
+    { id: 'cat-credit-personal', solutionId: 'sol-main', parentId: 'cat-credit', name: '个人贷款', level: 3, formTypes: ['问答库', '二维表'], hasContent: false },
+    { id: 'cat-process', solutionId: 'sol-main', parentId: null, name: '业务流程', level: 1, formTypes: [], hasContent: false },
+    { id: 'cat-customer-service', solutionId: 'sol-main', parentId: 'cat-process', name: '客户服务', level: 2, formTypes: [], hasContent: false },
+    { id: 'cat-open-account', solutionId: 'sol-main', parentId: 'cat-customer-service', name: '开户流程', level: 3, formTypes: ['SOP', '问答库'], hasContent: false },
+    { id: 'cat-complaint', solutionId: 'sol-main', parentId: 'cat-customer-service', name: '投诉处理', level: 3, formTypes: ['SOP'], hasContent: false },
+    { id: 'cat-compliance', solutionId: 'sol-main', parentId: null, name: '合规制度', level: 1, formTypes: [], hasContent: false },
+    { id: 'cat-marketing-compliance', solutionId: 'sol-main', parentId: 'cat-compliance', name: '营销合规', level: 2, formTypes: [], hasContent: false },
+    { id: 'cat-copy-review', solutionId: 'sol-main', parentId: 'cat-marketing-compliance', name: '宣传话术审核', level: 3, formTypes: ['决策表', '问答库'], hasContent: false },
+  ],
+  categoryPlans: [
+    {
+      id: 'plan-wealth-fund-qa',
+      projectId: 'proj-main',
+      solutionId: 'sol-main',
+      categoryId: 'cat-wealth-fund',
+      formType: '问答库',
+      status: 'active',
+      name: '理财产品问答库处理方案',
+      nodes: [
+        { toolId: 'ke-standard-file-parse', toolName: '通用解析' },
+        { toolId: 'ke-standard-parent-child-chunk', toolName: '父子切片' },
+        { toolId: 'ke-standard-qa-extract', toolName: 'QA抽取' },
+      ],
+      updatedAt: '2026-06-02 17:11',
+    },
   ],
 };
 
@@ -167,6 +173,10 @@ export const dataStore = {
   getRelationships() { return this.list('relationships'); },
   getTemplates() { return this.list('templates'); },
   getProjects() { return this.list('projects'); },
+  getCategoryPlans(solutionId) {
+    const plans = this.list('categoryPlans');
+    return solutionId ? plans.filter((item) => item.solutionId === solutionId) : plans;
+  },
   getRelationship(relationshipId) {
     return this.getRelationships().find((item) => item.id === relationshipId) || null;
   },
@@ -257,6 +267,38 @@ export const dataStore = {
   },
   getProjectCategories(solutionId) {
     return this.list('projectCategories').filter((item) => item.solutionId === solutionId);
+  },
+  getCategoryPlan(categoryId, formType) {
+    return this.list('categoryPlans').find((item) => item.categoryId === categoryId && item.formType === formType) || null;
+  },
+  upsertCategoryPlan(payload) {
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const plans = this.list('categoryPlans');
+    const existing = plans.find((item) => item.categoryId === payload.categoryId && item.formType === payload.formType);
+    const next = existing
+      ? { ...existing, ...payload, updatedAt: now }
+      : { id: id('plan'), status: 'active', createdAt: now, updatedAt: now, ...payload };
+    this.save('categoryPlans', existing ? plans.map((item) => (item.id === existing.id ? next : item)) : [...plans, next]);
+    return next;
+  },
+  getFormalPlanReferencesByToolId(toolId) {
+    const projects = this.getProjects();
+    const solutions = this.list('projectSolutions');
+    const categories = this.list('projectCategories');
+    const activePlans = this.list('categoryPlans').filter((plan) => plan.status === 'active' && plan.nodes?.some((node) => node.toolId === toolId));
+    const spaces = new Map();
+    const references = activePlans.map((plan) => {
+      const project = projects.find((item) => item.id === plan.projectId);
+      const solution = solutions.find((item) => item.id === plan.solutionId);
+      const category = categories.find((item) => item.id === plan.categoryId);
+      if (project) spaces.set(project.id, project);
+      return { ...plan, project, solution, category };
+    });
+    return {
+      spaceCount: spaces.size,
+      spaces: Array.from(spaces.values()),
+      plans: references,
+    };
   },
   isProjectCategoryNameExists(solutionId, parentId, name, excludeId) {
     return this.getProjectCategories(solutionId).some((item) => item.parentId === parentId && item.name === name && item.id !== excludeId);
