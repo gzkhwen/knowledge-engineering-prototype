@@ -411,56 +411,40 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   background: #eaf6ff;
 }
 .schema-tree {
-  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-x: auto;
   color: #111827;
   font-size: 13px;
 }
-.schema-tree.ant-tree {
-  background: transparent;
-}
-.schema-tree .ant-tree-treenode {
-  align-items: flex-start;
-  padding: 4px 0;
-}
-.schema-tree .ant-tree-switcher {
-  color: #98a2b3;
-}
-.schema-tree .ant-tree-switcher-line-icon {
-  color: #98a2b3;
-}
-.schema-tree .ant-tree-indent-unit::before,
-.schema-tree .ant-tree-switcher-leaf-line::before,
-.schema-tree .ant-tree-switcher-leaf-line::after {
-  border-color: #d8dee8 !important;
-}
-.schema-tree .ant-tree-node-content-wrapper {
-  min-height: 0;
-  padding: 0 4px;
-  border-radius: 4px;
-}
-.schema-tree .ant-tree-node-content-wrapper:hover,
-.schema-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
-  background: transparent;
-}
-.schema-tree-title {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 2px 0 4px;
-}
-.schema-tree-field-row {
+.schema-tree-row {
   display: inline-grid;
-  grid-template-columns: minmax(0, max-content) max-content max-content;
+  grid-template-columns: max-content 6px minmax(0, max-content) max-content max-content minmax(180px, 1fr);
   align-items: center;
   column-gap: 6px;
   min-width: 0;
-  width: max-content;
-  max-width: 100%;
+  width: fit-content;
+  max-width: none;
   color: #111827;
   font-size: 13px;
   line-height: 1.35;
+  white-space: nowrap;
 }
-.schema-tree-field-row strong {
+.schema-tree-prefix {
+  min-width: 0;
+  color: #a8b0bd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  white-space: pre;
+}
+.schema-tree-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #a8b0bd;
+}
+.schema-tree-row strong {
   min-width: 0;
   max-width: 320px;
   color: #1f2937;
@@ -498,10 +482,13 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   background: #fff7f6;
 }
 .schema-tree-desc {
-  margin: 0 !important;
+  min-width: 0;
+  margin: 0 0 0 2px !important;
   color: #344054 !important;
   font-size: 12px;
   line-height: 1.55 !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .schema-card { min-width: 0; padding: 14px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; }

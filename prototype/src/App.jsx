@@ -1,6 +1,5 @@
 import { Children, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Tree } from 'antd';
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -2780,8 +2779,6 @@ function buildSchemaTreeNodes(schema = {}, parentPath = '', requiredFields = [])
     const childSchema = fieldSchema.type === 'array' ? fieldSchema.items : fieldSchema;
     const childRequired = Array.isArray(childSchema?.required) ? childSchema.required : [];
     return {
-      key: path,
-      title: name,
       name,
       path,
       typeLabel: getSchemaTypeLabel(fieldSchema),
@@ -2792,32 +2789,34 @@ function buildSchemaTreeNodes(schema = {}, parentPath = '', requiredFields = [])
   });
 }
 
-function SchemaTreeTitle({ node }) {
-  return (
-    <div className="schema-tree-title">
-      <div className="schema-tree-field-row">
-        <strong>{node.name}</strong>
-        <span className={`schema-type-pill type-${String(node.typeLabel).split('<')[0]}`}>{node.typeLabel}</span>
-        {node.required ? <span className="schema-required-pill">必填</span> : null}
-      </div>
-      {node.description ? <p className="schema-tree-desc">{node.description}</p> : null}
-    </div>
-  );
+function flattenSchemaTreeRows(nodes = [], ancestorHasNext = []) {
+  return nodes.flatMap((node, index) => {
+    const isLast = index === nodes.length - 1;
+    const prefix = ancestorHasNext.map((hasNext) => (hasNext ? '│  ' : '   ')).join('') + (ancestorHasNext.length ? (isLast ? '└─ ' : '├─ ') : '');
+    return [
+      { node, prefix },
+      ...flattenSchemaTreeRows(node.children, [...ancestorHasNext, !isLast]),
+    ];
+  });
 }
 
 function SchemaTreeView({ schema }) {
   const nodes = buildSchemaTreeNodes(schema, '', schema.required || []);
   if (!nodes.length) return <p className="empty-hint">暂无 Schema 字段</p>;
+  const rows = flattenSchemaTreeRows(nodes);
   return (
-    <Tree
-      className="schema-tree"
-      treeData={nodes}
-      defaultExpandAll
-      selectable={false}
-      showIcon={false}
-      showLine={{ showLeafIcon: false }}
-      titleRender={(node) => <SchemaTreeTitle node={node} />}
-    />
+    <div className="schema-tree">
+      {rows.map(({ node, prefix }) => (
+        <div className="schema-tree-row" key={node.path}>
+          <span className="schema-tree-prefix">{prefix}</span>
+          <span className="schema-tree-dot" />
+          <strong>{node.name}</strong>
+          <span className={`schema-type-pill type-${String(node.typeLabel).split('<')[0]}`}>{node.typeLabel}</span>
+          {node.required ? <span className="schema-required-pill">必填</span> : null}
+          {node.description ? <span className="schema-tree-desc">{node.description}</span> : null}
+        </div>
+      ))}
+    </div>
   );
 }
 
