@@ -1196,8 +1196,9 @@ function ToolManagementPage({ notify }) {
 
   const saveKnowledgeTool = () => {
     for (let step = 0; step < 3; step += 1) {
-      if (!validateKnowledgeToolDraftStep(createDraft, step)) {
-        notify(requiredFieldMessage, 'error');
+      const errorMessage = getKnowledgeToolDraftStepError(createDraft, step);
+      if (errorMessage) {
+        notify(errorMessage, 'error');
         return;
       }
     }
@@ -1393,7 +1394,7 @@ function makeKnowledgeToolDraft(source, category) {
     inputArtifacts: createDefaultInputArtifacts(source?.tool?.inputs || []),
     inputs: normalizeDraftInputs(source?.tool?.inputs || []),
     outputs: normalizeDraftOutputs(source?.tool?.outputs || []),
-    storageRules: firstOutputName ? [createOutputRule(firstOutputName)] : [],
+    storageRules: [createOutputRule(firstOutputName)],
     standardizationCode: createDefaultStandardizationCode(firstOutputName),
     parameterMappingCode: createDefaultParameterMappingCode(source?.tool?.inputs || []),
     indexConfig: createIndexConfig(firstOutputName),
@@ -1406,6 +1407,14 @@ function hasOutputSchema(source) {
 }
 
 function makeKnowledgeToolEditDraft(tool) {
+  const hasStorageRule = tool.storageContract?.enabled === false
+    ? false
+    : Boolean(
+      tool.storageContract?.enabled
+      || tool.storageContract?.rules?.length
+      || tool.storageContract?.outputName
+      || tool.storageContract?.artifactType
+    );
   return {
     id: tool.id,
     sourceId: `${tool.sourceServiceId || tool.serviceId}-${tool.sourceToolName || tool.name}`,
@@ -1419,7 +1428,7 @@ function makeKnowledgeToolEditDraft(tool) {
     inputArtifacts: normalizeInputArtifacts(tool.inputArtifacts || [], tool.inputs || []),
     inputs: normalizeDraftInputs(tool.inputs || []),
     outputs: normalizeDraftOutputs(tool.outputs || []),
-    storageRules: normalizeStorageRules(tool.storageContract, tool.outputs || []),
+    storageRules: hasStorageRule ? normalizeStorageRules(tool.storageContract, tool.outputs || []).slice(0, 1) : [],
     standardizationCode: tool.storageContract?.standardizationCode || createDefaultStandardizationCode(tool.storageContract?.outputName || tool.outputs?.[0]?.name || ''),
     parameterMappingCode: tool.parameterMappingCode || createDefaultParameterMappingCode(tool.inputs || []),
     indexConfig: normalizeIndexConfig(tool.storageContract, tool.outputs || []),
@@ -1618,7 +1627,8 @@ function createIndexConfig(outputName = '') {
 }
 
 function normalizeStorageRules(contract, outputs = []) {
-  if (contract?.rules?.length) return contract.rules.map((rule) => ({ ...createOutputRule(rule.outputName), ...rule, id: rule.id || makeId('output-rule') }));
+  if (contract?.enabled === false) return [];
+  if (contract?.rules?.length) return contract.rules.slice(0, 1).map((rule) => ({ ...createOutputRule(rule.outputName), ...rule, id: rule.id || makeId('output-rule') }));
   const outputName = contract?.outputName || outputs[0]?.name || '';
   if (!outputName) return [];
   const actions = [];
@@ -1654,10 +1664,11 @@ function normalizeIndexConfig(contract, outputs = []) {
 }
 
 function buildStorageContractFromRules(rules = [], indexConfig = createIndexConfig(), fallback = {}, standardizationCode = '') {
-  const firstRule = rules[0] || {};
+  const normalizedRules = rules.slice(0, 1);
+  const firstRule = normalizedRules[0] || {};
   return {
     ...(fallback || {}),
-    enabled: rules.length > 0,
+    enabled: normalizedRules.length > 0,
     outputName: firstRule.outputName || '',
     artifactType: firstRule.artifactType || '原始结果',
     storageTargetType: firstRule.storageTargetType || 'Elasticsearch',
@@ -1678,11 +1689,10 @@ function buildStorageContractFromRules(rules = [], indexConfig = createIndexConf
     recallJoinField: indexConfig?.recallJoinField || '',
     indexConfig: indexConfig || createIndexConfig(),
     standardizationCode,
-    rules,
+    rules: normalizedRules,
   };
 }
 
-const requiredFieldMessage = '必填项不允许为空';
 const hasText = (value) => String(value ?? '').trim().length > 0;
 
 function getDraftConfigRows(draft) {
@@ -1692,32 +1702,52 @@ function getDraftConfigRows(draft) {
     .filter((input) => !selectedArtifactSources.has(input.sourceName || input.name));
 }
 
-function validateKnowledgeToolDraftStep(draft, step) {
-  if (!draft) return false;
+function getKnowledgeToolDraftStepError(draft, step) {
+  if (!draft) return '请选择MCP工具';
   if (step === 0) {
-    return Boolean(hasText(draft.selectedMcpId) && hasText(draft.sourceId) && hasText(draft.name) && hasText(draft.category) && hasText(draft.description));
+    if (!hasText(draft.selectedMcpId)) return '请选择MCP服务';
+    if (!hasText(draft.sourceId)) return '请选择MCP工具';
+    if (!hasText(draft.name)) return '节点名称不能为空';
+    if (!hasText(draft.category)) return '节点类型不能为空';
+    if (!hasText(draft.description)) return '节点描述不能为空';
+    return '';
   }
   if (step === 1) {
     const artifacts = draft.inputArtifacts || [];
     const configRows = getDraftConfigRows(draft);
-    const validArtifacts = artifacts.length > 0 && artifacts.every((artifact) => (
-      hasText(artifact.name) && hasText(artifact.displayName) && hasText(artifact.type) && hasText(artifact.description)
-    ));
-    const validConfigRows = configRows.every((row) => (
-      hasText(row.name) && hasText(row.displayName) && hasText(row.description)
-    ));
-    return Boolean(validArtifacts && validConfigRows && hasText(draft.parameterMappingCode));
+    if (artifacts.length === 0) return '至少需要添加一个节点输入';
+    for (const artifact of artifacts) {
+      if (!hasText(artifact.name)) return '节点输入字段名称不能为空';
+      if (!hasText(artifact.displayName)) return '节点输入显示名称不能为空';
+      if (!hasText(artifact.type)) return '节点输入类型不能为空';
+      if (!hasText(artifact.description)) return '节点输入说明不能为空';
+    }
+    for (const row of configRows) {
+      if (!hasText(row.name)) return '参数名称不能为空';
+      if (!hasText(row.displayName)) return '参数显示名称不能为空';
+      if (!hasText(row.description)) return '参数说明不能为空';
+    }
+    if (!hasText(draft.parameterMappingCode)) return '参数映射代码不能为空';
+    return '';
   }
   if (step === 2) {
     const rules = draft.storageRules || [];
     const outputs = draft.outputs || [];
-    const validRules = rules.every((rule) => hasText(rule.outputName) && hasText(rule.artifactType));
-    const validOutputs = outputs.length > 0 && outputs.every((output) => (
-      hasText(output.name) && hasText(output.displayName) && hasText(output.codeOutput || output.path) && hasText(output.description)
-    ));
-    return Boolean(hasText(draft.standardizationCode) && validRules && validOutputs);
+    if (!hasText(draft.standardizationCode)) return 'MCP工具结果解析代码不能为空';
+    for (const rule of rules) {
+      if (!hasText(rule.outputName)) return '存储规则代码返回不能为空';
+      if (!hasText(rule.artifactType)) return '存储规则知识形态不能为空';
+    }
+    if (outputs.length === 0) return '至少需要添加一个节点输出';
+    for (const output of outputs) {
+      if (!hasText(output.name)) return '节点输出字段名称不能为空';
+      if (!hasText(output.displayName)) return '节点输出显示名称不能为空';
+      if (!hasText(output.codeOutput || output.path)) return '节点输出代码返回不能为空';
+      if (!hasText(output.description)) return '节点输出说明不能为空';
+    }
+    return '';
   }
-  return true;
+  return '';
 }
 
 function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClose, onSave, notify }) {
@@ -1728,11 +1758,12 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   const configInputRows = getDraftConfigRows(draft);
   const steps = ['流程节点绑定MCP工具', 'MCP工具入参映射', 'MCP工具返回映射'];
   const activeStep = Math.min(draft.step || 0, steps.length - 1);
-  const showRequiredError = () => notify?.(requiredFieldMessage, 'error');
+  const showValidationError = (message) => notify?.(message, 'error');
   const validateStepsBefore = (targetStep) => {
     for (let step = 0; step < targetStep; step += 1) {
-      if (!validateKnowledgeToolDraftStep(draft, step)) {
-        showRequiredError();
+      const errorMessage = getKnowledgeToolDraftStepError(draft, step);
+      if (errorMessage) {
+        showValidationError(errorMessage);
         return false;
       }
     }
@@ -1744,8 +1775,9 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
     }
   };
   const goNext = () => {
-    if (!validateKnowledgeToolDraftStep(draft, activeStep)) {
-      showRequiredError();
+    const errorMessage = getKnowledgeToolDraftStepError(draft, activeStep);
+    if (errorMessage) {
+      showValidationError(errorMessage);
       return;
     }
     setDraft((current) => ({ ...current, step: activeStep + 1 }));
@@ -1861,7 +1893,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   };
   const addStorageRule = () => setDraft((current) => ({
     ...current,
-    storageRules: [...(current.storageRules || []), createEmptyOutputRule()],
+    storageRules: (current.storageRules || []).length ? current.storageRules.slice(0, 1) : [createEmptyOutputRule()],
   }));
   const removeStorageRule = (ruleId) => setDraft((current) => ({
     ...current,
@@ -2188,10 +2220,10 @@ function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange
         </div>
         <div className="schema-card standardization-panel binding-panel">
           <div className="schema-head">
-            <strong>解析结果持久化存储</strong>
-            <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加绑定</button>
+            <strong>MCP工具结果持久化存储</strong>
+            {rules.length === 0 ? <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加绑定</button> : null}
           </div>
-          <p className="plain-step-tip">将提取代码处理后的结果持久化存储，系统会按所选知识形态完成存储落库。</p>
+          <p className="plain-step-tip">通过代码对MCP工具的返回结果做标准化提取和处理，并绑定知识形态，系统会按所选知识形态完成存储落库。</p>
           <div className="binding-list">
             {rules.length ? (
               <table className="data-table compact-table editable-schema-table output-binding-table">
@@ -2703,8 +2735,8 @@ function NodeOutputMappingDetail({ tool, rawSource }) {
           code={tool.storageContract?.standardizationCode || ''}
         />
         <NodeMappingSubTable
-          title="解析结果持久化存储"
-          tip="将提取代码处理后的结果持久化存储，系统会按所选知识形态完成存储落库。"
+          title="MCP工具结果持久化存储"
+          tip="通过代码对MCP工具的返回结果做标准化提取和处理，并绑定知识形态，系统会按所选知识形态完成存储落库。"
           columns={['代码返回', '类型', '知识形态', '节点输出引用']}
           rows={storageRows}
         />
