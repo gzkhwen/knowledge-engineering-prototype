@@ -2702,7 +2702,7 @@ function NodeInputMappingDetail({ tool, rawSource }) {
           tip="通过代码将流程节点的输入和配置参数映射到MCP工具的Input Schema。"
           code={tool.parameterMappingCode || ''}
         />
-        <NodeDetailSchemaBlock title="原始MCP input schema" schema={inputSchema} />
+        <NodeDetailSchemaBlock title="原始MCP工具 Input Schema" schema={inputSchema} structured />
       </div>
     </section>
   );
@@ -2761,11 +2761,88 @@ function NodeDetailCodeBlock({ title, tip, code }) {
   );
 }
 
-function NodeDetailSchemaBlock({ title, schema }) {
+function getSchemaTypeLabel(schema = {}) {
+  const type = Array.isArray(schema.type) ? schema.type.join('|') : schema.type || schema.originalType || 'object';
+  if (type === 'array') {
+    const itemType = Array.isArray(schema.items?.type) ? schema.items.type.join('|') : schema.items?.type || 'object';
+    return `array<${itemType}>`;
+  }
+  return type;
+}
+
+function buildSchemaTreeNodes(schema = {}, parentPath = '', requiredFields = []) {
+  if (!schema?.properties) return [];
+  return Object.entries(schema.properties).map(([name, fieldSchema]) => {
+    const path = parentPath ? `${parentPath}.${name}` : name;
+    const childSchema = fieldSchema.type === 'array' ? fieldSchema.items : fieldSchema;
+    const childRequired = Array.isArray(childSchema?.required) ? childSchema.required : [];
+    return {
+      name,
+      path,
+      typeLabel: getSchemaTypeLabel(fieldSchema),
+      required: requiredFields.includes(name),
+      description: fieldSchema.description || '',
+      children: buildSchemaTreeNodes(childSchema, path, childRequired),
+    };
+  });
+}
+
+function SchemaTreeNode({ node, depth = 0 }) {
+  const hasChildren = node.children.length > 0;
+  const [expanded, setExpanded] = useState(depth < 2);
+  return (
+    <li className={`schema-tree-item ${hasChildren ? 'has-children' : ''}`}>
+      <div className="schema-tree-row">
+        <span className="schema-tree-dot" />
+        {hasChildren ? (
+          <button type="button" className="schema-tree-toggle" onClick={() => setExpanded((current) => !current)} aria-label={expanded ? '收起字段' : '展开字段'}>
+            <AntDownOutlined className={expanded ? 'expanded' : ''} />
+          </button>
+        ) : <span className="schema-tree-toggle-placeholder" />}
+        <strong>{node.name}</strong>
+        <span className={`schema-type-pill type-${String(node.typeLabel).split('<')[0]}`}>{node.typeLabel}</span>
+        {node.required ? <span className="schema-required-pill">必填</span> : null}
+      </div>
+      {node.description ? <p className="schema-tree-desc">{node.description}</p> : null}
+      {hasChildren && expanded ? (
+        <ul className="schema-tree-list nested">
+          {node.children.map((child) => <SchemaTreeNode key={child.path} node={child} depth={depth + 1} />)}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+function SchemaTreeView({ schema }) {
+  const nodes = buildSchemaTreeNodes(schema, '', schema.required || []);
+  if (!nodes.length) return <p className="empty-hint">暂无 Schema 字段</p>;
+  return (
+    <ul className="schema-tree-list">
+      {nodes.map((node) => <SchemaTreeNode key={node.path} node={node} />)}
+    </ul>
+  );
+}
+
+function NodeDetailSchemaBlock({ title, schema, structured = false }) {
+  const [showRawSchema, setShowRawSchema] = useState(false);
+  const showTree = structured && !showRawSchema;
   return (
     <div className="schema-card standardization-panel schema-fill-panel node-detail-schema-card">
-      <div className="schema-head"><strong>{title}</strong></div>
-      <pre className="json-schema-preview">{JSON.stringify(schema, null, 2)}</pre>
+      <div className="schema-head">
+        <strong>{title}</strong>
+        {structured ? (
+          <button
+            type="button"
+            className={`schema-view-toggle ${showRawSchema ? 'active' : ''}`}
+            title={showRawSchema ? '查看结构化视图' : '查看原始 JSON'}
+            aria-label={showRawSchema ? '查看结构化视图' : '查看原始 JSON'}
+            onClick={() => setShowRawSchema((current) => !current)}
+          >
+            <CodeOutlined />
+          </button>
+        ) : null}
+      </div>
+      {showTree ? <SchemaTreeView schema={schema} /> : <pre className="json-schema-preview">{JSON.stringify(schema, null, 2)}</pre>}
     </div>
   );
 }
