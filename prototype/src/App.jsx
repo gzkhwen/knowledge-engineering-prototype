@@ -1936,7 +1936,7 @@ function NodeBindingStep({ draft, setDraft, sources, selectedSource, selectedMcp
                 </SelectField>
               </Field>
             </>
-          ) : <p className="empty-hint">当前还没有可用的外部 MCP 原始工具。请先在“MCP Server 接入”页完成服务同步。</p>}
+          ) : <p className="empty-hint">暂无已启用 MCP 服务，请先在“MCP服务管理”中启用服务。</p>}
           <Field label="原始名称工具描述信息">
             <div className="mcp-description-box">{toolDescription}</div>
           </Field>

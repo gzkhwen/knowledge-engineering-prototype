@@ -1289,7 +1289,7 @@ export function subscribeCatalog(listener) {
 
 export function listRawMcpTools(services = loadServices()) {
   return services
-    .filter((service) => !service.locked)
+    .filter((service) => !service.locked && service.status !== '停用')
     .flatMap((service) => (service.tools || []).map((tool) => ({
       id: `${service.id}-${tool.name}`,
       serviceId: service.id,
