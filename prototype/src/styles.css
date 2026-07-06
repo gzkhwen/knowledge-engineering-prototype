@@ -411,16 +411,48 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   background: #eaf6ff;
 }
 .schema-tree {
-  display: grid;
-  gap: 8px;
+  position: relative;
   margin-top: 10px;
   overflow-x: auto;
   color: #111827;
   font-size: 13px;
 }
+.schema-tree-content {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 10px;
+  width: max-content;
+  min-width: 100%;
+  padding: 2px 0;
+}
+.schema-tree-lines {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.schema-tree-lines path {
+  fill: none;
+  stroke: #cbd3df;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.schema-tree-node {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.schema-tree-children {
+  display: grid;
+  gap: 10px;
+  margin-left: 32px;
+}
 .schema-tree-row {
   display: inline-grid;
-  grid-template-columns: max-content 6px minmax(0, max-content) max-content max-content minmax(180px, 1fr);
+  grid-template-columns: 6px minmax(0, max-content) max-content max-content minmax(180px, 1fr);
   align-items: center;
   column-gap: 6px;
   min-width: 0;
@@ -431,14 +463,9 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   line-height: 1.35;
   white-space: nowrap;
 }
-.schema-tree-prefix {
-  min-width: 0;
-  color: #a8b0bd;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
-  white-space: pre;
-}
 .schema-tree-dot {
+  position: relative;
+  z-index: 2;
   width: 5px;
   height: 5px;
   border-radius: 999px;

@@ -1,4 +1,4 @@
-import { Children, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
+import { Children, isValidElement, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ApiOutlined,
@@ -2789,33 +2789,94 @@ function buildSchemaTreeNodes(schema = {}, parentPath = '', requiredFields = [])
   });
 }
 
-function flattenSchemaTreeRows(nodes = [], ancestorHasNext = []) {
-  return nodes.flatMap((node, index) => {
-    const isLast = index === nodes.length - 1;
-    const prefix = ancestorHasNext.map((hasNext) => (hasNext ? '│  ' : '   ')).join('') + (ancestorHasNext.length ? (isLast ? '└─ ' : '├─ ') : '');
-    return [
-      { node, prefix },
-      ...flattenSchemaTreeRows(node.children, [...ancestorHasNext, !isLast]),
-    ];
-  });
+function collectSchemaTreeEdges(nodes = []) {
+  return nodes.flatMap((node) => [
+    ...node.children.map((child) => ({ key: `${node.path}-${child.path}`, parentPath: node.path, childPath: child.path })),
+    ...collectSchemaTreeEdges(node.children),
+  ]);
+}
+
+function SchemaTreeNode({ node, registerDot }) {
+  return (
+    <div className="schema-tree-node">
+      <div className="schema-tree-row">
+        <span className="schema-tree-dot" ref={(element) => registerDot(node.path, element)} />
+        <strong>{node.name}</strong>
+        <span className={`schema-type-pill type-${String(node.typeLabel).split('<')[0]}`}>{node.typeLabel}</span>
+        {node.required ? <span className="schema-required-pill">必填</span> : null}
+        {node.description ? <span className="schema-tree-desc">{node.description}</span> : null}
+      </div>
+      {node.children.length ? (
+        <div className="schema-tree-children">
+          {node.children.map((child) => <SchemaTreeNode key={child.path} node={child} registerDot={registerDot} />)}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function SchemaTreeView({ schema }) {
-  const nodes = buildSchemaTreeNodes(schema, '', schema.required || []);
+  const nodes = useMemo(() => buildSchemaTreeNodes(schema, '', schema.required || []), [schema]);
+  const edgePairs = useMemo(() => collectSchemaTreeEdges(nodes), [nodes]);
+  const containerRef = useRef(null);
+  const contentRef = useRef(null);
+  const dotRefs = useRef(new Map());
+  const [lines, setLines] = useState([]);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+
+  const registerDot = (path, element) => {
+    if (element) dotRefs.current.set(path, element);
+    else dotRefs.current.delete(path);
+  };
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (!container || !content) return undefined;
+
+    const updateLines = () => {
+      const containerRect = container.getBoundingClientRect();
+      const nextLines = edgePairs.map((edge) => {
+        const parentDot = dotRefs.current.get(edge.parentPath);
+        const childDot = dotRefs.current.get(edge.childPath);
+        if (!parentDot || !childDot) return null;
+        const parentRect = parentDot.getBoundingClientRect();
+        const childRect = childDot.getBoundingClientRect();
+        const x1 = parentRect.left - containerRect.left + container.scrollLeft + parentRect.width / 2;
+        const y1 = parentRect.top - containerRect.top + container.scrollTop + parentRect.height / 2;
+        const x2 = childRect.left - containerRect.left + container.scrollLeft + childRect.width / 2;
+        const y2 = childRect.top - containerRect.top + container.scrollTop + childRect.height / 2;
+        return { ...edge, x1, y1, x2, y2 };
+      }).filter(Boolean);
+      setLines(nextLines);
+      setCanvasSize({
+        width: Math.max(container.scrollWidth, content.scrollWidth),
+        height: Math.max(container.scrollHeight, content.scrollHeight),
+      });
+    };
+
+    updateLines();
+    const resizeObserver = new ResizeObserver(updateLines);
+    resizeObserver.observe(container);
+    resizeObserver.observe(content);
+    window.addEventListener('resize', updateLines);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateLines);
+    };
+  }, [edgePairs]);
+
   if (!nodes.length) return <p className="empty-hint">暂无 Schema 字段</p>;
-  const rows = flattenSchemaTreeRows(nodes);
   return (
-    <div className="schema-tree">
-      {rows.map(({ node, prefix }) => (
-        <div className="schema-tree-row" key={node.path}>
-          <span className="schema-tree-prefix">{prefix}</span>
-          <span className="schema-tree-dot" />
-          <strong>{node.name}</strong>
-          <span className={`schema-type-pill type-${String(node.typeLabel).split('<')[0]}`}>{node.typeLabel}</span>
-          {node.required ? <span className="schema-required-pill">必填</span> : null}
-          {node.description ? <span className="schema-tree-desc">{node.description}</span> : null}
-        </div>
-      ))}
+    <div className="schema-tree" ref={containerRef}>
+      <svg className="schema-tree-lines" width={canvasSize.width} height={canvasSize.height} aria-hidden="true">
+        {lines.map((line) => (
+          <path key={line.key} d={`M ${line.x1} ${line.y1} V ${line.y2} H ${line.x2}`} />
+        ))}
+      </svg>
+      <div className="schema-tree-content" ref={contentRef}>
+        {nodes.map((node) => <SchemaTreeNode key={node.path} node={node} registerDot={registerDot} />)}
+      </div>
     </div>
   );
 }
