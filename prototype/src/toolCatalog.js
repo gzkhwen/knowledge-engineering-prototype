@@ -1,6 +1,6 @@
-const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v21';
-const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v21';
-const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v21';
+const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v23';
+const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v23';
+const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v23';
 const CATALOG_EVENT = 'knowledge-engineering-managed-tool-catalog-changed';
 const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v4',
@@ -54,6 +54,12 @@ const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v20',
   'knowledge-engineering-demo-higress-managed-tools-v20',
   'knowledge-engineering-demo-higress-managed-tool-categories-v20',
+  'knowledge-engineering-demo-higress-mcp-services-v21',
+  'knowledge-engineering-demo-higress-managed-tools-v21',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v21',
+  'knowledge-engineering-demo-higress-mcp-services-v22',
+  'knowledge-engineering-demo-higress-managed-tools-v22',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v22',
 ];
 
 export const defaultCategories = ['文档转换', '文档解析', '文档分块', '内容抽取'];
@@ -88,6 +94,7 @@ const demoFieldDisplayNames = {
   content_url: '文件访问地址',
   data: '结果数据',
   document_request: '文档处理请求',
+  duration_ms: '处理耗时',
   end_section: '结束标题',
   file: '文件对象',
   file_name: '文件名称',
@@ -109,9 +116,12 @@ const demoFieldDisplayNames = {
   ocrPages: 'OCR页结果',
   overlap: '重叠长度',
   pages: '页级内容',
+  page_count: '页数',
   paragraphs: '标准段落',
   parse_mode: '解析模式',
   prompt: '提示词',
+  parser_version: '解析器版本',
+  processing_options: '处理选项',
   qaPairs: 'QA对集合',
   qaQualityReport: 'QA质量报告',
   qaResult: 'QA结果',
@@ -136,6 +146,7 @@ const demoFieldDisplayNames = {
   top_k: '返回数量',
   user_id: '用户ID',
   payload: '请求载荷',
+  target_format: '目标格式',
 };
 
 function createInput(name, type, required = true, description = '', defaultValue = '', schema = null) {
@@ -268,6 +279,15 @@ const fileUploadItemSchema = {
     file_size: { type: 'integer', description: '文件大小，单位 Byte。' },
     content_url: { type: 'string', description: '文件下载或临时访问地址。' },
     mime_type: { type: 'string', description: '文件 MIME 类型。' },
+    metadata: {
+      type: 'object',
+      description: '文件附加元数据。',
+      properties: {
+        source_system: { type: 'string', description: '文件来源系统。' },
+        uploaded_at: { type: 'string', description: '文件上传时间。' },
+        page_count: { type: 'integer', description: '预估页数。' },
+      },
+    },
   },
   required: ['file_name', 'content_url'],
 };
@@ -294,6 +314,17 @@ function createPromptInput(description = '可选提示词，用于补充 OCR 或
   return createInput('prompt', 'string', false, description);
 }
 
+const processingOptionsSchema = {
+  type: 'object',
+  description: '工具处理选项。',
+  properties: {
+    parse_mode: { type: 'string', description: '解析模式，例如 ocr、layout、table。' },
+    target_format: { type: 'string', description: '目标输出格式，例如 pdf、md。' },
+    enable_layout: { type: 'boolean', description: '是否启用版面结构识别。' },
+    language: { type: 'string', description: '文档语言，例如 zh-CN。' },
+  },
+};
+
 function resultFileItemSchema(dataFileType = 'md') {
   return {
     type: 'object',
@@ -302,6 +333,28 @@ function resultFileItemSchema(dataFileType = 'md') {
       file_name: { type: 'string', description: '结果文件名称。' },
       file_url: { type: 'string', description: '结果文件访问地址。' },
       file_type: { type: 'string', description: `结果文件类型，示例：${dataFileType}。` },
+      metadata: {
+        type: 'object',
+        description: '结果文件元数据。',
+        properties: {
+          duration_ms: { type: 'integer', description: '处理耗时，单位毫秒。' },
+          page_count: { type: 'integer', description: '结果对应的文档页数。' },
+          parser_version: { type: 'string', description: '解析器或模型版本。' },
+        },
+      },
+      content_outline: {
+        type: 'array',
+        description: '结果内容的标题层级摘要。',
+        items: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: '标题名称。' },
+            level: { type: 'integer', description: '标题层级。' },
+            page: { type: 'integer', description: '来源页码。' },
+          },
+          required: ['title', 'level'],
+        },
+      },
     },
     required: ['file_name', 'file_type'],
   };
@@ -343,6 +396,7 @@ const documentRequestSchema = {
   properties: {
     files: filesInputSchema,
     user_id: { type: 'string', description: '调用用户标识，用于审计、权限校验或任务追踪。' },
+    processing_options: processingOptionsSchema,
   },
   required: ['files', 'user_id'],
 };
@@ -372,7 +426,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/mx_ocr',
     method: 'POST',
     inputs: [createFilesInput('待 OCR 解析的文件列表。'), createUserIdInput()],
-    outputs: createResponseOutputs('OCR 解析后的 Markdown 文件列表。', { dataDescription: 'OCR 解析后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
+    outputs: createResponseOutputs('OCR 解析后的 Markdown 文件列表。', { dataDescription: 'OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' }),
   },
   {
     slug: 'dots-ocr',
@@ -394,7 +448,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/mineru_ocr',
     method: 'POST',
     inputs: [createDocumentRequestInput('待 MinerU 解析的文档处理请求。')],
-    outputs: createResponseOutputs('MinerU 解析后的 Markdown 文件列表。', { dataDescription: 'MinerU 解析后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
+    outputs: createResponseOutputs('MinerU 解析后的 Markdown 文件列表。', { dataDescription: 'MinerU 解析后的 Markdown 文件列表。', dataFileType: 'md' }),
   },
   {
     slug: 'markdown-chunk',
@@ -422,7 +476,7 @@ const idpDocumentTools = [
       createInput('end_section', 'string', false, '结束标题，mode 为 mid 时需要填写。'),
       createUserIdInput(),
     ],
-    outputs: createResponseOutputs('按标题抽取后的 Markdown 文件列表。', { dataDescription: '按标题抽取后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
+    outputs: createResponseOutputs('按标题抽取后的 Markdown 文件列表。', { dataDescription: '按标题抽取后的 Markdown 文件列表。', dataFileType: 'md' }),
   },
   {
     slug: 'paddle-ocr',
@@ -433,7 +487,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/paddle_ocr',
     method: 'POST',
     inputs: [createFilesInput('待 Paddle OCR 解析的文件列表。'), createPromptInput(), createUserIdInput()],
-    outputs: createResponseOutputs('Paddle OCR 解析后的 Markdown 文件列表。', { dataDescription: 'Paddle OCR 解析后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
+    outputs: createResponseOutputs('Paddle OCR 解析后的 Markdown 文件列表。', { dataDescription: 'Paddle OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' }),
   },
   {
     slug: 'deepseek-ocr',
@@ -477,7 +531,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/hunyuan_ocr',
     method: 'POST',
     inputs: [createFilesInput('待 Hunyuan 多模态 OCR 解析的文件列表。'), createUserIdInput(), createPromptInput('建议暴露的提示词参数，可用于定位、解析、信息抽取或翻译任务。')],
-    outputs: createResponseOutputs('Hunyuan OCR 解析后的 Markdown 文件列表。', { dataDescription: 'Hunyuan OCR 解析后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
+    outputs: createResponseOutputs('Hunyuan OCR 解析后的 Markdown 文件列表。', { dataDescription: 'Hunyuan OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' }),
   },
   {
     slug: 'glm-ocr',
@@ -488,7 +542,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/glm_ocr',
     method: 'POST',
     inputs: [createFilesInput('待 GLM 多模态 OCR 解析的文件列表。'), createUserIdInput()],
-    outputs: createResponseOutputs('GLM OCR 解析后的 Markdown 文件列表。', { dataDescription: 'GLM OCR 解析后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
+    outputs: createResponseOutputs('GLM OCR 解析后的 Markdown 文件列表。', { dataDescription: 'GLM OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' }),
   },
   {
     slug: 'qianfan-ocr',
@@ -629,17 +683,18 @@ function makeManagedTool({
   inputs = [],
   outputs = [],
   inputArtifacts,
-  parameterMappingCode = '',
+  parameterMappingCode,
   storageContract,
   lastSyncedAt = '-',
   version = 'v1',
+  autoGenerateDemoMappings = true,
 }) {
-  const normalizedInputs = normalizeToolInputs({ name, inputs });
-  const normalizedOutputs = normalizeToolOutputs({ name, outputs });
+  const normalizedInputs = !autoGenerateDemoMappings && Array.isArray(inputs) && inputs.length === 0 ? [] : normalizeToolInputs({ name, inputs });
+  const normalizedOutputs = !autoGenerateDemoMappings && Array.isArray(outputs) && outputs.length === 0 ? [] : normalizeToolOutputs({ name, outputs });
   const baseStorageContract = normalizeStorageContract(storageContract);
   const storageWithCode = {
     ...baseStorageContract,
-    standardizationCode: baseStorageContract.standardizationCode || createDemoStandardizationCode(baseStorageContract.rules, normalizedOutputs),
+    standardizationCode: baseStorageContract.standardizationCode || (autoGenerateDemoMappings ? createDemoStandardizationCode(baseStorageContract.rules, normalizedOutputs) : ''),
   };
   const [linkedStorageContract, linkedOutputs] = applyDemoNodeOutputRefs(storageWithCode, normalizedOutputs);
   return {
@@ -659,10 +714,10 @@ function makeManagedTool({
     enabled: true,
     version,
     lastSyncedAt,
-    inputArtifacts: inputArtifacts || createDemoInputArtifacts(normalizedInputs),
+    inputArtifacts: inputArtifacts ?? (autoGenerateDemoMappings ? createDemoInputArtifacts(normalizedInputs) : []),
     inputs: normalizedInputs,
     outputs: linkedOutputs,
-    parameterMappingCode: parameterMappingCode || createDemoParameterMappingCode(normalizedInputs),
+    parameterMappingCode: parameterMappingCode ?? (autoGenerateDemoMappings ? createDemoParameterMappingCode(normalizedInputs) : ''),
     storageContract: linkedStorageContract,
   };
 }
@@ -743,6 +798,91 @@ function managedToolStorageFor(rawTool, index) {
   });
 }
 
+function createManagedNodeArtifact(name, displayName, type, artifactType, description) {
+  return {
+    id: `input-artifact-${name}`,
+    name,
+    displayName,
+    type,
+    artifactType,
+    sourcePath: name,
+    sourceName: name,
+    description,
+  };
+}
+
+function createManagedNodeInputArtifacts(rawTool, definition) {
+  if (definition.category === '文档转换') {
+    return [createManagedNodeArtifact('source_files', '待转换文件', 'array<object>', 'file_object', '待转换的原始文件，可来自人工上传或上游节点输出。')];
+  }
+  if (definition.category === '文档分块') {
+    return [createManagedNodeArtifact('markdown_documents', 'Markdown文档', 'array<object>', 'text_blocks', '待分块的 Markdown 文档或解析后的结构化文本。')];
+  }
+  if (definition.category === '内容抽取') {
+    return [createManagedNodeArtifact('source_documents', '待抽取内容', 'array<object>', 'text_blocks', '待抽取的 Markdown 文档、文本切片或结构化章节内容。')];
+  }
+  const isFootnote = rawTool.slug === 'extract-footnote';
+  return [createManagedNodeArtifact(isFootnote ? 'policy_documents' : 'document_files', isFootnote ? '条款文档' : '待解析文件', 'array<object>', 'file_object', isFootnote ? '待提取脚注的保险条款或政策文档。' : '待 OCR 或版面解析的文件列表。')];
+}
+
+function createManagedNodeParam(name, displayName, type, required, description, defaultValue = '') {
+  return { name, displayName, type, required, description, defaultValue };
+}
+
+function createManagedNodeConfigParams(rawTool, definition) {
+  if (definition.category === '文档转换') {
+    return [
+      createManagedNodeParam('target_format', '目标格式', 'string', true, '转换后的目标文件格式。', 'pdf'),
+      createManagedNodeParam('retain_layout', '保留版式', 'boolean', false, '是否尽量保留原文件版式。', true),
+      createManagedNodeParam('output_naming_rule', '输出命名规则', 'string', false, '转换结果文件的命名规则。', '{original_name}.pdf'),
+    ];
+  }
+  if (definition.category === '文档分块') {
+    return [
+      createManagedNodeParam('chunk_strategy', '分块策略', 'string', true, '按标题、段落或语义边界进行分块。', 'heading'),
+      createManagedNodeParam('max_chunk_size', '最大切片长度', 'number', true, '单个切片允许的最大字符数。', 1200),
+      createManagedNodeParam('overlap_size', '重叠长度', 'number', false, '相邻切片之间保留的重叠字符数。', 120),
+    ];
+  }
+  if (definition.category === '内容抽取') {
+    return [
+      createManagedNodeParam('extract_scope', '抽取范围', 'string', true, '指定抽取全文、标题章节或特定内容类型。', rawTool.slug === 'extract-footnote' ? 'footnote' : 'title_section'),
+      createManagedNodeParam('title_match_mode', '标题匹配方式', 'string', false, '按精确匹配、包含匹配或正则匹配定位标题。', 'contains'),
+      createManagedNodeParam('include_context', '包含上下文', 'boolean', false, '是否在抽取结果中保留前后文。', true),
+    ];
+  }
+  return [
+    createManagedNodeParam('parse_mode', '解析模式', 'string', true, '指定通用解析、版面解析、OCR解析或条款解析模式。', 'layout_ocr'),
+    createManagedNodeParam('language', '文档语言', 'string', false, '文档主要语言。', 'zh-CN'),
+    createManagedNodeParam('table_mode', '表格处理模式', 'string', false, '表格区域的识别和输出方式。', 'structured'),
+    createManagedNodeParam('enable_image_caption', '图片说明生成', 'boolean', false, '是否为图片区域生成文字说明。', false),
+  ];
+}
+
+function createManagedNodeParameterMappingCode(rawTool, definition, artifacts, params) {
+  const rawInputs = normalizeToolInputs(rawTool);
+  const artifactName = artifacts[0]?.name || 'input';
+  const configNames = new Set(params.map((param) => param.name));
+  const lines = rawInputs.map((input) => {
+    if (input.name === 'user_id') return `    ${input.name}: context.system.userId`;
+    if (configNames.has(input.name)) return `    ${input.name}: context.config.${input.name}`;
+    if (['files', 'file', 'input', 'content', 'markdown', 'md_file'].some((key) => input.name.toLowerCase().includes(key))) {
+      return `    ${input.name}: context.nodeInput.${artifactName}`;
+    }
+    if (input.name === 'prompt') {
+      const fallbackConfig = definition.category === '内容抽取' ? 'extract_scope' : 'parse_mode';
+      return `    ${input.name}: context.config.${fallbackConfig}`;
+    }
+    const fallback = input.defaultValue !== undefined && input.defaultValue !== '' ? ` ?? ${JSON.stringify(input.defaultValue)}` : '';
+    return `    ${input.name}: context.config.${input.name}${fallback}`;
+  });
+  return `function mapParams(context) {
+  return {
+${lines.join(',\n')}
+  };
+}`;
+}
+
 function initialManagedTools(services = initialServices) {
   const rawTools = services
     .filter((service) => !service.locked && service.status !== '停用')
@@ -751,6 +891,8 @@ function initialManagedTools(services = initialServices) {
 
   return rawTools.map(({ service, tool }, index) => {
     const definition = getManagedToolDefinition(tool);
+    const inputArtifacts = createManagedNodeInputArtifacts(tool, definition);
+    const inputs = createManagedNodeConfigParams(tool, definition);
     return makeManagedTool({
       id: `ke-idp-${tool.slug || index + 1}`,
       name: definition.name,
@@ -759,8 +901,10 @@ function initialManagedTools(services = initialServices) {
       sourceServiceId: service.id,
       sourceServiceName: service.name,
       sourceToolName: tool.name,
-      inputs: normalizeToolInputs(tool),
+      inputArtifacts,
+      inputs,
       outputs: normalizeToolOutputs(tool),
+      parameterMappingCode: createManagedNodeParameterMappingCode(tool, definition, inputArtifacts, inputs),
       storageContract: managedToolStorageFor(tool, index),
       lastSyncedAt: service.lastSyncedAt,
     });
@@ -889,6 +1033,7 @@ export function listRawMcpTools(services = loadServices()) {
 export function createKnowledgeToolFromRaw(source, overrides = {}) {
   const rawTool = source?.tool || {};
   const name = overrides.name?.trim() || rawTool.name || '新建流程节点';
+  const hasOverride = (key) => Object.prototype.hasOwnProperty.call(overrides, key);
   return makeManagedTool({
     id: `ke-standard-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name,
@@ -897,9 +1042,10 @@ export function createKnowledgeToolFromRaw(source, overrides = {}) {
     sourceServiceId: source?.serviceId || '',
     sourceServiceName: source?.serviceName || '',
     sourceToolName: rawTool.name || '',
-    inputs: overrides.inputs || rawTool.inputs || defaultToolInputs(rawTool.name || ''),
-    outputs: overrides.outputs || rawTool.outputs || defaultToolOutputs(rawTool.name || ''),
-    parameterMappingCode: overrides.parameterMappingCode || '',
+    inputArtifacts: hasOverride('inputArtifacts') ? overrides.inputArtifacts : undefined,
+    inputs: hasOverride('inputs') ? overrides.inputs : (rawTool.inputs || defaultToolInputs(rawTool.name || '')),
+    outputs: hasOverride('outputs') ? overrides.outputs : (rawTool.outputs || defaultToolOutputs(rawTool.name || '')),
+    parameterMappingCode: hasOverride('parameterMappingCode') ? overrides.parameterMappingCode : '',
     storageContract: createStorageContract({
       enabled: Boolean(overrides.storageRules?.length),
       outputName: overrides.storageRules?.[0]?.outputName || rawTool.outputs?.[0]?.name || '',
@@ -927,6 +1073,7 @@ export function createKnowledgeToolFromRaw(source, overrides = {}) {
       note: overrides.storageNote || '创建后可在工具详情中继续完善结果存储设置。',
     }),
     lastSyncedAt: source?.lastSyncedAt || '-',
+    autoGenerateDemoMappings: false,
   });
 }
 

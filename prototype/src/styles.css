@@ -386,6 +386,17 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   gap: 8px;
   margin-bottom: 0;
 }
+.standard-tool-modal .node-detail-schema-card {
+  max-height: 560px;
+  min-height: 0;
+  overflow: hidden;
+}
+.standard-tool-modal .node-detail-schema-card .schema-tree,
+.standard-tool-modal .node-detail-schema-card .json-schema-preview {
+  max-height: 500px;
+  min-height: 0;
+  overflow: auto;
+}
 .node-detail-schema-card .json-schema-preview {
   height: auto;
   min-height: 0;
@@ -1067,6 +1078,13 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .workbench-page .text-link { color: #0f63f6; }
 .workbench-grid { display: grid; grid-template-columns: 248px minmax(360px, 1fr) 420px; gap: 16px; flex: 1; min-height: 0; height: auto; }
 .workbench-grid > .panel { border-color: #e0e8f2; border-radius: 12px; }
+.workbench-entry-panel { min-height: 520px; display: grid; place-items: center; border-color: #e0e8f2; border-radius: 12px; }
+.workbench-entry-empty { display: grid; justify-items: center; gap: 12px; color: #667085; text-align: center; }
+.workbench-entry-empty > .anticon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: #eff6ff; color: #0f63f6; font-size: 22px; }
+.workbench-entry-empty strong { color: #1f2937; font-size: 16px; }
+.workbench-entry-empty span { max-width: 320px; color: #667085; font-size: 13px; line-height: 1.6; }
+.workbench-entry-actions { display: flex; gap: 10px; margin-top: 4px; }
+.workbench-entry-actions button { min-width: 128px; height: 36px; border-radius: 10px; }
 .sample-column, .agent-column, .plan-column { min-height: 0; overflow: hidden; }
 .sample-column { padding: 12px; overflow-y: auto; }
 .sample-column h3 { margin: 0 0 8px; color: #374151; font-size: 13px; font-weight: 700; }

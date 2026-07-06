@@ -1381,7 +1381,6 @@ function ToolManagementPage({ notify }) {
 }
 
 function makeKnowledgeToolDraft(source, category) {
-  const firstOutputName = source?.tool?.outputs?.[0]?.name || '';
   return {
     id: null,
     sourceId: source?.id || '',
@@ -1391,13 +1390,13 @@ function makeKnowledgeToolDraft(source, category) {
     name: source?.tool?.name || '',
     description: source?.tool?.description || '',
     category,
-    inputArtifacts: createDefaultInputArtifacts(source?.tool?.inputs || []),
-    inputs: normalizeDraftInputs(source?.tool?.inputs || []),
-    outputs: normalizeDraftOutputs(source?.tool?.outputs || []),
-    storageRules: [createOutputRule(firstOutputName)],
-    standardizationCode: createDefaultStandardizationCode(firstOutputName),
-    parameterMappingCode: createDefaultParameterMappingCode(source?.tool?.inputs || []),
-    indexConfig: createIndexConfig(firstOutputName),
+    inputArtifacts: [],
+    inputs: [],
+    outputs: [],
+    storageRules: [],
+    standardizationCode: '',
+    parameterMappingCode: '',
+    indexConfig: createIndexConfig(''),
     exceptionRules: createDefaultExceptionRules(),
   };
 }
@@ -2108,10 +2107,7 @@ function InputMappingPanel({ source, code, artifacts, configRows, onCodeChange, 
           />
         </div>
       </div>
-      <div className="schema-card standardization-panel schema-fill-panel">
-        <div className="schema-head"><strong>原始MCP input schema</strong></div>
-        <pre className="json-schema-preview">{JSON.stringify(inputSchema, null, 2)}</pre>
-      </div>
+      <NodeDetailSchemaBlock title="原始MCP工具 Input Schema" schema={inputSchema} structured />
     </section>
   );
 }
@@ -2186,13 +2182,11 @@ function RawMcpToolPreview({ source }) {
         </div>
       </div>
       <div className="raw-schema-block">
-        <div className="raw-schema-title">input schema</div>
-        <pre className="json-schema-preview">{JSON.stringify(inputSchema, null, 2)}</pre>
+        <NodeDetailSchemaBlock title="原始MCP工具 Input Schema" schema={inputSchema} structured />
       </div>
       {outputs.length ? (
         <div className="raw-schema-block">
-          <div className="raw-schema-title">output schema</div>
-          <pre className="json-schema-preview">{JSON.stringify(outputSchema, null, 2)}</pre>
+          <NodeDetailSchemaBlock title="原始MCP工具 Output Schema" schema={outputSchema} structured />
         </div>
       ) : null}
     </div>
@@ -2203,10 +2197,7 @@ function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange
   const outputSchema = buildRawOutputJsonSchema(source?.tool?.outputs || []);
   return (
     <section className="standardization-grid">
-      <div className="schema-card standardization-panel schema-fill-panel">
-        <div className="schema-head"><strong>原始MCP output schema</strong></div>
-        <pre className="json-schema-preview">{JSON.stringify(outputSchema, null, 2)}</pre>
-      </div>
+      <NodeDetailSchemaBlock title="原始MCP工具 Output Schema" schema={outputSchema} structured />
       <div className="standardization-right-stack">
         <div className="schema-card standardization-panel code-editor-panel">
           <div className="schema-head"><strong>MCP工具结果解析提取代码</strong></div>
@@ -4488,7 +4479,7 @@ function getRuntimeLabel(status) {
   }[status] || '';
 }
 
-function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
+function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, onBack }) {
   const qaParams = new URLSearchParams(window.location.search);
   const qaMode = qaParams.get('qa') === '1';
   const qaGeneratedState = qaMode && qaParams.get('demoState') === 'generated';
@@ -4512,6 +4503,7 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
   const [running, setRunning] = useState(qaRunningState);
   const [testing, setTesting] = useState(false);
   const [confirmed, setConfirmed] = useState(hasSavedCategoryPlan);
+  const [entryMode, setEntryMode] = useState(() => (categoryId ? 'category' : 'blank'));
   const [results, setResults] = useState(() => (qaGeneratedState || hasSavedCategoryPlan ? [createSampleResult({ ...sampleDemoFile, status: '已完成' })] : []));
   const [connectionStates, setConnectionStates] = useState(() => {
     if (!['error', 'resolving', 'resolved'].includes(qaConnectionStatus)) return {};
@@ -4555,6 +4547,9 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
   const solution = dataStore.getProjectSolution(project.id);
   const category = solution ? dataStore.getProjectCategories(solution.id).find((item) => item.id === categoryId) : null;
+  const isMenuEntry = !categoryId;
+  const workbenchContextText = category ? `${project.name} / ${category.name} / ${decodeURIComponent(formType || '问答库')}` : `${project.name} / 临时方案`;
+  const workbenchPlanTitle = category ? `${category.name} · ${decodeURIComponent(formType || '问答库')}` : '临时方案';
   const categorySections = getCategorySections(planNodes);
   const nodeWarnings = getNodeWarnings(planNodes);
   const inputIssueMap = getNodeInputIssueMap(planNodes);
@@ -4572,6 +4567,9 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
     setCatalog(readWorkbenchCatalog());
     setToolCategories(snapshot.categories || defaultCategories);
   }), []);
+  useEffect(() => {
+    setEntryMode(categoryId ? 'category' : 'blank');
+  }, [categoryId, formType, projectId, entryNonce]);
   useEffect(() => {
     streamRef.current?.scrollTo({ top: streamRef.current.scrollHeight, behavior: 'smooth' });
   }, [events]);
@@ -5025,9 +5023,39 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
     setDraggingNodeId(null);
   };
 
+  const startAgentPlan = () => {
+    setEntryMode('generate');
+    setRightTab('方案');
+  };
+
+  const startManualPlan = () => {
+    setEntryMode('manual');
+    setRightTab('方案');
+    setAddOpen(true);
+  };
+
+  if (isMenuEntry && entryMode === 'blank') {
+    return (
+      <div className="workbench-page">
+        <PageHeader title="方案工作台" subtitle={`${project.name} / 暂未选择处理方案`} />
+        <section className="panel workbench-entry-panel">
+          <div className="workbench-entry-empty">
+            <ThunderboltOutlined />
+            <strong>暂无处理方案</strong>
+            <span>可以通过智能体生成方案，也可以人工配置流程节点。</span>
+            <div className="workbench-entry-actions">
+              <button type="button" className="primary" onClick={startAgentPlan}><ThunderboltOutlined /> 生成方案</button>
+              <button type="button" className="secondary" onClick={startManualPlan}><PlusOutlined /> 人工配置方案</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="workbench-page">
-      <PageHeader title="方案工作台" subtitle={`${project.name} / ${category?.name || '常见问题'} / ${decodeURIComponent(formType || '问答库')}`} actions={<button type="button" className="secondary" onClick={onBack}><LeftOutlined /> 返回类目</button>} />
+      <PageHeader title="方案工作台" subtitle={workbenchContextText} actions={categoryId ? <button type="button" className="secondary" onClick={onBack}><LeftOutlined /> 返回类目</button> : null} />
       <div className="workbench-grid">
         <aside className="panel sample-column">
           <h3>样例文件上传</h3>
@@ -5064,7 +5092,7 @@ function WorkbenchPage({ projectId, categoryId, formType, notify, onBack }) {
           {rightTab === '方案' ? (
             <div className="plan-tab">
               <div className="plan-summary">
-                <strong>{category?.name || '常见问题'} · {decodeURIComponent(formType || '问答库')}</strong>
+                <strong>{workbenchPlanTitle}</strong>
                 <button type="button" className="icon-button primary-mini" disabled={!canEdit} onClick={() => setAddOpen(true)}><PlusOutlined /></button>
               </div>
               <div className="workflow-list">
@@ -5750,11 +5778,11 @@ export function App() {
   const params = new URLSearchParams(window.location.search);
   const [active, setActive] = useState(params.get('screen') || 'ops-projects');
   const [projectId, setProjectId] = useState(dataStore.getProjects()[0]?.id);
-  const [workbenchTarget, setWorkbenchTarget] = useState({ projectId: dataStore.getProjects()[0]?.id, categoryId: 'cat-wealth-fund', formType: '问答库' });
+  const [workbenchTarget, setWorkbenchTarget] = useState({ projectId: dataStore.getProjects()[0]?.id, categoryId: null, formType: '问答库', entryNonce: 0 });
   const [toast, setToast] = useState(null);
   const notify = (message, type = 'info') => setToast({ message, type });
   const openSolution = (id) => { setProjectId(id); setActive('ops-category'); };
-  const openWorkbench = (id, categoryId = 'cat-wealth-fund', formType = '问答库') => { setWorkbenchTarget({ projectId: id, categoryId, formType }); setActive('ops-workbench'); };
+  const openWorkbench = (id, categoryId = null, formType = '问答库') => { setWorkbenchTarget({ projectId: id, categoryId, formType, entryNonce: Date.now() }); setActive('ops-workbench'); };
 
   let content;
   if (active === 'admin-mcp') content = <McpServicePage notify={notify} />;
@@ -5770,7 +5798,7 @@ export function App() {
   return (
     <Shell active={active} onNavigate={(key) => {
       if (key === 'ops-category') setProjectId(projectId || dataStore.getProjects()[0]?.id);
-      if (key === 'ops-workbench') setWorkbenchTarget((current) => ({ projectId: current.projectId || dataStore.getProjects()[0]?.id, categoryId: current.categoryId || 'cat-wealth-fund', formType: current.formType || '问答库' }));
+      if (key === 'ops-workbench') setWorkbenchTarget((current) => ({ projectId: current.projectId || dataStore.getProjects()[0]?.id, categoryId: null, formType: current.formType || '问答库', entryNonce: Date.now() }));
       setActive(key === 'ops-result' ? 'ops-knowledge-points' : key);
     }}>
       {content}
