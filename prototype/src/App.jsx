@@ -2799,11 +2799,13 @@ function collectSchemaTreeEdges(nodes = []) {
 function SchemaTreeNode({ node, registerDot }) {
   return (
     <div className="schema-tree-node">
-      <div className="schema-tree-row">
-        <span className="schema-tree-dot" ref={(element) => registerDot(node.path, element)} />
-        <strong>{node.name}</strong>
-        <span className={`schema-type-pill type-${String(node.typeLabel).split('<')[0]}`}>{node.typeLabel}</span>
-        {node.required ? <span className="schema-required-pill">必填</span> : null}
+      <div className="schema-tree-node-main">
+        <div className="schema-tree-row">
+          <span className="schema-tree-dot" ref={(element) => registerDot(node.path, element)} />
+          <strong>{node.name}</strong>
+          <span className={`schema-type-pill type-${String(node.typeLabel).split('<')[0]}`}>{node.typeLabel}</span>
+          {node.required ? <span className="schema-required-pill">必填</span> : null}
+        </div>
         {node.description ? <span className="schema-tree-desc">{node.description}</span> : null}
       </div>
       {node.children.length ? (
