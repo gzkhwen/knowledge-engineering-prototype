@@ -1,6 +1,6 @@
-const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v20';
-const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v20';
-const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v20';
+const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v21';
+const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v21';
+const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v21';
 const CATALOG_EVENT = 'knowledge-engineering-managed-tool-catalog-changed';
 const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v4',
@@ -51,9 +51,12 @@ const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v19',
   'knowledge-engineering-demo-higress-managed-tools-v19',
   'knowledge-engineering-demo-higress-managed-tool-categories-v19',
+  'knowledge-engineering-demo-higress-mcp-services-v20',
+  'knowledge-engineering-demo-higress-managed-tools-v20',
+  'knowledge-engineering-demo-higress-managed-tool-categories-v20',
 ];
 
-export const defaultCategories = ['文档转换', '文档解析', '内容处理'];
+export const defaultCategories = ['文档转换', '文档解析', '文档分块', '内容抽取'];
 
 function nowText() {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -84,6 +87,7 @@ const demoFieldDisplayNames = {
   code: '状态码',
   content_url: '文件访问地址',
   data: '结果数据',
+  document_request: '文档处理请求',
   end_section: '结束标题',
   file: '文件对象',
   file_name: '文件名称',
@@ -114,6 +118,7 @@ const demoFieldDisplayNames = {
   query: '检索问题',
   rerankedResults: '重排结果',
   response: '接口返回结果',
+  result: '处理结果',
   rerankStats: '重排统计信息',
   sections: '政策章节',
   sourceChunks: '来源切片',
@@ -130,6 +135,7 @@ const demoFieldDisplayNames = {
   title: '文件标题',
   top_k: '返回数量',
   user_id: '用户ID',
+  payload: '请求载荷',
 };
 
 function createInput(name, type, required = true, description = '', defaultValue = '', schema = null) {
@@ -288,7 +294,20 @@ function createPromptInput(description = '可选提示词，用于补充 OCR 或
   return createInput('prompt', 'string', false, description);
 }
 
-function responseOutputSchema({ dataDescription = '结果文件列表。', dataFileType = 'md' } = {}) {
+function resultFileItemSchema(dataFileType = 'md') {
+  return {
+    type: 'object',
+    description: '单个结果文件信息。',
+    properties: {
+      file_name: { type: 'string', description: '结果文件名称。' },
+      file_url: { type: 'string', description: '结果文件访问地址。' },
+      file_type: { type: 'string', description: `结果文件类型，示例：${dataFileType}。` },
+    },
+    required: ['file_name', 'file_type'],
+  };
+}
+
+function responseOutputSchema({ dataDescription = '结果文件列表。', dataFileType = 'md', dataItems = 'object' } = {}) {
   return {
     type: 'object',
     description: '接口统一返回对象。',
@@ -297,16 +316,7 @@ function responseOutputSchema({ dataDescription = '结果文件列表。', dataF
       data: {
         type: 'array',
         description: dataDescription,
-        items: {
-          type: 'object',
-          description: '单个结果文件信息。',
-          properties: {
-            file_name: { type: 'string', description: '结果文件名称。' },
-            file_url: { type: 'string', description: '结果文件访问地址。' },
-            file_type: { type: 'string', description: `结果文件类型，示例：${dataFileType}。` },
-          },
-          required: ['file_name', 'file_type'],
-        },
+        items: dataItems === 'string' ? { type: 'string', description: `结果文件名称或地址，示例：${dataFileType}。` } : resultFileItemSchema(dataFileType),
       },
       message: { type: 'string', description: '接口提示信息。' },
     },
@@ -314,8 +324,31 @@ function responseOutputSchema({ dataDescription = '结果文件列表。', dataF
   };
 }
 
-function createResponseOutput(description, options = {}) {
-  return createOutput('response', 'object', description, 'response', responseOutputSchema(options));
+function createResponseOutputs(description, options = {}) {
+  const schema = responseOutputSchema(options);
+  return [
+    createOutput('code', 'integer', '业务状态码。', 'code', schema.properties.code),
+    createOutput('data', options.dataItems === 'string' ? 'array<string>' : 'array<object>', description, 'data', schema.properties.data),
+    createOutput('message', 'string', '接口提示信息。', 'message', schema.properties.message),
+  ];
+}
+
+function createRootedResponseOutput(rootName = 'response', description = '接口返回结果。', options = {}) {
+  return createOutput(rootName, 'object', description, rootName, responseOutputSchema(options));
+}
+
+const documentRequestSchema = {
+  type: 'object',
+  description: '文档处理请求对象。',
+  properties: {
+    files: filesInputSchema,
+    user_id: { type: 'string', description: '调用用户标识，用于审计、权限校验或任务追踪。' },
+  },
+  required: ['files', 'user_id'],
+};
+
+function createDocumentRequestInput(description = '文档处理请求对象。') {
+  return createInput('document_request', 'object', true, description, '', documentRequestSchema);
 }
 
 const idpDocumentTools = [
@@ -328,7 +361,7 @@ const idpDocumentTools = [
     endpoint: 'api/general/document_to_pdf',
     method: 'POST',
     inputs: [createFilesInput('待转换的文档文件列表。'), createUserIdInput()],
-    outputs: [createResponseOutput('PDF 转换结果。', { dataDescription: '转换后的 PDF 文件列表。', dataFileType: 'pdf' })],
+    outputs: createResponseOutputs('转换后的 PDF 文件列表。', { dataDescription: '转换后的 PDF 文件列表。', dataFileType: 'pdf', dataItems: 'string' }),
   },
   {
     slug: 'mx-ocr',
@@ -339,7 +372,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/mx_ocr',
     method: 'POST',
     inputs: [createFilesInput('待 OCR 解析的文件列表。'), createUserIdInput()],
-    outputs: [createResponseOutput('OCR 解析后的 Markdown 文件列表。', { dataDescription: 'OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+    outputs: createResponseOutputs('OCR 解析后的 Markdown 文件列表。', { dataDescription: 'OCR 解析后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
   },
   {
     slug: 'dots-ocr',
@@ -350,7 +383,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/dots_ocr',
     method: 'POST',
     inputs: [createFilesInput('待多模态 OCR 解析的文件列表。'), createUserIdInput()],
-    outputs: [createResponseOutput('多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: '多模态 OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+    outputs: [createRootedResponseOutput('response', '多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: '多模态 OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
   },
   {
     slug: 'mineru-ocr',
@@ -360,25 +393,25 @@ const idpDocumentTools = [
     enabled: true,
     endpoint: 'api/document_parser/mineru_ocr',
     method: 'POST',
-    inputs: [createFilesInput('待 MinerU 解析的文件列表。'), createUserIdInput()],
-    outputs: [createResponseOutput('MinerU 解析后的 Markdown 文件列表。', { dataDescription: 'MinerU 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+    inputs: [createDocumentRequestInput('待 MinerU 解析的文档处理请求。')],
+    outputs: createResponseOutputs('MinerU 解析后的 Markdown 文件列表。', { dataDescription: 'MinerU 解析后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
   },
   {
     slug: 'markdown-chunk',
     name: 'makdown结构化分块接口',
     description: '将 Markdown 文档按指定模式进行结构化分块。',
-    category: '内容处理',
+    category: '文档分块',
     enabled: true,
     endpoint: 'api/general/markdown_chunk',
     method: 'POST',
     inputs: [createFilesInput('待结构化分块的 Markdown 文件列表。'), createModeInput(true), createUserIdInput()],
-    outputs: [createResponseOutput('结构化分块后的 Markdown 文件列表。', { dataDescription: '结构化分块后的 Markdown 文件列表。', dataFileType: 'md' })],
+    outputs: [createRootedResponseOutput('result', '结构化分块后的 Markdown 文件列表。', { dataDescription: '结构化分块后的 Markdown 文件列表。', dataFileType: 'md' })],
   },
   {
     slug: 'extract-md-content-by-title',
     name: 'makdown根据输入标题抽取内容接口',
     description: '根据输入标题从 Markdown 文档中抽取指定段落内容。',
-    category: '内容处理',
+    category: '内容抽取',
     enabled: true,
     endpoint: 'api/document_content_analysis/extract_md_content_by_titile',
     method: 'POST',
@@ -389,7 +422,7 @@ const idpDocumentTools = [
       createInput('end_section', 'string', false, '结束标题，mode 为 mid 时需要填写。'),
       createUserIdInput(),
     ],
-    outputs: [createResponseOutput('按标题抽取后的 Markdown 文件列表。', { dataDescription: '按标题抽取后的 Markdown 文件列表。', dataFileType: 'md' })],
+    outputs: createResponseOutputs('按标题抽取后的 Markdown 文件列表。', { dataDescription: '按标题抽取后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
   },
   {
     slug: 'paddle-ocr',
@@ -400,7 +433,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/paddle_ocr',
     method: 'POST',
     inputs: [createFilesInput('待 Paddle OCR 解析的文件列表。'), createPromptInput(), createUserIdInput()],
-    outputs: [createResponseOutput('Paddle 多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: 'Paddle OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+    outputs: createResponseOutputs('Paddle OCR 解析后的 Markdown 文件列表。', { dataDescription: 'Paddle OCR 解析后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
   },
   {
     slug: 'deepseek-ocr',
@@ -411,7 +444,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/deepseek_ocr',
     method: 'POST',
     inputs: [createFilesInput('待 DeepSeek 多模态 OCR 解析的文件列表。'), createPromptInput(), createUserIdInput()],
-    outputs: [createResponseOutput('DeepSeek 多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: 'DeepSeek OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+    outputs: [createRootedResponseOutput('response', 'DeepSeek OCR 解析后的 Markdown 文件列表。', { dataDescription: 'DeepSeek OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
   },
   {
     slug: 'ofd-to-pdf',
@@ -422,18 +455,18 @@ const idpDocumentTools = [
     endpoint: 'api/general/ofd_to_pdf',
     method: 'POST',
     inputs: [createFilesInput('待转换的 OFD 文件列表。'), createUserIdInput()],
-    outputs: [createResponseOutput('OFD 转 PDF 结果。', { dataDescription: '转换后的 PDF 文件列表。', dataFileType: 'pdf' })],
+    outputs: createResponseOutputs('转换后的 PDF 文件列表。', { dataDescription: '转换后的 PDF 文件列表。', dataFileType: 'pdf', dataItems: 'string' }),
   },
   {
     slug: 'extract-footnote',
     name: '保险类条款文档脚注提取api',
     description: '提取保险类条款文档中的脚注内容，输出 Markdown 结果。',
-    category: '内容处理',
+    category: '内容抽取',
     enabled: true,
     endpoint: 'api/document_content_analysis/extract_footnote',
     method: 'POST',
     inputs: [createFilesInput('待提取脚注的保险条款文件列表。'), createUserIdInput()],
-    outputs: [createResponseOutput('脚注提取后的 Markdown 文件列表。', { dataDescription: '脚注提取后的 Markdown 文件列表。', dataFileType: 'md' })],
+    outputs: [createRootedResponseOutput('response', '脚注提取后的 Markdown 文件列表。', { dataDescription: '脚注提取后的 Markdown 文件列表。', dataFileType: 'md' })],
   },
   {
     slug: 'hunyuan-ocr',
@@ -444,7 +477,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/hunyuan_ocr',
     method: 'POST',
     inputs: [createFilesInput('待 Hunyuan 多模态 OCR 解析的文件列表。'), createUserIdInput(), createPromptInput('建议暴露的提示词参数，可用于定位、解析、信息抽取或翻译任务。')],
-    outputs: [createResponseOutput('Hunyuan 多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: 'Hunyuan OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+    outputs: createResponseOutputs('Hunyuan OCR 解析后的 Markdown 文件列表。', { dataDescription: 'Hunyuan OCR 解析后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
   },
   {
     slug: 'glm-ocr',
@@ -455,7 +488,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/glm_ocr',
     method: 'POST',
     inputs: [createFilesInput('待 GLM 多模态 OCR 解析的文件列表。'), createUserIdInput()],
-    outputs: [createResponseOutput('GLM 多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: 'GLM OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+    outputs: createResponseOutputs('GLM OCR 解析后的 Markdown 文件列表。', { dataDescription: 'GLM OCR 解析后的 Markdown 文件列表。', dataFileType: 'md', dataItems: 'string' }),
   },
   {
     slug: 'qianfan-ocr',
@@ -467,7 +500,7 @@ const idpDocumentTools = [
     endpoint: 'api/document_parser/qianfan_ocr',
     method: 'POST',
     inputs: [createFilesInput('待千帆多模态 OCR 解析的文件列表。'), createPromptInput(), createUserIdInput()],
-    outputs: [createResponseOutput('千帆多模态 OCR 解析后的 Markdown 文件列表。', { dataDescription: '千帆 OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+    outputs: [createRootedResponseOutput('response', '千帆 OCR 解析后的 Markdown 文件列表。', { dataDescription: '千帆 OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
   },
 ];
 function defaultToolInputs(toolName) {
@@ -647,13 +680,46 @@ function getRawSource(services, toolName) {
   };
 }
 
+const managedToolDefinitions = {
+  'document-to-pdf': { name: '文档转PDF', category: '文档转换', description: '将常见办公文档、图片等材料转换为 PDF 文件，便于后续解析、归档和人工核验。' },
+  'mx-ocr': { name: '通用OCR解析', category: '文档解析', description: '对扫描件、图片型 PDF 等文件进行通用 OCR 识别，输出可用于后续加工的 Markdown 文本。' },
+  'dots-ocr': { name: '多模态OCR解析', category: '文档解析', description: '面向图文混排、版面复杂的文件进行多模态 OCR 解析，输出结构化 Markdown 文本。' },
+  'mineru-ocr': { name: 'MinerU版面解析', category: '文档解析', description: '使用 MinerU 能力解析文档版面与文本内容，适合复杂 PDF 的结构化解析。' },
+  'markdown-chunk': { name: 'Markdown结构化分块', category: '文档分块', description: '按标题层级或自适应策略对 Markdown 文档进行结构化分块。' },
+  'extract-md-content-by-title': { name: '按标题抽取内容', category: '内容抽取', description: '根据指定标题从 Markdown 文档中抽取对应章节或区间内容。' },
+  'paddle-ocr': { name: 'PaddleOCR解析', category: '文档解析', description: '使用 Paddle 多模态 OCR 能力解析文档，适合多版式文件的文本抽取。' },
+  'deepseek-ocr': { name: 'DeepSeek文档解析', category: '文档解析', description: '使用 DeepSeek 多模态能力解析文档内容，支持通过提示词补充解析要求。' },
+  'ofd-to-pdf': { name: 'OFD转PDF', category: '文档转换', description: '将 OFD 文档转换为 PDF，便于进入统一解析和存储流程。' },
+  'extract-footnote': { name: '条款脚注提取', category: '内容抽取', description: '从保险条款类文档中提取脚注内容，形成可进一步加工的文本结果。' },
+  'hunyuan-ocr': { name: 'Hunyuan文档解析', category: '文档解析', description: '使用 Hunyuan 多模态 OCR 能力解析文档，适合定位、解析和信息抽取类任务。' },
+  'glm-ocr': { name: 'GLM文档解析', category: '文档解析', description: '使用智谱 GLM 多模态 OCR 能力解析文档，输出 Markdown 文本结果。' },
+};
+
+function getManagedToolDefinition(rawTool) {
+  return managedToolDefinitions[rawTool.slug] || {
+    name: rawTool.name,
+    category: rawTool.category || '未分类',
+    description: rawTool.description,
+  };
+}
+
+function getPrimaryStorageOutputName(rawTool) {
+  const outputs = normalizeToolOutputs(rawTool);
+  if (!outputs.length) return '';
+  const rootedOutput = outputs.find((output) => output.name === 'response' || output.name === 'result');
+  if (rootedOutput) return rootedOutput.name;
+  const dataOutput = outputs.find((output) => output.name === 'data');
+  return dataOutput?.name || outputs[0].name;
+}
+
 function managedToolStorageFor(rawTool, index) {
   const isConverter = rawTool.category === '文档转换';
   if (isConverter) return createStorageContract({ enabled: false, rules: [] });
+  const outputName = getPrimaryStorageOutputName(rawTool);
   const artifactType = rawTool.name.includes('脚注') ? '知识点' : '文本切片';
   return createStorageContract({
     enabled: true,
-    outputName: 'response',
+    outputName,
     artifactType,
     storageTargetType: '对象存储',
     objectStorageAddress: 'oss://knowledge-engineering',
@@ -662,7 +728,7 @@ function managedToolStorageFor(rawTool, index) {
     rules: [
       {
         id: `storage-${rawTool.slug || index + 1}`,
-        outputName: 'response',
+        outputName,
         artifactType,
         storageTargetType: '对象存储',
         esAddress: 'http://es.internal:9200',
@@ -683,19 +749,22 @@ function initialManagedTools(services = initialServices) {
     .flatMap((service) => (service.tools || []).map((tool) => ({ service, tool })))
     .filter(({ tool }) => tool.enabled !== false && tool.status !== '不可用');
 
-  return rawTools.map(({ service, tool }, index) => makeManagedTool({
-    id: `ke-idp-${tool.slug || index + 1}`,
-    name: tool.name.replace(/接口$/, ''),
-    description: tool.description,
-    category: tool.category || '未分类',
-    sourceServiceId: service.id,
-    sourceServiceName: service.name,
-    sourceToolName: tool.name,
-    inputs: normalizeToolInputs(tool),
-    outputs: normalizeToolOutputs(tool),
-    storageContract: managedToolStorageFor(tool, index),
-    lastSyncedAt: service.lastSyncedAt,
-  }));
+  return rawTools.map(({ service, tool }, index) => {
+    const definition = getManagedToolDefinition(tool);
+    return makeManagedTool({
+      id: `ke-idp-${tool.slug || index + 1}`,
+      name: definition.name,
+      description: definition.description,
+      category: definition.category,
+      sourceServiceId: service.id,
+      sourceServiceName: service.name,
+      sourceToolName: tool.name,
+      inputs: normalizeToolInputs(tool),
+      outputs: normalizeToolOutputs(tool),
+      storageContract: managedToolStorageFor(tool, index),
+      lastSyncedAt: service.lastSyncedAt,
+    });
+  });
 }
 
 function normalizeStoredTools(tools) {
