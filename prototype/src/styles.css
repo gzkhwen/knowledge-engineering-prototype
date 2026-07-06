@@ -147,22 +147,6 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   white-space: nowrap;
 }
 .select-option.disabled .missing-output-schema, .select-option:disabled .missing-output-schema { color: #d92d20; }
-.knowledge-shape-option {
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-}
-.knowledge-shape-option span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.developing-option {
-  flex: 0 0 auto;
-  color: #98a2b3;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-}
 .project-toolbar .search-box { width: 300px; }
 .project-toolbar .select-field-wrap, .project-toolbar .select-field { min-width: 150px; }
 

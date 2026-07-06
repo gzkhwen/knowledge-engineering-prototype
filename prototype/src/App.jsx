@@ -1120,10 +1120,13 @@ function ToolManagementPage({ notify }) {
   };
 
   const deleteCategory = (category) => {
-    if (!window.confirm(`确定删除节点类型「${category}」吗？该节点类型下的节点将进入未分类。`)) return;
+    if ((categoryCounts[category] || 0) > 0) {
+      window.alert('当前节点类型下存在流程节点，请先迁移或删除分类下节点后再删除分类');
+      return;
+    }
+    if (!window.confirm(`确定删除节点类型「${category}」吗？`)) return;
     const categoriesNext = snapshot.categories.filter((item) => item !== category);
-    const toolsNext = snapshot.tools.map((tool) => (tool.category === category ? { ...tool, category: '未分类' } : tool));
-    persist(toolsNext, categoriesNext);
+    persist(snapshot.tools, categoriesNext);
     setSelectedCategory(allToolsCategory);
     notify('节点类型已删除', 'success');
   };
@@ -1504,8 +1507,7 @@ function createDefaultParameterMappingCode(inputs = []) {
 }`;
 }
 
-const knowledgeShapeOptions = ['文本切片', 'QA对', '知识点', '父子切片', '二维表/结构化数据', '解析文档', '图片描述', '元数据', '原始结果'];
-const availableKnowledgeShapes = new Set(['文本切片', 'QA对', '知识点']);
+const knowledgeShapeOptions = ['文本切片', '父子切片', 'QA对', '知识点'];
 
 function createOutputRule(outputName = '') {
   return {
@@ -2099,17 +2101,7 @@ function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange
                       <td>
                         <SelectField value={rule.artifactType || ''} onChange={(artifactType) => onChange(rule.id, { artifactType })}>
                           <option value="">请选择</option>
-                          {knowledgeShapeOptions.map((item) => {
-                            const disabled = !availableKnowledgeShapes.has(item);
-                            return (
-                              <option key={item} value={item} disabled={disabled}>
-                                <span className="knowledge-shape-option">
-                                  <span>{item}</span>
-                                  {disabled ? <span className="developing-option">开发中</span> : null}
-                                </span>
-                              </option>
-                            );
-                          })}
+                          {knowledgeShapeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
                         </SelectField>
                       </td>
                       <td>
