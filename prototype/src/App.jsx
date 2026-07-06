@@ -2728,7 +2728,7 @@ function NodeOutputMappingDetail({ tool, rawSource }) {
     <section className="node-detail-section">
       <h3>MCP工具返回映射</h3>
       <div className="node-detail-linear">
-        <NodeDetailSchemaBlock title="原始MCP output schema" schema={outputSchema} />
+        <NodeDetailSchemaBlock title="原始MCP工具 Output Schema" schema={outputSchema} structured />
         <NodeDetailCodeBlock
           title="MCP工具结果解析提取代码"
           tip="通过代码对MCP工具的返回结果做标准化解析和提取，再做持久化存储和节点输出映射。"
