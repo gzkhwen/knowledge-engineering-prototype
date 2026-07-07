@@ -4500,7 +4500,6 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const [running, setRunning] = useState(qaRunningState);
   const [testing, setTesting] = useState(false);
   const [confirmed, setConfirmed] = useState(hasSavedCategoryPlan);
-  const [entryMode, setEntryMode] = useState(() => (categoryId ? 'category' : 'blank'));
   const [results, setResults] = useState(() => (qaGeneratedState || hasSavedCategoryPlan ? [createSampleResult({ ...sampleDemoFile, status: '已完成' })] : []));
   const [connectionStates, setConnectionStates] = useState(() => {
     if (!['error', 'resolving', 'resolved'].includes(qaConnectionStatus)) return {};
@@ -4544,7 +4543,6 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
   const solution = dataStore.getProjectSolution(project.id);
   const category = solution ? dataStore.getProjectCategories(solution.id).find((item) => item.id === categoryId) : null;
-  const isMenuEntry = !categoryId;
   const workbenchContextText = category ? `${project.name} / ${category.name} / ${decodeURIComponent(formType || '问答库')}` : `${project.name} / 临时方案`;
   const workbenchPlanTitle = category ? `${category.name} · ${decodeURIComponent(formType || '问答库')}` : '临时方案';
   const categorySections = getCategorySections(planNodes);
@@ -4564,9 +4562,6 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setCatalog(readWorkbenchCatalog());
     setToolCategories(snapshot.categories || defaultCategories);
   }), []);
-  useEffect(() => {
-    setEntryMode(categoryId ? 'category' : 'blank');
-  }, [categoryId, formType, projectId, entryNonce]);
   useEffect(() => {
     streamRef.current?.scrollTo({ top: streamRef.current.scrollHeight, behavior: 'smooth' });
   }, [events]);
@@ -5019,36 +5014,6 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setConfirmed(false);
     setDraggingNodeId(null);
   };
-
-  const startAgentPlan = () => {
-    setEntryMode('generate');
-    setRightTab('方案');
-  };
-
-  const startManualPlan = () => {
-    setEntryMode('manual');
-    setRightTab('方案');
-    setAddOpen(true);
-  };
-
-  if (isMenuEntry && entryMode === 'blank') {
-    return (
-      <div className="workbench-page">
-        <PageHeader title="方案工作台" subtitle={`${project.name} / 暂未选择处理方案`} />
-        <section className="panel workbench-entry-panel">
-          <div className="workbench-entry-empty">
-            <ThunderboltOutlined />
-            <strong>暂无处理方案</strong>
-            <span>可以通过智能体生成方案，也可以人工配置流程节点。</span>
-            <div className="workbench-entry-actions">
-              <button type="button" className="primary" onClick={startAgentPlan}><ThunderboltOutlined /> 生成方案</button>
-              <button type="button" className="secondary" onClick={startManualPlan}><PlusOutlined /> 人工配置方案</button>
-            </div>
-          </div>
-        </section>
-      </div>
-    );
-  }
 
   return (
     <div className="workbench-page">
