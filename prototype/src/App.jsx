@@ -3451,7 +3451,7 @@ function RightChevron() {
 
 const workflowCategoryOrder = ['文档解析', '文本分片', '系统节点', '知识提取', '质量评估'];
 const toolDialogCategoryOrder = ['文档解析', '文本分片', '知识提取', '质量评估', '系统节点', '未分类'];
-const categoryAliases = { 内容处理: '文本分片', 智能生成: '知识提取', 系统工具: '系统节点' };
+const categoryAliases = { 内容处理: '文本分片', 文档分块: '文本分片', 智能生成: '知识提取', 内容抽取: '知识提取', 系统工具: '系统节点' };
 const sampleDemoFile = { id: 'demo-policy-sample', name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB', status: '已上传' };
 const initialAgentEvents = [{
   id: 'welcome',
