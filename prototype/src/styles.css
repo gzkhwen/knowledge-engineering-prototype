@@ -387,6 +387,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   margin-bottom: 0;
 }
 .standard-tool-modal .node-detail-schema-card {
+  height: 100%;
   max-height: 560px;
   min-height: 0;
   overflow: hidden;
@@ -1533,6 +1534,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .standardization-grid {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(520px, 2fr);
+  align-items: stretch;
   gap: 10px;
   min-width: 0;
   min-height: 0;
@@ -1542,6 +1544,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   display: grid;
   gap: 10px;
   min-width: 0;
+  min-height: 0;
 }
 .input-config-stack {
   display: grid;
@@ -1570,6 +1573,10 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   grid-template-rows: auto minmax(0, 1fr);
   align-content: stretch;
   padding-bottom: 8px;
+}
+.schema-fill-panel .schema-tree {
+  min-height: 0;
+  height: auto;
 }
 .schema-fill-panel .json-schema-preview {
   height: auto;
