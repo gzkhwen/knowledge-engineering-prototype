@@ -2045,34 +2045,33 @@ function NodeInputArtifactTable({ artifacts, onAdd, onRemove, onChange }) {
         <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加节点输入</button>
       </div>
       <p className="plain-step-tip">定义当前流程节点用于接收上游节点输出结果的参数。</p>
-      {artifacts.length ? (
-        <table className="data-table compact-table editable-schema-table input-artifact-table">
-          <thead>
-            <tr>
-              <th>字段名称</th>
-              <th>显示名称</th>
-              <th>类型</th>
-              <th>说明</th>
-              <th>操作</th>
+      <table className="data-table compact-table editable-schema-table input-artifact-table">
+        <thead>
+          <tr>
+            <th>字段名称</th>
+            <th>显示名称</th>
+            <th>类型</th>
+            <th>说明</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {artifacts.map((artifact) => (
+            <tr key={artifact.id}>
+              <td><input value={artifact.name || ''} onChange={(event) => onChange(artifact.id, { name: event.target.value })} /></td>
+              <td><input value={artifact.displayName || ''} onChange={(event) => onChange(artifact.id, { displayName: event.target.value })} /></td>
+              <td>
+                <SelectField value={artifact.type || 'string'} onChange={(type) => onChange(artifact.id, { type, artifactType: inferInputArtifactType(type) })}>
+                  {outputFieldTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
+                </SelectField>
+              </td>
+              <td><input value={artifact.description || ''} onChange={(event) => onChange(artifact.id, { description: event.target.value })} /></td>
+              <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(artifact.id)}><DeleteOutlined /></button></td>
             </tr>
-          </thead>
-          <tbody>
-            {artifacts.map((artifact) => (
-              <tr key={artifact.id}>
-                <td><input value={artifact.name || ''} onChange={(event) => onChange(artifact.id, { name: event.target.value })} /></td>
-                <td><input value={artifact.displayName || ''} onChange={(event) => onChange(artifact.id, { displayName: event.target.value })} /></td>
-                <td>
-                  <SelectField value={artifact.type || 'string'} onChange={(type) => onChange(artifact.id, { type, artifactType: inferInputArtifactType(type) })}>
-                    {outputFieldTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
-                  </SelectField>
-                </td>
-                <td><input value={artifact.description || ''} onChange={(event) => onChange(artifact.id, { description: event.target.value })} /></td>
-                <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(artifact.id)}><DeleteOutlined /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : <p className="empty-hint">暂无节点输入。可添加后配置字段名称、显示名称、类型和说明。</p>}
+          ))}
+          {artifacts.length === 0 ? <tr><td colSpan={5} className="empty-table-cell">暂无节点输入</td></tr> : null}
+        </tbody>
+      </table>
     </section>
   );
 }
@@ -2216,44 +2215,42 @@ function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange
           </div>
           <p className="plain-step-tip">通过代码对MCP工具的返回结果做标准化提取和处理，并绑定知识形态，系统会按所选知识形态完成存储落库。</p>
           <div className="binding-list">
-            {rules.length ? (
-              <table className="data-table compact-table editable-schema-table output-binding-table">
-                <thead>
-                  <tr>
-                    <th>代码返回</th>
-                    <th>类型</th>
-                    <th>知识形态</th>
-                    <th>节点输出引用</th>
-                    <th>操作</th>
+            <table className="data-table compact-table editable-schema-table output-binding-table">
+              <thead>
+                <tr>
+                  <th>代码返回</th>
+                  <th>类型</th>
+                  <th>知识形态</th>
+                  <th>节点输出引用</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((rule) => (
+                  <tr key={rule.id}>
+                    <td><input value={rule.outputName || ''} placeholder="例如 chunks 或 result.qaPairs" onChange={(event) => onChange(rule.id, { outputName: event.target.value })} /></td>
+                    <td>
+                      <SelectField value={rule.fieldType || 'string'} onChange={(fieldType) => onChange(rule.id, { fieldType })}>
+                        {outputFieldTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
+                      </SelectField>
+                    </td>
+                    <td>
+                      <SelectField value={rule.artifactType || ''} onChange={(artifactType) => onChange(rule.id, { artifactType })}>
+                        <option value="">请选择</option>
+                        {knowledgeShapeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                      </SelectField>
+                    </td>
+                    <td>
+                      <button type="button" className={`switch-control ${rule.nodeOutputRef ? 'active' : ''}`} onClick={() => onToggleOutputRef(rule.id)} aria-pressed={Boolean(rule.nodeOutputRef)}>
+                        <span />
+                      </button>
+                    </td>
+                    <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(rule.id)}><DeleteOutlined /></button></td>
                   </tr>
-                </thead>
-                <tbody>
-                  {rules.map((rule) => (
-                    <tr key={rule.id}>
-                      <td><input value={rule.outputName || ''} placeholder="例如 chunks 或 result.qaPairs" onChange={(event) => onChange(rule.id, { outputName: event.target.value })} /></td>
-                      <td>
-                        <SelectField value={rule.fieldType || 'string'} onChange={(fieldType) => onChange(rule.id, { fieldType })}>
-                          {outputFieldTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
-                        </SelectField>
-                      </td>
-                      <td>
-                        <SelectField value={rule.artifactType || ''} onChange={(artifactType) => onChange(rule.id, { artifactType })}>
-                          <option value="">请选择</option>
-                          {knowledgeShapeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-                        </SelectField>
-                      </td>
-                      <td>
-                        <button type="button" className={`switch-control ${rule.nodeOutputRef ? 'active' : ''}`} onClick={() => onToggleOutputRef(rule.id)} aria-pressed={Boolean(rule.nodeOutputRef)}>
-                          <span />
-                        </button>
-                      </td>
-                      <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(rule.id)}><DeleteOutlined /></button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : null}
-            {rules.length === 0 ? <p className="empty-hint">暂无绑定。请添加代码输出，并选择对应知识形态。</p> : null}
+                ))}
+                {rules.length === 0 ? <tr><td colSpan={5} className="empty-table-cell">暂无绑定</td></tr> : null}
+              </tbody>
+            </table>
           </div>
         </div>
         <NodeOutputTable
