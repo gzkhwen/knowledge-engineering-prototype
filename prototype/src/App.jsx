@@ -3877,6 +3877,7 @@ function managedToolToWorkbenchTool(tool) {
     output: flow?.output || (category === '文档解析' ? 'rawText' : category === '文本分片' ? 'cleanText' : 'rawText'),
     inputParamId: getInputParamIdForTool(tool, null),
     params,
+    inputArtifacts: (tool.inputArtifacts || []).map((artifact) => ({ ...artifact })),
     outputs: outputs.length ? outputs : [makeOutput('result', '工具结果', '工具执行返回结果。', 'data.result')],
   };
 }
@@ -3901,6 +3902,7 @@ function cloneWorkbenchNode(node) {
     ...node,
     inputSource: node.inputSource ? { ...node.inputSource } : { type: 'fixed' },
     params: node.params.map(cloneWorkbenchParam),
+    inputArtifacts: node.inputArtifacts?.map((artifact) => ({ ...artifact, source: artifact.source ? { ...artifact.source } : undefined })),
     outputs: node.outputs.map((output) => ({ ...output })),
     codeInputs: node.codeInputs?.map((input) => ({ ...input, source: { ...input.source } })),
     codeOutputs: node.codeOutputs?.map((output) => ({ ...output })),
@@ -3946,6 +3948,7 @@ function createWorkbenchNode(tool, inputSource = { type: 'fixed' }) {
     adjusted: false,
     inputSource,
     params,
+    inputArtifacts: (tool.inputArtifacts || []).map((artifact) => ({ ...artifact, source: artifact.source ? { ...artifact.source } : paramSource })),
     outputs: tool.outputs.map((output) => ({ ...output })),
     codeInputs: tool.id === 'system-code' ? [{ id: `${nodeId}-input`, name: 'input', source: paramSource, value: '' }] : undefined,
     codeOutputs: tool.id === 'system-code' ? [{ id: `${nodeId}-output`, type: 'Array<json>', name: 'cleanBlocks', value: 'data.cleanBlocks' }] : undefined,
@@ -4022,6 +4025,7 @@ function applyInputSource(node, inputSource) {
     adjusted: true,
     inputSource,
     params: node.params.map((param, index) => (param.id === node.inputParamId || (!node.inputParamId && index === 0) ? { ...param, source: paramSource } : param)),
+    inputArtifacts: node.inputArtifacts?.map((artifact) => ({ ...artifact, source: paramSource })),
     codeInputs: node.codeInputs?.map((input, index) => (index === 0 ? { ...input, source: paramSource } : input)),
   };
 }
@@ -5298,10 +5302,12 @@ function AddToolDialog({ tools, categories, nodes, confirmed, onClose, onAdd }) 
 }
 
 function AddNodeDetail({ tool }) {
+  const artifactInputs = tool.inputArtifacts || [];
   const inputParamId = tool.inputParamId || tool.params?.find((param) => param.source?.type === 'file' || param.source?.type === 'upstream')?.id;
-  const nodeInputs = (tool.params || []).filter((param) => param.id === inputParamId || param.source?.type === 'file' || param.source?.type === 'upstream');
-  const inputIds = new Set(nodeInputs.map((param) => param.id));
-  const configParams = (tool.params || []).filter((param) => !inputIds.has(param.id));
+  const legacyNodeInputs = artifactInputs.length ? [] : (tool.params || []).filter((param) => param.id === inputParamId || param.source?.type === 'file' || param.source?.type === 'upstream');
+  const inputIds = new Set(legacyNodeInputs.map((param) => param.id));
+  const nodeInputRows = artifactInputs.length ? artifactInputs.map(artifactToNodeDetailRow) : legacyNodeInputs.map(paramToNodeDetailRow);
+  const configParams = artifactInputs.length ? (tool.params || []) : (tool.params || []).filter((param) => !inputIds.has(param.id));
   const outputRows = (tool.outputs || []).map((output) => ({
     name: output.label || output.name,
     description: output.desc || output.description || output.path || '',
@@ -5309,11 +5315,20 @@ function AddNodeDetail({ tool }) {
   }));
   return (
     <div className="add-node-detail">
-      <AddNodeParamGroup title="节点输入" rows={nodeInputs.map((param) => paramToNodeDetailRow(param))} emptyText="暂无节点输入" showRequired />
+      <AddNodeParamGroup title="节点输入" rows={nodeInputRows} emptyText="暂无节点输入" showRequired />
       <AddNodeParamGroup title="配置参数" rows={configParams.map((param) => paramToNodeDetailRow(param))} emptyText="暂无配置参数" showRequired />
       <AddNodeParamGroup title="节点输出" rows={outputRows} emptyText="暂无节点输出" />
     </div>
   );
+}
+
+function artifactToNodeDetailRow(artifact) {
+  return {
+    name: artifact.displayName || artifact.name,
+    description: artifact.description || '',
+    type: artifact.type || artifact.artifactType || 'object',
+    required: artifact.required ?? true,
+  };
 }
 
 function paramToNodeDetailRow(param) {
@@ -5501,14 +5516,28 @@ function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, i
   );
 }
 
+function inputArtifactToParam(artifact) {
+  return {
+    id: artifact.id,
+    label: artifact.displayName || artifact.name,
+    desc: artifact.description || '',
+    type: artifact.type?.includes('object') || artifact.type?.includes('array') ? 'textarea' : 'text',
+    schemaType: artifact.type || artifact.artifactType || 'object',
+    value: artifact.value || '',
+    required: artifact.required ?? true,
+    source: artifact.source || { type: 'file' },
+  };
+}
+
 function EditNodeDialog({ node, nodes, onClose, onSave }) {
   const [draft, setDraft] = useState(cloneWorkbenchNode(node));
   const priorNodes = getPriorNodes(nodes, node.nodeId);
   const scriptParam = draft.params.find((param) => param.id === 'script');
   const normalParams = draft.toolId === 'system-code' ? draft.params.filter((param) => param.id === 'outputVariables') : draft.params;
   const nodeInputParamId = draft.inputParamId || normalParams[0]?.id || '';
-  const nodeInputParams = normalParams.filter((param) => param.id === nodeInputParamId);
-  const configParams = normalParams.filter((param) => param.id !== nodeInputParamId);
+  const artifactInputs = draft.inputArtifacts || [];
+  const nodeInputParams = artifactInputs.length ? artifactInputs.map(inputArtifactToParam) : normalParams.filter((param) => param.id === nodeInputParamId);
+  const configParams = artifactInputs.length ? normalParams : normalParams.filter((param) => param.id !== nodeInputParamId);
   const updateParam = (nextParam) => setDraft((current) => {
     const isNodeInput = nextParam.id === current.inputParamId;
     const inputSource = isNodeInput
@@ -5517,6 +5546,16 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
         : { type: 'fixed' }
       : current.inputSource;
     return { ...current, inputSource, params: current.params.map((param) => param.id === nextParam.id ? nextParam : param) };
+  });
+  const updateNodeInputParam = (nextParam) => setDraft((current) => {
+    const inputSource = nextParam.source?.type === 'upstream'
+      ? { type: 'upstream', sourceNodeId: nextParam.source.sourceNodeId, outputPath: nextParam.source.outputPath }
+      : { type: 'fixed' };
+    return {
+      ...current,
+      inputSource,
+      inputArtifacts: (current.inputArtifacts || []).map((artifact) => (artifact.id === nextParam.id ? { ...artifact, source: nextParam.source, value: nextParam.value } : artifact)),
+    };
   });
   const updateCodeInput = (idValue, patch) => setDraft((current) => ({
     ...current,
@@ -5641,7 +5680,7 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
           <section className="config-section">
             <div className="config-section-head"><h3>节点输入</h3></div>
             <div className="param-list">
-              {nodeInputParams.length ? nodeInputParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} onChange={updateParam} singleLine={index === 0} inlineSource showHeader={index === 0} />) : <div className="empty-mini">暂无节点输入</div>}
+              {nodeInputParams.length ? nodeInputParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} onChange={artifactInputs.length ? updateNodeInputParam : updateParam} singleLine={index === 0} inlineSource showHeader={index === 0} />) : <div className="empty-mini">暂无节点输入</div>}
             </div>
           </section>
           <section className="config-section">
