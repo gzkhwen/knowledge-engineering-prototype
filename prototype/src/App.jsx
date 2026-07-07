@@ -3457,25 +3457,25 @@ const initialAgentEvents = [{
   id: 'welcome',
   role: 'agent',
   title: '处理方案生成助手',
-  content: '请上传样例文件并发送给我。我会读取样例、调研可用工具、试跑工具结果，并生成可落地为 Workflow DSL 的处理方案。',
+  content: '请上传样例文件并发送给我。我会读取样例、匹配可用流程节点、试跑节点结果，并生成可落地为 Workflow DSL 的处理方案。',
   status: 'done',
 }];
 const generatedAgentEvents = [
   { id: 'qa-parse', role: 'thought', title: '分析样例文件', content: '样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。', status: 'done' },
-  { id: 'qa-query', role: 'thought', title: '工具目录查询', content: '查询结果：命中可用工具，其中包含系统节点和外部接入节点。', status: 'done', kind: 'toolCall' },
-  { id: 'qa-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建文档解析和文本分片主链路，再检查工具输出与下游入参是否需要适配。', status: 'done', flowSteps: ['文档解析', '文本分片'] },
-  { id: 'qa-check-edge', role: 'thought', title: '检查节点承接', content: '发现适配问题：文件解析返回 sections[].content，分片工具需要 data.cleanBlocks。', status: 'done' },
+  { id: 'qa-query', role: 'thought', title: '节点目录查询', content: '查询结果：命中可用流程节点，其中包含系统节点和外部接入节点。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建文档解析和文本分片主链路，再检查节点输出与下游入参是否需要适配。', status: 'done', flowSteps: ['文档解析', '文本分片'] },
+  { id: 'qa-check-edge', role: 'thought', title: '检查节点承接', content: '发现适配问题：文档解析节点返回 sections[].content，分片节点需要 data.cleanBlocks。', status: 'done' },
   { id: 'qa-fix-edge', role: 'thought', title: '修复节点承接', content: '已插入代码执行器，将解析结果转换为 data.cleanBlocks，然后继续添加后置存储和 QA 提取节点。', status: 'done', kind: 'toolCall' },
   { id: 'qa-config-storage', role: 'thought', title: '参数配置：数据存储器', content: '参数配置完成：数据存储器 已形成当前方案中的 Step 执行契约。', status: 'done', kind: 'toolCall' },
   { id: 'qa-config-knowledge', role: 'thought', title: '参数配置：QA提取', content: '参数配置完成：QA提取 已形成当前方案中的 Step 执行契约。', status: 'done', kind: 'toolCall' },
-  { id: 'qa-check', role: 'thought', title: '检查完整方案', content: '方案检查通过：节点顺序、工具参数、变量承接和存储策略均可执行。', status: 'done' },
-  { id: 'qa-run', role: 'thought', title: '样例试跑', content: '试跑结果：所有工具执行成功；分片结果已写入 ES；问答结果已生成。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-check', role: 'thought', title: '检查完整方案', content: '方案检查通过：节点顺序、节点参数、变量承接和存储策略均可执行。', status: 'done' },
+  { id: 'qa-run', role: 'thought', title: '样例试跑', content: '试跑结果：所有节点执行成功；分片结果已写入 ES；问答结果已生成。', status: 'done', kind: 'toolCall' },
   { id: 'qa-done', role: 'agent', title: '方案生成与样例执行完成', content: '已完成方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。', status: 'done' },
 ];
 const runningAgentEvents = [
   { id: 'run-parse', role: 'thought', title: '分析样例文件', content: '样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。', status: 'done' },
-  { id: 'run-query', role: 'thought', title: '工具目录查询', content: '查询结果：命中可用工具，其中包含系统节点和外部接入节点。', status: 'done', kind: 'toolCall' },
-  { id: 'run-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建主链路，再检查工具输出与下游入参是否需要适配。', status: 'done', flowSteps: ['文档解析', '文本分片', '系统节点', '知识提取'] },
+  { id: 'run-query', role: 'thought', title: '节点目录查询', content: '查询结果：命中可用流程节点，其中包含系统节点和外部接入节点。', status: 'done', kind: 'toolCall' },
+  { id: 'run-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建主链路，再检查节点输出与下游入参是否需要适配。', status: 'done', flowSteps: ['文档解析', '文本分片', '系统节点', '知识提取'] },
   { id: 'run-config-storage', role: 'thought', title: '参数配置：数据存储器', content: '配置依据：节点参数定义、样例分析结果、上游输出路径。配置项：存储对象、存储方式、写入模式。', status: 'running', kind: 'toolCall' },
 ];
 
@@ -4114,7 +4114,7 @@ function isParamConfigWarning(warning) {
 }
 
 function isConnectionIssueWarning(warning) {
-  return /还未接入上游工具|输入来源节点已不存在|位于当前节点之后|输入路径未配置|仍引用/.test(warning);
+  return /还未接入上游节点|还未接入上游工具|输入来源节点已不存在|位于当前节点之后|输入路径未配置|仍引用/.test(warning);
 }
 
 function needsSmartToolHandling(node, rawWarnings) {
@@ -4140,12 +4140,12 @@ function getConnectionIssueForNode(node, nodes) {
   const hasParamConfigIssue = getParamProblems(node, node.inputSource?.type !== 'upstream').some(isParamConfigWarning);
   if (node.inputSource?.type !== 'upstream') {
     if (!previous || hasParamConfigIssue || getToolChainType(node, 'input') === 'sampleFile') return null;
-    return { kind: 'missing-upstream', nodeId: node.nodeId, previousNodeId: previous.nodeId, reason: `${node.toolName} 已完成参数配置，但还未接入上游工具「${previous.toolName}」的输出。` };
+    return { kind: 'missing-upstream', nodeId: node.nodeId, previousNodeId: previous.nodeId, reason: `${node.toolName} 已完成参数配置，但还未接入上游节点「${previous.toolName}」的输出。` };
   }
   const source = nodes.find((item) => item.nodeId === node.inputSource.sourceNodeId);
   if (!source) return { kind: 'source-missing', nodeId: node.nodeId, previousNodeId: previous?.nodeId, reason: `${node.toolName} 的输入来源节点已不存在。` };
   const priorNodes = getPriorNodes(nodes, node.nodeId);
-  if (!priorNodes.some((item) => item.nodeId === source.nodeId)) return { kind: 'source-after', nodeId: node.nodeId, sourceNodeId: source.nodeId, previousNodeId: previous?.nodeId, reason: `${node.toolName} 引用的上游工具「${source.toolName}」位于当前节点之后。` };
+  if (!priorNodes.some((item) => item.nodeId === source.nodeId)) return { kind: 'source-after', nodeId: node.nodeId, sourceNodeId: source.nodeId, previousNodeId: previous?.nodeId, reason: `${node.toolName} 引用的上游节点「${source.toolName}」位于当前节点之后。` };
   if (!isValidOutputPath(node.inputSource.outputPath)) return { kind: 'invalid-path', nodeId: node.nodeId, sourceNodeId: source.nodeId, previousNodeId: previous?.nodeId, reason: `${node.toolName} 的输入路径未配置或格式不合法。` };
   if (previous && canNodeFeedNext(previous, node) && source.nodeId !== previous.nodeId) {
     return { kind: 'bypass-inserted-node', nodeId: node.nodeId, sourceNodeId: source.nodeId, previousNodeId: previous.nodeId, reason: `${node.toolName} 当前仍引用「${source.toolName}」，但前面新增/调整了「${previous.toolName}」，需要改为承接最新上游输出。` };
@@ -4324,7 +4324,7 @@ function getSmartConfigureInstruction(node) {
   if (node.toolId === 'qa-extractor') return '承接分片结果，生成可用于客服问答的政策问答对。';
   if (node.toolId === 'summary') return '承接分片结果，生成政策知识点、适用对象和关键规则。';
   if (node.toolId === 'system-storage') return '承接分片结果并以 upsert 方式写入 ES。';
-  if (node.toolId === 'system-code') return '把解析输出转换为后续分片工具可消费的标准文本块。';
+  if (node.toolId === 'system-code') return '把解析输出转换为后续分片节点可消费的标准文本块。';
   return `补齐「${node.toolName}」在当前处理方案中的输入来源和必填参数。`;
 }
 
@@ -4471,7 +4471,7 @@ function getSelectableNodeOutputs(sourceNode, currentPath = '') {
 function getRuntimeLabel(status) {
   return {
     building: '创建节点中',
-    selectingTool: '选择工具中',
+    selectingTool: '确认节点中',
     configuring: '配置参数中',
     configured: '配置完成',
     running: '运行中',
@@ -4623,55 +4623,59 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     };
 
     const visibleParams = (node) => node.params.filter((param) => isParamVisible(node, param)).slice(0, 4);
-    const collapseRuntimeNodes = (nodes) => {
-      const ids = new Set(nodes.map((node) => node.nodeId));
-      setPlanNodes((current) => current.map((node) => (ids.has(node.nodeId) ? { ...node, expanded: false } : node)));
+    const withExpandedNodes = (nodes, expandedNodes = []) => {
+      const expandedIds = new Set(expandedNodes.map((node) => node.nodeId));
+      return nodes.map((node) => ({ ...node, expanded: expandedIds.has(node.nodeId) }));
     };
-    const buildAndSelectToolNode = (nodes, allNodes, title, toolText) => {
+    const activateRuntimeNodes = (nodes) => {
+      const ids = new Set(nodes.map((node) => node.nodeId));
+      setPlanNodes((current) => current.map((node) => ({ ...node, expanded: ids.has(node.nodeId) })));
+    };
+    const buildAndSelectFlowNode = (nodes, allNodes, title, nodeText) => {
       if (!nodes.length) return;
       let buildEventId = '';
       let selectEventId = '';
       const nodeTitle = title.replace('节点', '');
-      const toolNames = nodes.map((node) => node.toolName).join('、');
+      const nodeNames = nodes.map((node) => node.toolName).join('、');
       step(1800, () => {
-        setPlanNodes(allNodes);
+        setPlanNodes(withExpandedNodes(allNodes));
         setRuntimeForNodes(nodes, { status: 'building' });
         buildEventId = pushEvent({ role: 'thought', title: `设计流程节点：${nodeTitle}`, content: `我会把${nodeTitle}放在当前处理链路中，并确认它与前后节点的职责边界。`, status: 'running' });
       });
       step(2300, () => {
-        updateEvent(buildEventId, { status: 'done', content: `${nodeTitle}节点已加入方案。下一步需要为这个节点选择具体 MCP 工具。` });
+        updateEvent(buildEventId, { status: 'done', content: `${nodeTitle}节点已加入方案。下一步需要确认节点配置。` });
         setRuntimeForNodes(nodes, { status: 'selectingTool' });
-        selectEventId = pushEvent({ role: 'thought', title: `工具选择：${nodeTitle}`, content: `候选依据：${toolText} 选择结果：${toolNames}。`, status: 'running', kind: 'toolCall' });
+        selectEventId = pushEvent({ role: 'thought', title: `节点匹配：${nodeTitle}`, content: `候选依据：${nodeText} 匹配结果：${nodeNames}。`, status: 'running', kind: 'toolCall' });
       });
       step(2300, () => {
-        updateEvent(selectEventId, { status: 'done', content: `已选择工具：${toolNames}；所属流程节点：${nodeTitle}。` });
+        updateEvent(selectEventId, { status: 'done', content: `已确认节点：${nodeNames}；所属流程节点：${nodeTitle}。` });
         setRuntimeForNodes(nodes, { status: 'done' });
       });
     };
-    const configureToolNode = (nodes, initialDelay = 0) => {
+    const configureFlowNode = (nodes, initialDelay = 0) => {
       if (!nodes.length) return;
       let configEventId = '';
-      const toolNames = nodes.map((node) => node.toolName).join('、');
+      const nodeNames = nodes.map((node) => node.toolName).join('、');
       const paramSummary = nodes.flatMap((node) => visibleParams(node).map((param) => param.label)).slice(0, 5).join('、');
       step(initialDelay, () => {
+        activateRuntimeNodes(nodes);
         setRuntimeForNodes(nodes, { status: 'configuring', visibleParamCount: 0 });
-        configEventId = pushEvent({ role: 'thought', title: `参数配置：${toolNames}`, content: `配置依据：工具参数定义、样例分析结果、上游输出路径。配置项：${paramSummary}。`, status: 'running', kind: 'toolCall' });
+        configEventId = pushEvent({ role: 'thought', title: `节点配置：${nodeNames}`, content: `配置依据：节点参数定义、样例分析结果、上游输出路径。配置项：${paramSummary || '无额外配置项'}。`, status: 'running', kind: 'toolCall' });
       });
       [1, 2, 3, 4].forEach((count) => {
         step(900, () => setRuntimeForNodes(nodes, { status: 'configuring', visibleParamCount: count }));
       });
       step(900, () => {
         setRuntimeForNodes(nodes, { status: 'configured', visibleParamCount: 4 });
-        updateEvent(configEventId, { status: 'done', content: `参数配置完成：${toolNames} 已形成当前方案中的 Step 执行契约。` });
+        updateEvent(configEventId, { status: 'done', content: `节点配置完成：${nodeNames} 已形成当前方案中的 Step 执行契约。` });
       });
       step(1100, () => {
         setRuntimeForNodes(nodes, { status: 'done' });
-        collapseRuntimeNodes(nodes);
       });
     };
-    const buildToolNode = (nodes, allNodes, title, toolText) => {
-      buildAndSelectToolNode(nodes, allNodes, title, toolText);
-      configureToolNode(nodes);
+    const buildFlowNode = (nodes, allNodes, title, nodeText) => {
+      buildAndSelectFlowNode(nodes, allNodes, title, nodeText);
+      configureFlowNode(nodes);
     };
 
     let analyzeEventId = '';
@@ -4694,63 +4698,63 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     step(3200, () => {
       updateEvent(parseEventId, { status: 'done', content: '结构识别完成：需要先解析文档，再做结构适配、分片、存储，并基于分片结果生成问答。' });
       setSampleFiles((current) => current.map((file) => ({ ...file, status: '试跑中' })));
-      queryEventId = pushEvent({ role: 'thought', title: '工具目录查询', content: '输入：工具状态=可用，分类=文档解析/文本分片/知识提取/系统节点；输出：候选节点清单。', status: 'running', kind: 'toolCall' });
+      queryEventId = pushEvent({ role: 'thought', title: '节点目录查询', content: '输入：节点状态=可用，分类=文档解析/文本分片/知识提取/系统节点；输出：候选节点清单。', status: 'running', kind: 'toolCall' });
     });
     step(3000, () => {
-      updateEvent(queryEventId, { status: 'done', content: `查询结果：命中 ${catalog.filter((tool) => tool.status === '可用').length} 个可用节点，其中包含系统节点和外部接入节点。` });
-      designEventId = pushEvent({ role: 'thought', title: '开始设计处理方案', content: '我会先生成主链路，再检查工具返回能否被后置工具直接消费。', status: 'running' });
+      updateEvent(queryEventId, { status: 'done', content: `查询结果：命中 ${catalog.filter((node) => node.status === '可用').length} 个可用节点，其中包含系统节点和外部接入节点。` });
+      designEventId = pushEvent({ role: 'thought', title: '开始设计处理方案', content: '我会先生成主链路，再检查节点输出能否被后置节点直接消费。', status: 'running' });
     });
     step(3300, () => {
-      updateEvent(designEventId, { status: 'done', content: '方案设计完成。先搭建主链路，再检查工具输出与下游入参是否需要适配。', kind: 'flow', flowSteps: ['文档解析', '文本分片', '系统节点', '知识提取'] });
+      updateEvent(designEventId, { status: 'done', content: '方案设计完成。先搭建主链路，再检查节点输出与下游入参是否需要适配。', kind: 'flow', flowSteps: ['文档解析', '文本分片', '系统节点', '知识提取'] });
     });
 
-    buildAndSelectToolNode([parser], [parser], '文档解析节点', '候选工具=文件解析；选择原因=该工具与 Higress 已发布的文件解析能力一致。');
-    buildAndSelectToolNode([splitter], [parser, splitter], '文本分片节点', '候选工具=文本分片；选择原因=该工具与 Higress 已发布的文本分片能力一致。');
+    buildFlowNode([parser], [parser], '文档解析节点', '候选节点=通用OCR解析；选择原因=该节点适合处理扫描件和 PDF 文件解析。');
+    buildFlowNode([splitter], [parser, splitter], '文本分片节点', '候选节点=Markdown结构化分块；选择原因=该节点适合按标题层级和段落结构生成文本切片。');
 
     step(2200, () => {
-      checkEventId = pushEvent({ role: 'thought', title: '检查节点承接', content: '文本分片工具已选定，我会检查文档解析输出能否被分片工具直接消费，再决定是否继续添加后置节点。', status: 'running' });
+      checkEventId = pushEvent({ role: 'thought', title: '检查节点承接', content: '文本分片节点已确定，我会检查文档解析输出能否被分片节点直接消费，再决定是否继续添加后置节点。', status: 'running' });
     });
     step(7200, () => {
       setPlanNodes(preFixNodes);
-      setConnectionStates({ [getConnectionKey(parser.category, splitter.category)]: { status: 'error', reason: '文件解析返回 sections[].content，分片工具需要 data.cleanBlocks，节点之间缺少结构适配。' } });
-      updateEvent(checkEventId, { status: 'done', content: '发现适配问题：文件解析返回 sections[].content，分片工具需要 data.cleanBlocks。' });
-      issueAnalysisEventId = pushEvent({ role: 'thought', title: '正在分析适配问题', content: '我需要对比解析工具的实际返回和分片工具的参数要求，确认问题是字段命名不一致，还是缺少结构转换。', status: 'running' });
+      setConnectionStates({ [getConnectionKey(parser.category, splitter.category)]: { status: 'error', reason: '文档解析节点返回 sections[].content，分片节点需要 data.cleanBlocks，节点之间缺少结构适配。' } });
+      updateEvent(checkEventId, { status: 'done', content: '发现适配问题：文档解析节点返回 sections[].content，分片节点需要 data.cleanBlocks。' });
+      issueAnalysisEventId = pushEvent({ role: 'thought', title: '正在分析适配问题', content: '我需要对比上游节点的实际返回和分片节点的参数要求，确认问题是字段命名不一致，还是缺少结构转换。', status: 'running' });
     });
     step(2800, () => {
-      updateEvent(issueAnalysisEventId, { status: 'done', content: '问题原因已确认：上游工具未声明稳定 outputSchema，实际返回字段需要先转换成平台可识别的 cleanBlocks。' });
-      pushEvent({ role: 'thought', title: '输出解决方案', content: '解决方案：在文档解析节点和文本分片节点之间插入代码执行器，生成 data.cleanBlocks 作为分片工具输入。', status: 'done' });
+      updateEvent(issueAnalysisEventId, { status: 'done', content: '问题原因已确认：上游节点返回字段与后置节点入参不一致，需要先转换成平台可识别的 cleanBlocks。' });
+      pushEvent({ role: 'thought', title: '输出解决方案', content: '解决方案：在文档解析节点和文本分片节点之间插入代码执行器，生成 data.cleanBlocks 作为分片节点输入。', status: 'done' });
     });
     step(1600, () => {
-      resolveEventId = pushEvent({ role: 'thought', title: '开始解决适配问题', content: '我会在文档解析和文本分片之间插入代码执行器，把解析结果转换成分片工具可识别的数据结构。', status: 'running' });
+      resolveEventId = pushEvent({ role: 'thought', title: '开始解决适配问题', content: '我会在文档解析和文本分片之间插入代码执行器，把解析结果转换成分片节点可识别的数据结构。', status: 'running' });
       setConnectionStates({ [getConnectionKey(parser.category, splitter.category)]: { status: 'resolving', reason: '正在插入代码执行器解决结构适配问题。' } });
     });
 
-    buildToolNode([adapter].filter(Boolean), adaptedNodes, '系统节点', '候选节点=代码执行器；选择原因=需要把 sections[].content 转换为 data.cleanBlocks。');
-    configureToolNode([splitter]);
+    buildFlowNode([adapter].filter(Boolean), adaptedNodes, '系统节点', '候选节点=代码执行器；选择原因=需要把 sections[].content 转换为 data.cleanBlocks。');
+    configureFlowNode([splitter]);
 
     step(2000, () => {
       setConnectionStates({
-        [getConnectionKey(parser.category, adapter.category)]: { status: 'resolved', reason: '代码执行器输出 data.cleanBlocks，分片工具可直接引用。' },
-        [getConnectionKey(adapter.category, splitter.category)]: { status: 'resolved', reason: '分片工具输入已改为 data.cleanBlocks。' },
+        [getConnectionKey(parser.category, adapter.category)]: { status: 'resolved', reason: '代码执行器输出 data.cleanBlocks，分片节点可直接引用。' },
+        [getConnectionKey(adapter.category, splitter.category)]: { status: 'resolved', reason: '分片节点输入已改为 data.cleanBlocks。' },
       });
-      updateEvent(resolveEventId, { status: 'done', content: '适配问题已解决：代码执行器输出 data.cleanBlocks，分片工具可直接引用。' });
+      updateEvent(resolveEventId, { status: 'done', content: '适配问题已解决：代码执行器输出 data.cleanBlocks，分片节点可直接引用。' });
     });
     step(2200, () => {
       setConnectionStates({});
     });
 
-    buildToolNode([storage], storageNodes, '系统节点', '候选节点=数据存储器；选择原因=需要把分片结果写入 ES 供后续检索使用。');
-    buildToolNode([qa].filter(Boolean), finalNodes, '知识提取节点', '候选工具=QA提取；选择原因=自动方案先完成问答抽取，知识点提取可在后续手动添加。');
+    buildFlowNode([storage], storageNodes, '系统节点', '候选节点=数据存储器；选择原因=需要把分片结果写入 ES 供后续检索使用。');
+    buildFlowNode([qa].filter(Boolean), finalNodes, '知识提取节点', '候选节点=QA提取；选择原因=自动方案先完成问答抽取，知识点提取可在后续手动添加。');
 
     step(2200, () => {
       setConnectionStates({});
       recheckEventId = pushEvent({ role: 'thought', title: '检查完整方案', content: '我会重新检查修复后的节点顺序、输入输出映射和 Step 执行契约。', status: 'running' });
     });
     step(6800, () => {
-      updateEvent(recheckEventId, { status: 'done', content: '方案检查通过：节点顺序、工具参数、变量承接和存储策略均可执行。' });
+      updateEvent(recheckEventId, { status: 'done', content: '方案检查通过：节点顺序、节点参数、变量承接和存储策略均可执行。' });
     });
     step(1800, () => {
-      executeEventId = pushEvent({ role: 'thought', title: '样例试跑', content: '输入：医保政策样例.pdf；执行对象：最终 Workflow Step；输出：每个工具的输入、输出和执行状态。', status: 'running', kind: 'toolCall' });
+      executeEventId = pushEvent({ role: 'thought', title: '样例试跑', content: '输入：医保政策样例.pdf；执行对象：最终处理方案；输出：每个节点的输入、输出和执行状态。', status: 'running', kind: 'toolCall' });
     });
     finalNodes.forEach((node) => {
       step(1700, () => setRuntimeForNodes([node], { status: 'running' }));
@@ -4758,7 +4762,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     });
     step(2000, () => {
       setRuntimeForNodes(finalNodes, { status: 'success' });
-      updateEvent(executeEventId, { status: 'done', content: '试跑结果：所有工具执行成功；分片结果已写入 ES；问答结果已生成。' });
+      updateEvent(executeEventId, { status: 'done', content: '试跑结果：所有节点执行成功；分片结果已写入 ES；问答结果已生成。' });
     });
     step(1200, () => {
       setRuntimeForNodes(finalNodes, { status: 'done' });
@@ -4834,7 +4838,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       setRuntimeForNodes([configured], { status: 'done' });
       pushEvent({ role: 'agent', title: failure ? '参数已配置，连通性待处理' : '参数配置完成', content: failure ? `已完成「${node.toolName}」参数配置，但方案仍存在连通性问题：${failure.reason}` : `已完成「${node.toolName}」参数配置，并校验通过前后节点的输入输出承接关系。`, status: 'done' });
       setRunning(false);
-      notify(failure ? '参数已配置，仍需处理连通性' : 'Agent 已完成工具参数配置', failure ? 'warning' : 'success');
+      notify(failure ? '参数已配置，仍需处理连通性' : 'Agent 已完成节点参数配置', failure ? 'warning' : 'success');
     }, 3200);
   };
 
@@ -5194,8 +5198,8 @@ function ToolPendingRow({ status }) {
     <div className="tool-pending-row">
       <SyncOutlined spin />
       <div>
-        <strong>{status === 'building' ? '正在创建节点...' : '正在选择工具...'}</strong>
-        <span>{status === 'building' ? 'Agent 正在确定节点位置' : '工具选择完成后显示工具模块'}</span>
+        <strong>{status === 'building' ? '正在创建节点...' : '正在确认节点...'}</strong>
+        <span>{status === 'building' ? 'Agent 正在确定节点位置' : '节点确认完成后展示配置过程'}</span>
       </div>
     </div>
   );
