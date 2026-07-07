@@ -5178,10 +5178,6 @@ function WorkflowSection({
         } : undefined}
         onDragEnd={canEdit ? onSectionDragEnd : undefined}
       >
-        <div className="workflow-head">
-          <strong>{section.category}</strong>
-          <div />
-        </div>
         <div className="workflow-tools">
           {section.nodes.map((node) => {
             const rawToolWarnings = rawWarnings[node.nodeId] || [];
