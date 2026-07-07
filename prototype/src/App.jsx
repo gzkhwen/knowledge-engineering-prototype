@@ -55,6 +55,20 @@ function Badge({ children, tone = 'neutral' }) {
   return <span className={`badge ${tone}`}>{children}</span>;
 }
 
+function FieldTypeTag({ type }) {
+  if (!type) return null;
+  return <span className="field-type-tag">{type}</span>;
+}
+
+function OptionLabelWithType({ label, type }) {
+  return (
+    <span className="option-label-with-type">
+      <span>{label}</span>
+      <FieldTypeTag type={type} />
+    </span>
+  );
+}
+
 function Toast({ toast, onClose }) {
   useEffect(() => {
     if (!toast) return undefined;
@@ -78,7 +92,7 @@ function SearchBox({ value, onChange, placeholder }) {
   );
 }
 
-function SelectField({ value, onChange, children, className = '', disabled = false }) {
+function SelectField({ value, onChange, children, className = '', disabled = false, missingLabel = '当前选项已失效' }) {
   const [open, setOpen] = useState(false);
   const [dropdownStyle, setDropdownStyle] = useState(null);
   const rootRef = useRef(null);
@@ -91,7 +105,7 @@ function SelectField({ value, onChange, children, className = '', disabled = fal
       label: child.props.children,
       disabled: Boolean(child.props.disabled),
     }));
-  const selected = options.find((option) => `${option.value}` === `${value}`) || options[0];
+  const selected = options.find((option) => `${option.value}` === `${value}`);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -138,7 +152,7 @@ function SelectField({ value, onChange, children, className = '', disabled = fal
   return (
     <span ref={rootRef} className={`select-field-wrap ${open ? 'open' : ''} ${disabled ? 'disabled' : ''} ${className}`.trim()}>
       <button type="button" className={`select-field ${disabled ? 'readonly' : ''} ${className}`.trim()} disabled={disabled} onClick={() => setOpen((current) => !current)}>
-        <span>{selected?.label}</span>
+        <span>{selected?.label || (value ? missingLabel : options[0]?.label)}</span>
         <DownOutlined />
       </button>
       {open && dropdownStyle ? createPortal(
@@ -1024,7 +1038,7 @@ function ToolSchemaCard({ tool }) {
           <label>入参</label>
           {inputRows.length ? inputRows.map((item) => (
             <span className="schema-item" key={item.name}>
-              <strong>{item.name}</strong>
+              <strong>{item.displayName || item.label || item.name}</strong>
               <em>{item.type || 'text'}</em>
               {item.required ? <b>必填</b> : null}
               {item.desc || item.description ? <small>{item.desc || item.description}</small> : null}
@@ -1035,7 +1049,7 @@ function ToolSchemaCard({ tool }) {
           <label>出参</label>
           {outputRows.length ? outputRows.map((item) => (
             <span className="schema-item" key={item.name}>
-              <strong>{item.name}</strong>
+              <strong>{item.displayName || item.label || item.name}</strong>
               <em>{item.type || item.path || 'object'}</em>
               {item.desc || item.description ? <small>{item.desc || item.description}</small> : null}
             </span>
@@ -2620,7 +2634,7 @@ function NodeMappingDetailTable({ tool }) {
   const storageRules = normalizeStorageRules(tool.storageContract, tool.outputs || []);
   const artifactPaths = new Set((tool.inputArtifacts || []).map((artifact) => artifact.sourcePath || artifact.sourceName).filter(Boolean));
   const inputRows = (tool.inputArtifacts || []).map((artifact) => [
-    artifact.name || '-',
+    artifact.displayName || artifact.label || artifact.name || '-',
     getArtifactTypeLabel(artifact.artifactType, artifact.type),
     artifact.sourcePath || artifact.sourceName || '-',
     artifact.description || '-',
@@ -2628,7 +2642,7 @@ function NodeMappingDetailTable({ tool }) {
   const configRows = (tool.inputs || [])
     .filter((input) => !artifactPaths.has(input.name))
     .map((input) => [
-      input.name || '-',
+      input.displayName || input.label || input.name || '-',
       input.type || '-',
       input.sourceName || input.name || '-',
       input.required ? '是' : '否',
@@ -2636,7 +2650,7 @@ function NodeMappingDetailTable({ tool }) {
       input.description || '-',
     ]);
   const outputRows = (tool.outputs || []).map((output) => [
-    output.name || '-',
+    output.displayName || output.label || output.name || '-',
     getArtifactTypeLabel(output.artifactType, output.type),
     output.sourceType === 'storageRef' ? '存储引用' : 'MCP工具返回值',
     output.sourceType === 'storageRef' ? getStorageRuleLabel(storageRules, output.storageRuleId) : output.path || output.name || '-',
@@ -3462,20 +3476,21 @@ const initialAgentEvents = [{
 const generatedAgentEvents = [
   { id: 'qa-parse', role: 'thought', title: '分析样例文件', content: '样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。', status: 'done' },
   { id: 'qa-query', role: 'thought', title: '节点目录查询', content: '查询结果：命中可用流程节点，其中包含系统节点和外部接入节点。', status: 'done', kind: 'toolCall' },
-  { id: 'qa-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建文档解析和文本分片主链路，再检查节点输出与下游入参是否需要适配。', status: 'done', flowSteps: ['文档解析', '文本分片'] },
+  { id: 'qa-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建解析、分片和知识点提取主链路，再通过迭代执行逐项处理知识点数组，并在迭代体内完成打标入参整理、知识点打标和结果拼装。', status: 'done', flowSteps: ['文档解析', '文本分片', '知识点提取', '迭代执行', '数据存储'] },
   { id: 'qa-check-edge', role: 'thought', title: '检查节点承接', content: '发现适配问题：文档解析节点返回 sections[].content，分片节点需要 data.cleanBlocks。', status: 'done' },
-  { id: 'qa-fix-edge', role: 'thought', title: '修复节点承接', content: '已插入代码执行器，将解析结果转换为 data.cleanBlocks，然后继续添加后置存储和 QA 提取节点。', status: 'done', kind: 'toolCall' },
-  { id: 'qa-config-storage', role: 'thought', title: '参数配置：数据存储器', content: '参数配置完成：数据存储器 已形成当前方案中的 Step 执行契约。', status: 'done', kind: 'toolCall' },
-  { id: 'qa-config-knowledge', role: 'thought', title: '参数配置：QA提取', content: '参数配置完成：QA提取 已形成当前方案中的 Step 执行契约。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-fix-edge', role: 'thought', title: '修复节点承接', content: '已插入代码执行器，将解析结果转换为 data.cleanBlocks，然后继续添加知识点提取和迭代执行节点。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-config-knowledge', role: 'thought', title: '参数配置：知识点提取', content: '参数配置完成：知识点提取已输出知识点数组。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-config-iteration', role: 'thought', title: '参数配置：迭代执行', content: '参数配置完成：迭代输入数组为知识点提取的知识点结果，迭代体内包含代码执行器、知识点打标、代码执行器，迭代结果来源为最终拼装后的打标结果。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-config-storage', role: 'thought', title: '参数配置：数据存储器', content: '参数配置完成：数据存储器承接迭代结果，写入打标结果存储。', status: 'done', kind: 'toolCall' },
   { id: 'qa-check', role: 'thought', title: '检查完整方案', content: '方案检查通过：节点顺序、节点参数、变量承接和存储策略均可执行。', status: 'done' },
-  { id: 'qa-run', role: 'thought', title: '样例试跑', content: '试跑结果：所有节点执行成功；分片结果已写入 ES；问答结果已生成。', status: 'done', kind: 'toolCall' },
+  { id: 'qa-run', role: 'thought', title: '样例试跑', content: '试跑结果：所有节点执行成功；知识点打标结果已按知识点逐条生成，并聚合为迭代结果写入存储。', status: 'done', kind: 'toolCall' },
   { id: 'qa-done', role: 'agent', title: '方案生成与样例执行完成', content: '已完成方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。', status: 'done' },
 ];
 const runningAgentEvents = [
   { id: 'run-parse', role: 'thought', title: '分析样例文件', content: '样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。', status: 'done' },
   { id: 'run-query', role: 'thought', title: '节点目录查询', content: '查询结果：命中可用流程节点，其中包含系统节点和外部接入节点。', status: 'done', kind: 'toolCall' },
-  { id: 'run-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建主链路，再检查节点输出与下游入参是否需要适配。', status: 'done', flowSteps: ['文档解析', '文本分片', '系统节点', '知识提取'] },
-  { id: 'run-config-storage', role: 'thought', title: '参数配置：数据存储器', content: '配置依据：节点参数定义、样例分析结果、上游输出路径。配置项：存储对象、存储方式、写入模式。', status: 'running', kind: 'toolCall' },
+  { id: 'run-design', role: 'thought', title: '开始设计处理方案', content: '方案设计完成。先搭建主链路，再配置迭代执行节点处理知识点数组，迭代体内包含代码执行器、知识点打标、代码执行器。', status: 'done', flowSteps: ['文档解析', '文本分片', '知识点提取', '迭代执行', '数据存储'] },
+  { id: 'run-config-storage', role: 'thought', title: '参数配置：迭代执行', content: '配置依据：知识点提取输出数组、迭代体内部节点、打标结果聚合路径。', status: 'running', kind: 'toolCall' },
 ];
 
 function normalizeWorkbenchCategory(category) {
@@ -3496,7 +3511,7 @@ function sortWorkbenchCategories(categories, order = toolDialogCategoryOrder) {
 }
 
 function makeOutput(idValue, label, desc, path, type) {
-  return { id: idValue, name: label, label, desc, path, type };
+  return { id: idValue, name: idValue, displayName: label, label, desc, path, type };
 }
 
 const defaultParamDescriptions = {
@@ -3512,6 +3527,16 @@ const defaultParamDescriptions = {
   storageObject: '需要写入知识存储的结构化数据，可引用前置分片或抽取结果。',
   storageMethod: '选择存储目标和写入方式，当前演示链路使用 ES 写入。',
   writeMode: '控制数据写入策略，例如新增、更新或覆盖已有记录。',
+  iterationInput: '选择上游节点输出的数组结果，作为迭代执行逐项处理的输入数组。',
+  iterationOutput: '选择迭代体内子节点的输出字段，作为每轮结果并聚合为迭代结果数组。',
+  concurrency: '同时处理的元素数量，默认 1，最大支持 5。',
+  iterationTimeout: '单次迭代体执行的超时时间，默认 60 秒，最大支持 180 秒。',
+  errorResponseMethod: '单次执行发生错误时的处理方式。',
+  taggingObject: '本轮需要打标的知识点内容。',
+  knowledgeTitle: '当前知识点标题或唯一标识，用于保持打标结果可追踪。',
+  sourceChunkIds: '当前知识点来源分片 ID 列表。',
+  tagStrategy: '控制知识点打标时采用的标签生成策略。',
+  labelPool: '限定可使用的标签范围。',
   file: '待解析文件对象，包含 fileUrl、fileName、fileType。',
   input: '工具输入数据，按当前工具契约传入段落列表或知识片段列表。',
   parse_mode: '解析模式，默认 policy_clause。',
@@ -3548,6 +3573,16 @@ const workbenchParamLabels = {
   metrics: '评估指标',
   qaPairs: 'QA对',
   sourceChunks: '来源切片',
+  iterationInput: '迭代输入数组',
+  iterationOutput: '迭代结果来源',
+  concurrency: '并发数量',
+  iterationTimeout: '单次执行超时时间',
+  errorResponseMethod: '单次执行错误响应方法',
+  taggingObject: '打标对象',
+  knowledgeTitle: '知识点标题',
+  sourceChunkIds: '来源分片',
+  tagStrategy: '打标策略',
+  labelPool: '标签范围',
 };
 
 const workbenchOutputLabels = {
@@ -3584,6 +3619,9 @@ const workbenchOutputLabels = {
   chunkQualityReport: '切片质量报告',
   badChunks: '问题切片',
   keywordResult: '关键词结果',
+  iterationResult: '迭代结果',
+  tagResult: '打标结果',
+  tagSummary: '标签摘要',
 };
 
 const workbenchParamSelects = {
@@ -3593,6 +3631,8 @@ const workbenchParamSelects = {
   table_mode: ['自动识别', '强表格模式', '版面优先'],
   model: ['qwen3-8b', 'qwen3-32b', 'bge-m3', 'text-embedding-v3'],
   summary_type: ['政策摘要', '办理条件', '材料清单', '风险提示'],
+  errorResponseMethod: ['错误时终止', '忽略错误并继续', '移除错误输出并继续'],
+  tagStrategy: ['规则标签优先', '结构感知打标', '模型自动打标'],
   enable_layout: ['开启', '关闭'],
 };
 
@@ -3611,6 +3651,7 @@ function getWorkbenchParamOptions(name) {
 function makeParam(idValue, label, value, options = {}) {
   return {
     id: idValue,
+    displayName: options.displayName || label,
     label,
     desc: options.desc || defaultParamDescriptions[idValue] || defaultParamDescriptions[label] || '',
     type: options.type || 'text',
@@ -3755,6 +3796,27 @@ const baseTools = [
     outputs: [makeOutput('storageRef', '存储引用', 'storage_ref，后置节点可引用的存储结果地址。', 'data.storageRef'), makeOutput('storedCount', '写入数量', 'number，本次成功写入的数据条数。', 'data.storedCount')],
   },
   {
+    id: 'system-iteration',
+    name: '迭代执行',
+    category: '系统节点',
+    sourceType: 'system',
+    serviceName: '流程引擎默认节点',
+    summary: '基于上游数组结果逐项执行迭代体内部节点，并将每轮结果聚合为数组。',
+    status: '可用',
+    input: 'knowledgePoints',
+    output: 'iterationResult',
+    inputParamId: 'iterationInput',
+    allowMultiple: true,
+    params: [
+      makeParam('iterationInput', '迭代输入数组', '', { type: 'target', schemaType: 'Array', required: true }),
+      makeParam('iterationOutput', '迭代结果来源', '', { type: 'target', schemaType: '', required: true }),
+      makeParam('concurrency', '并发数量', 1, { type: 'number', required: true, min: 1, max: 5 }),
+      makeParam('iterationTimeout', '单次执行超时时间', 60, { type: 'number', required: true, min: 1, max: 180, unit: '秒' }),
+      makeParam('errorResponseMethod', '单次执行错误响应方法', '错误时终止', { type: 'select', required: true, options: ['错误时终止', '忽略错误并继续', '移除错误输出并继续'] }),
+    ],
+    outputs: [makeOutput('iterationResult', '迭代结果', 'Array，迭代体每轮单次输出聚合后的结果数组。', 'iterationResult', 'Array')],
+  },
+  {
     id: 'qa-extractor',
     name: 'QA提取',
     category: '知识提取',
@@ -3789,6 +3851,26 @@ const baseTools = [
     outputs: [makeOutput('summary', 'summary', 'string，政策知识点摘要正文。', 'summary', 'string'), makeOutput('summaryResult', 'summaryResult', 'array<object>，知识点条目和来源引用，包含 title、content、sourceChunkIds。', 'summaryResult', 'array<object>'), makeOutput('applicableUsers', 'applicableUsers', 'array<string>，适用对象列表。', 'applicableUsers', 'array<string>'), makeOutput('keyRules', 'keyRules', 'array<string>，关键规则列表。', 'keyRules', 'array<string>')],
   },
   {
+    id: 'knowledge-tagging',
+    name: '知识点打标',
+    category: '知识提取',
+    serviceName: 'Nacos 知识工程 MCP',
+    summary: '针对单个知识点生成标签、分类和规则命中结果。',
+    status: '可用',
+    input: 'knowledgePoint',
+    output: 'tagResult',
+    inputParamId: 'taggingObject',
+    allowInIteration: true,
+    params: [
+      makeParam('taggingObject', '打标对象', '', { type: 'textarea', required: true }),
+      makeParam('knowledgeTitle', '知识点标题', '', { type: 'text' }),
+      makeParam('sourceChunkIds', '来源分片', '', { type: 'textarea' }),
+      makeParam('tagStrategy', '打标策略', '结构感知打标', { type: 'select', required: true, options: ['规则标签优先', '结构感知打标', '模型自动打标'] }),
+      makeParam('labelPool', '标签范围', ['适用对象', '办理条件', '材料要求'], { type: 'tags', options: ['适用对象', '办理条件', '材料要求', '费用结算', '备案流程', '风险提示'] }),
+    ],
+    outputs: [makeOutput('tagResult', '打标结果', 'object，包含知识点 ID、标签、置信度和来源引用。', 'tagResult', 'object'), makeOutput('tagSummary', '标签摘要', 'string，当前知识点的标签摘要。', 'tagSummary', 'string')],
+  },
+  {
     id: 'keyword-extractor',
     name: '关键词提取',
     category: '知识提取',
@@ -3810,6 +3892,7 @@ const higressWorkbenchToolIds = {
   文件解析: 'medical-policy-parser',
   文本分片: 'medical-policy-splitter',
   知识点提取: 'summary',
+  知识点打标: 'knowledge-tagging',
   QA提取: 'qa-extractor',
 };
 
@@ -3823,9 +3906,10 @@ const higressWorkbenchToolFlow = {
 function toolInputToParam(input, index) {
   const type = String(input.type || '').toLowerCase();
   const name = input.name || `input_${index + 1}`;
+  const displayName = input.displayName || input.label || getWorkbenchParamLabel(name);
   const selectOptions = getWorkbenchParamOptions(name);
   const paramType = selectOptions ? 'select' : type.includes('number') || type.includes('int') ? 'number' : type.includes('array') || type.includes('object') ? 'textarea' : 'text';
-  return makeParam(name, getWorkbenchParamLabel(name), defaultToolParamValue(name, paramType), {
+  return makeParam(name, displayName, defaultToolParamValue(name, paramType), {
     type: paramType,
     schemaType: input.type || paramType,
     required: input.required ?? true,
@@ -3847,6 +3931,11 @@ function defaultToolParamValue(name, paramType) {
   if (name === 'model') return 'qwen3-8b';
   if (name === 'system_prompt') return '请基于医保政策原文生成问答对，答案必须来自原文，并保留来源片段。';
   if (name === 'summary_type') return '政策摘要';
+  if (name === 'concurrency') return 1;
+  if (name === 'iterationTimeout') return 60;
+  if (name === 'errorResponseMethod') return '错误时终止';
+  if (name === 'tagStrategy') return '结构感知打标';
+  if (name === 'labelPool') return ['适用对象', '办理条件', '材料要求'];
   if (name === 'batch_size') return 32;
   if (name === 'top_k') return 10;
   if (paramType === 'number') return 0;
@@ -3868,7 +3957,7 @@ function managedToolToWorkbenchTool(tool) {
   const params = (tool.inputs || []).map(toolInputToParam);
   const outputs = (tool.outputs || []).map((output, index) => {
     const name = output.name || `output_${index + 1}`;
-    return makeOutput(name, getWorkbenchOutputLabel(name), output.description || '节点输出结果。', output.path || name, output.type || 'object');
+    return makeOutput(name, output.displayName || output.label || getWorkbenchOutputLabel(name), output.description || '节点输出结果。', output.path || name, output.type || 'object');
   });
   return {
     id: higressWorkbenchToolIds[tool.name] || tool.id,
@@ -3899,19 +3988,71 @@ function readWorkbenchCatalog() {
   }));
 }
 
+function isIterationNode(node) {
+  return node?.toolId === 'system-iteration';
+}
+
+function getIterationVariables() {
+  return [
+    { value: 'currentElement', label: '当前元素', type: 'object' },
+    { value: 'currentIndex', label: '当前序号', type: 'number' },
+  ];
+}
+
+function normalizeIterationVariableValue(value) {
+  return value === 'currentIndex' ? 'currentIndex' : 'currentElement';
+}
+
+function getIterationItemOutputOptions(node) {
+  return (node?.innerNodes || [])
+    .flatMap((innerNode) => (innerNode.outputs || []).map((output) => ({
+      value: `${innerNode.nodeId}:${output.path || output.id || output.name}`,
+      label: `${innerNode.toolName} / ${output.displayName || output.label || output.name || output.path}`,
+    })));
+}
+
+function applyIterationSourceToNode(node) {
+  const iterationSource = { type: 'iteration', outputPath: 'currentElement' };
+  return {
+    ...node,
+    inputSource: { type: 'iteration', outputPath: 'currentElement' },
+    params: node.params.map((param) => {
+      if (param.id === 'taggingObject') return { ...param, source: iterationSource };
+      if (param.id === node.inputParamId) return { ...param, source: iterationSource };
+      return param;
+    }),
+  };
+}
+
 function cloneWorkbenchParam(param) {
   return { ...param, value: Array.isArray(param.value) ? [...param.value] : param.value, source: param.source ? { ...param.source } : { type: 'manual' } };
 }
 
+function ensureIterationNodeParams(node) {
+  const outputParam = makeParam('iterationOutput', '迭代结果来源', '', { type: 'target', schemaType: '', required: true });
+  if (!isIterationNode(node)) return node;
+  const params = [];
+  const hasOutputParam = node.params.some((param) => param.id === 'iterationOutput');
+  node.params.forEach((param) => {
+    if (param.id === 'iterationInput') params.push({ ...param, schemaType: 'Array' });
+    else if (param.id === 'iterationOutput') params.push({ ...param, schemaType: '' });
+    else params.push(param);
+    if (param.id === 'iterationInput' && !hasOutputParam) params.push(outputParam);
+  });
+  return { ...node, params };
+}
+
 function cloneWorkbenchNode(node) {
+  const normalizedNode = ensureIterationNodeParams(node);
   return {
-    ...node,
-    inputSource: node.inputSource ? { ...node.inputSource } : { type: 'fixed' },
-    params: node.params.map(cloneWorkbenchParam),
-    inputArtifacts: node.inputArtifacts?.map((artifact) => ({ ...artifact, source: artifact.source ? { ...artifact.source } : undefined })),
-    outputs: node.outputs.map((output) => ({ ...output })),
-    codeInputs: node.codeInputs?.map((input) => ({ ...input, source: { ...input.source } })),
-    codeOutputs: node.codeOutputs?.map((output) => ({ ...output })),
+    ...normalizedNode,
+    inputSource: normalizedNode.inputSource ? { ...normalizedNode.inputSource } : { type: 'fixed' },
+    params: normalizedNode.params.map(cloneWorkbenchParam),
+    inputArtifacts: normalizedNode.inputArtifacts?.map((artifact) => ({ ...artifact, source: artifact.source ? { ...artifact.source } : undefined })),
+    outputs: normalizedNode.outputs.map((output) => ({ ...output })),
+    codeInputs: normalizedNode.codeInputs?.map((input) => ({ ...input, source: { ...input.source } })),
+    codeOutputs: normalizedNode.codeOutputs?.map((output) => ({ ...output })),
+    innerNodes: normalizedNode.innerNodes?.map(cloneWorkbenchNode),
   };
 }
 
@@ -3927,6 +4068,19 @@ function emptyParamValue(param) {
 }
 
 function clearManualNodeConfig(node) {
+  if (isIterationNode(node)) {
+    return {
+      ...node,
+      inputSource: { type: 'fixed' },
+      params: node.params.map((param) => (
+        param.id === 'concurrency' ? { ...param, value: 1, source: { type: 'manual' } }
+          : param.id === 'iterationTimeout' ? { ...param, value: 60, source: { type: 'manual' } }
+            : param.id === 'errorResponseMethod' ? { ...param, value: '错误时终止', source: { type: 'manual' } }
+              : { ...param, value: emptyParamValue(param), source: { type: 'manual' } }
+      )),
+      innerNodes: [],
+    };
+  }
   return {
     ...node,
     inputSource: { type: 'fixed' },
@@ -3955,10 +4109,90 @@ function createWorkbenchNode(tool, inputSource = { type: 'fixed' }) {
     adjusted: false,
     inputSource,
     params,
+    description: tool.description || tool.summary || '',
     inputArtifacts: (tool.inputArtifacts || []).map((artifact) => ({ ...artifact, source: artifact.source ? { ...artifact.source } : paramSource })),
     outputs: tool.outputs.map((output) => ({ ...output })),
     codeInputs: tool.id === 'system-code' ? [{ id: `${nodeId}-input`, name: 'input', source: paramSource, value: '' }] : undefined,
     codeOutputs: tool.id === 'system-code' ? [{ id: `${nodeId}-output`, type: 'Array<json>', name: 'cleanBlocks', value: 'data.cleanBlocks' }] : undefined,
+    innerNodes: tool.id === 'system-iteration' ? [] : undefined,
+  };
+}
+
+function createDemoCodeNode(codeTool, config) {
+  const node = createWorkbenchNode(codeTool, { type: 'fixed' });
+  const codeInputs = config.codeInputs.map((input, index) => ({
+    id: `${node.nodeId}-input-${index + 1}`,
+    name: input.name,
+    source: input.source,
+    value: input.value || '',
+  }));
+  const codeOutputs = config.codeOutputs.map((output) => ({
+    id: output.id,
+    name: output.name,
+    type: output.type,
+    value: output.value,
+  }));
+  const withOutputs = syncCodeOutputs({
+    ...node,
+    codeInputs,
+    codeOutputs,
+    expanded: true,
+    adjusted: true,
+  }, codeOutputs);
+  return {
+    ...withOutputs,
+    params: withOutputs.params.map((param) => {
+      if (param.id === 'codeInput') return { ...param, source: codeInputs[0]?.source || param.source, value: codeInputs[0]?.value || '' };
+      if (param.id === 'script') return { ...param, value: config.script };
+      return param;
+    }),
+  };
+}
+
+function createConfiguredIterationNode(iterationTool, inputSource, codeTool, taggingTool) {
+  const iterationNode = createWorkbenchNode(iterationTool, inputSource);
+  const source = inputSource.type === 'upstream' ? { type: 'upstream', sourceNodeId: inputSource.sourceNodeId, outputPath: inputSource.outputPath } : { type: 'manual' };
+  const currentElementSource = { type: 'iteration', outputPath: 'currentElement' };
+  const prepareCode = codeTool ? createDemoCodeNode(codeTool, {
+    codeInputs: [{ name: 'knowledgePoint', source: currentElementSource }],
+    script: 'def main(knowledgePoint: dict) -> dict:\n    return {\n        "tagInput": {\n            "knowledgePointId": knowledgePoint.get("knowledgePointId"),\n            "title": knowledgePoint.get("title"),\n            "content": knowledgePoint.get("content"),\n            "sourceChunkIds": knowledgePoint.get("sourceChunkIds", [])\n        }\n    }',
+    codeOutputs: [{ id: 'tagInput', name: '打标入参', type: 'object', value: 'data.tagInput' }],
+  }) : null;
+  const taggingNode = taggingTool ? createWorkbenchNode(taggingTool, { type: 'fixed' }) : null;
+  const configuredTaggingNode = taggingNode ? {
+    ...taggingNode,
+    expanded: true,
+    adjusted: true,
+    inputSource: prepareCode ? { type: 'upstream', sourceNodeId: prepareCode.nodeId, outputPath: 'data.tagInput' } : currentElementSource,
+    params: taggingNode.params.map((param) => (
+      param.id === taggingNode.inputParamId
+        ? { ...param, source: prepareCode ? { type: 'upstream', sourceNodeId: prepareCode.nodeId, outputPath: 'data.tagInput' } : currentElementSource }
+        : param
+    )),
+  } : null;
+  const assembleCode = codeTool ? createDemoCodeNode(codeTool, {
+    codeInputs: [
+      { name: 'knowledgePoint', source: currentElementSource },
+      { name: 'tagResult', source: configuredTaggingNode ? { type: 'upstream', sourceNodeId: configuredTaggingNode.nodeId, outputPath: 'tagResult' } : { type: 'manual' } },
+    ],
+    script: 'def main(knowledgePoint: dict, tagResult: dict) -> dict:\n    return {\n        "taggedKnowledge": {\n            **knowledgePoint,\n            "tags": tagResult.get("tags", []),\n            "category": tagResult.get("category"),\n            "confidence": tagResult.get("confidence")\n        }\n    }',
+    codeOutputs: [{ id: 'taggedKnowledge', name: '最终打标结果', type: 'object', value: 'data.taggedKnowledge' }],
+  }) : null;
+  const innerNodes = [prepareCode, configuredTaggingNode, assembleCode].filter(Boolean);
+  const outputSourceNode = assembleCode || configuredTaggingNode || prepareCode;
+  const outputSource = outputSourceNode?.outputs?.find((output) => output.path === 'data.taggedKnowledge') || outputSourceNode?.outputs?.[0];
+  return {
+    ...iterationNode,
+    expanded: true,
+    innerNodes,
+    params: iterationNode.params.map((param) => {
+      if (param.id === 'iterationInput') return { ...param, source, value: '' };
+      if (param.id === 'iterationOutput' && outputSourceNode && outputSource) return { ...param, source: { type: 'upstream', sourceNodeId: outputSourceNode.nodeId, outputPath: outputSource.path || outputSource.id || outputSource.name }, value: '' };
+      if (param.id === 'concurrency') return { ...param, value: 1 };
+      if (param.id === 'iterationTimeout') return { ...param, value: 60 };
+      if (param.id === 'errorResponseMethod') return { ...param, value: '错误时终止' };
+      return param;
+    }),
   };
 }
 
@@ -3968,16 +4202,20 @@ function createAgentDemoNodes(catalog = readWorkbenchCatalog()) {
   const adapterTool = byId.get('system-code');
   const splitterTool = byId.get('medical-policy-splitter') || byId.get('recursive-separator-splitter') || byId.get('chunk-splitter') || catalog.find((tool) => getSemanticCategory(tool) === '文本分片');
   const storageTool = byId.get('system-storage');
-  const qaTool = byId.get('qa-extractor');
+  const knowledgeTool = byId.get('summary');
+  const iterationTool = byId.get('system-iteration');
+  const taggingTool = byId.get('knowledge-tagging');
   const parser = parserTool ? createWorkbenchNode(parserTool, { type: 'fixed' }) : null;
   const adapter = parser && adapterTool ? createWorkbenchNode(adapterTool, { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: 'sections' }) : null;
   const splitterSource = adapter || parser;
   const splitter = splitterTool && splitterSource ? createWorkbenchNode(splitterTool, { type: 'upstream', sourceNodeId: splitterSource.nodeId, outputPath: adapter ? 'data.cleanBlocks' : 'sections' }) : null;
-  const storage = storageTool && splitter ? createWorkbenchNode(storageTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }) : null;
-  const qa = qaTool && splitter ? createWorkbenchNode(qaTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }) : null;
-  return [parser, adapter, splitter, storage, qa].filter(Boolean).map((node) => ({
+  const knowledge = knowledgeTool && splitter ? createWorkbenchNode(knowledgeTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }) : null;
+  const iteration = iterationTool && knowledge ? createConfiguredIterationNode(iterationTool, { type: 'upstream', sourceNodeId: knowledge.nodeId, outputPath: 'summaryResult' }, adapterTool, taggingTool) : null;
+  const storageSource = iteration || knowledge || splitter;
+  const storage = storageTool && storageSource ? createWorkbenchNode(storageTool, { type: 'upstream', sourceNodeId: storageSource.nodeId, outputPath: iteration ? 'iterationResult' : knowledge ? 'summaryResult' : 'textChunkResult' }) : null;
+  return [parser, adapter, splitter, knowledge, iteration, storage].filter(Boolean).map((node) => ({
     ...node,
-    expanded: false,
+    expanded: isIterationNode(node),
     adjusted: true,
   }));
 }
@@ -4005,9 +4243,20 @@ function createOptimizedNodes(currentNodes, catalog = readWorkbenchCatalog()) {
   const splitter = next[splitterIndex >= 0 ? splitterIndex : next.findIndex((node) => getSemanticCategory(node) === '文本分片')];
   next.forEach((node, index) => {
     if (index <= splitterIndex || node.nodeId === splitter?.nodeId) return;
-    if (node.toolId === 'system-storage' || getSemanticCategory(node) === '知识提取') {
+    if (getSemanticCategory(node) === '知识提取') {
       next[index] = applyInputSource(node, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' });
     }
+  });
+  const knowledge = next.find((node) => node.toolId === 'summary');
+  const iterationIndex = next.findIndex(isIterationNode);
+  if (iterationIndex >= 0 && knowledge) {
+    next[iterationIndex] = applyInputSource(next[iterationIndex], { type: 'upstream', sourceNodeId: knowledge.nodeId, outputPath: 'summaryResult' });
+  }
+  const iteration = iterationIndex >= 0 ? next[iterationIndex] : null;
+  next.forEach((node, index) => {
+    if (node.toolId !== 'system-storage') return;
+    const source = iteration || knowledge || splitter;
+    if (source) next[index] = applyInputSource(node, { type: 'upstream', sourceNodeId: source.nodeId, outputPath: isIterationNode(source) ? 'iterationResult' : source.toolId === 'summary' ? 'summaryResult' : 'textChunkResult' });
   });
   return next;
 }
@@ -4053,6 +4302,61 @@ function getPriorNodes(nodes, nodeId) {
   return index > 0 ? nodes.slice(0, index) : [];
 }
 
+function getAllWorkbenchNodes(nodes) {
+  return nodes.flatMap((node) => [node, ...(node.innerNodes || [])]);
+}
+
+function isArrayOutput(output) {
+  return `${output?.type || ''} ${output?.desc || ''} ${output?.description || ''}`.toLowerCase().includes('array');
+}
+
+function getNodeOutputByPath(nodes, sourceNodeId, outputPath) {
+  const sourceNode = getAllWorkbenchNodes(nodes).find((item) => item.nodeId === sourceNodeId);
+  return getEffectiveNodeOutputs(sourceNode).find((output) => (output.path || output.id || output.name) === outputPath);
+}
+
+function getIterationOutputSourceType(node) {
+  if (!isIterationNode(node)) return '';
+  const source = getIterationParam(node, 'iterationOutput')?.source;
+  const sourceNode = (node.innerNodes || []).find((innerNode) => innerNode.nodeId === source?.sourceNodeId) || (node.innerNodes || [])[0];
+  const outputs = getEffectiveNodeOutputs(sourceNode);
+  const sourceOutput = outputs.find((output) => (output.path || output.id || output.name) === source?.outputPath) || outputs[0];
+  return sourceOutput ? getOutputDisplay(sourceOutput).type || sourceOutput.type || '' : '';
+}
+
+function getIterationResultOutputType(node) {
+  const sourceType = getIterationOutputSourceType(node);
+  return sourceType ? `Array<${sourceType}>` : 'Array';
+}
+
+function getEffectiveNodeOutputs(node) {
+  if (!node) return [];
+  if (!isIterationNode(node)) return node.outputs || [];
+  const resultType = getIterationResultOutputType(node);
+  return (node.outputs || []).map((output) => (
+    (output.path || output.id || output.name) === 'iterationResult'
+      ? { ...output, type: resultType, desc: `${resultType}，迭代体每轮单次输出聚合后的结果数组。` }
+      : output
+  ));
+}
+
+function normalizeIterationOutputSource(node) {
+  if (!isIterationNode(node)) return node;
+  const outputParam = getIterationParam(node, 'iterationOutput');
+  if (!outputParam || outputParam.source?.type === 'upstream') return node;
+  const sourceNode = (node.innerNodes || [])[0];
+  const sourceOutput = getEffectiveNodeOutputs(sourceNode)[0];
+  if (!sourceNode || !sourceOutput) return node;
+  return {
+    ...node,
+    params: node.params.map((param) => (
+      param.id === 'iterationOutput'
+        ? { ...param, source: { type: 'upstream', sourceNodeId: sourceNode.nodeId, outputPath: sourceOutput.path || sourceOutput.id || sourceOutput.name } }
+        : param
+    )),
+  };
+}
+
 function getPreviousEnabledNode(nodes, nodeId) {
   const prior = getPriorNodes(nodes, nodeId).filter((node) => node.enabled);
   return prior[prior.length - 1] || null;
@@ -4080,6 +4384,8 @@ function canNodeFeedNext(previousNode, node) {
   if (previousOutput === nodeInput) return true;
   if (getSemanticCategory(previousNode) === '文档解析' && getSemanticCategory(node) === '文本分片') return true;
   if (getSemanticCategory(previousNode) === '文本分片' && (getSemanticCategory(node) === '知识提取' || node.toolId === 'system-storage')) return true;
+  if (getSemanticCategory(previousNode) === '知识提取' && isIterationNode(node)) return true;
+  if (isIterationNode(previousNode) && node.toolId === 'system-storage') return true;
   if (previousNode.outputs?.some((output) => output.path.includes('cleanBlocks')) && getSemanticCategory(node) === '文本分片') return true;
   return false;
 }
@@ -4132,7 +4438,7 @@ function getParamProblems(node, receivesExternalInput = false) {
   if (!node.enabled) return [];
   return node.params.flatMap((param) => {
     if (!isParamVisible(node, param)) return [];
-    if (!param.required || param.source?.type === 'file' || param.source?.type === 'upstream') return [];
+    if (!param.required || param.source?.type === 'file' || param.source?.type === 'upstream' || param.source?.type === 'iteration') return [];
     if (param.id === node.inputParamId && (node.inputSource.type === 'upstream' || receivesExternalInput)) return [];
     if (typeof param.value === 'string' && !param.value.trim()) return [`${param.label} 未填写`];
     if (typeof param.value === 'number' && ((param.min !== undefined && param.value < param.min) || (param.max !== undefined && param.value > param.max))) return [`${param.label} 超出范围`];
@@ -4169,6 +4475,15 @@ function getNodeWarnings(nodes) {
     const issue = getConnectionIssueForNode(node, nodes);
     if (issue) nodeWarnings.push(issue.reason || inputSourceWarningText);
     if (node.status !== '可用') nodeWarnings.push(`${node.toolName} 当前不可用于新处理方案`);
+    if (isIterationNode(node)) {
+      const innerNodes = node.innerNodes || [];
+      const iterationInput = getIterationParam(node, 'iterationInput');
+      const iterationInputSource = iterationInput?.source || {};
+      const sourceOutput = iterationInputSource.type === 'upstream' ? getNodeOutputByPath(nodes, iterationInputSource.sourceNodeId, iterationInputSource.outputPath) : null;
+      if (iterationInputSource.type !== 'upstream') nodeWarnings.push('请选择节点输入');
+      else if (!isArrayOutput(sourceOutput)) nodeWarnings.push('节点输入必须为数组类型');
+      if (!innerNodes.length) nodeWarnings.push('请添加迭代体内部节点');
+    }
     if (nodeWarnings.length) warnings[node.nodeId] = nodeWarnings;
   });
   return warnings;
@@ -4216,6 +4531,12 @@ function getFirstPlanFailure(nodes) {
 function getBestOutputPathForTarget(upstream, target) {
   if (getSemanticCategory(upstream) === '文本分片') {
     return upstream.outputs.find((output) => output.path.includes('textChunkResult'))?.path || upstream.outputs[0]?.path || 'textChunkResult';
+  }
+  if (getSemanticCategory(upstream) === '知识提取' && isIterationNode(target)) {
+    return upstream.outputs.find((output) => output.path.includes('summaryResult') || output.path.includes('knowledgePoints'))?.path || upstream.outputs[0]?.path || 'summaryResult';
+  }
+  if (isIterationNode(upstream)) {
+    return upstream.outputs.find((output) => output.path.includes('iterationResult'))?.path || upstream.outputs[0]?.path || 'iterationResult';
   }
   if (upstream.outputs.some((output) => output.path.includes('cleanBlocks')) && getSemanticCategory(target) === '文本分片') {
     return upstream.outputs.find((output) => output.path.includes('cleanBlocks'))?.path || 'data.cleanBlocks';
@@ -4292,6 +4613,16 @@ function getSmartParamValue(param, instruction, node) {
   if (param.id === 'input') return getSemanticCategory(node) === '文本分片' ? '${upstream.paragraphs}' : '${upstream.textChunkResult}';
   if (param.id === 'extractionObject') return '${upstream.textChunkResult}';
   if (param.id === 'storageObject') return '${upstream.textChunkResult}';
+  if (param.id === 'iterationInput') return '${upstream.summaryResult}';
+  if (param.id === 'iterationOutput') return '${迭代体.节点输出}';
+  if (param.id === 'concurrency') return 1;
+  if (param.id === 'iterationTimeout') return 60;
+  if (param.id === 'errorResponseMethod') return '错误时终止';
+  if (param.id === 'taggingObject') return '${迭代执行.当前元素}';
+  if (param.id === 'knowledgeTitle') return '';
+  if (param.id === 'sourceChunkIds') return '';
+  if (param.id === 'tagStrategy') return '结构感知打标';
+  if (param.id === 'labelPool') return ['适用对象', '办理条件', '材料要求'];
   if (param.id === 'codeInput') return '${upstream.data.documentParseResult}';
   if (param.id === 'script') return 'function transform(input) {\n  return {\n    cleanBlocks: input.map(item => ({\n      title: item.title || item.heading,\n      text: item.text || item.content,\n      page: item.page,\n      source: item.source || item.fileName\n    })).filter(item => item.text)\n  };\n}';
   if (param.id === 'outputVariables') return '[{ "name": "cleanBlocks", "type": "Array<json>", "path": "data.cleanBlocks" }]';
@@ -4330,6 +4661,8 @@ function getSmartConfigureInstruction(node) {
   if (node.toolId === 'medical-policy-splitter') return '承接上游标准文本块，按章节边界生成 800 字左右的知识片段。';
   if (node.toolId === 'qa-extractor') return '承接分片结果，生成可用于客服问答的政策问答对。';
   if (node.toolId === 'summary') return '承接分片结果，生成政策知识点、适用对象和关键规则。';
+  if (node.toolId === 'system-iteration') return '承接知识点提取结果，对每个知识点逐项执行知识点打标，并聚合打标结果。';
+  if (node.toolId === 'knowledge-tagging') return '承接迭代执行的当前元素，对单个知识点完成结构感知打标。';
   if (node.toolId === 'system-storage') return '承接分片结果并以 upsert 方式写入 ES。';
   if (node.toolId === 'system-code') return '把解析输出转换为后续分片节点可消费的标准文本块。';
   return `补齐「${node.toolName}」在当前处理方案中的输入来源和必填参数。`;
@@ -4367,59 +4700,68 @@ function createSmartConfiguredNode(node, nodes, instruction) {
 
 function createSampleResult(file, options = {}) {
   const baseRuns = [
-      {
-        toolName: '文件解析',
-        category: '文档解析',
-        outputPath: 'sections',
-        parameters: [
-          { name: 'file', value: `${file.name} · ${file.size}` },
-          { name: 'parse_mode', value: 'policy_clause' },
-          { name: 'language', value: 'zh-CN' },
+    {
+      toolName: '文件解析',
+      category: '文档解析',
+      outputPath: 'sections',
+      parameters: [
+        { name: 'file', value: `${file.name} · ${file.size}` },
+        { name: 'parse_mode', value: 'policy_clause' },
+        { name: 'language', value: 'zh-CN' },
+      ],
+      status: '成功',
+      outputFull: JSON.stringify({ title: '医保政策样例', sections: [{ title: '适用范围', page: 1, content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' }, { title: '办理条件', page: 2, content: '参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可申请备案。' }], paragraphs: [{ id: 'p1', heading: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' }], metadata: { fileName: file.name, pageCount: 4, parserVersion: 'policy-parser-1.0', elapsedMs: 128 } }, null, 2),
+    },
+    {
+      toolName: '代码执行器',
+      category: '系统节点',
+      outputPath: 'data.cleanBlocks',
+      parameters: [{ name: 'input', value: 'sections' }, { name: 'script', value: 'return { cleanBlocks: sections.map(...) }' }],
+      status: '成功',
+      outputFull: JSON.stringify({ data: { cleanBlocks: [{ title: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 }, { title: '办理条件', text: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 }] }, scriptResult: { normalizedCount: 2 } }, null, 2),
+    },
+    {
+      toolName: '文本分片',
+      category: '文本分片',
+      outputPath: 'textChunkResult',
+      parameters: [{ name: 'input', value: 'data.cleanBlocks' }, { name: 'chunk_size', value: '800' }, { name: 'overlap', value: '80' }],
+      status: '成功',
+      outputFull: JSON.stringify({ textChunkResult: [{ chunkId: 'chunk-001', title: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 }, { chunkId: 'chunk-002', title: '办理条件', text: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 }], stats: { chunkCount: 2, chunkSize: 800, overlap: 80 } }, null, 2),
+    },
+    ...(options.includeKnowledge ? [{
+      toolName: '知识点提取',
+      category: '知识提取',
+      outputPath: 'summaryResult',
+      parameters: [{ name: 'input', value: 'textChunkResult' }, { name: 'summary_type', value: '政策摘要' }, { name: 'model', value: 'qwen3-8b' }],
+      status: '成功',
+      outputFull: JSON.stringify({ summary: '该政策说明医保参保人员异地就医备案与费用结算要求。', summaryResult: [{ knowledgePointId: 'kp-001', chunkId: 'chunk-001', title: '适用对象', content: '本政策面向本市医保参保人员。', sourceChunkIds: ['chunk-001'] }, { knowledgePointId: 'kp-002', chunkId: 'chunk-002', title: '备案条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', sourceChunkIds: ['chunk-002'] }], applicableUsers: ['城镇职工基本医保参保人', '城乡居民基本医保参保人'], keyRules: ['异地就医需先备案', '结算结果需支持人工复核'] }, null, 2),
+    }, {
+      toolName: '迭代执行',
+      category: '系统节点',
+      outputPath: 'iterationResult',
+      parameters: [{ name: '迭代输入数组', value: 'summaryResult' }, { name: '迭代体', value: '代码执行器 → 知识点打标 → 代码执行器' }, { name: '迭代结果来源', value: '最终打标结果' }, { name: '并发数量', value: '1' }],
+      status: '成功',
+      outputFull: JSON.stringify({
+        iterationResult: [
+          { knowledgePointId: 'kp-001', chunkId: 'chunk-001', title: '适用对象', content: '本政策面向本市医保参保人员。', tags: ['适用对象'], category: '政策适用范围', confidence: 0.93, sourceChunkIds: ['chunk-001'] },
+          { knowledgePointId: 'kp-002', chunkId: 'chunk-002', title: '备案条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', tags: ['办理条件', '备案流程'], category: '办理条件', confidence: 0.91, sourceChunkIds: ['chunk-002'] },
         ],
-        status: '成功',
-        outputFull: JSON.stringify({ title: '医保政策样例', sections: [{ title: '适用范围', page: 1, content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' }, { title: '办理条件', page: 2, content: '参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可申请备案。' }], paragraphs: [{ id: 'p1', heading: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' }], metadata: { fileName: file.name, pageCount: 4, parserVersion: 'policy-parser-1.0', elapsedMs: 128 } }, null, 2),
-      },
-      {
-        toolName: '代码执行器',
-        category: '系统节点',
-        outputPath: 'data.cleanBlocks',
-        parameters: [{ name: 'input', value: 'sections' }, { name: 'script', value: 'return { cleanBlocks: sections.map(...) }' }],
-        status: '成功',
-        outputFull: JSON.stringify({ data: { cleanBlocks: [{ title: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 }, { title: '办理条件', text: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 }] }, scriptResult: { normalizedCount: 2 } }, null, 2),
-      },
-      {
-        toolName: '文本分片',
-        category: '文本分片',
-        outputPath: 'textChunkResult',
-        parameters: [{ name: 'input', value: 'data.cleanBlocks' }, { name: 'chunk_size', value: '800' }, { name: 'overlap', value: '80' }],
-        status: '成功',
-        outputFull: JSON.stringify({ textChunkResult: [{ chunkId: 'chunk-001', title: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 }, { chunkId: 'chunk-002', title: '办理条件', text: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 }], stats: { chunkCount: 2, chunkSize: 800, overlap: 80 } }, null, 2),
-      },
-      {
-        toolName: '数据存储器',
-        category: '系统节点',
-        outputPath: 'data.storageRef',
-        parameters: [{ name: '存储对象', value: 'textChunkResult' }, { name: '存储方式', value: '写入ES' }, { name: '写入模式', value: 'upsert' }],
-        status: '成功',
-        outputFull: JSON.stringify({ data: { storageRef: 'es://knowledge_chunks/demo-policy-sample', storedCount: 2 }, writeResult: { acknowledged: true, failedCount: 0 } }, null, 2),
-      },
-      ...(options.includeKnowledge ? [{
-        toolName: '知识点提取',
-        category: '知识提取',
-        outputPath: 'summaryResult',
-        parameters: [{ name: 'input', value: 'textChunkResult' }, { name: 'summary_type', value: '政策摘要' }, { name: 'model', value: 'qwen3-8b' }],
-        status: '成功',
-        outputFull: JSON.stringify({ summary: '该政策说明医保参保人员异地就医备案与费用结算要求。', summaryResult: [{ title: '适用对象', content: '本政策面向本市医保参保人员。', sourceChunkIds: ['chunk-001'] }], applicableUsers: ['城镇职工基本医保参保人', '城乡居民基本医保参保人'], keyRules: ['异地就医需先备案', '结算结果需支持人工复核'] }, null, 2),
-      }] : []),
-      {
-        toolName: 'QA提取',
-        category: '知识提取',
-        outputPath: 'qaResult',
-        parameters: [{ name: 'input', value: 'textChunkResult' }, { name: 'model', value: 'qwen3-8b' }, { name: 'system_prompt', value: '请基于医保政策原文生成问答对，答案必须来自原文，并保留来源片段。' }],
-        status: '成功',
-        outputFull: JSON.stringify({ qaResult: [{ question: '异地就医备案政策适用于哪些人？', answer: '适用于本市基本医疗保险参保人员。', sourceChunkId: 'chunk-001' }] }, null, 2),
-      },
-    ];
+        iterationBodyRuns: [
+          { node: '代码执行器', output: 'data.tagInput', description: '从当前元素中整理知识点 ID、标题、正文和来源分片。' },
+          { node: '知识点打标', output: 'tagResult', description: '基于单个知识点生成标签、分类和置信度。' },
+          { node: '代码执行器', output: 'data.taggedKnowledge', description: '合并原始知识点和打标结果，形成单条最终打标结果。' },
+        ],
+        iterationStats: { total: 2, success: 2, failed: 0, concurrency: 1, timeoutSeconds: 60, errorResponseMethod: '错误时终止' },
+      }, null, 2),
+    }, {
+      toolName: '数据存储器',
+      category: '系统节点',
+      outputPath: 'data.storageRef',
+      parameters: [{ name: '存储对象', value: 'iterationResult' }, { name: '存储方式', value: '写入ES' }, { name: '写入模式', value: 'upsert' }],
+      status: '成功',
+      outputFull: JSON.stringify({ data: { storageRef: 'es://knowledge_tags/demo-policy-sample', storedCount: 2 }, writeResult: { acknowledged: true, failedCount: 0 } }, null, 2),
+    }] : []),
+  ];
   return {
     fileId: file.id,
     fileName: file.name,
@@ -4450,8 +4792,12 @@ function createSampleResultForPlan(file, nodes) {
 
 function getParamPreview(param, nodes = []) {
   if (param.source?.type === 'file') return '原始文件的地址信息';
+  if (param.source?.type === 'iteration') {
+    const variable = getIterationVariables().find((item) => item.value === normalizeIterationVariableValue(param.source.outputPath));
+    return variable?.label || '当前元素';
+  }
   if (param.source?.type === 'upstream') {
-    const source = nodes.find((node) => node.nodeId === param.source.sourceNodeId);
+    const source = getAllWorkbenchNodes(nodes).find((node) => node.nodeId === param.source.sourceNodeId);
     return `上游节点 · ${source?.toolName || '来源已失效'} · ${param.source.outputPath || '未选择输出'}`;
   }
   if (Array.isArray(param.value)) return param.value.length ? param.value.join('、') : '';
@@ -4461,18 +4807,44 @@ function getParamPreview(param, nodes = []) {
 }
 
 function getToolPreviewParams(node) {
+  if (isIterationNode(node)) return node.params;
   return node.params.filter((param) => param.id !== node.inputParamId);
 }
 
-function getSelectableNodeOutputs(sourceNode, currentPath = '') {
-  const outputs = (sourceNode?.outputs || []).map((output) => ({
+function getSelectableNodeOutputs(sourceNode) {
+  return getEffectiveNodeOutputs(sourceNode).map((output) => ({
     value: output.path || output.id || output.name,
-    label: output.label || output.name || output.path,
+    label: output.displayName || output.label || output.name || output.path,
+    type: output.type || getOutputDisplay(output).type || '',
+    desc: output.desc || output.description || '',
   })).filter((output) => output.value);
-  if (currentPath && !outputs.some((output) => output.value === currentPath)) {
-    outputs.push({ value: currentPath, label: currentPath });
-  }
-  return outputs;
+}
+
+function getComparableFieldType(type = '') {
+  const normalized = normalizeDataType(type);
+  if (normalized === 'json') return 'object';
+  if (normalized === 'textarea' || normalized === 'target' || normalized === 'select' || normalized === 'tags' || normalized === 'multiselect') return '';
+  return normalized;
+}
+
+function isOutputTypeMatched(param, output) {
+  const paramType = getComparableFieldType(param.schemaType || param.type || '');
+  const outputType = getComparableFieldType(output.type || '');
+  if (!paramType || !outputType) return true;
+  if (paramType === outputType) return true;
+  if (paramType === 'object' && outputType === 'json') return true;
+  if (paramType === 'url' && outputType === 'string') return true;
+  return false;
+}
+
+function getTypedSelectableOutputs(param, outputs) {
+  return outputs
+    .map((output, index) => ({ ...output, disabled: !isOutputTypeMatched(param, output), __index: index }))
+    .sort((a, b) => Number(a.disabled) - Number(b.disabled) || a.__index - b.__index);
+}
+
+function getFirstEnabledOutput(outputs) {
+  return outputs.find((output) => !output.disabled) || outputs[0];
 }
 
 function getRuntimeLabel(status) {
@@ -4511,7 +4883,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const [running, setRunning] = useState(qaRunningState);
   const [testing, setTesting] = useState(false);
   const [confirmed, setConfirmed] = useState(hasSavedCategoryPlan);
-  const [results, setResults] = useState(() => (qaGeneratedState || hasSavedCategoryPlan ? [createSampleResult({ ...sampleDemoFile, status: '已完成' })] : []));
+  const [results, setResults] = useState(() => (qaGeneratedState || hasSavedCategoryPlan ? [createSampleResult({ ...sampleDemoFile, status: '已完成' }, { includeKnowledge: true })] : []));
   const [connectionStates, setConnectionStates] = useState(() => {
     if (!['error', 'resolving', 'resolved'].includes(qaConnectionStatus)) return {};
     const [fromSection, toSection] = getCategorySections(planNodes);
@@ -4527,8 +4899,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   });
   const [nodeRuntime, setNodeRuntime] = useState(() => {
     if (!qaRunningState) return {};
-    const storage = planNodes.find((node) => node.toolId === 'system-storage');
-    return storage ? { [storage.nodeId]: { status: 'configuring', visibleParamCount: 2 } } : {};
+    const iteration = planNodes.find((node) => node.toolId === 'system-iteration');
+    return iteration ? { [iteration.nodeId]: { status: 'configuring', visibleParamCount: 2 } } : {};
   });
   const [agentInput, setAgentInput] = useState('');
   const [agentTask, setAgentTask] = useState(() => {
@@ -4543,12 +4915,16 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     return null;
   });
   const [addOpen, setAddOpen] = useState(qaAddToolOpen);
+  const [addParentId, setAddParentId] = useState(null);
   const [editingNode, setEditingNode] = useState(() => (
     qaEditToolId ? planNodes.find((node) => node.toolId === qaEditToolId || node.toolName === qaEditToolId) || null : null
   ));
+  const [editingParentId, setEditingParentId] = useState(null);
   const [draggingNodeId, setDraggingNodeId] = useState(null);
+  const [draggingInnerNode, setDraggingInnerNode] = useState(null);
   const [draggingSectionId, setDraggingSectionId] = useState(null);
   const [dragInsertTarget, setDragInsertTarget] = useState(null);
+  const [innerDragInsertTarget, setInnerDragInsertTarget] = useState(null);
   const streamRef = useRef(null);
   const fileRef = useRef(null);
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
@@ -4586,7 +4962,21 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const setRuntimeForNodes = (nodes, state) => setNodeRuntime((current) => ({ ...current, ...Object.fromEntries(nodes.map((node) => [node.nodeId, state])) }));
   const toggleNodeExpanded = (nodeId) => {
     if (running) return;
-    setPlanNodes((current) => current.map((node) => (node.nodeId === nodeId ? { ...node, expanded: !node.expanded } : node)));
+    setPlanNodes((current) => current.map((node) => {
+      if (node.nodeId === nodeId) {
+        const nextExpanded = !node.expanded;
+        return {
+          ...node,
+          expanded: nextExpanded,
+          innerNodes: isIterationNode(node) ? (node.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded: nextExpanded })) : node.innerNodes,
+        };
+      }
+      if (!(node.innerNodes || []).some((innerNode) => innerNode.nodeId === nodeId)) return node;
+      return {
+        ...node,
+        innerNodes: node.innerNodes.map((innerNode) => (innerNode.nodeId === nodeId ? { ...innerNode, expanded: !innerNode.expanded } : innerNode)),
+      };
+    }));
   };
 
   const addDemoSample = () => {
@@ -4606,11 +4996,12 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       notify('请先上传或添加样例文件', 'error');
       return;
     }
-    const [parser, adapter, splitter, storage, qa] = createAgentDemoNodes(catalog);
+    const [parser, adapter, splitter, knowledge, iteration, storage] = createAgentDemoNodes(catalog);
     const preFixNodes = [parser, splitter].filter(Boolean);
     const adaptedNodes = [parser, adapter, splitter].filter(Boolean);
-    const storageNodes = [parser, adapter, splitter, storage].filter(Boolean);
-    const finalNodes = [parser, adapter, splitter, storage, qa].filter(Boolean);
+    const knowledgeNodes = [parser, adapter, splitter, knowledge].filter(Boolean);
+    const iterationNodes = [parser, adapter, splitter, knowledge, iteration].filter(Boolean);
+    const finalNodes = [parser, adapter, splitter, knowledge, iteration, storage].filter(Boolean);
     const filesSnapshot = [...sampleFiles];
     setRunning(true);
     setConfirmed(false);
@@ -4703,7 +5094,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       parseEventId = pushEvent({ role: 'thought', title: '识别文档结构', content: '我会优先保留政策标题、条款层级和来源页码，因为后续分片和问答都依赖这些结构信息。', status: 'running' });
     });
     step(3200, () => {
-      updateEvent(parseEventId, { status: 'done', content: '结构识别完成：需要先解析文档，再做结构适配、分片、存储，并基于分片结果生成问答。' });
+      updateEvent(parseEventId, { status: 'done', content: '结构识别完成：需要先解析文档，再做结构适配、分片、知识点提取，并对知识点数组逐项打标后存储。' });
       setSampleFiles((current) => current.map((file) => ({ ...file, status: '试跑中' })));
       queryEventId = pushEvent({ role: 'thought', title: '节点目录查询', content: '输入：节点状态=可用，分类=文档解析/文本分片/知识提取/系统节点；输出：候选节点清单。', status: 'running', kind: 'toolCall' });
     });
@@ -4712,7 +5103,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       designEventId = pushEvent({ role: 'thought', title: '开始设计处理方案', content: '我会先生成主链路，再检查节点输出能否被后置节点直接消费。', status: 'running' });
     });
     step(3300, () => {
-      updateEvent(designEventId, { status: 'done', content: '方案设计完成。先搭建主链路，再检查节点输出与下游入参是否需要适配。', kind: 'flow', flowSteps: ['文档解析', '文本分片', '系统节点', '知识提取'] });
+      updateEvent(designEventId, { status: 'done', content: '方案设计完成。先搭建解析、分片和知识点提取主链路，再通过迭代执行逐项处理知识点数组，并在迭代体内完成打标入参整理、知识点打标和结果拼装。', kind: 'flow', flowSteps: ['文档解析', '文本分片', '知识点提取', '迭代执行', '数据存储'] });
     });
 
     buildFlowNode([parser], [parser], '文档解析节点', '候选节点=通用OCR解析；选择原因=该节点适合处理扫描件和 PDF 文件解析。');
@@ -4750,8 +5141,9 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       setConnectionStates({});
     });
 
-    buildFlowNode([storage], storageNodes, '系统节点', '候选节点=数据存储器；选择原因=需要把分片结果写入 ES 供后续检索使用。');
-    buildFlowNode([qa].filter(Boolean), finalNodes, '知识提取节点', '候选节点=QA提取；选择原因=自动方案先完成问答抽取，知识点提取可在后续手动添加。');
+    buildFlowNode([knowledge].filter(Boolean), knowledgeNodes, '知识点提取节点', '候选节点=知识点提取；选择原因=需要先把分片结果提炼为知识点数组。');
+    buildFlowNode([iteration].filter(Boolean), iterationNodes, '系统节点', '候选节点=迭代执行；选择原因=知识点打标一次只处理一个知识点，需要在迭代体内按“代码执行器-知识点打标-代码执行器”逐项处理知识点数组。');
+    buildFlowNode([storage].filter(Boolean), finalNodes, '系统节点', '候选节点=数据存储器；选择原因=需要把迭代执行聚合后的打标结果写入 ES。');
 
     step(2200, () => {
       setConnectionStates({});
@@ -4769,12 +5161,12 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     });
     step(2000, () => {
       setRuntimeForNodes(finalNodes, { status: 'success' });
-      updateEvent(executeEventId, { status: 'done', content: '试跑结果：所有节点执行成功；分片结果已写入 ES；问答结果已生成。' });
+      updateEvent(executeEventId, { status: 'done', content: '试跑结果：所有节点执行成功；知识点打标结果已按知识点逐条生成，并聚合为迭代结果写入存储。' });
     });
     step(1200, () => {
       setRuntimeForNodes(finalNodes, { status: 'done' });
       setSampleFiles((current) => current.map((file) => ({ ...file, status: '已完成' })));
-      setResults(filesSnapshot.map(createSampleResult));
+      setResults(filesSnapshot.map((file) => createSampleResult(file, { includeKnowledge: true })));
       pushEvent({ role: 'agent', title: '方案生成与样例执行完成', content: '已完成方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。', status: 'done' });
       setRunning(false);
       notify('Agent 已完成方案生成和样例执行', 'success');
@@ -4883,8 +5275,22 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
 
   const addTool = (tool) => {
     if (!tool) return;
-    if (planNodes.some((node) => node.toolId === tool.id) && !tool.allowMultiple) {
-      notify('该节点已添加', 'warning');
+    if (addParentId) {
+      const node = applyIterationSourceToNode(clearManualNodeConfig(createWorkbenchNode(tool, { type: 'fixed' })));
+      setPlanNodes((current) => current.map((item) => {
+        if (item.nodeId !== addParentId) return item;
+        const nextInnerNodes = [...(item.innerNodes || []), { ...node, expanded: true, adjusted: true }];
+        return {
+          ...item,
+          expanded: true,
+          innerNodes: nextInnerNodes,
+        };
+      }));
+      setConnectionStates({});
+      setAddOpen(false);
+      setAddParentId(null);
+      setConfirmed(false);
+      notify(`已添加内部节点：${node.toolName}`, 'success');
       return;
     }
     const prev = planNodes[planNodes.length - 1];
@@ -4892,6 +5298,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setConnectionStates({});
     setPlanNodes((current) => [...current, { ...node, expanded: true, adjusted: true }]);
     setAddOpen(false);
+    setAddParentId(null);
     setConfirmed(false);
     notify(`已添加节点，已归入${node.category}`, 'success');
   };
@@ -4956,8 +5363,45 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   };
 
   const updateNode = (node) => {
-    setPlanNodes((current) => current.map((item) => item.nodeId === node.nodeId ? node : item));
+    const nodeDescription = node.description?.trim() || '';
+    const namedNode = {
+      ...node,
+      toolName: node.toolName?.trim() || editingNode?.toolName || node.name || '未命名节点',
+      description: nodeDescription,
+      summary: nodeDescription || node.summary,
+    };
+    const normalizedNode = normalizeIterationOutputSource(namedNode);
+    const nextNode = isIterationNode(normalizedNode) ? { ...normalizedNode, outputs: getEffectiveNodeOutputs(normalizedNode) } : normalizedNode;
+    setPlanNodes((current) => {
+      if (!editingParentId) return current.map((item) => item.nodeId === nextNode.nodeId ? nextNode : item);
+      return current.map((item) => (item.nodeId === editingParentId
+        ? { ...item, innerNodes: (item.innerNodes || []).map((innerNode) => (innerNode.nodeId === nextNode.nodeId ? nextNode : innerNode)) }
+        : item));
+    });
     setEditingNode(null);
+    setEditingParentId(null);
+    setConfirmed(false);
+  };
+
+  const openAddNode = (parentId = null) => {
+    setAddParentId(parentId);
+    setAddOpen(true);
+  };
+
+  const openEditNode = (node, parentId = null) => {
+    setEditingParentId(parentId);
+    setEditingNode(node);
+  };
+
+  const deleteInnerNode = (parentId, innerNode) => {
+    setPlanNodes((current) => current.map((node) => {
+      if (node.nodeId !== parentId) return node;
+      const nextInnerNodes = (node.innerNodes || []).filter((item) => item.nodeId !== innerNode.nodeId);
+      return {
+        ...node,
+        innerNodes: nextInnerNodes,
+      };
+    }));
     setConfirmed(false);
   };
 
@@ -5030,6 +5474,48 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setDraggingNodeId(null);
   };
 
+  const clearInnerDragState = () => {
+    setDraggingInnerNode(null);
+    setInnerDragInsertTarget(null);
+  };
+
+  const getInnerInsertTarget = (event, parentId, targetNodeId) => {
+    if (!draggingInnerNode || draggingInnerNode.parentId !== parentId || draggingInnerNode.nodeId === targetNodeId) {
+      return null;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+    return { parentId, targetNodeId, position };
+  };
+
+  const updateInnerInsertTarget = (event, parentId, targetNodeId) => {
+    setInnerDragInsertTarget(getInnerInsertTarget(event, parentId, targetNodeId));
+  };
+
+  const dropInnerNodeAtInsertTarget = (target = innerDragInsertTarget) => {
+    if (!draggingInnerNode || !target || draggingInnerNode.parentId !== target.parentId || draggingInnerNode.nodeId === target.targetNodeId || !canEdit) {
+      clearInnerDragState();
+      return;
+    }
+    const { parentId, targetNodeId, position } = target;
+    setPlanNodes((current) => current.map((node) => {
+      if (node.nodeId !== parentId) return node;
+      const innerNodes = node.innerNodes || [];
+      const from = innerNodes.findIndex((innerNode) => innerNode.nodeId === draggingInnerNode.nodeId);
+      const to = innerNodes.findIndex((innerNode) => innerNode.nodeId === targetNodeId);
+      if (from < 0 || to < 0) return node;
+      const nextInnerNodes = [...innerNodes];
+      const [moved] = nextInnerNodes.splice(from, 1);
+      const targetIndex = nextInnerNodes.findIndex((innerNode) => innerNode.nodeId === targetNodeId);
+      if (targetIndex < 0) return node;
+      nextInnerNodes.splice(position === 'after' ? targetIndex + 1 : targetIndex, 0, { ...moved, adjusted: true });
+      return { ...node, innerNodes: nextInnerNodes };
+    }));
+    clearManualConnectionStates();
+    setConfirmed(false);
+    clearInnerDragState();
+  };
+
   return (
     <div className="workbench-page">
       <PageHeader title="方案工作台" subtitle={workbenchContextText} actions={categoryId ? <button type="button" className="secondary" onClick={onBack}><LeftOutlined /> 返回类目</button> : null} />
@@ -5070,7 +5556,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
             <div className="plan-tab">
               <div className="plan-summary">
                 <strong>{workbenchPlanTitle}</strong>
-                <button type="button" className="icon-button primary-mini" disabled={!canEdit} onClick={() => setAddOpen(true)}><PlusOutlined /></button>
+                <button type="button" className="icon-button primary-mini" disabled={!canEdit} onClick={() => openAddNode()}><PlusOutlined /></button>
               </div>
               <div className="workflow-list">
                 {categorySections.length ? categorySections.map((section, index) => {
@@ -5104,7 +5590,16 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                         onSectionDragEnd={clearSectionDragState}
                         onToolDragStart={setDraggingNodeId}
                         onToolDrop={dropToolOnNode}
-                        onEdit={setEditingNode}
+                        onEdit={(node) => openEditNode(node)}
+                        onAddInner={(node) => openAddNode(node.nodeId)}
+                        onEditInner={(parentNode, innerNode) => openEditNode(innerNode, parentNode.nodeId)}
+                        onDeleteInner={deleteInnerNode}
+                        draggingInnerNode={draggingInnerNode}
+                        innerDragInsertTarget={innerDragInsertTarget}
+                        onInnerDragStart={(parentId, nodeId) => setDraggingInnerNode(parentId && nodeId ? { parentId, nodeId } : null)}
+                        onInnerDragOver={updateInnerInsertTarget}
+                        onInnerDrop={dropInnerNodeAtInsertTarget}
+                        onInnerDragEnd={clearInnerDragState}
                         onToggle={toggleNodeExpanded}
                         onDelete={(node) => { setPlanNodes((current) => current.filter((item) => item.nodeId !== node.nodeId)); setConfirmed(false); }}
                         onSmartConfigure={(node) => setAgentTask({ type: 'tool-config', nodeId: node.nodeId, toolName: node.toolName })}
@@ -5129,8 +5624,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
           </div>
         </aside>
       </div>
-      {addOpen ? <AddToolDialog tools={catalog} categories={toolCategories} nodes={planNodes} confirmed={confirmed} onClose={() => setAddOpen(false)} onAdd={addTool} /> : null}
-      {editingNode ? <EditNodeDialog node={editingNode} nodes={planNodes} onClose={() => setEditingNode(null)} onSave={updateNode} /> : null}
+      {addOpen ? <AddToolDialog tools={catalog} categories={toolCategories} nodes={planNodes} confirmed={confirmed} parentId={addParentId} onClose={() => { setAddOpen(false); setAddParentId(null); }} onAdd={addTool} /> : null}
+      {editingNode ? <EditNodeDialog node={editingNode} nodes={planNodes} parentId={editingParentId} onClose={() => { setEditingNode(null); setEditingParentId(null); }} onSave={updateNode} /> : null}
     </div>
   );
 }
@@ -5156,11 +5651,20 @@ function WorkflowSection({
   canEdit,
   draggingSectionId,
   draggingNodeId,
+  draggingInnerNode,
+  innerDragInsertTarget,
   onSectionDragStart,
   onSectionDragEnd,
   onToolDragStart,
   onToolDrop,
+  onInnerDragStart,
+  onInnerDragOver,
+  onInnerDrop,
+  onInnerDragEnd,
   onEdit,
+  onAddInner,
+  onEditInner,
+  onDeleteInner,
   onToggle,
   onDelete,
   onSmartConfigure,
@@ -5192,7 +5696,117 @@ function WorkflowSection({
         <div className="workflow-tools">
           {section.nodes.map((node) => {
             const rawToolWarnings = rawWarnings[node.nodeId] || [];
+            if (isIterationNode(node)) {
+              return (
+                <IterationRuntimeCard
+                  key={node.nodeId}
+                  node={node}
+                  nodes={nodes}
+                  warnings={nodeWarnings[node.nodeId] || []}
+                  runtime={nodeRuntime[node.nodeId]}
+                  canEdit={canEdit}
+                  onEdit={() => onEdit(node)}
+                  onToggle={() => onToggle(node.nodeId)}
+                  onDelete={() => onDelete(node)}
+                  onAddInner={() => onAddInner(node)}
+                  onEditInner={(innerNode) => onEditInner(node, innerNode)}
+                  onToggleInner={onToggle}
+                  draggingInnerNode={draggingInnerNode}
+                  innerDragInsertTarget={innerDragInsertTarget}
+                  onInnerDragStart={onInnerDragStart}
+                  onInnerDragOver={onInnerDragOver}
+                  onInnerDrop={onInnerDrop}
+                  onInnerDragEnd={onInnerDragEnd}
+                  onDeleteInner={(innerNode) => onDeleteInner(node.nodeId, innerNode)}
+                />
+              );
+            }
             return <ToolRuntimeRow key={node.nodeId} node={node} nodes={nodes} warnings={nodeWarnings[node.nodeId] || []} needsSmartHandling={needsSmartToolHandling(node, rawToolWarnings)} runtime={nodeRuntime[node.nodeId]} canEdit={canEdit} canDrag={canEdit && section.nodes.length > 1} isDragging={draggingNodeId === node.nodeId} onDragStart={() => onToolDragStart(node.nodeId)} onDrop={() => onToolDrop(node.nodeId)} onEdit={() => onEdit(node)} onToggle={() => onToggle(node.nodeId)} onDelete={() => onDelete(node)} onSmartConfigure={() => onSmartConfigure(node)} />;
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function getIterationParam(node, paramId) {
+  return node.params.find((param) => param.id === paramId);
+}
+
+function IterationRuntimeCard({ node, nodes, warnings, runtime, canEdit, onEdit, onToggle, onDelete, onAddInner, onEditInner, onToggleInner, draggingInnerNode, innerDragInsertTarget, onInnerDragStart, onInnerDragOver, onInnerDrop, onInnerDragEnd, onDeleteInner }) {
+  const status = runtime?.status || 'done';
+  const configured = status === 'configured' || status === 'success';
+  const expanded = status === 'configuring' || node.expanded;
+  const runtimeLabel = getRuntimeLabel(status);
+  return (
+    <div className={`tool-runtime-row iteration-runtime-row ${warnings.length ? 'warning' : ''} ${configured ? 'success' : ''} ${expanded ? 'expanded' : ''}`}>
+      <div className="tool-runtime-main" role="button" tabIndex={0} onClick={onToggle} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onToggle(); }}>
+        <span className="tool-runtime-icon iteration-icon">{status === 'running' || status === 'configuring' ? <SyncOutlined spin /> : <SyncOutlined />}</span>
+        <span className="tool-runtime-name">{node.toolName}</span>
+        {runtimeLabel ? <em>{runtimeLabel}</em> : null}
+      </div>
+      <div className="tool-runtime-actions">
+        <button type="button" disabled={!canEdit} onClick={onEdit}><EditOutlined /></button>
+        <button type="button" disabled={!canEdit} className="danger-link" onClick={onDelete}><DeleteOutlined /></button>
+      </div>
+      <div className={`iteration-body ${expanded ? 'expanded' : 'collapsed'}`}>
+        <div className="iteration-body-head">
+          <strong>迭代体</strong>
+          <button type="button" className="iteration-add-inner-button" disabled={!canEdit} onClick={onAddInner}>
+            <PlusOutlined />
+            添加内部节点
+          </button>
+        </div>
+        <div className="iteration-inner-list">
+          {(node.innerNodes || []).map((innerNode, index) => {
+            const insertPosition = innerDragInsertTarget?.parentId === node.nodeId && innerDragInsertTarget?.targetNodeId === innerNode.nodeId ? innerDragInsertTarget.position : null;
+            return (
+              <div
+                className="iteration-inner-section-wrap"
+                key={innerNode.nodeId}
+                onDragOver={canEdit ? (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onInnerDragOver(event, node.nodeId, innerNode.nodeId);
+                } : undefined}
+                onDrop={canEdit ? (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onInnerDrop();
+                } : undefined}
+              >
+                {insertPosition === 'before' ? <div className="workflow-drop-indicator iteration-drop-indicator" /> : null}
+                <div className="workflow-section iteration-inner-section">
+                  <div className="workflow-step">
+                    <div className="step-number">{String(index + 1).padStart(2, '0')}</div>
+                    {index < (node.innerNodes || []).length - 1 ? <div className="workflow-line" /> : null}
+                  </div>
+                  <div className="workflow-body">
+                    <div className="workflow-tools">
+                      <ToolRuntimeRow
+                        node={innerNode}
+                        nodes={nodes}
+                        warnings={[]}
+                        needsSmartHandling={false}
+                        runtime={null}
+                        canEdit={canEdit}
+                        canDrag={canEdit && (node.innerNodes || []).length > 1}
+                        isDragging={draggingInnerNode?.parentId === node.nodeId && draggingInnerNode?.nodeId === innerNode.nodeId}
+                        onDragStart={() => onInnerDragStart(node.nodeId, innerNode.nodeId)}
+                        onDragOver={(event) => onInnerDragOver(event, node.nodeId, innerNode.nodeId)}
+                        onDrop={() => onInnerDrop()}
+                        onDragEnd={onInnerDragEnd}
+                        onEdit={() => onEditInner(innerNode)}
+                        onToggle={() => onToggleInner(innerNode.nodeId)}
+                        onDelete={() => onDeleteInner(innerNode)}
+                        onSmartConfigure={() => {}}
+                      />
+                    </div>
+                  </div>
+                </div>
+                {insertPosition === 'after' ? <div className="workflow-drop-indicator iteration-drop-indicator" /> : null}
+              </div>
+            );
           })}
         </div>
       </div>
@@ -5212,7 +5826,7 @@ function ToolPendingRow({ status }) {
   );
 }
 
-function ToolRuntimeRow({ node, nodes, warnings, needsSmartHandling, runtime, canEdit, canDrag, isDragging, onDragStart, onDrop, onEdit, onToggle, onDelete, onSmartConfigure }) {
+function ToolRuntimeRow({ node, nodes, warnings, needsSmartHandling, runtime, canEdit, canDrag, isDragging, onDragStart, onDragOver, onDrop, onDragEnd, onEdit, onToggle, onDelete, onSmartConfigure }) {
   const status = runtime?.status || 'done';
   const configured = status === 'configured' || status === 'success';
   if (status === 'building' || status === 'selectingTool') return <ToolPendingRow status={status} />;
@@ -5233,12 +5847,14 @@ function ToolRuntimeRow({ node, nodes, warnings, needsSmartHandling, runtime, ca
       onDragOver={canDrag ? (event) => {
         event.preventDefault();
         event.stopPropagation();
+        onDragOver?.(event);
       } : undefined}
       onDrop={canDrag ? (event) => {
         event.preventDefault();
         event.stopPropagation();
         onDrop();
       } : undefined}
+      onDragEnd={canDrag ? onDragEnd : undefined}
     >
       <div
         className="tool-runtime-main"
@@ -5280,27 +5896,26 @@ function ToolRuntimeRow({ node, nodes, warnings, needsSmartHandling, runtime, ca
   );
 }
 
-function AddToolDialog({ tools, categories, nodes, confirmed, onClose, onAdd }) {
+function AddToolDialog({ tools, categories, nodes, confirmed, parentId, onClose, onAdd }) {
   const [category, setCategory] = useState(allToolsCategory);
-  const [selectedId, setSelectedId] = useState(tools[0]?.id || '');
+  const scopedTools = parentId ? tools.filter((tool) => tool.id !== 'system-iteration') : tools;
+  const [selectedId, setSelectedId] = useState(scopedTools[0]?.id || '');
   const cats = [allToolsCategory, ...sortWorkbenchCategories(Array.from(new Set([...(categories || []), '系统节点'].filter(Boolean))))];
-  const filtered = category === allToolsCategory ? tools : tools.filter((tool) => tool.category === category);
-  const current = tools.find((tool) => tool.id === selectedId) || filtered[0];
-  const addedToolIds = new Set(nodes.map((node) => node.toolId));
-  const selectedToolAdded = Boolean(current && addedToolIds.has(current.id) && !current.allowMultiple);
+  const scopedCats = cats.filter((cat) => cat === allToolsCategory || scopedTools.some((tool) => tool.category === cat));
+  const filtered = category === allToolsCategory ? scopedTools : scopedTools.filter((tool) => tool.category === category);
+  const current = scopedTools.find((tool) => tool.id === selectedId) || filtered[0];
   return (
     <Modal
       title="添加节点"
       wide
       className="add-tool-modal"
       onClose={onClose}
-      footer={<><button type="button" className="secondary" onClick={onClose}>取消</button><button type="button" className="primary" disabled={!current || selectedToolAdded || confirmed} onClick={() => onAdd(current)}>{selectedToolAdded ? '节点已添加' : confirmed ? '方案已确认' : '确认添加'}</button></>}
+      footer={<><button type="button" className="secondary" onClick={onClose}>取消</button><button type="button" className="primary" disabled={!current || confirmed} onClick={() => onAdd(current)}>{confirmed ? '方案已确认' : '确认添加'}</button></>}
     >
       <div className="add-tool-grid">
-        <div className="tool-picker-list category-picker"><div className="tool-picker-title">节点分类</div>{cats.map((cat) => <button type="button" key={cat} className={category === cat ? 'active' : ''} onClick={() => { setCategory(cat); setSelectedId((cat === allToolsCategory ? tools : tools.filter((tool) => tool.category === cat))[0]?.id || ''); }}><span>{cat}</span><Badge>{cat === allToolsCategory ? tools.length : tools.filter((tool) => tool.category === cat).length}</Badge></button>)}</div>
+        <div className="tool-picker-list category-picker"><div className="tool-picker-title">节点分类</div>{scopedCats.map((cat) => <button type="button" key={cat} className={category === cat ? 'active' : ''} onClick={() => { setCategory(cat); setSelectedId((cat === allToolsCategory ? scopedTools : scopedTools.filter((tool) => tool.category === cat))[0]?.id || ''); }}><span>{cat}</span><Badge>{cat === allToolsCategory ? scopedTools.length : scopedTools.filter((tool) => tool.category === cat).length}</Badge></button>)}</div>
         <div className="tool-picker-list tool-list-picker"><div className="tool-picker-title">节点列表</div>{filtered.map((tool) => {
-          const isAdded = addedToolIds.has(tool.id) && !tool.allowMultiple;
-          return <button type="button" key={tool.id} className={`${selectedId === tool.id ? 'active' : ''} ${isAdded ? 'added' : ''}`.trim()} onClick={() => setSelectedId(tool.id)}><strong>{tool.name}{isAdded ? <Badge>已添加</Badge> : null}</strong><span>{tool.category} · {tool.summary}</span></button>;
+          return <button type="button" key={tool.id} className={selectedId === tool.id ? 'active' : ''} onClick={() => setSelectedId(tool.id)}><strong>{tool.name}</strong><span>{tool.category} · {tool.summary}</span></button>;
         })}</div>
         <div className="tool-detail-mini">{current ? <AddNodeDetail tool={current} /> : null}</div>
       </div>
@@ -5316,7 +5931,7 @@ function AddNodeDetail({ tool }) {
   const nodeInputRows = artifactInputs.length ? artifactInputs.map(artifactToNodeDetailRow) : legacyNodeInputs.map(paramToNodeDetailRow);
   const configParams = artifactInputs.length ? (tool.params || []) : (tool.params || []).filter((param) => !inputIds.has(param.id));
   const outputRows = (tool.outputs || []).map((output) => ({
-    name: output.label || output.name,
+    name: output.displayName || output.label || output.name,
     description: output.desc || output.description || output.path || '',
     type: output.type || 'object',
   }));
@@ -5331,7 +5946,7 @@ function AddNodeDetail({ tool }) {
 
 function artifactToNodeDetailRow(artifact) {
   return {
-    name: artifact.displayName || artifact.name,
+    name: artifact.displayName || artifact.label || artifact.name,
     description: artifact.description || '',
     type: artifact.type || artifact.artifactType || 'object',
     required: artifact.required ?? true,
@@ -5340,7 +5955,7 @@ function artifactToNodeDetailRow(artifact) {
 
 function paramToNodeDetailRow(param) {
   return {
-    name: param.label || param.name || param.id,
+    name: param.displayName || param.label || param.name || param.id,
     description: param.desc || param.description || '',
     type: param.schemaType || param.type || 'text',
     required: Boolean(param.required),
@@ -5396,7 +6011,7 @@ function NodeOutputReadonlyTable({ outputs }) {
         return (
           <span className="output-item" key={output.path || output.id || output.name}>
             <span className="output-item-title">
-              <code>{output.label || output.name || '-'}</code>
+              <code>{output.displayName || output.label || output.name || '-'}</code>
               {display.type ? <strong>{display.type}</strong> : null}
             </span>
             <small>{display.description || '-'}</small>
@@ -5416,17 +6031,24 @@ function getOutputDisplay(output) {
   return { type, description: cleanedDescription };
 }
 
-function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, inlineSource = false, showHeader = true, showFx = true }) {
-  const active = param.source?.type === 'file' || param.source?.type === 'upstream';
-  const sourceType = param.source?.type === 'upstream' ? 'upstream' : param.source?.type === 'file' ? 'file' : 'manual';
+function ParamEditor({ param, nodes, priorNodes, iterationContext = null, onChange, singleLine = false, inlineSource = false, showHeader = true, showFx = true, allowFileSource = true }) {
+  const active = param.source?.type === 'file' || param.source?.type === 'upstream' || param.source?.type === 'iteration';
+  const sourceType = param.source?.type === 'iteration' ? 'iteration' : param.source?.type === 'upstream' ? 'upstream' : param.source?.type === 'file' ? 'file' : 'manual';
+  const iterationVariableValue = normalizeIterationVariableValue(param.source?.outputPath);
+  const iterationVariableOptions = getIterationVariables();
+  const upstreamSourceDisabled = priorNodes.length === 0;
   const upstreamNode = priorNodes.find((item) => item.nodeId === param.source?.sourceNodeId) || priorNodes[0];
-  const upstreamOutputs = getSelectableNodeOutputs(upstreamNode, param.source?.outputPath);
+  const upstreamOutputs = getTypedSelectableOutputs(param, getSelectableNodeOutputs(upstreamNode));
+  const upstreamNodeValue = param.source?.sourceNodeId || upstreamNode?.nodeId || '';
+  const upstreamOutputValue = param.source?.outputPath || getFirstEnabledOutput(upstreamOutputs)?.value || '';
   const updateSourceType = (type) => {
     if (type === 'manual') onChange({ ...param, source: { type: 'manual' } });
-    else if (type === 'file') onChange({ ...param, source: { type: 'file' } });
+    else if (type === 'file' && allowFileSource) onChange({ ...param, source: { type: 'file' } });
+    else if (type === 'iteration') onChange({ ...param, source: { type: 'iteration', outputPath: iterationVariableValue } });
     else {
       const source = priorNodes.find((node) => node.nodeId === param.source?.sourceNodeId) || priorNodes[0];
-      onChange({ ...param, source: source ? { type: 'upstream', sourceNodeId: source.nodeId, outputPath: source.outputs[0]?.path || 'data.result' } : { type: 'file' } });
+      const outputs = getTypedSelectableOutputs(param, getSelectableNodeOutputs(source));
+      onChange({ ...param, source: source ? { type: 'upstream', sourceNodeId: source.nodeId, outputPath: getFirstEnabledOutput(outputs)?.value || '' } : { type: 'manual' } });
     }
   };
   const renderManualField = () => param.type === 'textarea' && !singleLine && !inlineSource
@@ -5438,31 +6060,54 @@ function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, i
         : <input type={param.type === 'number' ? 'number' : 'text'} value={Array.isArray(param.value) ? param.value.join('、') : param.value} onChange={(event) => onChange({ ...param, value: param.type === 'number' ? Number(event.target.value) : event.target.value })} />;
 
   if (inlineSource) {
-    const inlineSourceType = sourceType === 'upstream' ? 'upstream' : 'file';
+    const inlineSourceType = sourceType === 'iteration' ? 'iteration' : sourceType === 'upstream' ? 'upstream' : allowFileSource ? 'file' : 'upstream';
+    const isIterationOutputParam = param.id === 'iterationOutput';
+    const fieldType = isIterationOutputParam ? '' : (param.schemaType || param.type || '');
+    const upstreamSourceLabel = isIterationOutputParam ? '引用子流程节点输出' : '引用上游节点输出';
+    const upstreamNodeLabel = isIterationOutputParam ? '子流程节点' : '上游节点';
+    const upstreamOutputLabel = isIterationOutputParam ? '子流程节点输出' : '选择输出';
     return (
-      <div className="param-editor-row inline-source">
+      <div className={`param-editor-row inline-source ${isIterationOutputParam ? 'iteration-output-source' : ''}`.trim()}>
         <label className="param-name-column">
           <span>{showHeader ? '参数名称' : ''}</span>
-          <div className="param-name-display">{param.label}{param.required ? <em>*</em> : null}</div>
+          <div className="param-name-display">
+            <span>{param.displayName || param.label}</span>
+            <FieldTypeTag type={fieldType} />
+          </div>
         </label>
         <label className="source-field">
           <span>{showHeader ? '取值方式' : ''}</span>
           <SelectField value={inlineSourceType} onChange={updateSourceType}>
-            <option value="file">引用原始文件</option>
-            <option value="upstream" disabled={priorNodes.length === 0}>引用上游节点输出</option>
+            {allowFileSource ? <option value="file">引用原始文件</option> : null}
+            <option value="upstream" disabled={upstreamSourceDisabled}>{upstreamSourceLabel}</option>
+            {iterationContext ? <option value="iteration">引用迭代变量</option> : null}
           </SelectField>
         </label>
         <div className="param-value-column">
           <span>{showHeader ? '参数值' : ''}</span>
           {inlineSourceType === 'file' ? <input readOnly value="原始文件的地址信息" /> : null}
+          {inlineSourceType === 'iteration' ? (
+            <SelectField value={iterationVariableValue} onChange={(outputPath) => onChange({ ...param, source: { type: 'iteration', outputPath } })}>
+              {iterationVariableOptions.map((variable) => (
+                <option key={variable.value} value={variable.value}>
+                  <OptionLabelWithType label={variable.label} type={variable.type} />
+                </option>
+              ))}
+            </SelectField>
+          ) : null}
           {inlineSourceType === 'upstream' ? (
             <div className="param-upstream-setting">
-              <PrefixedSelectField label="上游节点" value={param.source?.sourceNodeId || ''} onChange={(value) => {
+              <PrefixedSelectField label={upstreamNodeLabel} value={upstreamNodeValue} onChange={(value) => {
                   const source = priorNodes.find((item) => item.nodeId === value);
-                  onChange({ ...param, source: { type: 'upstream', sourceNodeId: value, outputPath: source?.outputs[0]?.path || 'data.result' } });
+                  const outputs = getTypedSelectableOutputs(param, getSelectableNodeOutputs(source));
+                  onChange({ ...param, source: { type: 'upstream', sourceNodeId: value, outputPath: getFirstEnabledOutput(outputs)?.value || '' } });
                 }}>{priorNodes.map((item) => <option key={item.nodeId} value={item.nodeId}>{item.toolName}</option>)}</PrefixedSelectField>
-              <PrefixedSelectField label="选择输出" value={param.source?.outputPath || upstreamOutputs[0]?.value || ''} onChange={(outputPath) => onChange({ ...param, source: { ...param.source, type: 'upstream', outputPath } })}>
-                {upstreamOutputs.map((output) => <option key={output.value} value={output.value}>{output.label}</option>)}
+              <PrefixedSelectField label={upstreamOutputLabel} value={upstreamOutputValue} onChange={(outputPath) => onChange({ ...param, source: { ...param.source, type: 'upstream', sourceNodeId: upstreamNodeValue, outputPath } })}>
+                {upstreamOutputs.map((output) => (
+                  <option key={output.value} value={output.value} disabled={output.disabled}>
+                    <OptionLabelWithType label={output.label} type={output.type} />
+                  </option>
+                ))}
               </PrefixedSelectField>
             </div>
           ) : null}
@@ -5481,7 +6126,8 @@ function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, i
             if (active) onChange({ ...param, source: { type: 'manual' } });
             else {
               const source = priorNodes[0];
-              onChange({ ...param, source: source ? { type: 'upstream', sourceNodeId: source.nodeId, outputPath: source.outputs[0]?.path || 'data.result' } : { type: 'file' } });
+              const outputs = getSelectableNodeOutputs(source);
+              onChange({ ...param, source: source ? { type: 'upstream', sourceNodeId: source.nodeId, outputPath: outputs[0]?.value || '' } : { type: 'file' } });
             }
           }}>fx</button>
         ) : null}
@@ -5490,9 +6136,10 @@ function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, i
         <div className="param-source-row">
           <label className="source-field">
             <span>取值方式</span>
-            <SelectField value={param.source?.type === 'upstream' ? 'upstream' : 'file'} onChange={updateSourceType}>
-              <option value="upstream" disabled={priorNodes.length === 0}>引用上游节点输出</option>
+            <SelectField value={sourceType === 'iteration' ? 'iteration' : sourceType === 'upstream' ? 'upstream' : 'file'} onChange={updateSourceType}>
+              <option value="upstream" disabled={upstreamSourceDisabled}>引用上游节点输出</option>
               <option value="file">引用原始文件</option>
+              {iterationContext ? <option value="iteration">引用迭代变量</option> : null}
             </SelectField>
           </label>
           {param.source?.type === 'upstream' ? (
@@ -5501,16 +6148,32 @@ function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, i
                 <span>上游节点</span>
                 <SelectField value={param.source.sourceNodeId || ''} onChange={(value) => {
                   const source = priorNodes.find((item) => item.nodeId === value);
-                  onChange({ ...param, source: { type: 'upstream', sourceNodeId: value, outputPath: source?.outputs[0]?.path || 'data.result' } });
+                  const outputs = getTypedSelectableOutputs(param, getSelectableNodeOutputs(source));
+                  onChange({ ...param, source: { type: 'upstream', sourceNodeId: value, outputPath: getFirstEnabledOutput(outputs)?.value || '' } });
                 }}>{priorNodes.map((item) => <option key={item.nodeId} value={item.nodeId}>{item.toolName}</option>)}</SelectField>
               </label>
               <label className="source-field">
                 <span>选择输出</span>
-                <SelectField value={param.source.outputPath || upstreamOutputs[0]?.value || ''} onChange={(outputPath) => onChange({ ...param, source: { ...param.source, outputPath } })}>
-                  {upstreamOutputs.map((output) => <option key={output.value} value={output.value}>{output.label}</option>)}
+                <SelectField value={param.source.outputPath || getFirstEnabledOutput(upstreamOutputs)?.value || ''} onChange={(outputPath) => onChange({ ...param, source: { ...param.source, outputPath } })}>
+                  {upstreamOutputs.map((output) => (
+                    <option key={output.value} value={output.value} disabled={output.disabled}>
+                      <OptionLabelWithType label={output.label} type={output.type} />
+                    </option>
+                  ))}
                 </SelectField>
               </label>
             </>
+          ) : param.source?.type === 'iteration' ? (
+            <label className="source-field source-field-wide">
+              <span>取值内容</span>
+              <SelectField value={iterationVariableValue} onChange={(outputPath) => onChange({ ...param, source: { type: 'iteration', outputPath } })}>
+                {iterationVariableOptions.map((variable) => (
+                  <option key={variable.value} value={variable.value}>
+                    <OptionLabelWithType label={variable.label} type={variable.type} />
+                  </option>
+                ))}
+              </SelectField>
+            </label>
           ) : (
             <label className="source-field source-field-wide">
               <span>取值内容</span>
@@ -5526,7 +6189,7 @@ function ParamEditor({ param, nodes, priorNodes, onChange, singleLine = false, i
 function inputArtifactToParam(artifact) {
   return {
     id: artifact.id,
-    label: artifact.displayName || artifact.name,
+    label: artifact.displayName || artifact.label || artifact.name,
     desc: artifact.description || '',
     type: artifact.type?.includes('object') || artifact.type?.includes('array') ? 'textarea' : 'text',
     schemaType: artifact.type || artifact.artifactType || 'object',
@@ -5536,9 +6199,13 @@ function inputArtifactToParam(artifact) {
   };
 }
 
-function EditNodeDialog({ node, nodes, onClose, onSave }) {
+function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
   const [draft, setDraft] = useState(cloneWorkbenchNode(node));
-  const priorNodes = getPriorNodes(nodes, node.nodeId);
+  const parentNode = parentId ? nodes.find((item) => item.nodeId === parentId) : null;
+  const priorNodes = parentNode
+    ? [...getPriorNodes(nodes, parentNode.nodeId), ...getPriorNodes(parentNode.innerNodes || [], node.nodeId)]
+    : getPriorNodes(nodes, node.nodeId);
+  const iterationContext = parentNode ? { parentNode } : null;
   const scriptParam = draft.params.find((param) => param.id === 'script');
   const normalParams = draft.toolId === 'system-code' ? draft.params.filter((param) => param.id === 'outputVariables') : draft.params;
   const nodeInputParamId = draft.inputParamId || normalParams[0]?.id || '';
@@ -5550,14 +6217,18 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
     const inputSource = isNodeInput
       ? nextParam.source?.type === 'upstream'
         ? { type: 'upstream', sourceNodeId: nextParam.source.sourceNodeId, outputPath: nextParam.source.outputPath }
-        : { type: 'fixed' }
+        : nextParam.source?.type === 'iteration'
+          ? { type: 'iteration', outputPath: normalizeIterationVariableValue(nextParam.source.outputPath) }
+          : { type: 'fixed' }
       : current.inputSource;
     return { ...current, inputSource, params: current.params.map((param) => param.id === nextParam.id ? nextParam : param) };
   });
   const updateNodeInputParam = (nextParam) => setDraft((current) => {
     const inputSource = nextParam.source?.type === 'upstream'
       ? { type: 'upstream', sourceNodeId: nextParam.source.sourceNodeId, outputPath: nextParam.source.outputPath }
-      : { type: 'fixed' };
+      : nextParam.source?.type === 'iteration'
+        ? { type: 'iteration', outputPath: normalizeIterationVariableValue(nextParam.source.outputPath) }
+        : { type: 'fixed' };
     return {
       ...current,
       inputSource,
@@ -5571,7 +6242,12 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
   const updateCodeInputSource = (idValue, nextParam) => setDraft((current) => {
     const codeInputs = (current.codeInputs || []).map((input) => input.id === idValue ? { ...input, source: nextParam.source, value: nextParam.value } : input);
     const params = current.params.map((param) => param.id === 'codeInput' ? { ...param, source: nextParam.source, value: nextParam.value } : param);
-    return { ...current, inputSource: nextParam.source?.type === 'upstream' ? { type: 'upstream', sourceNodeId: nextParam.source.sourceNodeId, outputPath: nextParam.source.outputPath } : current.inputSource, codeInputs, params };
+    const inputSource = nextParam.source?.type === 'upstream'
+      ? { type: 'upstream', sourceNodeId: nextParam.source.sourceNodeId, outputPath: nextParam.source.outputPath }
+      : nextParam.source?.type === 'iteration'
+        ? { type: 'iteration', outputPath: normalizeIterationVariableValue(nextParam.source.outputPath) }
+        : current.inputSource;
+    return { ...current, inputSource, codeInputs, params };
   });
   const addCodeInput = () => setDraft((current) => ({
     ...current,
@@ -5591,7 +6267,6 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
           <span className="config-modal-icon"><ToolOutlined /></span>
           <span className="config-modal-title-copy">
             <strong>编辑节点配置</strong>
-            <small>{node.toolName} · {node.category}</small>
           </span>
         </span>
       )}
@@ -5600,23 +6275,66 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
       className="config-modal"
       footer={<><button type="button" className="secondary" onClick={onClose}>取消</button><button type="button" className="primary" onClick={() => onSave(draft)}>保存</button></>}
     >
-      {draft.toolId === 'system-code' ? (
+      <section className="config-section">
+        <div className="config-section-head"><h3>节点信息</h3></div>
+        <label className="node-info-setting">
+          <span>节点名称 <em>*</em></span>
+          <input value={draft.toolName || ''} onChange={(event) => setDraft((current) => ({ ...current, toolName: event.target.value }))} />
+        </label>
+        <label className="node-info-setting node-info-description">
+          <span>节点描述</span>
+          <input value={draft.description ?? draft.summary ?? ''} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} />
+        </label>
+      </section>
+      {draft.toolId === 'system-iteration' ? (
+        <>
+          <section className="config-section">
+            <div className="config-section-head"><h3>节点输入</h3></div>
+            <div className="param-list">
+              {draft.params.filter((param) => param.id === 'iterationInput').map((param) => (
+                <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} onChange={updateParam} singleLine inlineSource allowFileSource={false} />
+              ))}
+            </div>
+          </section>
+          <section className="config-section">
+            <div className="config-section-head"><h3>配置参数</h3></div>
+            <div className="simple-node-param-list">
+              {draft.params.filter((param) => ['concurrency', 'iterationTimeout', 'errorResponseMethod'].includes(param.id)).map((param) => <SimpleNodeConfigParam key={param.id} param={param} onChange={updateParam} />)}
+            </div>
+          </section>
+          <section className="config-section">
+            <div className="config-section-head"><h3>迭代结果来源</h3></div>
+            <div className="param-list">
+              {draft.params.filter((param) => param.id === 'iterationOutput').map((param) => (
+                <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={draft.innerNodes || []} onChange={updateParam} singleLine inlineSource allowFileSource={false} />
+              ))}
+            </div>
+          </section>
+          <section className="config-section">
+            <div className="config-section-head"><h3>节点输出</h3></div>
+            <NodeOutputReadonlyTable outputs={getEffectiveNodeOutputs(draft)} />
+          </section>
+        </>
+      ) : draft.toolId === 'system-code' ? (
         <>
           <section className="config-section">
             <div className="config-section-head"><h3>定义入参</h3><button type="button" className="text-link" onClick={addCodeInput}><PlusOutlined /> 添加入参</button></div>
             <div className="code-input-list">
               {(draft.codeInputs || []).map((input, index) => {
                 const source = input.source || { type: 'manual' };
-                const sourceType = source.type === 'upstream' ? 'upstream' : source.type === 'file' ? 'file' : 'manual';
+                const sourceType = source.type === 'iteration' ? 'iteration' : source.type === 'upstream' ? 'upstream' : source.type === 'file' ? 'file' : 'manual';
+                const iterationVariableValue = normalizeIterationVariableValue(source.outputPath);
                 const sourceNode = priorNodes.find((item) => item.nodeId === source.sourceNodeId) || priorNodes[0];
-                const sourceOutputs = getSelectableNodeOutputs(sourceNode, source.outputPath);
+                const sourceOutputs = getSelectableNodeOutputs(sourceNode);
                 const updateInputSource = (nextSource) => updateCodeInputSource(input.id, { source: nextSource, value: input.value || '' });
                 const updateSourceType = (type) => {
                   if (type === 'manual') updateInputSource({ type: 'manual' });
                   if (type === 'file') updateInputSource({ type: 'file' });
+                  if (type === 'iteration') updateInputSource({ type: 'iteration', outputPath: iterationVariableValue });
                   if (type === 'upstream') {
                     const nextSourceNode = priorNodes.find((item) => item.nodeId === source.sourceNodeId) || priorNodes[0];
-                    updateInputSource(nextSourceNode ? { type: 'upstream', sourceNodeId: nextSourceNode.nodeId, outputPath: source.outputPath || nextSourceNode.outputs[0]?.path || 'data.result' } : { type: 'file' });
+                    const outputs = getSelectableNodeOutputs(nextSourceNode);
+                    updateInputSource(nextSourceNode ? { type: 'upstream', sourceNodeId: nextSourceNode.nodeId, outputPath: source.outputPath || outputs[0]?.value || '' } : { type: 'file' });
                   }
                 };
                 return (
@@ -5631,20 +6349,35 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
                         <option value="manual">手动输入</option>
                         <option value="file">引用原始文件</option>
                         <option value="upstream" disabled={priorNodes.length === 0}>引用上游节点输出</option>
+                        {iterationContext ? <option value="iteration">引用迭代变量</option> : null}
                       </SelectField>
                     </label>
                     <div className="code-input-value-setting">
                       <span>{index === 0 ? '参数值' : ''}</span>
                       {sourceType === 'manual' ? <input value={input.value || ''} onChange={(event) => updateCodeInput(input.id, { value: event.target.value })} /> : null}
                       {sourceType === 'file' ? <input readOnly value="原始文件的地址信息" /> : null}
+                      {sourceType === 'iteration' ? (
+                        <SelectField value={iterationVariableValue} onChange={(outputPath) => updateInputSource({ type: 'iteration', outputPath })}>
+                          {getIterationVariables().map((variable) => (
+                            <option key={variable.value} value={variable.value}>
+                              <OptionLabelWithType label={variable.label} type={variable.type} />
+                            </option>
+                          ))}
+                        </SelectField>
+                      ) : null}
                       {sourceType === 'upstream' ? (
                         <div className="param-upstream-setting">
                           <PrefixedSelectField label="上游节点" value={source.sourceNodeId || ''} onChange={(value) => {
                               const nextSourceNode = priorNodes.find((item) => item.nodeId === value);
-                              updateInputSource({ type: 'upstream', sourceNodeId: value, outputPath: nextSourceNode?.outputs[0]?.path || 'data.result' });
+                              const outputs = getSelectableNodeOutputs(nextSourceNode);
+                              updateInputSource({ type: 'upstream', sourceNodeId: value, outputPath: outputs[0]?.value || '' });
                             }}>{priorNodes.map((item) => <option key={item.nodeId} value={item.nodeId}>{item.toolName}</option>)}</PrefixedSelectField>
                           <PrefixedSelectField label="选择输出" value={source.outputPath || sourceOutputs[0]?.value || ''} onChange={(outputPath) => updateInputSource({ ...source, type: 'upstream', outputPath })}>
-                            {sourceOutputs.map((output) => <option key={output.value} value={output.value}>{output.label}</option>)}
+                            {sourceOutputs.map((output) => (
+                              <option key={output.value} value={output.value}>
+                                <OptionLabelWithType label={output.label} type={output.type} />
+                              </option>
+                            ))}
                           </PrefixedSelectField>
                         </div>
                       ) : null}
@@ -5687,7 +6420,7 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
           <section className="config-section">
             <div className="config-section-head"><h3>节点输入</h3></div>
             <div className="param-list">
-              {nodeInputParams.length ? nodeInputParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} onChange={artifactInputs.length ? updateNodeInputParam : updateParam} singleLine={index === 0} inlineSource showHeader={index === 0} />) : <div className="empty-mini">暂无节点输入</div>}
+              {nodeInputParams.length ? nodeInputParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} iterationContext={iterationContext} onChange={artifactInputs.length ? updateNodeInputParam : updateParam} singleLine={index === 0} inlineSource showHeader={index === 0} />) : <div className="empty-mini">暂无节点输入</div>}
             </div>
           </section>
           <section className="config-section">
@@ -5698,10 +6431,12 @@ function EditNodeDialog({ node, nodes, onClose, onSave }) {
           </section>
         </>
       )}
-      <section className="config-section">
-        <div className="config-section-head"><h3>节点输出</h3></div>
-        <NodeOutputReadonlyTable outputs={draft.outputs || []} />
-      </section>
+      {draft.toolId !== 'system-iteration' ? (
+        <section className="config-section">
+          <div className="config-section-head"><h3>节点输出</h3></div>
+          <NodeOutputReadonlyTable outputs={draft.outputs || []} />
+        </section>
+      ) : null}
     </Modal>
   );
 }
