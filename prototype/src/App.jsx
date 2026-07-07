@@ -3449,8 +3449,7 @@ function RightChevron() {
   return <span className="right-chevron">›</span>;
 }
 
-const workflowCategoryOrder = ['文档解析', '文本分片', '系统节点', '知识提取', '质量评估'];
-const toolDialogCategoryOrder = ['文档解析', '文本分片', '知识提取', '质量评估', '系统节点', '未分类'];
+const toolDialogCategoryOrder = [...defaultCategories, '系统节点', '未分类'];
 const categoryAliases = { 内容处理: '文本分片', 文档分块: '文本分片', 智能生成: '知识提取', 内容抽取: '知识提取', 系统工具: '系统节点' };
 const sampleDemoFile = { id: 'demo-policy-sample', name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB', status: '已上传' };
 const initialAgentEvents = [{
@@ -3483,8 +3482,12 @@ function normalizeWorkbenchCategory(category) {
   return categoryAliases[category] || category || '未分类';
 }
 
-function categorySortIndex(category, order = workflowCategoryOrder) {
-  const index = order.indexOf(normalizeWorkbenchCategory(category));
+function getSemanticCategory(item) {
+  return item?.semanticCategory || normalizeWorkbenchCategory(item?.category || item);
+}
+
+function categorySortIndex(category, order = toolDialogCategoryOrder) {
+  const index = order.indexOf(category || '未分类');
   return index >= 0 ? index : order.length;
 }
 
@@ -3857,9 +3860,10 @@ function getInputParamIdForTool(tool, base) {
 }
 
 function managedToolToWorkbenchTool(tool) {
-  const category = normalizeWorkbenchCategory(tool.category);
+  const category = tool.category || '未分类';
+  const semanticCategory = normalizeWorkbenchCategory(category);
   const base = baseTools.find((item) => item.name === tool.name);
-  if (base?.sourceType === 'system') return { ...base, category, serviceName: tool.serviceName || base.serviceName, summary: tool.description || base.summary, status: tool.status || base.status };
+  if (base?.sourceType === 'system') return { ...base, category, semanticCategory, serviceName: tool.serviceName || base.serviceName, summary: tool.description || base.summary, status: tool.status || base.status };
   const flow = higressWorkbenchToolFlow[tool.name];
   const params = (tool.inputs || []).map(toolInputToParam);
   const outputs = (tool.outputs || []).map((output, index) => {
@@ -3870,11 +3874,12 @@ function managedToolToWorkbenchTool(tool) {
     id: higressWorkbenchToolIds[tool.name] || tool.id,
     name: tool.name,
     category,
+    semanticCategory,
     serviceName: tool.serviceName || '-',
     summary: tool.description || '',
     status: tool.status || (tool.enabled === false ? '不可用' : '可用'),
-    input: flow?.input || (category === '文档解析' ? 'sampleFile' : category === '文本分片' ? 'rawText' : 'cleanText'),
-    output: flow?.output || (category === '文档解析' ? 'rawText' : category === '文本分片' ? 'cleanText' : 'rawText'),
+    input: flow?.input || (semanticCategory === '文档解析' ? 'sampleFile' : semanticCategory === '文本分片' ? 'rawText' : 'cleanText'),
+    output: flow?.output || (semanticCategory === '文档解析' ? 'rawText' : semanticCategory === '文本分片' ? 'cleanText' : 'rawText'),
     inputParamId: getInputParamIdForTool(tool, null),
     params,
     inputArtifacts: (tool.inputArtifacts || []).map((artifact) => ({ ...artifact })),
@@ -3889,7 +3894,8 @@ function readWorkbenchCatalog() {
   const byId = new Map([...managedTools, ...systemTools].map((tool) => [tool.id, tool]));
   return Array.from(byId.values()).map((tool) => ({
     ...tool,
-    category: normalizeWorkbenchCategory(tool.category),
+    category: tool.category || '未分类',
+    semanticCategory: getSemanticCategory(tool),
   }));
 }
 
@@ -3942,7 +3948,8 @@ function createWorkbenchNode(tool, inputSource = { type: 'fixed' }) {
     flowNodeId: nodeId,
     toolId: tool.id,
     toolName: tool.name,
-    category: normalizeWorkbenchCategory(tool.category),
+    category: tool.category || '未分类',
+    semanticCategory: getSemanticCategory(tool),
     enabled: true,
     expanded: false,
     adjusted: false,
@@ -3957,9 +3964,9 @@ function createWorkbenchNode(tool, inputSource = { type: 'fixed' }) {
 
 function createAgentDemoNodes(catalog = readWorkbenchCatalog()) {
   const byId = new Map(catalog.map((tool) => [tool.id, tool]));
-  const parserTool = byId.get('medical-policy-parser') || byId.get('document-parser') || catalog.find((tool) => normalizeWorkbenchCategory(tool.category) === '文档解析');
+  const parserTool = byId.get('medical-policy-parser') || byId.get('document-parser') || catalog.find((tool) => getSemanticCategory(tool) === '文档解析');
   const adapterTool = byId.get('system-code');
-  const splitterTool = byId.get('medical-policy-splitter') || byId.get('recursive-separator-splitter') || byId.get('chunk-splitter') || catalog.find((tool) => normalizeWorkbenchCategory(tool.category) === '文本分片');
+  const splitterTool = byId.get('medical-policy-splitter') || byId.get('recursive-separator-splitter') || byId.get('chunk-splitter') || catalog.find((tool) => getSemanticCategory(tool) === '文本分片');
   const storageTool = byId.get('system-storage');
   const qaTool = byId.get('qa-extractor');
   const parser = parserTool ? createWorkbenchNode(parserTool, { type: 'fixed' }) : null;
@@ -3985,20 +3992,20 @@ function createDraftNodesWithoutAdapter(catalog = readWorkbenchCatalog()) {
 function createOptimizedNodes(currentNodes, catalog = readWorkbenchCatalog()) {
   const byId = new Map(catalog.map((tool) => [tool.id, tool]));
   const next = currentNodes.length ? currentNodes.map(cloneWorkbenchNode) : createAgentDemoNodes(catalog);
-  const splitterIndex = next.findIndex((node) => normalizeWorkbenchCategory(node.category) === '文本分片');
+  const splitterIndex = next.findIndex((node) => getSemanticCategory(node) === '文本分片');
   const currentSplitter = next[splitterIndex];
   const adapter = next.find((node) => node.toolId === 'system-code');
-  const parser = next.find((node) => normalizeWorkbenchCategory(node.category) === '文档解析');
+  const parser = next.find((node) => getSemanticCategory(node) === '文档解析');
   const optimizedSplitter = createWorkbenchNode(byId.get('medical-policy-splitter') || byId.get('recursive-separator-splitter') || byId.get('chunk-splitter'), adapter ? { type: 'upstream', sourceNodeId: adapter.nodeId, outputPath: 'data.cleanBlocks' } : { type: 'upstream', sourceNodeId: parser?.nodeId, outputPath: 'sections' });
   if (currentSplitter) {
     optimizedSplitter.nodeId = currentSplitter.nodeId;
     optimizedSplitter.flowNodeId = currentSplitter.flowNodeId;
   }
   if (splitterIndex >= 0) next[splitterIndex] = { ...optimizedSplitter, adjusted: true };
-  const splitter = next[splitterIndex >= 0 ? splitterIndex : next.findIndex((node) => normalizeWorkbenchCategory(node.category) === '文本分片')];
+  const splitter = next[splitterIndex >= 0 ? splitterIndex : next.findIndex((node) => getSemanticCategory(node) === '文本分片')];
   next.forEach((node, index) => {
     if (index <= splitterIndex || node.nodeId === splitter?.nodeId) return;
-    if (node.toolId === 'system-storage' || normalizeWorkbenchCategory(node.category) === '知识提取') {
+    if (node.toolId === 'system-storage' || getSemanticCategory(node) === '知识提取') {
       next[index] = applyInputSource(node, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' });
     }
   });
@@ -4036,7 +4043,7 @@ function getCategorySections(nodes) {
     const sectionId = node.flowNodeId || node.nodeId;
     const last = sections[sections.length - 1];
     if (last?.sectionId === sectionId) last.nodes.push(node);
-    else sections.push({ sectionId, category: normalizeWorkbenchCategory(node.category), nodes: [node] });
+    else sections.push({ sectionId, category: getSemanticCategory(node), nodes: [node] });
   });
   return sections;
 }
@@ -4067,13 +4074,13 @@ function getToolChainType(node, field) {
 
 function canNodeFeedNext(previousNode, node) {
   if (!previousNode || !node) return false;
-  if (normalizeWorkbenchCategory(previousNode.category) === normalizeWorkbenchCategory(node.category)) return false;
+  if (getSemanticCategory(previousNode) === getSemanticCategory(node)) return false;
   const previousOutput = getToolChainType(previousNode, 'output');
   const nodeInput = getToolChainType(node, 'input');
   if (previousOutput === nodeInput) return true;
-  if (normalizeWorkbenchCategory(previousNode.category) === '文档解析' && normalizeWorkbenchCategory(node.category) === '文本分片') return true;
-  if (normalizeWorkbenchCategory(previousNode.category) === '文本分片' && (normalizeWorkbenchCategory(node.category) === '知识提取' || node.toolId === 'system-storage')) return true;
-  if (previousNode.outputs?.some((output) => output.path.includes('cleanBlocks')) && normalizeWorkbenchCategory(node.category) === '文本分片') return true;
+  if (getSemanticCategory(previousNode) === '文档解析' && getSemanticCategory(node) === '文本分片') return true;
+  if (getSemanticCategory(previousNode) === '文本分片' && (getSemanticCategory(node) === '知识提取' || node.toolId === 'system-storage')) return true;
+  if (previousNode.outputs?.some((output) => output.path.includes('cleanBlocks')) && getSemanticCategory(node) === '文本分片') return true;
   return false;
 }
 
@@ -4207,10 +4214,10 @@ function getFirstPlanFailure(nodes) {
 }
 
 function getBestOutputPathForTarget(upstream, target) {
-  if (normalizeWorkbenchCategory(upstream.category) === '文本分片') {
+  if (getSemanticCategory(upstream) === '文本分片') {
     return upstream.outputs.find((output) => output.path.includes('textChunkResult'))?.path || upstream.outputs[0]?.path || 'textChunkResult';
   }
-  if (upstream.outputs.some((output) => output.path.includes('cleanBlocks')) && normalizeWorkbenchCategory(target.category) === '文本分片') {
+  if (upstream.outputs.some((output) => output.path.includes('cleanBlocks')) && getSemanticCategory(target) === '文本分片') {
     return upstream.outputs.find((output) => output.path.includes('cleanBlocks'))?.path || 'data.cleanBlocks';
   }
   return upstream.outputs[0]?.path || 'data.result';
@@ -4258,7 +4265,7 @@ function getPlanProblems(nodes) {
 
 function getSmartPromptValue(param, node, instruction) {
   const lowerId = param.id.toLowerCase();
-  if (normalizeWorkbenchCategory(node.category) === '文档解析') {
+  if (getSemanticCategory(node) === '文档解析') {
     if (lowerId.includes('system')) return '你是知识工程文档解析专家。请从输入文件中提取正文、标题层级、表格、图片说明和页码来源，保持原文事实，不做总结改写，输出结构化 Markdown/JSON 结果。';
     if (lowerId.includes('user')) return '请解析当前上传的业务文档，保留标题层级、段落、表格和页码信息，输出可供后续分片与问答抽取使用的结构化文本。';
   }
@@ -4282,7 +4289,7 @@ function getSmartParamValue(param, instruction, node) {
   if (param.id === 'parse_mode') return 'policy_clause';
   if (param.id === 'language') return 'zh-CN';
   if (param.id === 'chunkObject') return '${upstream.data.documentParseResult}';
-  if (param.id === 'input') return normalizeWorkbenchCategory(node.category) === '文本分片' ? '${upstream.paragraphs}' : '${upstream.textChunkResult}';
+  if (param.id === 'input') return getSemanticCategory(node) === '文本分片' ? '${upstream.paragraphs}' : '${upstream.textChunkResult}';
   if (param.id === 'extractionObject') return '${upstream.textChunkResult}';
   if (param.id === 'storageObject') return '${upstream.textChunkResult}';
   if (param.id === 'codeInput') return '${upstream.data.documentParseResult}';
@@ -4716,7 +4723,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     });
     step(7200, () => {
       setPlanNodes(preFixNodes);
-      setConnectionStates({ [getConnectionKey(parser.category, splitter.category)]: { status: 'error', reason: '文档解析节点返回 sections[].content，分片节点需要 data.cleanBlocks，节点之间缺少结构适配。' } });
+      setConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'error', reason: '文档解析节点返回 sections[].content，分片节点需要 data.cleanBlocks，节点之间缺少结构适配。' } });
       updateEvent(checkEventId, { status: 'done', content: '发现适配问题：文档解析节点返回 sections[].content，分片节点需要 data.cleanBlocks。' });
       issueAnalysisEventId = pushEvent({ role: 'thought', title: '正在分析适配问题', content: '我需要对比上游节点的实际返回和分片节点的参数要求，确认问题是字段命名不一致，还是缺少结构转换。', status: 'running' });
     });
@@ -4726,7 +4733,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     });
     step(1600, () => {
       resolveEventId = pushEvent({ role: 'thought', title: '开始解决适配问题', content: '我会在文档解析和文本分片之间插入代码执行器，把解析结果转换成分片节点可识别的数据结构。', status: 'running' });
-      setConnectionStates({ [getConnectionKey(parser.category, splitter.category)]: { status: 'resolving', reason: '正在插入代码执行器解决结构适配问题。' } });
+      setConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'resolving', reason: '正在插入代码执行器解决结构适配问题。' } });
     });
 
     buildFlowNode([adapter].filter(Boolean), adaptedNodes, '系统节点', '候选节点=代码执行器；选择原因=需要把 sections[].content 转换为 data.cleanBlocks。');
@@ -4734,8 +4741,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
 
     step(2000, () => {
       setConnectionStates({
-        [getConnectionKey(parser.category, adapter.category)]: { status: 'resolved', reason: '代码执行器输出 data.cleanBlocks，分片节点可直接引用。' },
-        [getConnectionKey(adapter.category, splitter.category)]: { status: 'resolved', reason: '分片节点输入已改为 data.cleanBlocks。' },
+        [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(adapter))]: { status: 'resolved', reason: '代码执行器输出 data.cleanBlocks，分片节点可直接引用。' },
+        [getConnectionKey(getSemanticCategory(adapter), getSemanticCategory(splitter))]: { status: 'resolved', reason: '分片节点输入已改为 data.cleanBlocks。' },
       });
       updateEvent(resolveEventId, { status: 'done', content: '适配问题已解决：代码执行器输出 data.cleanBlocks，分片节点可直接引用。' });
     });
@@ -5276,7 +5283,7 @@ function ToolRuntimeRow({ node, nodes, warnings, needsSmartHandling, runtime, ca
 function AddToolDialog({ tools, categories, nodes, confirmed, onClose, onAdd }) {
   const [category, setCategory] = useState(allToolsCategory);
   const [selectedId, setSelectedId] = useState(tools[0]?.id || '');
-  const cats = [allToolsCategory, ...sortWorkbenchCategories(Array.from(new Set([...(categories || []), ...tools.map((tool) => normalizeWorkbenchCategory(tool.category))].filter(Boolean))))];
+  const cats = [allToolsCategory, ...sortWorkbenchCategories(Array.from(new Set([...(categories || []), '系统节点'].filter(Boolean))))];
   const filtered = category === allToolsCategory ? tools : tools.filter((tool) => tool.category === category);
   const current = tools.find((tool) => tool.id === selectedId) || filtered[0];
   const addedToolIds = new Set(nodes.map((node) => node.toolId));
