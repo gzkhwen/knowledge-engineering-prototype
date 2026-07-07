@@ -464,7 +464,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .schema-tree-children {
   display: grid;
   gap: 10px;
-  margin-left: 24px;
+  margin-left: 16px;
 }
 .schema-tree-row {
   display: inline-grid;
