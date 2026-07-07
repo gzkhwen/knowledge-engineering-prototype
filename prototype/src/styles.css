@@ -426,7 +426,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   margin-top: 10px;
   overflow-x: auto;
   color: #111827;
-  font-size: 13px;
+  font-size: 12px;
 }
 .schema-tree-content {
   position: relative;
@@ -464,7 +464,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .schema-tree-children {
   display: grid;
   gap: 10px;
-  margin-left: 32px;
+  margin-left: 24px;
 }
 .schema-tree-row {
   display: inline-grid;
@@ -475,7 +475,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   width: fit-content;
   max-width: none;
   color: #111827;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.35;
   white-space: nowrap;
 }
@@ -491,7 +491,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   min-width: 0;
   max-width: 320px;
   color: #1f2937;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
   overflow-wrap: anywhere;
 }
