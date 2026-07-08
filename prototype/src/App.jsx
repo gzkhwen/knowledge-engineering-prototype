@@ -12,10 +12,18 @@ import {
   DownOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
+  FileExcelFilled,
+  FileMarkdownFilled,
+  FileOutlined,
+  FilePdfFilled,
+  FilePptFilled,
+  FileTextOutlined,
+  FileWordFilled,
   FolderOpenOutlined,
   HomeOutlined,
   MenuFoldOutlined,
   MoreOutlined,
+  PaperClipOutlined,
   PlusOutlined,
   RobotOutlined,
   SearchOutlined,
@@ -25,7 +33,6 @@ import {
   SyncOutlined,
   ThunderboltOutlined,
   ToolOutlined,
-  UploadOutlined,
 } from '@ant-design/icons';
 import { dataStore, knowledgeFormTypes } from './dataStore.js';
 import {
@@ -3188,7 +3195,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
   const [expanded, setExpanded] = useState(new Set());
   const [selectedTemplate, setSelectedTemplate] = useState(dataStore.getProject(projectId)?.templateId || '');
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
-  const [categoryForm, setCategoryForm] = useState({ name: '', parentId: '', formTypes: ['问答库'] });
+  const [categoryForm, setCategoryForm] = useState({ name: '', parentId: '', formTypes: ['切片库'] });
   const [categoryError, setCategoryError] = useState('');
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
   const solution = dataStore.getProjectSolution(project.id);
@@ -3230,8 +3237,10 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
     notify('项目空间已发布', 'success');
   };
 
+  const openFallbackPlan = () => onWorkbench(project.id, null, '切片库');
+
   const openCreateCategory = () => {
-    setCategoryForm({ name: '', parentId: '', formTypes: ['问答库'] });
+    setCategoryForm({ name: '', parentId: '', formTypes: ['切片库'] });
     setCategoryError('');
     setCategoryDialogOpen(true);
   };
@@ -3312,19 +3321,23 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
               {children.length ? (open ? <AntDownOutlined /> : <RightChevron />) : null}
             </button>
             <FolderOpenOutlined />
-            <strong>{cat.name}</strong>
-            <Badge>第 {cat.level} 层</Badge>
-            <Badge tone={leaf ? 'success' : 'neutral'}>{leaf ? '末级' : `${children.length} 个子类目`}</Badge>
-            {cat.hasContent ? <Badge tone="warning">有构建结果</Badge> : null}
-            {leaf ? <Badge tone={cat.formTypes.some((formType) => hasActiveCategoryPlan(cat.id, formType)) ? 'success' : 'warning'}>{cat.formTypes.some((formType) => hasActiveCategoryPlan(cat.id, formType)) ? '已生成处理方案' : '未确认'}</Badge> : null}
+            <div className="viewer-category-content">
+              <div className="viewer-category-title-row">
+                <strong>{cat.name}</strong>
+              </div>
+              {leaf ? (
+                <span className="viewer-form-tags">
+                  {cat.formTypes.map((form) => (
+                    <Badge key={form} tone={hasActiveCategoryPlan(cat.id, form) ? 'success' : form === '切片库' ? 'warning' : 'blue'}>{form}</Badge>
+                  ))}
+                </span>
+              ) : null}
+            </div>
           </div>
           <div className="category-actions viewer-category-actions">
-            {leaf ? cat.formTypes.map((form) => (
-              <div className="form-action" key={form}>
-                <Badge tone={hasActiveCategoryPlan(cat.id, form) ? 'success' : form === '非结构化切片' ? 'warning' : 'blue'}>{hasActiveCategoryPlan(cat.id, form) ? `${form} · 已确认` : form}</Badge>
-                <button type="button" onClick={() => onWorkbench(project.id, cat.id, form)}>生成处理方案</button>
-              </div>
-            )) : <span className="category-note">知识形态由末级类目指定</span>}
+            {leaf ? (
+              <button type="button" className="secondary category-config-button" onClick={() => onWorkbench(project.id, cat.id, cat.formTypes[0] || '切片库')}>配置方案</button>
+            ) : <span className="category-note">知识形态由末级类目指定</span>}
           </div>
         </div>
         {children.length && open ? children.map(renderNode) : null}
@@ -3355,7 +3368,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
       <PageHeader
         title={project.name}
         subtitle="查看项目知识类目与处理方案确认状态"
-        actions={<><button type="button" className="secondary" onClick={onBack}><LeftOutlined /> 返回列表</button><button type="button" className="primary" disabled={unconfirmedPlanCount > 0} onClick={publishSolution}>发布项目空间</button></>}
+        actions={<><button type="button" className="secondary" onClick={openFallbackPlan}>兜底方案</button><button type="button" className="primary" disabled={unconfirmedPlanCount > 0} onClick={publishSolution}>发布项目空间</button></>}
       />
       <section className="panel solution-info-panel">
         <div className="section-head compact"><h2>基本信息</h2></div>
@@ -3447,9 +3460,84 @@ function RightChevron() {
   return <span className="right-chevron">›</span>;
 }
 
+function BotMessageSquareIcon({ className = '' }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 6V2H8" />
+      <path d="M15 11v2" />
+      <path d="M2 12h2" />
+      <path d="M20 12h2" />
+      <path d="M20 16a2 2 0 0 1-2 2H8.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 4 20.286V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z" />
+      <path d="M9 11v2" />
+    </svg>
+  );
+}
+
+function FileUploadIcon({ className = '' }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+      <path d="M14 2v5a1 1 0 0 0 1 1h5" />
+      <path d="M12 12v6" />
+      <path d="m15 15-3-3-3 3" />
+    </svg>
+  );
+}
+
 const toolDialogCategoryOrder = [...defaultCategories, '系统节点', '未分类'];
 const categoryAliases = { 内容处理: '文本分片', 文档分块: '文本分片', 智能生成: '知识提取', 内容抽取: '知识提取', 系统工具: '系统节点' };
-const sampleDemoFile = { id: 'demo-policy-sample', name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB', status: '已上传' };
+const sampleDemoFile = { id: 'demo-policy-sample', name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB', status: '未发送' };
+const workbenchFileFormats = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md'];
+const workbenchSampleNames = ['医保政策样例', '理财产品说明书', '客户问答清单'];
+const workbenchFileFormatMeta = {
+  pdf: { Icon: FilePdfFilled, color: '#dc2626' },
+  docx: { Icon: FileWordFilled, color: '#2563eb' },
+  xlsx: { Icon: FileExcelFilled, color: '#16a34a' },
+  pptx: { Icon: FilePptFilled, color: '#ea580c' },
+  txt: { Icon: FileTextOutlined, color: '#64748b' },
+  md: { Icon: FileMarkdownFilled, color: '#334155' },
+};
+const getFileExtension = (name = '') => name.split('.').pop()?.toLowerCase() || '';
+const createWorkbenchSampleFiles = (target, status = '未发送') => workbenchSampleNames.map((name, index) => ({
+  id: `sample-${target.formType}-${target.fileFormat}-${index}`,
+  name: `${name}.${target.fileFormat}`,
+  type: target.fileFormat.toUpperCase(),
+  size: `${(1.2 + index * 0.42).toFixed(2)} MB`,
+  status,
+}));
+const parsePlanVersion = (version) => {
+  const [major = '0', minor = '0'] = `${version}`.split('.');
+  return { major: Number.parseInt(major, 10) || 0, minor: Number.parseInt(minor, 10) || 0 };
+};
+const sortPlanVersionsDesc = (versions) => [...versions].sort((a, b) => {
+  const left = parsePlanVersion(a);
+  const right = parsePlanVersion(b);
+  return right.major - left.major || right.minor - left.minor;
+});
+const getNextPlanVersion = (versions) => {
+  if (!versions.length) return '1.0';
+  const latest = parsePlanVersion(sortPlanVersionsDesc(versions)[0]);
+  return `${latest.major}.${latest.minor + 1}`;
+};
+const getPlanTargetKey = (target) => `${target.formType}__${target.fileFormat}`;
 const initialAgentEvents = [{
   id: 'welcome',
   role: 'agent',
@@ -4832,9 +4920,10 @@ function createSampleResultForPlan(file, nodes) {
     fileName: file.name,
     toolRuns: nodes.filter((node) => node.enabled).map((node, index) => {
       const matched = defaultRuns.find((run) => run.toolName === node.toolName);
-      if (matched) return matched;
+      if (matched) return { ...matched, nodeId: node.nodeId, toolName: node.toolName, category: node.category };
       const outputPath = node.outputs[0]?.path || `data.step${index + 1}Result`;
       return {
+        nodeId: node.nodeId,
         toolName: node.toolName,
         category: node.category,
         outputPath,
@@ -4915,6 +5004,10 @@ function getRuntimeLabel(status) {
   }[status] || '';
 }
 
+function getFallbackPlanCategoryId(projectId) {
+  return `fallback-plan-${projectId || 'default'}`;
+}
+
 function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, onBack }) {
   const qaParams = new URLSearchParams(window.location.search);
   const qaMode = qaParams.get('qa') === '1';
@@ -4925,17 +5018,28 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const qaAddToolOpen = qaMode && qaParams.get('addTool') === '1';
   const qaConnectionStatus = qaMode ? qaParams.get('connection') : null;
   const qaAgentTask = qaMode ? qaParams.get('agentTask') : null;
-  const savedCategoryPlan = dataStore.getCategoryPlan(categoryId, formType);
+  const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
+  const solution = dataStore.getProjectSolution(project.id);
+  const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
+  const category = categories.find((item) => item.id === categoryId) || null;
+  const planStorageCategoryId = category ? category.id : getFallbackPlanCategoryId(project.id);
+  const initialFormType = decodeURIComponent(formType || category?.formTypes?.[0] || '切片库');
+  const savedCategoryPlan = dataStore.getCategoryPlan(planStorageCategoryId, initialFormType, workbenchFileFormats[0]);
   const hasSavedCategoryPlan = savedCategoryPlan?.status === 'active';
+  const initialPlanTarget = { formType: initialFormType, fileFormat: workbenchFileFormats[0] };
   const [catalog, setCatalog] = useState(() => readWorkbenchCatalog());
-  const [sampleFiles, setSampleFiles] = useState(() => (qaGeneratedState || qaRunningState || hasSavedCategoryPlan ? [{ ...sampleDemoFile, status: qaGeneratedState || hasSavedCategoryPlan ? '已完成' : '试跑中' }] : []));
+  const [sampleFiles, setSampleFiles] = useState(() => (
+    qaGeneratedState || qaRunningState || hasSavedCategoryPlan
+      ? [{ ...sampleDemoFile, status: qaGeneratedState || hasSavedCategoryPlan ? '已完成' : '试跑中' }]
+      : createWorkbenchSampleFiles(initialPlanTarget)
+  ));
   const [events, setEvents] = useState(() => (qaGeneratedState || hasSavedCategoryPlan ? generatedAgentEvents : qaRunningState ? runningAgentEvents : initialAgentEvents));
   const [planNodes, setPlanNodes] = useState(() => {
     if (qaGeneratedState || hasSavedCategoryPlan) return createAgentDemoNodes(readWorkbenchCatalog());
     if (qaRunningState) return createAgentDemoNodes(readWorkbenchCatalog()).slice(0, 4);
     return [];
   });
-  const [rightTab, setRightTab] = useState(() => (['样例', '方案', '结果预览', '历史版本'].includes(qaRightTab) ? qaRightTab : '方案'));
+  const [rightTab, setRightTab] = useState(() => (['处理方案', '执行结果'].includes(qaRightTab) ? qaRightTab : '处理方案'));
   const [running, setRunning] = useState(qaRunningState);
   const [testing, setTesting] = useState(false);
   const [confirmed, setConfirmed] = useState(hasSavedCategoryPlan);
@@ -4981,23 +5085,217 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const [draggingSectionId, setDraggingSectionId] = useState(null);
   const [dragInsertTarget, setDragInsertTarget] = useState(null);
   const [innerDragInsertTarget, setInnerDragInsertTarget] = useState(null);
+  const [selectedPlanTarget, setSelectedPlanTarget] = useState(() => ({ formType: initialFormType, fileFormat: workbenchFileFormats[0] }));
+  const [savedPlanVersions, setSavedPlanVersions] = useState(() => (hasSavedCategoryPlan ? ['1.0'] : []));
+  const [selectedPlanVersion, setSelectedPlanVersion] = useState('1.0');
+  const [versionSnapshots, setVersionSnapshots] = useState(() => (
+    hasSavedCategoryPlan ? {
+      '1.0': {
+        planNodes: cloneWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog())),
+        results: [createSampleResult({ ...sampleDemoFile, status: '已完成' }, { includeKnowledge: true })],
+        sampleFiles: [{ ...sampleDemoFile, status: '已完成' }],
+      },
+    } : {}
+  ));
+  const [executionRecords, setExecutionRecords] = useState(() => {
+    if (!hasSavedCategoryPlan) return {};
+    const file = { ...sampleDemoFile, status: '已完成' };
+    const nodes = cloneWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog()));
+    const result = createSampleResultForPlan(file, nodes);
+    return {
+      [`${file.id}__1.0`]: {
+        file,
+        version: '1.0',
+        planNodes: nodes,
+        result,
+      },
+    };
+  });
+  const [expandedPlanGroups, setExpandedPlanGroups] = useState(() => new Set([initialFormType]));
+  const [samplePopoverOpen, setSamplePopoverOpen] = useState(false);
+  const [planRunPopoverOpen, setPlanRunPopoverOpen] = useState(false);
+  const [saveConfirmVersion, setSaveConfirmVersion] = useState(null);
   const streamRef = useRef(null);
   const fileRef = useRef(null);
-  const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
-  const solution = dataStore.getProjectSolution(project.id);
-  const category = solution ? dataStore.getProjectCategories(solution.id).find((item) => item.id === categoryId) : null;
-  const workbenchContextText = category ? `${project.name} / ${category.name} / ${decodeURIComponent(formType || '问答库')}` : `${project.name} / 临时方案`;
-  const workbenchPlanTitle = category ? `${category.name} · ${decodeURIComponent(formType || '问答库')}` : '临时方案';
+  const agentInputRef = useRef(null);
+  const agentTimersRef = useRef([]);
+  const planContextRef = useRef({});
+  const categoryPath = category ? (() => {
+    const byId = new Map(categories.map((item) => [item.id, item]));
+    const path = [];
+    let current = category;
+    const seen = new Set();
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      path.unshift(current.name);
+      current = current.parentId ? byId.get(current.parentId) : null;
+    }
+    return path.join('>');
+  })() : '';
+  const planFormTypes = category?.formTypes?.length ? category.formTypes : knowledgeFormTypes;
+  const activePlanTarget = {
+    formType: planFormTypes.includes(selectedPlanTarget.formType) ? selectedPlanTarget.formType : planFormTypes[0],
+    fileFormat: workbenchFileFormats.includes(selectedPlanTarget.fileFormat) ? selectedPlanTarget.fileFormat : workbenchFileFormats[0],
+  };
+  const planVersions = savedPlanVersions.length ? sortPlanVersionsDesc(savedPlanVersions) : ['1.0'];
+  const activePlanTargetKey = getPlanTargetKey(activePlanTarget);
+  const createSampleForTarget = (target, status = '未发送') => ({
+    ...createWorkbenchSampleFiles(target, status)[0],
+    id: `demo-${target.formType}-${target.fileFormat}`,
+    name: `医保政策样例.${target.fileFormat}`,
+    type: target.fileFormat.toUpperCase(),
+    status,
+  });
+  const getSavedPlanForTarget = (target) => {
+    const savedPlan = dataStore.getCategoryPlan(planStorageCategoryId, target.formType, target.fileFormat);
+    if (!savedPlan || savedPlan.status !== 'active') return null;
+    if (savedPlan.fileFormat) return savedPlan.fileFormat === target.fileFormat ? savedPlan : null;
+    return target.fileFormat === 'pdf' ? savedPlan : null;
+  };
+  const createPlanContextState = (target) => {
+    const savedPlan = getSavedPlanForTarget(target);
+    const initialTarget = target.formType === initialFormType && target.fileFormat === workbenchFileFormats[0];
+    const generated = (qaGeneratedState && initialTarget) || Boolean(savedPlan);
+    const runningState = qaRunningState && initialTarget;
+    const sample = createSampleForTarget(target, generated ? '已完成' : runningState ? '试跑中' : '未发送');
+    return {
+      sampleFiles: generated || runningState ? [sample] : createWorkbenchSampleFiles(target),
+      events: generated ? generatedAgentEvents : runningState ? runningAgentEvents : initialAgentEvents,
+      planNodes: generated ? createAgentDemoNodes(readWorkbenchCatalog()) : runningState ? createAgentDemoNodes(readWorkbenchCatalog()).slice(0, 4) : [],
+      rightTab: ['处理方案', '执行结果'].includes(qaRightTab) ? qaRightTab : '处理方案',
+      running: runningState,
+      testing: false,
+      confirmed: Boolean(generated),
+      results: generated ? [createSampleResult(sample, { includeKnowledge: true })] : [],
+      connectionStates: {},
+      nodeRuntime: {},
+      agentInput: '',
+      agentTask: null,
+      savedPlanVersions: generated ? ['1.0'] : [],
+      selectedPlanVersion: '1.0',
+      versionSnapshots: generated ? {
+        '1.0': {
+          planNodes: createAgentDemoNodes(readWorkbenchCatalog()),
+          results: [createSampleResult(sample, { includeKnowledge: true })],
+          sampleFiles: [sample],
+        },
+      } : {},
+      executionRecords: generated ? {
+        [`${sample.id}__1.0`]: {
+          file: sample,
+          version: '1.0',
+          planNodes: cloneWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog())),
+          result: createSampleResultForPlan(sample, createAgentDemoNodes(readWorkbenchCatalog())),
+        },
+      } : {},
+    };
+  };
+  const getCurrentPlanContextState = () => ({
+    sampleFiles,
+    events,
+    planNodes,
+    rightTab,
+    running,
+    testing,
+    confirmed,
+    results,
+    connectionStates,
+    nodeRuntime,
+    agentInput,
+    agentTask,
+    savedPlanVersions,
+    selectedPlanVersion,
+    versionSnapshots,
+    executionRecords,
+  });
+  const applyPlanContextState = (state) => {
+    setSampleFiles(state.sampleFiles);
+    setEvents(state.events);
+    setPlanNodes(state.planNodes);
+    setRightTab(state.rightTab);
+    setRunning(state.running);
+    setTesting(state.testing);
+    setConfirmed(state.confirmed);
+    setResults(state.results);
+    setConnectionStates(state.connectionStates);
+    setNodeRuntime(state.nodeRuntime);
+    setAgentInput(state.agentInput);
+    setAgentTask(state.agentTask);
+    setSavedPlanVersions(state.savedPlanVersions || []);
+    setSelectedPlanVersion(state.selectedPlanVersion || '1.0');
+    setVersionSnapshots(state.versionSnapshots || {});
+    setExecutionRecords(state.executionRecords || {});
+    setSamplePopoverOpen(false);
+    setAddOpen(false);
+    setAddParentId(null);
+    setEditingNode(null);
+    setEditingParentId(null);
+  };
+  const createVersionSnapshot = () => ({
+    planNodes: cloneWorkbenchNodes(planNodes),
+    results: results.map((result) => ({ ...result })),
+    sampleFiles: sampleFiles.map((file) => ({ ...file })),
+  });
+  const selectPlanVersion = (version) => {
+    const snapshot = versionSnapshots[version];
+    setSelectedPlanVersion(version);
+    setRightTab('处理方案');
+    setRunning(false);
+    setTesting(false);
+    setConnectionStates({});
+    setNodeRuntime({});
+    setAddOpen(false);
+    setEditingNode(null);
+    setEditingParentId(null);
+    if (!snapshot) return;
+    setPlanNodes(cloneWorkbenchNodes(snapshot.planNodes || []));
+    setResults((snapshot.results || []).map((result) => ({ ...result })));
+    setSampleFiles((snapshot.sampleFiles || []).map((file) => ({ ...file })));
+    setConfirmed(true);
+  };
+  const switchPlanTarget = (target) => {
+    planContextRef.current[activePlanTargetKey] = getCurrentPlanContextState();
+    const nextKey = getPlanTargetKey(target);
+    const nextState = planContextRef.current[nextKey] || createPlanContextState(target);
+    setSelectedPlanTarget(target);
+    setExpandedPlanGroups((current) => new Set(current).add(target.formType));
+    applyPlanContextState(nextState);
+  };
+  const getFormatPlanStatus = (item, format) => {
+    const target = { formType: item, fileFormat: format };
+    const key = getPlanTargetKey(target);
+    if (key === activePlanTargetKey) {
+      if (confirmed && planNodes.length) return 'done';
+      if (planNodes.length && !confirmed) return 'configuring';
+    }
+    const contextState = planContextRef.current[key];
+    if (contextState?.confirmed && contextState.planNodes?.length) return 'done';
+    if (contextState?.planNodes?.length) return 'configuring';
+    if (getSavedPlanForTarget(target)) return 'done';
+    return '';
+  };
+  const getFormTypeDoneCount = (item) => workbenchFileFormats.filter((format) => getFormatPlanStatus(item, format) === 'done').length;
+  const togglePlanGroup = (item) => {
+    setExpandedPlanGroups((current) => {
+      const next = new Set(current);
+      next.has(item) ? next.delete(item) : next.add(item);
+      return next;
+    });
+  };
+  const workbenchContextText = category ? `${project.name} / ${category.name} / ${decodeURIComponent(formType || '切片库')}` : `${project.name} / 临时方案`;
+  const workbenchPlanTitle = category ? `${category.name} · ${activePlanTarget.formType} · ${activePlanTarget.fileFormat}` : `兜底方案 · ${activePlanTarget.formType} · ${activePlanTarget.fileFormat}`;
+  const { Icon: ActiveFormatIcon, color: activeFormatColor } = workbenchFileFormatMeta[activePlanTarget.fileFormat] || { Icon: FileOutlined, color: '#64748b' };
   const categorySections = getCategorySections(planNodes);
   const nodeWarnings = getNodeWarnings(planNodes);
   const inputIssueMap = getNodeInputIssueMap(planNodes);
   const displayedNodeWarnings = running ? {} : getNodeDisplayWarnings(nodeWarnings);
   const planProblems = getPlanProblems(planNodes);
   const visibleProblems = running || !planNodes.length ? [] : planProblems;
-  const canEdit = !confirmed && !running && !testing;
+  const canEdit = !running && !testing;
   const canSave = canEdit && planNodes.length > 0 && visibleProblems.length === 0;
   const hasAgentTask = Boolean(agentTask);
-  const canSendAgentMessage = !running && !testing && (Boolean(agentInput.trim()) || hasAgentTask) && (hasAgentTask || planNodes.length > 0 || sampleFiles.length > 0);
+  const canStopAgent = running || testing;
+  const canSendAgentMessage = !running && !testing && (hasAgentTask || Boolean(agentInput.trim()) || (!planNodes.length && sampleFiles.length > 0));
   const [toolCategories, setToolCategories] = useState(() => readUnifiedFlowNodeCatalog().categories || defaultCategories);
 
   useEffect(() => subscribeCatalog(() => {
@@ -5008,6 +5306,29 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   useEffect(() => {
     streamRef.current?.scrollTo({ top: streamRef.current.scrollHeight, behavior: 'smooth' });
   }, [events]);
+  useEffect(() => {
+    const input = agentInputRef.current;
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(input.scrollHeight, 132)}px`;
+  }, [agentInput]);
+  useEffect(() => () => {
+    agentTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    agentTimersRef.current = [];
+  }, []);
+
+  const clearAgentTimers = () => {
+    agentTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    agentTimersRef.current = [];
+  };
+  const scheduleAgentTimer = (callback, delay) => {
+    const timer = window.setTimeout(() => {
+      agentTimersRef.current = agentTimersRef.current.filter((item) => item !== timer);
+      callback();
+    }, delay);
+    agentTimersRef.current.push(timer);
+    return timer;
+  };
 
   const pushEvent = (event) => {
     const row = { ...event, id: makeId(event.role) };
@@ -5016,6 +5337,17 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   };
   const updateEvent = (idValue, patch) => setEvents((current) => current.map((item) => (item.id === idValue ? { ...item, ...patch } : item)));
   const setRuntimeForNodes = (nodes, state) => setNodeRuntime((current) => ({ ...current, ...Object.fromEntries(nodes.map((node) => [node.nodeId, state])) }));
+  const stopAgentProcessing = () => {
+    clearAgentTimers();
+    setRunning(false);
+    setTesting(false);
+    setNodeRuntime((current) => Object.fromEntries(Object.entries(current).map(([nodeId, state]) => [
+      nodeId,
+      ['building', 'selectingTool', 'configuring', 'running'].includes(state?.status) ? { ...state, status: 'done' } : state,
+    ])));
+    setSampleFiles((current) => current.map((file) => (file.status === '试跑中' ? { ...file, status: '未发送' } : file)));
+    pushEvent({ role: 'agent', title: '处理已停止', content: '已停止当前生成任务，可以继续调整意见或重新发送样例文件。', status: 'done' });
+  };
   const toggleNodeExpanded = (nodeId) => {
     if (running) return;
     setPlanNodes((current) => current.map((node) => {
@@ -5042,38 +5374,55 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
 
   const uploadFiles = (files) => {
     if (!files?.length) return;
-    const next = Array.from(files).map((file) => ({ id: `${file.name}-${file.lastModified}`, name: file.name, type: file.name.split('.').pop().toUpperCase(), size: `${Math.max(file.size / 1024 / 1024, 0.01).toFixed(2)} MB`, status: '已上传' }));
+    const fileList = Array.from(files);
+    const allowedFormat = activePlanTarget.fileFormat;
+    const invalidFiles = fileList.filter((file) => getFileExtension(file.name) !== allowedFormat);
+    const validFiles = fileList.filter((file) => getFileExtension(file.name) === allowedFormat);
+    if (invalidFiles.length) notify(`只能上传 ${allowedFormat} 格式的样例文件`, 'error');
+    if (!validFiles.length) return;
+    const next = validFiles.map((file) => ({ id: `${file.name}-${file.lastModified}`, name: file.name, type: allowedFormat.toUpperCase(), size: `${Math.max(file.size / 1024 / 1024, 0.01).toFixed(2)} MB`, status: '上传中' }));
+    const nextIds = new Set(next.map((file) => file.id));
     setSampleFiles((current) => [...next, ...current.filter((item) => !next.some((row) => row.id === item.id))]);
-    notify(`已上传 ${next.length} 个样例文件`, 'success');
+    window.setTimeout(() => {
+      setSampleFiles((current) => current.map((file) => (nextIds.has(file.id) ? { ...file, status: '未发送' } : file)));
+    }, 700);
+    notify(`已添加 ${next.length} 个样例文件`, 'success');
+    if (fileRef.current) fileRef.current.value = '';
   };
 
-  const runAgent = () => {
-    if (!sampleFiles.length) {
+  const runAgent = (files = sampleFiles) => {
+    if (!files.length) {
       notify('请先上传或添加样例文件', 'error');
       return;
     }
+    clearAgentTimers();
     const [parser, adapter, splitter, knowledge, iteration, storage] = createAgentDemoNodes(catalog);
     const preFixNodes = [parser, splitter].filter(Boolean);
     const adaptedNodes = [parser, adapter, splitter].filter(Boolean);
     const knowledgeNodes = [parser, adapter, splitter, knowledge].filter(Boolean);
     const iterationNodes = [parser, adapter, splitter, knowledge, iteration].filter(Boolean);
     const finalNodes = [parser, adapter, splitter, knowledge, iteration, storage].filter(Boolean);
-    const filesSnapshot = [...sampleFiles];
+    const filesSnapshot = [...files];
+    const sendingIds = new Set(filesSnapshot.map((file) => file.id));
     setRunning(true);
     setConfirmed(false);
-    setRightTab('方案');
+    setRightTab('处理方案');
     setPlanNodes([]);
     setResults([]);
     setConnectionStates({});
     setNodeRuntime({});
-    setSampleFiles((current) => current.map((file) => ({ ...file, status: '已发送' })));
-    pushEvent({ role: 'user', title: '发送样例文件', content: `已发送 ${filesSnapshot.length} 个样例文件，并附带已标记问题，请生成正式的知识处理方案。`, status: 'done' });
+    setSampleFiles((current) => {
+      const currentIds = new Set(current.map((file) => file.id));
+      const merged = [...filesSnapshot.filter((file) => !currentIds.has(file.id)), ...current];
+      return merged.map((file) => (sendingIds.has(file.id) ? { ...file, status: '试跑中' } : file));
+    });
+    pushEvent({ role: 'user', title: '发送样例文件', content: `已发送 ${filesSnapshot.map((file) => file.name).join('、')}，请生成正式的知识处理方案。`, status: 'done' });
 
     let cursor = 0;
     const agentDelay = (delay) => (delay <= 0 ? 0 : Math.max(350, Math.round(delay * 0.58)));
     const step = (delay, action) => {
       cursor += agentDelay(delay);
-      window.setTimeout(action, cursor);
+      scheduleAgentTimer(action, cursor);
     };
 
     const visibleParams = (node) => node.params.filter((param) => isParamVisible(node, param)).slice(0, 4);
@@ -5151,7 +5500,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     });
     step(3200, () => {
       updateEvent(parseEventId, { status: 'done', content: '结构识别完成：需要先解析文档，再做结构适配、分片、知识点提取，并对知识点数组逐项打标后存储。' });
-      setSampleFiles((current) => current.map((file) => ({ ...file, status: '试跑中' })));
+      setSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '试跑中' } : file)));
       queryEventId = pushEvent({ role: 'thought', title: '节点目录查询', content: '输入：节点状态=可用，分类=文档解析/文本分片/知识提取/系统节点；输出：候选节点清单。', status: 'running', kind: 'toolCall' });
     });
     step(3000, () => {
@@ -5209,7 +5558,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       updateEvent(recheckEventId, { status: 'done', content: '方案检查通过：节点顺序、节点参数、变量承接和存储策略均可执行。' });
     });
     step(1800, () => {
-      executeEventId = pushEvent({ role: 'thought', title: '样例试跑', content: '输入：医保政策样例.pdf；执行对象：最终处理方案；输出：每个节点的输入、输出和执行状态。', status: 'running', kind: 'toolCall' });
+      executeEventId = pushEvent({ role: 'thought', title: '样例试跑', content: `输入：${filesSnapshot[0].name}；执行对象：最终处理方案；输出：每个节点的输入、输出和执行状态。`, status: 'running', kind: 'toolCall' });
     });
     finalNodes.forEach((node) => {
       step(1700, () => setRuntimeForNodes([node], { status: 'running' }));
@@ -5226,7 +5575,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
         expanded: false,
         innerNodes: isIterationNode(node) ? (node.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded: false })) : node.innerNodes,
       })));
-      setSampleFiles((current) => current.map((file) => ({ ...file, status: '已完成' })));
+      setSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '已完成' } : file)));
       setResults(filesSnapshot.map((file) => createSampleResult(file, { includeKnowledge: true })));
       pushEvent({ role: 'agent', title: '方案生成与样例执行完成', content: '已完成方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。', status: 'done' });
       setRunning(false);
@@ -5240,10 +5589,11 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       notify('当前没有检测到需要修复的连接问题', 'info');
       return;
     }
+    clearAgentTimers();
     setRunning(true);
     pushEvent({ role: 'user', title: '处理流程连接问题', content: task.reason, status: 'done' });
     const eventId = pushEvent({ role: 'thought', title: '修复节点承接', content: '正在读取当前流程节点顺序、输入来源和工具输出路径。', status: 'running', kind: 'toolCall' });
-    window.setTimeout(() => {
+    scheduleAgentTimer(() => {
     const repairResult = repairConnectionIssue(planNodes, failure);
     const repaired = repairResult.nodes;
     const repairTargets = repaired.filter((node) => repairResult.targetIds.includes(node.nodeId));
@@ -5251,12 +5601,12 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setRuntimeForNodes(repairTargets, { status: 'configuring', visibleParamCount: 2 });
     updateEvent(eventId, { content: repairResult.actionText, status: 'running' });
     setConnectionStates(task.fromCategory && task.toCategory ? { [`${task.fromCategory}->${task.toCategory}`]: { status: 'resolving', reason: failure.reason } } : {});
-    window.setTimeout(() => {
+    scheduleAgentTimer(() => {
       setRuntimeForNodes(repairTargets, { status: 'configured', visibleParamCount: 4 });
       setConnectionStates(task.fromCategory && task.toCategory ? { [`${task.fromCategory}->${task.toCategory}`]: { status: 'resolved', reason: failure.reason } } : {});
       updateEvent(eventId, { content: '节点承接已修复：仅更新受影响节点，未重写其他节点参数。', status: 'done' });
     }, 900);
-    window.setTimeout(() => {
+    scheduleAgentTimer(() => {
       setConnectionStates({});
       setRuntimeForNodes(repairTargets, { status: 'done' });
       pushEvent({ role: 'agent', title: '智能修复完成', content: '当前方案已完成局部修复，可以点击测试重新试跑样例文件。', status: 'done' });
@@ -5271,30 +5621,31 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const configured = createSmartConfiguredNode(node, planNodes, configureInstruction);
     const nextNodes = planNodes.map((item) => item.nodeId === node.nodeId ? configured : item);
     const failure = getFirstPlanFailure(nextNodes);
+    clearAgentTimers();
     setRunning(true);
     setConfirmed(false);
-    setRightTab('方案');
+    setRightTab('处理方案');
     setConnectionStates({});
     pushEvent({ role: 'user', title: `设置${node.toolName}参数`, content: configureInstruction, status: 'done' });
     const understandEventId = pushEvent({ role: 'thought', title: `理解${node.toolName}参数需求`, content: '正在读取当前节点位置、上游输出和工具必填参数，准备写入可执行配置。', status: 'running' });
-    window.setTimeout(() => {
+    scheduleAgentTimer(() => {
       updateEvent(understandEventId, { content: `已确认本次只处理「${node.toolName}」的参数配置，不重建其他工具节点。`, status: 'done' });
       setRuntimeForNodes([configured], { status: 'configuring', visibleParamCount: 2 });
     }, 700);
     let configEventId = '';
-    window.setTimeout(() => {
+    scheduleAgentTimer(() => {
       configEventId = pushEvent({ role: 'thought', title: `配置${node.toolName}参数`, content: '根据用户需求补齐输入来源、必填参数和取值路径，并写回当前工具节点。', status: 'running', kind: 'toolCall' });
       setPlanNodes(nextNodes);
       setRuntimeForNodes([configured], { status: 'configuring', visibleParamCount: 4 });
     }, 1300);
-    window.setTimeout(() => {
+    scheduleAgentTimer(() => {
       updateEvent(configEventId, { content: `${node.toolName} 参数已写入，开始校验前后节点连通性。`, status: 'done' });
       setRuntimeForNodes([configured], { status: 'configured', visibleParamCount: 4 });
       if (failure?.fromCategory && failure.toCategory) {
         setConnectionStates({ [`${failure.fromCategory}->${failure.toCategory}`]: { status: 'error', reason: failure.reason } });
       }
     }, 2300);
-    window.setTimeout(() => {
+    scheduleAgentTimer(() => {
       setRuntimeForNodes([configured], { status: 'done' });
       pushEvent({ role: 'agent', title: failure ? '参数已配置，连通性待处理' : '参数配置完成', content: failure ? `已完成「${node.toolName}」参数配置，但方案仍存在连通性问题：${failure.reason}` : `已完成「${node.toolName}」参数配置，并校验通过前后节点的输入输出承接关系。`, status: 'done' });
       setRunning(false);
@@ -5316,15 +5667,24 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       if (node) smartConfigureNode(node, instruction);
       return;
     }
+    if (!instruction && !planNodes.length && sampleFiles.length) {
+      runAgent(sampleFiles);
+      return;
+    }
     if (!instruction) return;
     pushEvent({ role: 'user', title: '调整意见', content: instruction, status: 'done' });
     if (!planNodes.length) {
-      pushEvent({ role: 'agent', title: '等待样例处理', content: '当前还没有可调整的处理方案。请先发送样例文件。', status: 'done' });
+      if (sampleFiles.length) {
+        runAgent(sampleFiles);
+        return;
+      }
+      pushEvent({ role: 'agent', title: '等待样例处理', content: '当前还没有可调整的处理方案。请先上传或选择样例文件。', status: 'done' });
       return;
     }
     setRunning(true);
     const eventId = pushEvent({ role: 'thought', title: '局部更新方案', content: '正在基于当前方案识别需要调整的节点，不重新生成完整链路。', status: 'running', kind: 'toolCall' });
-    window.setTimeout(() => {
+    clearAgentTimers();
+    scheduleAgentTimer(() => {
       const next = createOptimizedNodes(planNodes, catalog);
       setPlanNodes(next);
       updateEvent(eventId, { content: '更新结果：按当前 Higress 工具链调整节点承接；当前方案中的工具保持不变。', status: 'done' });
@@ -5332,6 +5692,15 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       setRunning(false);
       notify('Agent 已调整处理方案', 'success');
     }, 1600);
+  };
+
+  const sendSampleFile = (file) => {
+    if (running || testing) return;
+    setSamplePopoverOpen(false);
+    runAgent([file]);
+  };
+  const deleteSampleFile = (fileId) => {
+    setSampleFiles((current) => current.filter((file) => file.id !== fileId));
   };
 
   const addTool = (tool) => {
@@ -5364,63 +5733,104 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     notify(`已添加节点，已归入${node.category}`, 'success');
   };
 
-  const testPlan = () => {
-    if (!planNodes.length || !sampleFiles.length) {
+  const testPlan = (file) => {
+    const runFiles = file ? [file] : sampleFiles;
+    if (!planNodes.length || !runFiles.length) {
       notify('请先准备方案和样例文件', 'error');
       return;
     }
     const failure = getFirstPlanFailure(planNodes);
     if (failure) {
       setConnectionStates({ [`${failure.fromCategory || '上游'}->${failure.toCategory || '当前'}`]: { status: 'error', reason: failure.reason } });
-      pushEvent({ role: 'agent', title: '方案测试未通过', content: `试跑已停止：${failure.reason}`, status: 'done' });
       notify('方案测试未通过，失败原因已标记在流程连线上', 'error');
       return;
     }
     setTesting(true);
-    setRightTab('方案');
+    setRightTab('处理方案');
     setResults([]);
     setNodeRuntime({});
     setConfirmed(false);
-    setSampleFiles((current) => current.map((file) => ({ ...file, status: '试跑中' })));
-    pushEvent({ role: 'user', title: '测试当前方案', content: `使用 ${sampleFiles[0].name} 试跑当前处理方案。`, status: 'done' });
-    const executeEventId = pushEvent({ role: 'thought', title: '测试当前方案', content: '按当前方案节点顺序执行样例文件，逐个校验工具输入、输出和下游承接。', status: 'running', kind: 'toolCall' });
+    const runVersion = selectedPlanVersion;
+    const runFileIds = new Set(runFiles.map((item) => item.id));
+    setSampleFiles((current) => current.map((item) => (runFileIds.has(item.id) ? { ...item, status: '试跑中' } : item)));
     const runnableNodes = planNodes.filter((node) => node.enabled);
+    const runPlanSnapshot = cloneWorkbenchNodes(runnableNodes);
+    clearAgentTimers();
     runnableNodes.forEach((node, index) => {
-      window.setTimeout(() => setNodeRuntime((current) => ({ ...current, [node.nodeId]: { status: 'running' } })), 300 + index * 450);
-      window.setTimeout(() => setNodeRuntime((current) => ({ ...current, [node.nodeId]: { status: 'success' } })), 650 + index * 450);
+      const startAt = 250 + index * 900;
+      scheduleAgentTimer(() => {
+        setPlanNodes((current) => current.map((item) => ({
+          ...item,
+          expanded: item.nodeId === node.nodeId,
+          innerNodes: isIterationNode(item) ? (item.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded: item.nodeId === node.nodeId })) : item.innerNodes,
+        })));
+        setNodeRuntime((current) => ({ ...current, [node.nodeId]: { status: 'running' } }));
+      }, startAt);
+      scheduleAgentTimer(() => {
+        setNodeRuntime((current) => ({ ...current, [node.nodeId]: { status: 'success' } }));
+      }, startAt + 650);
     });
-    window.setTimeout(() => {
-      setResults(sampleFiles.map((file) => createSampleResultForPlan(file, runnableNodes)));
-      setSampleFiles((current) => current.map((file) => ({ ...file, status: '已完成' })));
+    scheduleAgentTimer(() => {
+      const nextResults = runFiles.map((item) => createSampleResultForPlan(item, runnableNodes));
+      setResults(nextResults);
+      setExecutionRecords((current) => ({
+        ...current,
+        ...Object.fromEntries(nextResults.map((result) => {
+          const file = runFiles.find((item) => item.id === result.fileId) || { id: result.fileId, name: result.fileName };
+          return [`${result.fileId}__${runVersion}`, {
+            file: { ...file, status: '已完成' },
+            version: runVersion,
+            planNodes: cloneWorkbenchNodes(runPlanSnapshot),
+            result,
+          }];
+        })),
+      }));
+      setSampleFiles((current) => current.map((item) => (runFileIds.has(item.id) ? { ...item, status: '已完成' } : item)));
       setRuntimeForNodes(runnableNodes, { status: 'done' });
-      updateEvent(executeEventId, { content: '测试通过：样例文件已按当前方案完整跑通，结果预览已更新。', status: 'done' });
-      setRightTab('结果预览');
+      setPlanNodes((current) => current.map((node) => ({
+        ...node,
+        expanded: false,
+        innerNodes: isIterationNode(node) ? (node.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded: false })) : node.innerNodes,
+      })));
+      setRightTab('执行结果');
       setTesting(false);
       notify('方案测试通过', 'success');
-    }, 900 + runnableNodes.length * 450);
+    }, 1100 + runnableNodes.length * 900);
   };
 
-  const savePlan = () => {
+  const openSaveConfirm = () => {
     if (!canSave) {
       notify('当前方案仍存在校验问题', 'error');
       return;
     }
-    if (solution && category) {
+    setSaveConfirmVersion(getNextPlanVersion(savedPlanVersions));
+  };
+
+  const savePlan = (versionToSave) => {
+    if (solution) {
       dataStore.upsertCategoryPlan({
         projectId: project.id,
         solutionId: solution.id,
-        categoryId: category.id,
-        formType: decodeURIComponent(formType || '问答库'),
+        categoryId: planStorageCategoryId,
+        planScope: category ? 'category' : 'fallback',
+        formType: activePlanTarget.formType,
+        fileFormat: activePlanTarget.fileFormat,
+        version: versionToSave,
         status: 'active',
-        name: `${category.name}${decodeURIComponent(formType || '问答库')}处理方案`,
+        name: `${category ? category.name : project.name}${activePlanTarget.formType}${activePlanTarget.fileFormat}处理方案V${versionToSave}`,
         nodes: planNodes.filter((node) => node.toolId && !node.toolId.startsWith('system-')).map((node) => ({
           toolId: node.toolId,
           toolName: node.toolName,
         })),
       });
     }
+    const snapshot = createVersionSnapshot();
+    setSavedPlanVersions((current) => sortPlanVersionsDesc(Array.from(new Set([...current, versionToSave]))));
+    setVersionSnapshots((current) => ({ ...current, [versionToSave]: snapshot }));
+    setSelectedPlanVersion(versionToSave);
+    setSaveConfirmVersion(null);
     setConfirmed(true);
-    notify('处理方案已保存', 'success');
+    notify(`处理方案已保存为 V${versionToSave} 版本`, 'success');
   };
 
   const updateNode = (node) => {
@@ -5579,114 +5989,244 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
 
   return (
     <div className="workbench-page">
-      <PageHeader title="方案工作台" subtitle={workbenchContextText} actions={categoryId ? <button type="button" className="secondary" onClick={onBack}><LeftOutlined /> 返回类目</button> : null} />
+      <PageHeader title="方案工作台" />
       <div className="workbench-grid">
         <aside className="panel sample-column">
-          <h3>样例文件上传</h3>
-          <input ref={fileRef} type="file" hidden multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={(event) => uploadFiles(event.target.files)} />
-          <button type="button" className="upload-box" onClick={() => fileRef.current?.click()}><UploadOutlined /><strong>点击上传样例文件</strong><span>支持 PDF、Word、Excel、TXT</span></button>
-          <button type="button" className="text-link" onClick={addDemoSample}>导入演示样例</button>
-          <div className="file-list">
-            {sampleFiles.length ? sampleFiles.map((file) => (
-              <div className="file-item" key={file.id}>
-                <span className="file-type-badge">{file.type || 'FILE'}</span>
-                <div className="file-meta"><strong>{file.name}</strong><span>{file.size}</span></div>
-                <Badge tone={file.status === '已完成' ? 'success' : file.status === '试跑中' ? 'warning' : 'neutral'}>{file.status}</Badge>
-              </div>
-            )) : <div className="empty-mini">暂无样例文件</div>}
-          </div>
-          <h3>已标记问题</h3>
-          <div className="issue-box">客户自建解析工具可能不声明输出，需要验证后置工具承接。</div>
-          <button type="button" className="primary full" disabled={!sampleFiles.length || running || testing} onClick={runAgent}>{running ? <SyncOutlined spin /> : <SendOutlined />} 发送样例和问题给智能体</button>
-          <p className="sample-action-hint">智能体将同时读取样例文件和左侧已标记问题，生成可保存的处理方案。</p>
-        </aside>
-        <section className="panel agent-column">
-          <div className="panel-title"><StarOutlined className="agent-title-icon" /> 处理方案生成助手</div>
-          <div className="agent-stream" ref={streamRef}>{events.map((event) => <AgentEvent key={event.id} event={event} />)}</div>
-          <div className="agent-input">
-            <label className="agent-input-box">
-              {agentTask ? <button type="button" className="agent-task-chip" onClick={() => setAgentTask(null)}>{agentTask.type === 'connection-fix' ? '处理流程连接问题' : `设置${agentTask.toolName}参数`} ×</button> : null}
-              <input disabled={running || testing} value={agentInput} onChange={(event) => setAgentInput(event.target.value)} placeholder="输入问题或调整意见，例如：政策条款要优先保留层级..." onKeyDown={(event) => { if (event.key === 'Enter' && canSendAgentMessage) sendAgentInstruction(); }} />
-            </label>
-            <button type="button" disabled={!canSendAgentMessage} onClick={sendAgentInstruction}>{running || testing ? <SyncOutlined spin /> : <SendOutlined />}</button>
-          </div>
-        </section>
-        <aside className="panel plan-column">
-          <div className="tabs">{['样例', '方案', '结果预览', '历史版本'].map((tab) => <button type="button" key={tab} className={rightTab === tab ? 'active' : ''} onClick={() => setRightTab(tab)}>{tab}</button>)}</div>
-          {rightTab === '方案' ? (
-            <div className="plan-tab">
-              <div className="plan-summary">
-                <strong>{workbenchPlanTitle}</strong>
-                <button type="button" className="icon-button primary-mini" disabled={!canEdit} onClick={() => openAddNode()}><PlusOutlined /></button>
-              </div>
-              <div className="workflow-list">
-                {categorySections.length ? categorySections.map((section, index) => {
-                  const insertPosition = dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : null;
-                  return (
-                    <div
-                      className="workflow-section-wrap"
-                      key={`${section.sectionId}-${index}`}
-                      onDragOver={canEdit ? (event) => {
-                        event.preventDefault();
-                        updateSectionInsertTarget(event, section);
-                      } : undefined}
-                      onDrop={canEdit ? (event) => {
-                        event.preventDefault();
-                        dropSectionAtInsertTarget(getSectionInsertTarget(event, section));
-                      } : undefined}
-                    >
-                      {insertPosition === 'before' ? <div className="workflow-drop-indicator" /> : null}
-                      <WorkflowSection
-                        section={section}
-                        index={index}
-                        total={categorySections.length}
-                        nodes={planNodes}
-                        nodeWarnings={displayedNodeWarnings}
-                        rawWarnings={nodeWarnings}
-                        nodeRuntime={nodeRuntime}
-                        canEdit={canEdit}
-                        draggingSectionId={draggingSectionId}
-                        draggingNodeId={draggingNodeId}
-                        onSectionDragStart={() => setDraggingSectionId(section.sectionId)}
-                        onSectionDragEnd={clearSectionDragState}
-                        onToolDragStart={setDraggingNodeId}
-                        onToolDrop={dropToolOnNode}
-                        onEdit={(node) => openEditNode(node)}
-                        onAddInner={(node) => openAddNode(node.nodeId)}
-                        onEditInner={(parentNode, innerNode) => openEditNode(innerNode, parentNode.nodeId)}
-                        onDeleteInner={deleteInnerNode}
-                        draggingInnerNode={draggingInnerNode}
-                        innerDragInsertTarget={innerDragInsertTarget}
-                        onInnerDragStart={(parentId, nodeId) => setDraggingInnerNode(parentId && nodeId ? { parentId, nodeId } : null)}
-                        onInnerDragOver={updateInnerInsertTarget}
-                        onInnerDrop={dropInnerNodeAtInsertTarget}
-                        onInnerDragEnd={clearInnerDragState}
-                        onToggle={toggleNodeExpanded}
-                        onDelete={(node) => { setPlanNodes((current) => current.filter((item) => item.nodeId !== node.nodeId)); setConfirmed(false); }}
-                        onSmartConfigure={(node) => setAgentTask({ type: 'tool-config', nodeId: node.nodeId, toolName: node.toolName })}
-                      />
-                      {insertPosition === 'after' ? <div className="workflow-drop-indicator" /> : null}
+          <div className="scheme-overview">
+            <h3>配置方案</h3>
+            <p className="scheme-overview-tip">按知识形态+文件格式来配置处理方案。</p>
+            <div className="scheme-config-divider" />
+            <div className="scheme-overview-list">
+              {planFormTypes.map((item) => (
+                <div className="scheme-format-group" key={item}>
+                  <button type="button" className="scheme-format-title" onClick={() => togglePlanGroup(item)}>
+                    <span>{item}</span>
+                    <em>{getFormTypeDoneCount(item)}/{workbenchFileFormats.length}</em>
+                    {expandedPlanGroups.has(item) ? <AntDownOutlined /> : <RightChevron />}
+                  </button>
+                  {expandedPlanGroups.has(item) ? (
+                    <div className="scheme-format-list">
+                      {workbenchFileFormats.map((format) => {
+                        const active = activePlanTarget.formType === item && activePlanTarget.fileFormat === format;
+                        const { Icon: FormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+                        const status = getFormatPlanStatus(item, format);
+                        return (
+                          <button
+                            type="button"
+                            key={`${item}-${format}`}
+                            className={`scheme-format-item ${active ? 'active' : ''}`}
+                            style={{ '--format-color': color }}
+                            onClick={() => switchPlanTarget({ formType: item, fileFormat: format })}
+                          >
+                            <span className="scheme-format-icon"><FormatIcon /></span>
+                            <span className="scheme-format-name">{format}</span>
+                            {status === 'done' ? <CheckCircleOutlined className="scheme-format-status done" /> : null}
+                            {status === 'configuring' ? <SyncOutlined spin className="scheme-format-status configuring" /> : null}
+                          </button>
+                        );
+                      })}
                     </div>
-                  );
-                }) : (
-                  <div className="empty-mini large plan-empty">
-                    <ThunderboltOutlined />
-                    <strong>等待生成知识处理方案</strong>
-                    <span>发送样例文件和处理要求，智能体会自动理解文件和需求，生成知识处理方案。</span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        </aside>
+        <div className="workbench-top-strip">
+          <span className="workbench-strip-tag">{category ? '类目方案' : '兜底方案'}</span>
+          <span className="workbench-strip-separator">·</span>
+          <span className="workbench-strip-text">{project.name}</span>
+          {category ? <span className="workbench-strip-separator">·</span> : null}
+          {category ? <span className="workbench-strip-text">{categoryPath}</span> : null}
+          <span className="workbench-strip-separator">·</span>
+          <span className="workbench-strip-tag">{activePlanTarget.formType}</span>
+          <span className="workbench-strip-separator">·</span>
+          <span className="workbench-strip-tag format" style={{ '--format-color': activeFormatColor }}><ActiveFormatIcon />{activePlanTarget.fileFormat}</span>
+        </div>
+        <div className="panel workbench-main-panel">
+          <section className="agent-column">
+            <div className="panel-title"><BotMessageSquareIcon className="agent-title-icon" /> 处理方案生成助手</div>
+            <div className="agent-stream" ref={streamRef}>{events.map((event) => <AgentEvent key={event.id} event={event} />)}</div>
+            <div className="agent-input">
+              <div className="agent-input-box">
+                {agentTask ? <button type="button" className="agent-task-chip" onClick={() => setAgentTask(null)}>{agentTask.type === 'connection-fix' ? '处理流程连接问题' : `设置${agentTask.toolName}参数`} ×</button> : null}
+                <textarea
+                  ref={agentInputRef}
+                  disabled={running || testing}
+                  value={agentInput}
+                  onChange={(event) => setAgentInput(event.target.value)}
+                  placeholder="输入问题或调整意见，例如：政策条款要优先保留层级..."
+                  rows={1}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey && canSendAgentMessage) {
+                      event.preventDefault();
+                      sendAgentInstruction();
+                    }
+                  }}
+                />
+                <div className="agent-input-footer">
+                  <div className="sample-file-trigger-wrap">
+                    <button type="button" className="sample-file-trigger" onClick={() => { setPlanRunPopoverOpen(false); setSamplePopoverOpen((current) => !current); }}><PaperClipOutlined /> 样例文件</button>
+                    {samplePopoverOpen ? (
+                      <div className="sample-file-popover">
+                        <div className="sample-file-popover-head">
+                          <strong>样例文件</strong>
+                          <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
+                        </div>
+                        <input ref={fileRef} type="file" accept={`.${activePlanTarget.fileFormat}`} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
+                        {sampleFiles.length ? sampleFiles.map((file) => {
+                          const format = getFileExtension(file.name) || activePlanTarget.fileFormat;
+                          const { Icon: SampleFormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+                          return (
+                            <div className="sample-file-popover-item" key={file.id} style={{ '--format-color': color }}>
+                              <span className="scheme-format-icon"><SampleFormatIcon /></span>
+                              <span className="sample-file-popover-name">
+                                <span>{file.name}</span>
+                                <em className={`sample-status-tag status-${file.status}`}>{file.status}</em>
+                              </span>
+                              <span className="sample-file-popover-actions">
+                                <button type="button" title="发送" disabled={running || testing} onClick={() => sendSampleFile(file)}><SendOutlined /></button>
+                                <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
+                              </span>
+                            </div>
+                          );
+                        }) : <p>暂无样例文件</p>}
+                      </div>
+                    ) : null}
                   </div>
-                )}
+                  <button
+                    type="button"
+                    className="agent-send-button"
+                    title={canStopAgent ? '停止处理' : '发送'}
+                    disabled={!canStopAgent && !canSendAgentMessage}
+                    onClick={canStopAgent ? stopAgentProcessing : sendAgentInstruction}
+                  >
+                    {canStopAgent ? <SyncOutlined spin /> : <SendOutlined />}
+                  </button>
+                </div>
               </div>
             </div>
-          ) : rightTab === '结果预览' ? <ResultPreview results={results} files={sampleFiles} /> : rightTab === '样例' ? <SamplePreview files={sampleFiles} results={results} /> : <div className="empty-mini large">暂无历史版本。</div>}
-          <div className="plan-actions">
-            {visibleProblems.length && planNodes.length ? <div className="error-line">当前方案存在 {visibleProblems.length} 个校验问题，请处理后保存。</div> : null}
-            <button type="button" className="secondary" disabled={!planNodes.length || running || testing} onClick={testPlan}>{testing ? '测试中' : '测试'}</button>
-            <button type="button" className="primary" disabled={!canSave} onClick={savePlan}>保存为处理方案</button>
-          </div>
-        </aside>
+          </section>
+          <aside className="plan-column">
+            <div className="tabs">{['处理方案', '执行结果'].map((tab) => <button type="button" key={tab} className={rightTab === tab ? 'active' : ''} onClick={() => setRightTab(tab)}>{tab}</button>)}</div>
+            {rightTab === '处理方案' ? (
+              <div className="plan-tab">
+                <div className="plan-summary">
+                  <div className="plan-version-select">
+                    <span>选择方案版本</span>
+                    <SelectField value={selectedPlanVersion} onChange={selectPlanVersion} className="plan-version-field">
+                      {planVersions.map((version) => <option key={version} value={version}>{version}</option>)}
+                    </SelectField>
+                  </div>
+                  <button type="button" className="add-node-pill" disabled={!canEdit} onClick={() => openAddNode()}><PlusOutlined /> 添加节点</button>
+                </div>
+                <div className="workflow-list">
+                  {categorySections.length ? categorySections.map((section, index) => {
+                    const insertPosition = dragInsertTarget?.sectionId === section.sectionId ? dragInsertTarget.position : null;
+                    return (
+                      <div
+                        className="workflow-section-wrap"
+                        key={`${section.sectionId}-${index}`}
+                        onDragOver={canEdit ? (event) => {
+                          event.preventDefault();
+                          updateSectionInsertTarget(event, section);
+                        } : undefined}
+                        onDrop={canEdit ? (event) => {
+                          event.preventDefault();
+                          dropSectionAtInsertTarget(getSectionInsertTarget(event, section));
+                        } : undefined}
+                      >
+                        {insertPosition === 'before' ? <div className="workflow-drop-indicator" /> : null}
+                        <WorkflowSection
+                          section={section}
+                          index={index}
+                          total={categorySections.length}
+                          nodes={planNodes}
+                          nodeWarnings={displayedNodeWarnings}
+                          rawWarnings={nodeWarnings}
+                          nodeRuntime={nodeRuntime}
+                          canEdit={canEdit}
+                          draggingSectionId={draggingSectionId}
+                          draggingNodeId={draggingNodeId}
+                          onSectionDragStart={() => setDraggingSectionId(section.sectionId)}
+                          onSectionDragEnd={clearSectionDragState}
+                          onToolDragStart={setDraggingNodeId}
+                          onToolDrop={dropToolOnNode}
+                          onEdit={(node) => openEditNode(node)}
+                          onAddInner={(node) => openAddNode(node.nodeId)}
+                          onEditInner={(parentNode, innerNode) => openEditNode(innerNode, parentNode.nodeId)}
+                          onDeleteInner={deleteInnerNode}
+                          draggingInnerNode={draggingInnerNode}
+                          innerDragInsertTarget={innerDragInsertTarget}
+                          onInnerDragStart={(parentId, nodeId) => setDraggingInnerNode(parentId && nodeId ? { parentId, nodeId } : null)}
+                          onInnerDragOver={updateInnerInsertTarget}
+                          onInnerDrop={dropInnerNodeAtInsertTarget}
+                          onInnerDragEnd={clearInnerDragState}
+                          onToggle={toggleNodeExpanded}
+                          onDelete={(node) => { setPlanNodes((current) => current.filter((item) => item.nodeId !== node.nodeId)); setConfirmed(false); }}
+                          onSmartConfigure={(node) => setAgentTask({ type: 'tool-config', nodeId: node.nodeId, toolName: node.toolName })}
+                        />
+                        {insertPosition === 'after' ? <div className="workflow-drop-indicator" /> : null}
+                      </div>
+                    );
+                  }) : (
+                    <div className="plan-empty">
+                      <ThunderboltOutlined />
+                      <strong>还未配置知识处理方案</strong>
+                      <span>发送样例文件给助手，自动生成处理方案，或者手动配置处理方案。</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : <ResultPreview executionRecords={executionRecords} />}
+            <div className="plan-actions">
+              {visibleProblems.length && planNodes.length ? <div className="error-line">当前方案存在 {visibleProblems.length} 个校验问题，请处理后保存。</div> : null}
+              <div className="plan-run-wrap">
+                <button type="button" className="secondary" disabled={!planNodes.length || running || testing} onClick={() => { setSamplePopoverOpen(false); setPlanRunPopoverOpen((current) => !current); }}>{testing ? '试跑中' : '方案试跑'}</button>
+                {planRunPopoverOpen ? (
+                  <div className="sample-file-popover plan-run-popover">
+                    <div className="sample-file-popover-head">
+                      <strong>样例文件</strong>
+                      <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
+                    </div>
+                    <input ref={fileRef} type="file" accept={`.${activePlanTarget.fileFormat}`} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
+                    {sampleFiles.length ? sampleFiles.map((file) => {
+                      const format = getFileExtension(file.name) || activePlanTarget.fileFormat;
+                      const { Icon: SampleFormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+                      return (
+                        <div className="sample-file-popover-item" key={file.id} style={{ '--format-color': color }}>
+                          <span className="scheme-format-icon"><SampleFormatIcon /></span>
+                          <span className="sample-file-popover-name">
+                            <span>{file.name}</span>
+                            <em className={`sample-status-tag status-${file.status}`}>{file.status}</em>
+                          </span>
+                          <span className="sample-file-popover-actions">
+                            <button type="button" title="执行" disabled={running || testing} onClick={() => { setPlanRunPopoverOpen(false); testPlan(file); }}><SendOutlined /></button>
+                            <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
+                          </span>
+                        </div>
+                      );
+                    }) : <p>暂无样例文件</p>}
+                  </div>
+                ) : null}
+              </div>
+              <button type="button" className="primary" disabled={!canSave} onClick={openSaveConfirm}>保存方案</button>
+            </div>
+          </aside>
+        </div>
       </div>
-      {addOpen ? <AddToolDialog tools={catalog} categories={toolCategories} nodes={planNodes} confirmed={confirmed} parentId={addParentId} onClose={() => { setAddOpen(false); setAddParentId(null); }} onAdd={addTool} /> : null}
+      {addOpen ? <AddToolDialog tools={catalog} categories={toolCategories} nodes={planNodes} parentId={addParentId} onClose={() => { setAddOpen(false); setAddParentId(null); }} onAdd={addTool} /> : null}
       {editingNode ? <EditNodeDialog node={editingNode} nodes={planNodes} parentId={editingParentId} onClose={() => { setEditingNode(null); setEditingParentId(null); }} onSave={updateNode} /> : null}
+      {saveConfirmVersion ? (
+        <ConfirmDialog
+          title="保存方案"
+          message={`该方案将保存为V${saveConfirmVersion}版本，确认保存？`}
+          cancelText="取消"
+          confirmText="确认保存"
+          onCancel={() => setSaveConfirmVersion(null)}
+          onConfirm={() => savePlan(saveConfirmVersion)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -5957,7 +6497,7 @@ function ToolRuntimeRow({ node, nodes, warnings, needsSmartHandling, runtime, ca
   );
 }
 
-function AddToolDialog({ tools, categories, nodes, confirmed, parentId, onClose, onAdd }) {
+function AddToolDialog({ tools, categories, nodes, parentId, onClose, onAdd }) {
   const [category, setCategory] = useState(allToolsCategory);
   const scopedTools = parentId ? tools.filter((tool) => tool.id !== 'system-iteration') : tools;
   const [selectedId, setSelectedId] = useState(scopedTools[0]?.id || '');
@@ -5971,7 +6511,7 @@ function AddToolDialog({ tools, categories, nodes, confirmed, parentId, onClose,
       wide
       className="add-tool-modal"
       onClose={onClose}
-      footer={<><button type="button" className="secondary" onClick={onClose}>取消</button><button type="button" className="primary" disabled={!current || confirmed} onClick={() => onAdd(current)}>{confirmed ? '方案已确认' : '确认添加'}</button></>}
+      footer={<><button type="button" className="secondary" onClick={onClose}>取消</button><button type="button" className="primary" disabled={!current} onClick={() => onAdd(current)}>确认添加</button></>}
     >
       <div className="add-tool-grid">
         <div className="tool-picker-list category-picker"><div className="tool-picker-title">节点分类</div>{scopedCats.map((cat) => <button type="button" key={cat} className={category === cat ? 'active' : ''} onClick={() => { setCategory(cat); setSelectedId((cat === allToolsCategory ? scopedTools : scopedTools.filter((tool) => tool.category === cat))[0]?.id || ''); }}><span>{cat}</span><Badge>{cat === allToolsCategory ? scopedTools.length : scopedTools.filter((tool) => tool.category === cat).length}</Badge></button>)}</div>
@@ -6513,52 +7053,93 @@ function syncCodeOutputs(node, codeOutputs) {
   };
 }
 
-function ResultPreview({ results, files = [] }) {
-  if (!files.length) return <div className="empty-mini large">还没有样例文件，上传并执行后展示结果。</div>;
-  if (!results.length) return <div className="empty-mini large">Agent 执行方案后，将按工具展示本次调用参数和完整输出。</div>;
-  const visibleRuns = (toolRuns = []) => {
-    const failedIndex = toolRuns.findIndex((run) => run.status === '失败');
-    return failedIndex >= 0 ? toolRuns.slice(0, failedIndex + 1) : toolRuns;
-  };
+function ResultPreview({ executionRecords = {} }) {
+  const records = useMemo(() => Object.values(executionRecords), [executionRecords]);
+  const fileOptions = useMemo(() => {
+    const byId = new Map();
+    records.forEach((record) => {
+      if (!byId.has(record.file.id)) byId.set(record.file.id, record.file);
+    });
+    return Array.from(byId.values());
+  }, [records]);
+  const [selectedFileId, setSelectedFileId] = useState('');
+  const versionsForFile = useMemo(() => (
+    sortPlanVersionsDesc(records.filter((record) => record.file.id === selectedFileId).map((record) => record.version))
+  ), [records, selectedFileId]);
+  const [selectedVersion, setSelectedVersion] = useState('');
+
+  useEffect(() => {
+    if (!fileOptions.length) {
+      setSelectedFileId('');
+      return;
+    }
+    if (!fileOptions.some((file) => file.id === selectedFileId)) setSelectedFileId(fileOptions[0].id);
+  }, [fileOptions, selectedFileId]);
+
+  useEffect(() => {
+    if (!versionsForFile.length) {
+      setSelectedVersion('');
+      return;
+    }
+    if (!versionsForFile.includes(selectedVersion)) setSelectedVersion(versionsForFile[0]);
+  }, [versionsForFile, selectedVersion]);
+
+  if (!records.length) return <div className="empty-mini large">还没有执行结果，选择样例文件完成方案试跑后展示结果。</div>;
+
+  const selectedRecord = records.find((record) => record.file.id === selectedFileId && record.version === selectedVersion);
   return (
     <div className="result-list">
-      {files.map((file) => {
-            const result = results.find((item) => item.fileId === file.id);
-            return (
-              <section className="sample-result-group" key={file.id}>
-                <div className="sample-result-head">
-                  <span className="file-type-badge">{file.type || 'FILE'}</span>
-                  <div>
-                    <strong>{file.name}</strong>
-                    <span>{file.size}</span>
-                  </div>
-                  <Badge tone={file.status === '已完成' ? 'success' : file.status === '试跑中' ? 'warning' : 'neutral'}>{file.status}</Badge>
-            </div>
-            {result ? visibleRuns(result.toolRuns).map((run) => <ToolRunResultCard key={`${result.fileId}-${run.toolName}`} run={run} />) : <div className="empty-mini">等待执行结果</div>}
-          </section>
-        );
-      })}
+      <div className="result-filter-bar">
+        <label>
+          <span>样例文件</span>
+          <SelectField value={selectedFileId} onChange={setSelectedFileId} className="result-filter-field">
+            {fileOptions.map((file) => <option key={file.id} value={file.id}>{file.name}</option>)}
+          </SelectField>
+        </label>
+        <label>
+          <span>方案版本</span>
+          <SelectField value={selectedVersion} onChange={setSelectedVersion} className="result-filter-field">
+            {versionsForFile.map((version) => <option key={version} value={version}>{version}</option>)}
+          </SelectField>
+        </label>
+      </div>
+      {selectedRecord ? (
+        <section className="sample-result-group">
+          {(selectedRecord.planNodes || []).map((node, index) => {
+            const run = selectedRecord.result.toolRuns.find((item) => item.nodeId === node.nodeId || item.toolName === node.toolName);
+            return <ToolRunResultCard key={`${selectedRecord.file.id}-${selectedRecord.version}-${node.nodeId}`} run={run} node={node} file={selectedRecord.file} index={index} />;
+          })}
+        </section>
+      ) : <div className="empty-mini">当前组合暂无执行结果</div>}
     </div>
   );
 }
 
-function ToolRunResultCard({ run }) {
-  const success = run.status === '成功';
+function getRunInputPreview({ run, node, file, index }) {
+  if (index === 0 || node?.input === 'sampleFile') {
+    return JSON.stringify({ fileName: file.name, fileType: file.type, fileSize: file.size }, null, 2);
+  }
+  const inputPath = run?.parameters?.[0]?.value || node?.inputSource?.outputPath || 'data.result';
+  return JSON.stringify({ source: 'upstream', input: inputPath }, null, 2);
+}
+
+function ToolRunResultCard({ run, node, file, index }) {
+  if (!run) return null;
   return (
     <section className="run-card">
       <div className="run-card-head">
         <div>
-          <strong>{run.toolName}</strong>
-          <span>{run.category}</span>
+          <strong>{node?.toolName || run.toolName}</strong>
+          <span>{node?.category || run.category}</span>
         </div>
       </div>
       <div className="run-block">
-        <h4>参数配置</h4>
-        <div className="run-params">{run.parameters.map((param) => <span key={`${run.toolName}-${param.name}`}><em>{param.name}</em><b>{param.value}</b></span>)}</div>
+        <h4>输入</h4>
+        <pre>{getRunInputPreview({ run, node, file, index })}</pre>
       </div>
-      {success && run.outputFull ? (
+      {run.outputFull ? (
         <div className="run-block">
-          <h4>完整输出 <code>{run.outputPath}</code></h4>
+          <h4>输出 <code>{run.outputPath}</code></h4>
           <pre>{run.outputFull}</pre>
         </div>
       ) : null}
@@ -6578,15 +7159,28 @@ function SamplePreview({ files, results = [] }) {
   ))}</div>;
 }
 
+function getDefaultWorkbenchTarget(projectId = dataStore.getProjects()[0]?.id) {
+  const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
+  const solution = dataStore.getProjectSolution(project?.id);
+  const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
+  const category = categories.find((item) => item.formTypes?.length);
+  return {
+    projectId: project?.id,
+    categoryId: category?.id || null,
+    formType: category?.formTypes?.[0] || '切片库',
+    entryNonce: Date.now(),
+  };
+}
+
 export function App() {
   const params = new URLSearchParams(window.location.search);
   const [active, setActive] = useState(params.get('screen') || 'ops-projects');
   const [projectId, setProjectId] = useState(dataStore.getProjects()[0]?.id);
-  const [workbenchTarget, setWorkbenchTarget] = useState({ projectId: dataStore.getProjects()[0]?.id, categoryId: null, formType: '问答库', entryNonce: 0 });
+  const [workbenchTarget, setWorkbenchTarget] = useState(() => getDefaultWorkbenchTarget(dataStore.getProjects()[0]?.id));
   const [toast, setToast] = useState(null);
   const notify = (message, type = 'info') => setToast({ message, type });
   const openSolution = (id) => { setProjectId(id); setActive('ops-category'); };
-  const openWorkbench = (id, categoryId = null, formType = '问答库') => { setWorkbenchTarget({ projectId: id, categoryId, formType, entryNonce: Date.now() }); setActive('ops-workbench'); };
+  const openWorkbench = (id, categoryId = null, formType = '切片库') => { setWorkbenchTarget({ projectId: id, categoryId, formType, entryNonce: Date.now() }); setActive('ops-workbench'); };
 
   let content;
   if (active === 'admin-mcp') content = <McpServicePage notify={notify} />;
@@ -6602,7 +7196,7 @@ export function App() {
   return (
     <Shell active={active} onNavigate={(key) => {
       if (key === 'ops-category') setProjectId(projectId || dataStore.getProjects()[0]?.id);
-      if (key === 'ops-workbench') setWorkbenchTarget((current) => ({ projectId: current.projectId || dataStore.getProjects()[0]?.id, categoryId: null, formType: current.formType || '问答库', entryNonce: Date.now() }));
+      if (key === 'ops-workbench') setWorkbenchTarget((current) => getDefaultWorkbenchTarget(current.projectId || dataStore.getProjects()[0]?.id));
       setActive(key === 'ops-result' ? 'ops-knowledge-points' : key);
     }}>
       {content}

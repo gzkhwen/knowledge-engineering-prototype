@@ -10,7 +10,11 @@ const keys = {
   categoryPlans: 'ke-category-plans-v2',
 };
 
-const formTypes = ['问答库', '术语库', '非结构化切片', '二维表', '分类树', '决策表', 'SOP', '知识图谱'];
+const formTypes = ['切片库', 'QA库', '知识点'];
+const legacyFormTypeMap = {
+  非结构化切片: '切片库',
+  问答库: 'QA库',
+};
 
 function read(key, fallback) {
   try {
@@ -67,17 +71,17 @@ const seed = {
   projectCategories: [
     { id: 'cat-product', solutionId: 'sol-main', parentId: null, name: '产品知识', level: 1, formTypes: [], hasContent: false },
     { id: 'cat-wealth', solutionId: 'sol-main', parentId: 'cat-product', name: '财富管理', level: 2, formTypes: [], hasContent: false },
-    { id: 'cat-wealth-fund', solutionId: 'sol-main', parentId: 'cat-wealth', name: '理财产品', level: 3, formTypes: ['问答库', '非结构化切片'], hasContent: true },
-    { id: 'cat-wealth-fund-risk', solutionId: 'sol-main', parentId: 'cat-wealth', name: '风险揭示', level: 3, formTypes: ['问答库'], hasContent: false },
+    { id: 'cat-wealth-fund', solutionId: 'sol-main', parentId: 'cat-wealth', name: '理财产品', level: 3, formTypes, hasContent: true },
+    { id: 'cat-wealth-fund-risk', solutionId: 'sol-main', parentId: 'cat-wealth', name: '风险揭示', level: 3, formTypes, hasContent: false },
     { id: 'cat-credit', solutionId: 'sol-main', parentId: 'cat-product', name: '信贷产品', level: 2, formTypes: [], hasContent: false },
-    { id: 'cat-credit-personal', solutionId: 'sol-main', parentId: 'cat-credit', name: '个人贷款', level: 3, formTypes: ['问答库', '二维表'], hasContent: false },
+    { id: 'cat-credit-personal', solutionId: 'sol-main', parentId: 'cat-credit', name: '个人贷款', level: 3, formTypes, hasContent: false },
     { id: 'cat-process', solutionId: 'sol-main', parentId: null, name: '业务流程', level: 1, formTypes: [], hasContent: false },
     { id: 'cat-customer-service', solutionId: 'sol-main', parentId: 'cat-process', name: '客户服务', level: 2, formTypes: [], hasContent: false },
-    { id: 'cat-open-account', solutionId: 'sol-main', parentId: 'cat-customer-service', name: '开户流程', level: 3, formTypes: ['SOP', '问答库'], hasContent: false },
-    { id: 'cat-complaint', solutionId: 'sol-main', parentId: 'cat-customer-service', name: '投诉处理', level: 3, formTypes: ['SOP'], hasContent: false },
+    { id: 'cat-open-account', solutionId: 'sol-main', parentId: 'cat-customer-service', name: '开户流程', level: 3, formTypes, hasContent: false },
+    { id: 'cat-complaint', solutionId: 'sol-main', parentId: 'cat-customer-service', name: '投诉处理', level: 3, formTypes, hasContent: false },
     { id: 'cat-compliance', solutionId: 'sol-main', parentId: null, name: '合规制度', level: 1, formTypes: [], hasContent: false },
     { id: 'cat-marketing-compliance', solutionId: 'sol-main', parentId: 'cat-compliance', name: '营销合规', level: 2, formTypes: [], hasContent: false },
-    { id: 'cat-copy-review', solutionId: 'sol-main', parentId: 'cat-marketing-compliance', name: '宣传话术审核', level: 3, formTypes: ['决策表', '问答库'], hasContent: false },
+    { id: 'cat-copy-review', solutionId: 'sol-main', parentId: 'cat-marketing-compliance', name: '宣传话术审核', level: 3, formTypes, hasContent: false },
   ],
   categoryPlans: [
     {
@@ -85,9 +89,9 @@ const seed = {
       projectId: 'proj-main',
       solutionId: 'sol-main',
       categoryId: 'cat-wealth-fund',
-      formType: '问答库',
+      formType: 'QA库',
       status: 'active',
-      name: '理财产品问答库处理方案',
+      name: '理财产品QA库处理方案',
       nodes: [
         { toolId: 'ke-standard-file-parse', toolName: '通用解析' },
         { toolId: 'ke-standard-parent-child-chunk', toolName: '父子切片' },
@@ -103,24 +107,24 @@ function fallbackCategoriesForProject(solution, project) {
   if (project.templateId === 'tpl-mixue') {
     return [
       { id: `cat-${baseId}-product`, solutionId: solution.id, parentId: null, name: '产品知识', level: 1, formTypes: [], hasContent: false },
-      { id: `cat-${baseId}-franchise`, solutionId: solution.id, parentId: `cat-${baseId}-product`, name: '加盟政策', level: 2, formTypes: ['问答库', '非结构化切片'], hasContent: project.hasContent },
+      { id: `cat-${baseId}-franchise`, solutionId: solution.id, parentId: `cat-${baseId}-product`, name: '加盟政策', level: 2, formTypes, hasContent: project.hasContent },
     ];
   }
   if (project.relationshipId === 'rel-bank-marketing-qa') {
     return [
       { id: `cat-${baseId}-product`, solutionId: solution.id, parentId: null, name: '产品知识', level: 1, formTypes: [], hasContent: false },
-      { id: `cat-${baseId}-finance`, solutionId: solution.id, parentId: `cat-${baseId}-product`, name: '理财产品', level: 2, formTypes: ['问答库', '非结构化切片'], hasContent: project.hasContent },
+      { id: `cat-${baseId}-finance`, solutionId: solution.id, parentId: `cat-${baseId}-product`, name: '理财产品', level: 2, formTypes, hasContent: project.hasContent },
       { id: `cat-${baseId}-process`, solutionId: solution.id, parentId: null, name: '业务流程', level: 1, formTypes: [], hasContent: false },
-      { id: `cat-${baseId}-account`, solutionId: solution.id, parentId: `cat-${baseId}-process`, name: '开户流程', level: 2, formTypes: ['SOP', '问答库'], hasContent: false },
+      { id: `cat-${baseId}-account`, solutionId: solution.id, parentId: `cat-${baseId}-process`, name: '开户流程', level: 2, formTypes, hasContent: false },
     ];
   }
   if (project.relationshipId === 'rel-insurance-training-qa') {
     return [
-      { id: `cat-${baseId}-rules`, solutionId: solution.id, parentId: null, name: project.projectStatus === '草稿' ? '风控规则' : '保险知识', level: 1, formTypes: ['问答库', '非结构化切片'], hasContent: project.hasContent },
+      { id: `cat-${baseId}-rules`, solutionId: solution.id, parentId: null, name: project.projectStatus === '草稿' ? '风控规则' : '保险知识', level: 1, formTypes, hasContent: project.hasContent },
     ];
   }
   return [
-    { id: `cat-${baseId}-root`, solutionId: solution.id, parentId: null, name: '测试类目', level: 1, formTypes: ['问答库'], hasContent: project.hasContent },
+    { id: `cat-${baseId}-root`, solutionId: solution.id, parentId: null, name: '测试类目', level: 1, formTypes, hasContent: project.hasContent },
   ];
 }
 
@@ -143,6 +147,40 @@ function ensureProjectCategories() {
   if (changed) write(keys.projectCategories, next);
 }
 
+function normalizeProjectCategories() {
+  const categories = read(keys.projectCategories, []);
+  let changed = false;
+  const next = categories.map((category) => {
+    if (!category.formTypes?.length) return category;
+    const normalized = category.formTypes.map((item) => legacyFormTypeMap[item] || item).filter((item) => formTypes.includes(item));
+    const nextFormTypes = normalized.length ? Array.from(new Set(normalized)) : formTypes;
+    const shouldUseFullSet = nextFormTypes.length > 0;
+    const effectiveFormTypes = shouldUseFullSet ? formTypes : nextFormTypes;
+    if (effectiveFormTypes.length !== category.formTypes.length || effectiveFormTypes.some((item, index) => item !== category.formTypes[index])) {
+      changed = true;
+      return { ...category, formTypes: effectiveFormTypes };
+    }
+    return category;
+  });
+  if (changed) write(keys.projectCategories, next);
+}
+
+function normalizeCategoryPlans() {
+  const plans = read(keys.categoryPlans, []);
+  let changed = false;
+  const next = plans.map((plan) => {
+    const formType = legacyFormTypeMap[plan.formType] || plan.formType;
+    const effectiveFormType = formTypes.includes(formType) ? formType : '切片库';
+    const fileFormat = plan.fileFormat || 'pdf';
+    if (effectiveFormType !== plan.formType || fileFormat !== plan.fileFormat) {
+      changed = true;
+      return { ...plan, formType: effectiveFormType, fileFormat };
+    }
+    return plan;
+  });
+  if (changed) write(keys.categoryPlans, next);
+}
+
 function ensureSeeded() {
   const existingProjects = read(keys.projects, null);
   if (existingProjects) {
@@ -157,6 +195,8 @@ function ensureSeeded() {
 
 ensureSeeded();
 ensureProjectCategories();
+normalizeProjectCategories();
+normalizeCategoryPlans();
 
 export const knowledgeFormTypes = formTypes;
 
@@ -247,10 +287,10 @@ export const dataStore = {
     this.save('projectSolutions', [solution, ...this.list('projectSolutions')]);
     const baseCategories = [
       { name: '产品知识', parentName: null, level: 1, formTypes: [] },
-      { name: '理财产品', parentName: '产品知识', level: 2, formTypes: ['问答库', '非结构化切片'] },
-      { name: '信用卡产品', parentName: '产品知识', level: 2, formTypes: ['问答库'] },
+      { name: '理财产品', parentName: '产品知识', level: 2, formTypes },
+      { name: '信用卡产品', parentName: '产品知识', level: 2, formTypes },
       { name: '业务流程', parentName: null, level: 1, formTypes: [] },
-      { name: '开户流程', parentName: '业务流程', level: 2, formTypes: ['SOP', '问答库'] },
+      { name: '开户流程', parentName: '业务流程', level: 2, formTypes },
     ];
     const idMap = new Map();
     const categories = baseCategories.map((item) => {
@@ -268,13 +308,17 @@ export const dataStore = {
   getProjectCategories(solutionId) {
     return this.list('projectCategories').filter((item) => item.solutionId === solutionId);
   },
-  getCategoryPlan(categoryId, formType) {
-    return this.list('categoryPlans').find((item) => item.categoryId === categoryId && item.formType === formType) || null;
+  getCategoryPlan(categoryId, formType, fileFormat) {
+    return this.list('categoryPlans').find((item) => {
+      if (item.categoryId !== categoryId || item.formType !== formType) return false;
+      return fileFormat ? (item.fileFormat || 'pdf') === fileFormat : true;
+    }) || null;
   },
   upsertCategoryPlan(payload) {
     const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
     const plans = this.list('categoryPlans');
-    const existing = plans.find((item) => item.categoryId === payload.categoryId && item.formType === payload.formType);
+    const payloadFileFormat = payload.fileFormat || 'pdf';
+    const existing = plans.find((item) => item.categoryId === payload.categoryId && item.formType === payload.formType && (item.fileFormat || 'pdf') === payloadFileFormat);
     const next = existing
       ? { ...existing, ...payload, updatedAt: now }
       : { id: id('plan'), status: 'active', createdAt: now, updatedAt: now, ...payload };
