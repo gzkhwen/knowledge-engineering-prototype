@@ -1198,22 +1198,8 @@ export function createEmptyServiceDraft() {
     authValue: '',
     version: 'V1.0.0',
     description: '',
-    configMode: 'simple',
     headers: [],
     connectionTimeout: '60',
-    sseReadTimeout: '60',
-    jsonConfig: `{
-  "mcpServers": {
-    "serverName": {
-      "transport": "streamable_http",
-      "url": "https://example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer \${token}"
-      },
-      "timeout": 60
-    }
-  }
-}`,
   };
 }
 

@@ -782,11 +782,8 @@ function McpServicePage({ notify }) {
       authValue: '',
       version: service.version,
       description: service.description,
-      configMode: 'simple',
       headers: service.authType === '无鉴权' ? [] : [{ id: 'header-1', key: service.authType === 'API Key' ? 'x-api-key' : 'Authorization', value: '' }],
       connectionTimeout: '60',
-      sseReadTimeout: service.transport === 'SSE' ? '60' : '',
-      jsonConfig: createEmptyServiceDraft().jsonConfig,
     });
     setDialogOpen(true);
   };
@@ -824,12 +821,8 @@ function McpServicePage({ notify }) {
       notify('服务名称不能为空', 'error');
       return;
     }
-    if (draft.configMode === 'simple' && !draft.endpoint.trim()) {
+    if (!draft.endpoint.trim()) {
       notify('MCP服务地址不能为空', 'error');
-      return;
-    }
-    if (draft.configMode === 'json' && !draft.jsonConfig.trim()) {
-      notify('JSON配置不能为空', 'error');
       return;
     }
     if (editingId) {
@@ -953,39 +946,30 @@ function McpServicePage({ notify }) {
           <p className="field-help">支持中英文、数字、空格和下划线，不能以下划线开头。</p>
           <Field label="服务描述"><textarea maxLength={200} value={draft.description} onChange={(event) => updateDraft({ description: event.target.value })} /></Field>
           <p className="field-help">{draft.description.length}/200</p>
-          <div className="config-tabs">
-            <button type="button" className={draft.configMode === 'simple' ? 'active' : ''} onClick={() => updateDraft({ configMode: 'simple' })}>简易配置</button>
-            <button type="button" className={draft.configMode === 'json' ? 'active' : ''} onClick={() => updateDraft({ configMode: 'json' })}>JSON配置</button>
-          </div>
-          {draft.configMode === 'simple' ? (
-            <div className="dialog-stack">
-              <Field label="MCP连接协议类型">
-                <SelectField value={draft.transport} onChange={(value) => updateDraft({ transport: value })}>
-                  <option>SSE</option>
-                  <option>Streamable HTTP</option>
-                </SelectField>
-              </Field>
-              <Field label="MCP服务地址" required>
-                <input value={draft.endpoint} placeholder={draft.transport === 'SSE' ? 'https://example.com/mcp/sse' : 'https://example.com/mcp'} onChange={(event) => updateDraft({ endpoint: event.target.value })} />
-              </Field>
-              <section className="headers-box">
-                <div className="headers-head"><strong>Headers</strong><button type="button" onClick={addHeader}><PlusOutlined /> 添加</button></div>
-                {draft.headers.length === 0 ? <p>暂无 Headers，可按需添加变量 Key 和变量 Value。</p> : draft.headers.map((header) => (
-                  <div className="header-row" key={header.id}>
-                    <input placeholder="变量Key" value={header.key} onChange={(event) => updateHeader(header.id, { key: event.target.value })} />
-                    <input placeholder="变量Value" value={header.value} onChange={(event) => updateHeader(header.id, { value: event.target.value })} />
-                    <button type="button" className="danger-link" onClick={() => removeHeader(header.id)}><DeleteOutlined /></button>
-                  </div>
-                ))}
-              </section>
-              <div className={draft.transport === 'SSE' ? 'form-grid' : ''}>
-                <Field label="最大连接时长(s)"><input value={draft.connectionTimeout} onChange={(event) => updateDraft({ connectionTimeout: event.target.value })} /></Field>
-                {draft.transport === 'SSE' ? <Field label="SSE超时时长(s)"><input value={draft.sseReadTimeout} onChange={(event) => updateDraft({ sseReadTimeout: event.target.value })} /></Field> : null}
-              </div>
+          <div className="dialog-stack">
+            <Field label="MCP连接协议类型">
+              <SelectField value={draft.transport} onChange={(value) => updateDraft({ transport: value })}>
+                <option value="SSE">SSE</option>
+                <option value="Streamable HTTP">Streamable HTTP</option>
+              </SelectField>
+            </Field>
+            <Field label="MCP服务地址" required>
+              <input value={draft.endpoint} placeholder={draft.transport === 'SSE' ? 'https://example.com/mcp/sse' : 'https://example.com/mcp'} onChange={(event) => updateDraft({ endpoint: event.target.value })} />
+            </Field>
+            <section className="headers-box">
+              <div className="headers-head"><strong>Headers</strong><button type="button" onClick={addHeader}><PlusOutlined /> 添加</button></div>
+              {draft.headers.length === 0 ? <p>暂无 Headers，可按需添加变量 Key 和变量 Value。</p> : draft.headers.map((header) => (
+                <div className="header-row" key={header.id}>
+                  <input placeholder="变量Key" value={header.key} onChange={(event) => updateHeader(header.id, { key: event.target.value })} />
+                  <input placeholder="变量Value" value={header.value} onChange={(event) => updateHeader(header.id, { value: event.target.value })} />
+                  <button type="button" className="danger-link" onClick={() => removeHeader(header.id)}><DeleteOutlined /></button>
+                </div>
+              ))}
+            </section>
+            <div>
+              <Field label="最大连接时长(s)"><input value={draft.connectionTimeout} onChange={(event) => updateDraft({ connectionTimeout: event.target.value })} /></Field>
             </div>
-          ) : (
-            <Field label="JSON" required><textarea className="code-textarea" value={draft.jsonConfig} onChange={(event) => updateDraft({ jsonConfig: event.target.value })} /></Field>
-          )}
+          </div>
         </Modal>
       ) : null}
       {detailService ? (
