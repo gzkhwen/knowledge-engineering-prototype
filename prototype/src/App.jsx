@@ -6107,7 +6107,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
               </div>
             </div>
           </section>
-          <aside className="plan-column">
+          <aside className={`plan-column ${rightTab === '处理方案' && !planNodes.length ? 'empty-plan-column' : ''}`}>
             <div className="tabs">{['处理方案', '执行结果'].map((tab) => <button type="button" key={tab} className={rightTab === tab ? 'active' : ''} onClick={() => setRightTab(tab)}>{tab}</button>)}</div>
             {rightTab === '处理方案' ? (
               <div className="plan-tab">

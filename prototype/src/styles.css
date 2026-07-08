@@ -1236,6 +1236,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   box-shadow: 0 18px 48px rgba(15, 23, 42, .16);
   backdrop-filter: blur(10px);
 }
+.plan-column.empty-plan-column { min-height: 0; }
 .tabs { display: flex; height: 44px; padding: 0 12px; border-bottom: 1px solid #edf0f5; }
 .tabs button { padding: 0 12px; color: #667085; border-bottom: 2px solid transparent; }
 .plan-column .tabs button.active { color: #0f63f6; border-color: #0f63f6; font-weight: 600; }
@@ -1254,6 +1255,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .add-node-pill:hover { background: #0b55d9; }
 .add-node-pill:disabled { color: #94a3b8; background: #f1f5f9; cursor: not-allowed; }
 .workflow-list { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; max-height: calc(100vh - 430px); padding: 14px; overflow-y: auto; }
+.empty-plan-column .workflow-list { padding-bottom: 14px; overflow: visible; }
 .workflow-section-wrap { position: relative; }
 .workflow-card, .workflow-section { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 9px; margin-bottom: 12px; }
 .workflow-section.dragging { opacity: .54; filter: saturate(.86); }
