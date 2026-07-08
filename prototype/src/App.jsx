@@ -1061,7 +1061,7 @@ function ToolSchemaCard({ tool }) {
 }
 
 function ToolManagementPage({ notify }) {
-  const [snapshot, setSnapshot] = useState(() => normalizeToolSnapshot(readCatalog()));
+  const [snapshot, setSnapshot] = useState(() => normalizeToolSnapshot(readManagementFlowNodeCatalog()));
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(allToolsCategory);
   const [categoryDraft, setCategoryDraft] = useState(null);
@@ -1070,7 +1070,7 @@ function ToolManagementPage({ notify }) {
   const [detailTool, setDetailTool] = useState(null);
   const [createDraft, setCreateDraft] = useState(null);
 
-  useEffect(() => subscribeCatalog(() => setSnapshot(normalizeToolSnapshot(readCatalog()))), []);
+  useEffect(() => subscribeCatalog(() => setSnapshot(normalizeToolSnapshot(readManagementFlowNodeCatalog()))), []);
 
   useEffect(() => {
     setDetailTool((current) => (current ? snapshot.tools.find((tool) => tool.id === current.id) || null : null));
@@ -3557,6 +3557,9 @@ const workbenchParamLabels = {
   content: '政策正文',
   input: '输入内容',
   chunk_size: '切片长度',
+  chunk_strategy: '分块策略',
+  max_chunk_size: '最大切片长度',
+  overlap_size: '重叠长度',
   overlap: '重叠长度',
   model: '模型',
   system_prompt: '提示词',
@@ -3628,6 +3631,7 @@ const workbenchOutputLabels = {
 
 const workbenchParamSelects = {
   parse_mode: ['通用解析', '政策条款解析', 'OCR解析'],
+  chunk_strategy: ['heading', 'paragraph', 'semantic'],
   language: ['zh-CN', 'en-US'],
   ocr_language: ['zh-CN', 'en-US', 'ja-JP'],
   table_mode: ['自动识别', '强表格模式', '版面优先'],
@@ -3912,7 +3916,9 @@ function toolInputToParam(input, index) {
   const displayName = input.displayName || input.label || getWorkbenchParamLabel(name);
   const selectOptions = getWorkbenchParamOptions(name);
   const paramType = selectOptions ? 'select' : type.includes('number') || type.includes('int') ? 'number' : type.includes('array') || type.includes('object') ? 'textarea' : 'text';
-  return makeParam(name, displayName, defaultToolParamValue(name, paramType), {
+  const hasDefaultValue = Object.prototype.hasOwnProperty.call(input, 'defaultValue');
+  const defaultValue = hasDefaultValue ? input.defaultValue : defaultToolParamValue(name, paramType);
+  return makeParam(name, displayName, defaultValue, {
     type: paramType,
     schemaType: input.type || paramType,
     required: input.required ?? true,
@@ -3929,6 +3935,9 @@ function defaultToolParamValue(name, paramType) {
   if (name === 'enable_layout') return '开启';
   if (name === 'table_mode') return '自动识别';
   if (name === 'content') return '';
+  if (name === 'chunk_strategy') return 'heading';
+  if (name === 'max_chunk_size') return 1200;
+  if (name === 'overlap_size') return 120;
   if (name === 'chunk_size') return 800;
   if (name === 'overlap') return 80;
   if (name === 'model') return 'qwen3-8b';
@@ -3980,16 +3989,48 @@ function managedToolToWorkbenchTool(tool) {
   };
 }
 
+function isDisabledFlowNode(tool) {
+  return tool.status === '不可用' || tool.status === '禁用' || tool.enabled === false;
+}
+
+function readUnifiedFlowNodeCatalog() {
+  const catalog = readCatalog();
+  const systemTools = baseTools
+    .filter((tool) => tool.sourceType === 'system')
+    .map((tool) => ({
+      ...tool,
+      enabled: tool.enabled ?? true,
+      status: tool.status || '可用',
+      category: '系统节点',
+      sourceType: 'system',
+    }));
+  const byId = new Map([...catalog.tools, ...systemTools].map((tool) => [tool.id, tool]));
+  const tools = Array.from(byId.values());
+  return {
+    tools,
+    categories: sortWorkbenchCategories(Array.from(new Set([...(catalog.categories || []), '系统节点', ...tools.map((tool) => tool.category)].filter(Boolean)))),
+  };
+}
+
+function readManagementFlowNodeCatalog() {
+  const catalog = readUnifiedFlowNodeCatalog();
+  return {
+    tools: catalog.tools.filter((tool) => tool.category !== '系统节点'),
+    categories: catalog.categories.filter((category) => category !== '系统节点'),
+  };
+}
+
 function readWorkbenchCatalog() {
-  const managed = readCatalog().tools.filter((tool) => tool.status === '可用' || tool.enabled);
-  const managedTools = managed.map(managedToolToWorkbenchTool);
-  const systemTools = baseTools.filter((tool) => tool.sourceType === 'system');
-  const byId = new Map([...managedTools, ...systemTools].map((tool) => [tool.id, tool]));
-  return Array.from(byId.values()).map((tool) => ({
-    ...tool,
-    category: tool.category || '未分类',
-    semanticCategory: getSemanticCategory(tool),
-  }));
+  return readUnifiedFlowNodeCatalog().tools
+    .filter((tool) => !isDisabledFlowNode(tool))
+    .map((tool) => {
+      const nextTool = tool.sourceType === 'system' ? tool : managedToolToWorkbenchTool(tool);
+      return {
+        ...nextTool,
+        category: nextTool.category || '未分类',
+        semanticCategory: getSemanticCategory(nextTool),
+      };
+    });
 }
 
 function isIterationNode(node) {
@@ -4306,11 +4347,12 @@ function replaceToolKeepingStep(currentNode, tool, inputSource) {
 
 function applyInputSource(node, inputSource) {
   const paramSource = inputSource.type === 'upstream' ? { type: 'upstream', sourceNodeId: inputSource.sourceNodeId, outputPath: inputSource.outputPath } : { type: 'file' };
+  const hasArtifactInputs = Boolean(node.inputArtifacts?.length);
   return {
     ...node,
     adjusted: true,
     inputSource,
-    params: node.params.map((param, index) => (param.id === node.inputParamId || (!node.inputParamId && index === 0) ? { ...param, source: paramSource } : param)),
+    params: node.params.map((param, index) => (!hasArtifactInputs && (param.id === node.inputParamId || (!node.inputParamId && index === 0)) ? { ...param, source: paramSource } : param)),
     inputArtifacts: node.inputArtifacts?.map((artifact) => ({ ...artifact, source: paramSource })),
     codeInputs: node.codeInputs?.map((input, index) => (index === 0 ? { ...input, source: paramSource } : input)),
   };
@@ -4972,10 +5014,10 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const canSave = canEdit && planNodes.length > 0 && visibleProblems.length === 0;
   const hasAgentTask = Boolean(agentTask);
   const canSendAgentMessage = !running && !testing && (Boolean(agentInput.trim()) || hasAgentTask) && (hasAgentTask || planNodes.length > 0 || sampleFiles.length > 0);
-  const [toolCategories, setToolCategories] = useState(() => readCatalog().categories || defaultCategories);
+  const [toolCategories, setToolCategories] = useState(() => readUnifiedFlowNodeCatalog().categories || defaultCategories);
 
   useEffect(() => subscribeCatalog(() => {
-    const snapshot = readCatalog();
+    const snapshot = readUnifiedFlowNodeCatalog();
     setCatalog(readWorkbenchCatalog());
     setToolCategories(snapshot.categories || defaultCategories);
   }), []);
@@ -5195,6 +5237,11 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     });
     step(1200, () => {
       setRuntimeForNodes(finalNodes, { status: 'done' });
+      setPlanNodes((current) => current.map((node) => ({
+        ...node,
+        expanded: false,
+        innerNodes: isIterationNode(node) ? (node.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded: false })) : node.innerNodes,
+      })));
       setSampleFiles((current) => current.map((file) => ({ ...file, status: '已完成' })));
       setResults(filesSnapshot.map((file) => createSampleResult(file, { includeKnowledge: true })));
       pushEvent({ role: 'agent', title: '方案生成与样例执行完成', content: '已完成方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。', status: 'done' });

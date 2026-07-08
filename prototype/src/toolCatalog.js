@@ -1011,6 +1011,29 @@ function normalizeStoredTools(tools) {
   }));
 }
 
+function mergeStoredToolsWithSeed(storedTools, seedTools) {
+  const seedByName = new Map(seedTools.map((tool) => [tool.name, tool]));
+  const storedNames = new Set(storedTools.map((tool) => tool.name));
+  const refreshedTools = storedTools.map((tool) => {
+    const seed = seedByName.get(tool.name);
+    if (!seed) return tool;
+    return {
+      ...seed,
+      id: tool.id || seed.id,
+      status: tool.status || seed.status,
+      enabled: tool.enabled ?? seed.enabled,
+      lifecycleStatus: tool.lifecycleStatus || seed.lifecycleStatus,
+      version: tool.version || seed.version,
+      lastSyncedAt: seed.lastSyncedAt || tool.lastSyncedAt,
+    };
+  });
+  const missingSeedTools = seedTools.filter((tool) => !storedNames.has(tool.name));
+  return {
+    tools: [...refreshedTools, ...missingSeedTools],
+    changed: missingSeedTools.length > 0 || refreshedTools.some((tool, index) => JSON.stringify(tool) !== JSON.stringify(storedTools[index])),
+  };
+}
+
 export function loadServices() {
   purgeLegacyDemoStorage();
   try {
@@ -1068,11 +1091,10 @@ export function readCatalog() {
     if (tools) {
       const storedTools = normalizeStoredTools(tools);
       const seedTools = initialManagedTools(initialServices);
-      const storedNames = new Set(storedTools.map((tool) => tool.name));
-      const missingSeedTools = seedTools.filter((tool) => !storedNames.has(tool.name));
-      const nextTools = [...storedTools, ...missingSeedTools];
+      const merged = mergeStoredToolsWithSeed(storedTools, seedTools);
+      const nextTools = merged.tools;
       const nextCategories = mergeCategories(defaultCategories, categories, nextTools.map((tool) => tool.category));
-      if (missingSeedTools.length || nextCategories.length !== categories.length) saveCatalog(nextTools, nextCategories);
+      if (merged.changed || nextCategories.length !== categories.length) saveCatalog(nextTools, nextCategories);
       return { tools: nextTools, categories: nextCategories };
     }
   } catch {
