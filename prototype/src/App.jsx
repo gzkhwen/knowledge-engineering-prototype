@@ -3582,7 +3582,9 @@ const workbenchParamLabels = {
   knowledgeTitle: '知识点标题',
   sourceChunkIds: '来源分片',
   tagStrategy: '打标策略',
+  tag_strategy: '打标策略',
   labelPool: '标签范围',
+  label_pool: '标签范围',
 };
 
 const workbenchOutputLabels = {
@@ -3633,6 +3635,7 @@ const workbenchParamSelects = {
   summary_type: ['政策摘要', '办理条件', '材料清单', '风险提示'],
   errorResponseMethod: ['错误时终止', '忽略错误并继续', '移除错误输出并继续'],
   tagStrategy: ['规则标签优先', '结构感知打标', '模型自动打标'],
+  tag_strategy: ['规则标签优先', '结构感知打标', '模型自动打标'],
   enable_layout: ['开启', '关闭'],
 };
 
@@ -3934,8 +3937,8 @@ function defaultToolParamValue(name, paramType) {
   if (name === 'concurrency') return 1;
   if (name === 'iterationTimeout') return 60;
   if (name === 'errorResponseMethod') return '错误时终止';
-  if (name === 'tagStrategy') return '结构感知打标';
-  if (name === 'labelPool') return ['适用对象', '办理条件', '材料要求'];
+  if (name === 'tagStrategy' || name === 'tag_strategy') return '结构感知打标';
+  if (name === 'labelPool' || name === 'label_pool') return ['适用对象', '办理条件', '材料要求'];
   if (name === 'batch_size') return 32;
   if (name === 'top_k') return 10;
   if (paramType === 'number') return 0;
@@ -3943,6 +3946,7 @@ function defaultToolParamValue(name, paramType) {
 }
 
 function getInputParamIdForTool(tool, base) {
+  if (tool.inputArtifacts?.length) return base?.inputParamId || '';
   if (tool.name.includes('解析')) return 'file';
   if (tool.inputs?.some((input) => input.name === 'input')) return 'input';
   return base?.inputParamId || tool.inputs?.[0]?.name || '';
@@ -3992,6 +3996,14 @@ function isIterationNode(node) {
   return node?.toolId === 'system-iteration';
 }
 
+function isKnowledgeExtractionNode(node) {
+  return node?.toolId === 'summary' || node?.toolName === '知识点提取' || node?.name === '知识点提取';
+}
+
+function isKnowledgeTaggingNode(node) {
+  return node?.toolId === 'knowledge-tagging' || node?.toolName === '知识点打标' || node?.name === '知识点打标';
+}
+
 function getIterationVariables() {
   return [
     { value: 'currentElement', label: '当前元素', type: 'object' },
@@ -4016,6 +4028,7 @@ function applyIterationSourceToNode(node) {
   return {
     ...node,
     inputSource: { type: 'iteration', outputPath: 'currentElement' },
+    inputArtifacts: node.inputArtifacts?.map((artifact) => ({ ...artifact, source: iterationSource })),
     params: node.params.map((param) => {
       if (param.id === 'taggingObject') return { ...param, source: iterationSource };
       if (param.id === node.inputParamId) return { ...param, source: iterationSource };
@@ -4093,8 +4106,8 @@ function clearManualNodeConfig(node) {
 function createWorkbenchNode(tool, inputSource = { type: 'fixed' }) {
   const params = tool.params.map(cloneWorkbenchParam);
   const paramSource = inputSource.type === 'upstream' ? { type: 'upstream', sourceNodeId: inputSource.sourceNodeId, outputPath: inputSource.outputPath } : { type: 'file' };
-  const inputParamIndex = Math.max(0, params.findIndex((param) => param.id === tool.inputParamId));
-  if (params[inputParamIndex]) params[inputParamIndex] = { ...params[inputParamIndex], source: paramSource };
+  const inputParamIndex = params.findIndex((param) => param.id === tool.inputParamId);
+  if (inputParamIndex >= 0) params[inputParamIndex] = { ...params[inputParamIndex], source: paramSource };
   const nodeId = makeId(tool.id);
   return {
     ...tool,
@@ -4164,6 +4177,7 @@ function createConfiguredIterationNode(iterationTool, inputSource, codeTool, tag
     expanded: true,
     adjusted: true,
     inputSource: prepareCode ? { type: 'upstream', sourceNodeId: prepareCode.nodeId, outputPath: 'data.tagInput' } : currentElementSource,
+    inputArtifacts: taggingNode.inputArtifacts?.map((artifact) => ({ ...artifact, source: prepareCode ? { type: 'upstream', sourceNodeId: prepareCode.nodeId, outputPath: 'data.tagInput' } : currentElementSource })),
     params: taggingNode.params.map((param) => (
       param.id === taggingNode.inputParamId
         ? { ...param, source: prepareCode ? { type: 'upstream', sourceNodeId: prepareCode.nodeId, outputPath: 'data.tagInput' } : currentElementSource }
@@ -4196,15 +4210,31 @@ function createConfiguredIterationNode(iterationTool, inputSource, codeTool, tag
   };
 }
 
+function findWorkbenchToolByName(catalog, name) {
+  return catalog.find((tool) => tool.name === name || tool.sourceToolName === name);
+}
+
+function findKnowledgeExtractionTool(catalog, byId) {
+  return byId.get('summary')
+    || findWorkbenchToolByName(catalog, '知识点提取')
+    || catalog.find((tool) => getSemanticCategory(tool) === '知识提取' && tool.name.includes('知识点'));
+}
+
+function findKnowledgeTaggingTool(catalog, byId) {
+  return byId.get('knowledge-tagging')
+    || findWorkbenchToolByName(catalog, '知识点打标')
+    || catalog.find((tool) => tool.category === '知识打标' && tool.name.includes('打标'));
+}
+
 function createAgentDemoNodes(catalog = readWorkbenchCatalog()) {
   const byId = new Map(catalog.map((tool) => [tool.id, tool]));
   const parserTool = byId.get('medical-policy-parser') || byId.get('document-parser') || catalog.find((tool) => getSemanticCategory(tool) === '文档解析');
   const adapterTool = byId.get('system-code');
   const splitterTool = byId.get('medical-policy-splitter') || byId.get('recursive-separator-splitter') || byId.get('chunk-splitter') || catalog.find((tool) => getSemanticCategory(tool) === '文本分片');
   const storageTool = byId.get('system-storage');
-  const knowledgeTool = byId.get('summary');
+  const knowledgeTool = findKnowledgeExtractionTool(catalog, byId);
   const iterationTool = byId.get('system-iteration');
-  const taggingTool = byId.get('knowledge-tagging');
+  const taggingTool = findKnowledgeTaggingTool(catalog, byId);
   const parser = parserTool ? createWorkbenchNode(parserTool, { type: 'fixed' }) : null;
   const adapter = parser && adapterTool ? createWorkbenchNode(adapterTool, { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: 'sections' }) : null;
   const splitterSource = adapter || parser;
@@ -4247,7 +4277,7 @@ function createOptimizedNodes(currentNodes, catalog = readWorkbenchCatalog()) {
       next[index] = applyInputSource(node, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' });
     }
   });
-  const knowledge = next.find((node) => node.toolId === 'summary');
+  const knowledge = next.find(isKnowledgeExtractionNode);
   const iterationIndex = next.findIndex(isIterationNode);
   if (iterationIndex >= 0 && knowledge) {
     next[iterationIndex] = applyInputSource(next[iterationIndex], { type: 'upstream', sourceNodeId: knowledge.nodeId, outputPath: 'summaryResult' });
@@ -4256,7 +4286,7 @@ function createOptimizedNodes(currentNodes, catalog = readWorkbenchCatalog()) {
   next.forEach((node, index) => {
     if (node.toolId !== 'system-storage') return;
     const source = iteration || knowledge || splitter;
-    if (source) next[index] = applyInputSource(node, { type: 'upstream', sourceNodeId: source.nodeId, outputPath: isIterationNode(source) ? 'iterationResult' : source.toolId === 'summary' ? 'summaryResult' : 'textChunkResult' });
+    if (source) next[index] = applyInputSource(node, { type: 'upstream', sourceNodeId: source.nodeId, outputPath: isIterationNode(source) ? 'iterationResult' : isKnowledgeExtractionNode(source) ? 'summaryResult' : 'textChunkResult' });
   });
   return next;
 }
@@ -4594,7 +4624,7 @@ function getSmartPromptValue(param, node, instruction) {
     if (lowerId.includes('system')) return '你是知识库问答抽取专家。请基于输入片段生成可用于客服问答的高质量 QA，问题表达自然，答案必须来自原文，并保留来源片段引用。';
     if (lowerId.includes('guide')) return '请围绕用户可能咨询的问题生成问答对。每个答案需完整、可独立理解，并返回 question、answer、sourceChunkId 字段。';
   }
-  if (node.toolId === 'summary') {
+  if (isKnowledgeExtractionNode(node)) {
     if (lowerId.includes('system')) return '你是知识工程知识点提取专家。请基于输入片段提炼关键知识点，保持事实准确，避免引入原文没有的信息，并输出结构化知识点。';
     if (lowerId.includes('guide')) return '请按主题生成知识点条目，每条包含 title、content、sourceChunkIds，优先覆盖适用范围、办理条件和材料要求。';
   }
@@ -4621,8 +4651,8 @@ function getSmartParamValue(param, instruction, node) {
   if (param.id === 'taggingObject') return '${迭代执行.当前元素}';
   if (param.id === 'knowledgeTitle') return '';
   if (param.id === 'sourceChunkIds') return '';
-  if (param.id === 'tagStrategy') return '结构感知打标';
-  if (param.id === 'labelPool') return ['适用对象', '办理条件', '材料要求'];
+  if (param.id === 'tagStrategy' || param.id === 'tag_strategy') return '结构感知打标';
+  if (param.id === 'labelPool' || param.id === 'label_pool') return ['适用对象', '办理条件', '材料要求'];
   if (param.id === 'codeInput') return '${upstream.data.documentParseResult}';
   if (param.id === 'script') return 'function transform(input) {\n  return {\n    cleanBlocks: input.map(item => ({\n      title: item.title || item.heading,\n      text: item.text || item.content,\n      page: item.page,\n      source: item.source || item.fileName\n    })).filter(item => item.text)\n  };\n}';
   if (param.id === 'outputVariables') return '[{ "name": "cleanBlocks", "type": "Array<json>", "path": "data.cleanBlocks" }]';
@@ -4660,9 +4690,9 @@ function getSmartConfigureInstruction(node) {
   if (node.toolId === 'medical-policy-parser') return '使用当前上传的医保政策样例文件，按政策条款模式解析正文、章节和段落。';
   if (node.toolId === 'medical-policy-splitter') return '承接上游标准文本块，按章节边界生成 800 字左右的知识片段。';
   if (node.toolId === 'qa-extractor') return '承接分片结果，生成可用于客服问答的政策问答对。';
-  if (node.toolId === 'summary') return '承接分片结果，生成政策知识点、适用对象和关键规则。';
+  if (isKnowledgeExtractionNode(node)) return '承接分片结果，生成政策知识点、适用对象和关键规则。';
   if (node.toolId === 'system-iteration') return '承接知识点提取结果，对每个知识点逐项执行知识点打标，并聚合打标结果。';
-  if (node.toolId === 'knowledge-tagging') return '承接迭代执行的当前元素，对单个知识点完成结构感知打标。';
+  if (isKnowledgeTaggingNode(node)) return '承接迭代执行的当前元素，对单个知识点完成结构感知打标。';
   if (node.toolId === 'system-storage') return '承接分片结果并以 upsert 方式写入 ES。';
   if (node.toolId === 'system-code') return '把解析输出转换为后续分片节点可消费的标准文本块。';
   return `补齐「${node.toolName}」在当前处理方案中的输入来源和必填参数。`;

@@ -62,7 +62,7 @@ const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-managed-tool-categories-v22',
 ];
 
-export const defaultCategories = ['文档转换', '文档解析', '文档分块', '内容抽取'];
+export const defaultCategories = ['文档转换', '文档解析', '文档分块', '内容抽取', '知识打标'];
 
 function nowText() {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -137,6 +137,11 @@ const demoFieldDisplayNames = {
   summary: '知识点摘要',
   summary_type: '摘要类型',
   summaryResult: '知识点列表',
+  knowledge_point: '知识点',
+  tagResult: '打标结果',
+  tagSummary: '标签摘要',
+  tag_strategy: '打标策略',
+  label_pool: '标签范围',
   system_prompt: '系统提示词',
   table_mode: '表格解析模式',
   tableMetadata: '表格元数据',
@@ -523,6 +528,26 @@ const idpDocumentTools = [
     outputs: [createRootedResponseOutput('response', '脚注提取后的 Markdown 文件列表。', { dataDescription: '脚注提取后的 Markdown 文件列表。', dataFileType: 'md' })],
   },
   {
+    slug: 'knowledge-point-extraction',
+    name: '知识点提取接口',
+    description: '基于文本分片提取结构化知识点，输出知识点标题、正文和来源分片引用。',
+    category: '内容抽取',
+    enabled: true,
+    endpoint: 'api/knowledge/point_extract',
+    method: 'POST',
+    inputs: [
+      createInput('chunks', 'array<object>', true, '待提取知识点的文本分片列表。'),
+      createInput('summary_type', 'string', false, '知识点提取类型。', '政策摘要'),
+      createInput('model', 'string', false, '使用的模型。', 'qwen3-8b'),
+    ],
+    outputs: [
+      createOutput('summary', 'string', '知识点摘要正文。', 'summary'),
+      createOutput('summaryResult', 'array<object>', '知识点条目和来源引用，包含 title、content、sourceChunkIds。', 'summaryResult'),
+      createOutput('applicableUsers', 'array<string>', '适用对象列表。', 'applicableUsers'),
+      createOutput('keyRules', 'array<string>', '关键规则列表。', 'keyRules'),
+    ],
+  },
+  {
     slug: 'hunyuan-ocr',
     name: '腾讯hunyuan多模态ocr接口',
     description: '调用腾讯 Hunyuan 多模态 OCR 能力解析文件，prompt 可用于指定定位、解析、信息抽取或翻译任务。',
@@ -555,6 +580,27 @@ const idpDocumentTools = [
     method: 'POST',
     inputs: [createFilesInput('待千帆多模态 OCR 解析的文件列表。'), createPromptInput(), createUserIdInput()],
     outputs: [createRootedResponseOutput('response', '千帆 OCR 解析后的 Markdown 文件列表。', { dataDescription: '千帆 OCR 解析后的 Markdown 文件列表。', dataFileType: 'md' })],
+  },
+];
+
+const knowledgeTaggingTools = [
+  {
+    slug: 'knowledge-point-tagging',
+    name: '知识点打标接口',
+    description: '针对单个知识点生成标签、分类和置信度，保留来源分片引用。',
+    category: '知识打标',
+    enabled: true,
+    endpoint: 'api/knowledge/point_tagging',
+    method: 'POST',
+    inputs: [
+      createInput('knowledge_point', 'object', true, '待打标的单个知识点对象。'),
+      createInput('tag_strategy', 'string', false, '打标策略。', '结构感知打标'),
+      createInput('label_pool', 'array<string>', false, '可用标签范围。'),
+    ],
+    outputs: [
+      createOutput('tagResult', 'object', '当前知识点的标签、分类、置信度和来源引用。', 'tagResult'),
+      createOutput('tagSummary', 'string', '当前知识点的标签摘要。', 'tagSummary'),
+    ],
   },
 ];
 function defaultToolInputs(toolName) {
@@ -668,6 +714,22 @@ export const initialServices = [
     toolCategories: Object.fromEntries(idpDocumentTools.map((tool) => [tool.name, tool.category || '未分类'])),
     tools: idpDocumentTools,
   },
+  {
+    id: 'svc-knowledge-tagging',
+    name: '知识加工 MCP',
+    serviceType: '标准 MCP Server',
+    endpoint: 'https://mcp.internal.com/knowledge-processing/sse',
+    transport: 'SSE',
+    authType: 'Bearer Token',
+    version: 'V1.0.0',
+    status: '连接正常',
+    toolCount: knowledgeTaggingTools.length,
+    toolNames: knowledgeTaggingTools.map((tool) => tool.name),
+    lastSyncedAt: '2026-07-08 10:20',
+    description: '面向知识点标签、分类和规则命中的知识加工 MCP 工具样例。',
+    toolCategories: Object.fromEntries(knowledgeTaggingTools.map((tool) => [tool.name, tool.category || '未分类'])),
+    tools: knowledgeTaggingTools,
+  },
 ];
 
 function makeManagedTool({
@@ -742,6 +804,8 @@ const managedToolDefinitions = {
   'mineru-ocr': { name: 'MinerU版面解析', category: '文档解析', description: '使用 MinerU 能力解析文档版面与文本内容，适合复杂 PDF 的结构化解析。' },
   'markdown-chunk': { name: 'Markdown结构化分块', category: '文档分块', description: '按标题层级或自适应策略对 Markdown 文档进行结构化分块。' },
   'extract-md-content-by-title': { name: '按标题抽取内容', category: '内容抽取', description: '根据指定标题从 Markdown 文档中抽取对应章节或区间内容。' },
+  'knowledge-point-extraction': { name: '知识点提取', category: '内容抽取', description: '基于文本分片结果提取知识点、适用对象和关键规则。' },
+  'knowledge-point-tagging': { name: '知识点打标', category: '知识打标', description: '针对单个知识点生成标签、分类和规则命中结果。' },
   'paddle-ocr': { name: 'PaddleOCR解析', category: '文档解析', description: '使用 Paddle 多模态 OCR 能力解析文档，适合多版式文件的文本抽取。' },
   'deepseek-ocr': { name: 'DeepSeek文档解析', category: '文档解析', description: '使用 DeepSeek 多模态能力解析文档内容，支持通过提示词补充解析要求。' },
   'ofd-to-pdf': { name: 'OFD转PDF', category: '文档转换', description: '将 OFD 文档转换为 PDF，便于进入统一解析和存储流程。' },
@@ -771,7 +835,7 @@ function managedToolStorageFor(rawTool, index) {
   const isConverter = rawTool.category === '文档转换';
   if (isConverter) return createStorageContract({ enabled: false, rules: [] });
   const outputName = getPrimaryStorageOutputName(rawTool);
-  const artifactType = rawTool.name.includes('脚注') ? '知识点' : '文本切片';
+  const artifactType = rawTool.name.includes('知识点') || rawTool.name.includes('脚注') ? '知识点' : '文本切片';
   return createStorageContract({
     enabled: true,
     outputName,
@@ -821,6 +885,9 @@ function createManagedNodeInputArtifacts(rawTool, definition) {
   if (definition.category === '内容抽取') {
     return [createManagedNodeArtifact('source_documents', '待抽取内容', 'array<object>', 'text_blocks', '待抽取的 Markdown 文档、文本切片或结构化章节内容。')];
   }
+  if (definition.category === '知识打标') {
+    return [createManagedNodeArtifact('knowledge_point', '待打标知识点', 'object', 'knowledge_point', '待打标的单个知识点，可来自迭代执行的当前元素。')];
+  }
   const isFootnote = rawTool.slug === 'extract-footnote';
   return [createManagedNodeArtifact(isFootnote ? 'policy_documents' : 'document_files', isFootnote ? '条款文档' : '待解析文件', 'array<object>', 'file_object', isFootnote ? '待提取脚注的保险条款或政策文档。' : '待 OCR 或版面解析的文件列表。')];
 }
@@ -845,10 +912,22 @@ function createManagedNodeConfigParams(rawTool, definition) {
     ];
   }
   if (definition.category === '内容抽取') {
+    if (rawTool.slug === 'knowledge-point-extraction') {
+      return [
+        createManagedNodeParam('summary_type', '提取类型', 'string', true, '控制知识点提取的目标类型。', '政策摘要'),
+        createManagedNodeParam('model', '模型', 'string', false, '用于知识点提取的模型。', 'qwen3-8b'),
+      ];
+    }
     return [
       createManagedNodeParam('extract_scope', '抽取范围', 'string', true, '指定抽取全文、标题章节或特定内容类型。', rawTool.slug === 'extract-footnote' ? 'footnote' : 'title_section'),
       createManagedNodeParam('title_match_mode', '标题匹配方式', 'string', false, '按精确匹配、包含匹配或正则匹配定位标题。', 'contains'),
       createManagedNodeParam('include_context', '包含上下文', 'boolean', false, '是否在抽取结果中保留前后文。', true),
+    ];
+  }
+  if (definition.category === '知识打标') {
+    return [
+      createManagedNodeParam('tag_strategy', '打标策略', 'string', true, '控制知识点打标时采用的标签生成策略。', '结构感知打标'),
+      createManagedNodeParam('label_pool', '标签范围', 'array<string>', false, '本次打标可使用的标签范围。', ['适用对象', '办理条件', '材料要求']),
     ];
   }
   return [
@@ -866,7 +945,7 @@ function createManagedNodeParameterMappingCode(rawTool, definition, artifacts, p
   const lines = rawInputs.map((input) => {
     if (input.name === 'user_id') return `    ${input.name}: context.system.userId`;
     if (configNames.has(input.name)) return `    ${input.name}: context.config.${input.name}`;
-    if (['files', 'file', 'input', 'content', 'markdown', 'md_file'].some((key) => input.name.toLowerCase().includes(key))) {
+    if (['files', 'file', 'input', 'content', 'markdown', 'md_file', 'chunk', 'knowledge'].some((key) => input.name.toLowerCase().includes(key))) {
       return `    ${input.name}: context.nodeInput.${artifactName}`;
     }
     if (input.name === 'prompt') {
@@ -986,7 +1065,16 @@ export function readCatalog() {
   try {
     const tools = JSON.parse(localStorage.getItem(CATALOG_KEY) || 'null');
     const categories = readCategories();
-    if (tools) return { tools: normalizeStoredTools(tools), categories };
+    if (tools) {
+      const storedTools = normalizeStoredTools(tools);
+      const seedTools = initialManagedTools(initialServices);
+      const storedNames = new Set(storedTools.map((tool) => tool.name));
+      const missingSeedTools = seedTools.filter((tool) => !storedNames.has(tool.name));
+      const nextTools = [...storedTools, ...missingSeedTools];
+      const nextCategories = mergeCategories(defaultCategories, categories, nextTools.map((tool) => tool.category));
+      if (missingSeedTools.length || nextCategories.length !== categories.length) saveCatalog(nextTools, nextCategories);
+      return { tools: nextTools, categories: nextCategories };
+    }
   } catch {
     // ignore
   }
