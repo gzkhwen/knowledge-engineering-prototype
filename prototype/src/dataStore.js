@@ -12,6 +12,7 @@ const keys = {
   planVersions: 'ke-plan-versions-v1',
   planExecutions: 'ke-plan-executions-v1',
   planChats: 'ke-plan-chats-v1',
+  demoPlanSeedVersion: 'ke-demo-plan-seed-version',
 };
 
 const formTypes = ['切片库', 'QA库', '知识点'];
@@ -260,6 +261,198 @@ function migrateLegacyCategoryPlans() {
   }
 }
 
+const demoFileMeta = {
+  pdf: { name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB' },
+  docx: { name: '开户流程手册.docx', type: 'DOCX', size: '1.86 MB' },
+  xlsx: { name: '客户问答清单.xlsx', type: 'XLSX', size: '1.32 MB' },
+  pptx: { name: '理财产品培训课件.pptx', type: 'PPTX', size: '3.16 MB' },
+  txt: { name: '投诉工单导出.txt', type: 'TXT', size: '0.42 MB' },
+  md: { name: '宣传话术清单.md', type: 'MD', size: '0.36 MB' },
+};
+
+function slugText(value) {
+  return String(value || '')
+    .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
+function demoPlanId({ planScope, categoryId, formType, fileFormat }) {
+  return `demo-plan-${planScope}-${categoryId || 'space'}-${slugText(formType)}-${fileFormat}`;
+}
+
+function demoNodeSets(formType, fileFormat) {
+  const parserName = fileFormat === 'xlsx' ? '表格解析' : fileFormat === 'pptx' ? '页面解析' : fileFormat === 'txt' || fileFormat === 'md' ? '纯文本解析' : '文件解析';
+  const parser = { toolId: 'medical-policy-parser', toolName: parserName, category: '文档解析' };
+  const adapter = fileFormat === 'pdf' || fileFormat === 'docx' ? [{ toolId: 'system-code', toolName: '代码执行器', category: '系统节点' }] : [];
+  const splitter = { toolId: 'medical-policy-splitter', toolName: fileFormat === 'md' ? 'Markdown结构化分块' : '文本分片', category: '文本分片' };
+  const storage = { toolId: 'system-storage', toolName: '数据存储器', category: '系统节点' };
+  if (formType === '切片库') return [parser, ...adapter, splitter, storage];
+  if (formType === 'QA库') return [parser, ...adapter, splitter, { toolId: 'qa-extractor', toolName: 'QA提取', category: '知识提取' }, storage];
+  return [parser, ...adapter, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, { toolId: 'knowledge-tagging', toolName: '知识点打标', category: '知识提取' }, storage];
+}
+
+function demoSampleFile(fileFormat, seedName) {
+  const meta = demoFileMeta[fileFormat] || demoFileMeta.pdf;
+  const name = seedName || meta.name;
+  return {
+    id: `demo-sample-${slugText(name)}`,
+    name,
+    type: meta.type,
+    size: meta.size,
+    status: '已完成',
+  };
+}
+
+function demoResult(file, nodes, formType, categoryName, version) {
+  const runs = nodes.map((node, index) => ({
+    toolName: node.toolName,
+    category: node.category,
+    outputPath: index === nodes.length - 1 ? 'data.storageRef' : `data.step${index + 1}`,
+    parameters: [{ name: index === 0 ? '样例文件' : '输入来源', value: index === 0 ? file.name : `data.step${index}` }],
+    status: '成功',
+    outputFull: JSON.stringify({
+      version,
+      target: `${categoryName || '兜底方案'} / ${formType}`,
+      node: node.toolName,
+      fileName: file.name,
+      result: index === nodes.length - 1
+        ? { storageRef: `es://knowledge-demo/${slugText(categoryName || 'fallback')}/${slugText(formType)}/${file.type.toLowerCase()}`, storedCount: formType === 'QA库' ? 18 : formType === '知识点' ? 24 : 42 }
+        : { status: 'success', count: 3 + index, sample: ['适用对象', '办理条件', '材料要求'].slice(0, Math.min(3, index + 1)) },
+    }, null, 2),
+  }));
+  return { fileId: file.id, fileName: file.name, toolRuns: runs };
+}
+
+function demoChatMessages({ categoryName, formType, fileFormat, versionCount }) {
+  const scopeName = categoryName || '空间兜底';
+  return [
+    { id: `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}-1`, role: 'agent', title: '处理方案生成助手', content: `当前配置对象为${scopeName}的${formType} ${fileFormat}处理方案。`, status: 'done' },
+    { id: `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}-2`, role: 'user', title: '发送样例文件', content: `已发送${demoFileMeta[fileFormat]?.name || '样例文件'}，请生成可复用处理方案。`, status: 'done' },
+    { id: `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}-3`, role: 'thought', title: '分析样例结构', content: `已识别${fileFormat}文件结构，按${formType}目标选择解析、加工和存储节点。`, status: 'done' },
+    { id: `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}-4`, role: 'agent', title: '方案已生成', content: `已生成${versionCount > 1 ? `${versionCount}个历史版本，最新版本可直接试跑。` : '1个可保存版本，并完成样例试跑。'}`, status: 'done' },
+  ];
+}
+
+function ensureDemoPlanData() {
+  const demoVersion = 'workbench-plan-demo-v1';
+  if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
+
+  const projects = read(keys.projects, []);
+  const solutions = read(keys.projectSolutions, []);
+  const categories = read(keys.projectCategories, []);
+  const project = projects.find((item) => item.id === 'proj-main') || projects[0];
+  if (!project) return;
+  const solution = solutions.find((item) => item.projectId === project.id);
+  if (!solution) return;
+  const categoryById = new Map(categories.map((item) => [item.id, item]));
+
+  const definitions = [
+    { planScope: 'fallback', formType: '切片库', fileFormat: 'pdf', versions: ['1.0', '1.1'] },
+    { planScope: 'fallback', formType: '切片库', fileFormat: 'docx', versions: ['1.0'] },
+    { planScope: 'fallback', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1'] },
+    { planScope: 'fallback', formType: 'QA库', fileFormat: 'txt', versions: ['1.0'] },
+    { planScope: 'fallback', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
+    { planScope: 'fallback', formType: '知识点', fileFormat: 'md', versions: ['1.0'] },
+    { categoryId: 'cat-wealth-fund', formType: '切片库', fileFormat: 'pdf', versions: ['1.0'] },
+    { categoryId: 'cat-wealth-fund', formType: '切片库', fileFormat: 'docx', versions: ['1.0'] },
+    { categoryId: 'cat-wealth-fund', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'] },
+    { categoryId: 'cat-wealth-fund', formType: 'QA库', fileFormat: 'xlsx', versions: ['1.0'] },
+    { categoryId: 'cat-wealth-fund', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
+    { categoryId: 'cat-wealth-fund-risk', formType: '切片库', fileFormat: 'pdf', versions: ['1.0'] },
+    { categoryId: 'cat-wealth-fund-risk', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0'] },
+    { categoryId: 'cat-wealth-fund-risk', formType: '知识点', fileFormat: 'md', versions: ['1.0'] },
+    { categoryId: 'cat-credit-personal', formType: '切片库', fileFormat: 'pdf', versions: ['1.0'] },
+    { categoryId: 'cat-credit-personal', formType: '切片库', fileFormat: 'docx', versions: ['1.0'] },
+    { categoryId: 'cat-credit-personal', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0'] },
+    { categoryId: 'cat-credit-personal', formType: '知识点', fileFormat: 'txt', versions: ['1.0'] },
+    { categoryId: 'cat-open-account', formType: '切片库', fileFormat: 'pdf', versions: ['1.8', '1.9', '2.0'] },
+    { categoryId: 'cat-open-account', formType: '切片库', fileFormat: 'pptx', versions: ['1.0'] },
+    { categoryId: 'cat-open-account', formType: 'QA库', fileFormat: 'docx', versions: ['1.0'] },
+    { categoryId: 'cat-open-account', formType: '知识点', fileFormat: 'md', versions: ['1.0'] },
+    { categoryId: 'cat-complaint', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0'] },
+    { categoryId: 'cat-complaint', formType: 'QA库', fileFormat: 'txt', versions: ['1.0'] },
+    { categoryId: 'cat-complaint', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
+    { categoryId: 'cat-copy-review', formType: '切片库', fileFormat: 'docx', versions: ['1.0'] },
+    { categoryId: 'cat-copy-review', formType: 'QA库', fileFormat: 'md', versions: ['1.0'] },
+    { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
+    { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'docx', versions: ['1.0'] },
+  ].map((item) => ({ planScope: item.planScope || 'category', ...item }));
+
+  const routeKeys = new Set(definitions.map((item) => `${item.planScope}|${item.categoryId || ''}|${item.formType}|${item.fileFormat}`));
+  const currentPlans = read(keys.plans, []);
+  const retainedPlans = currentPlans.filter((plan) => !routeKeys.has(`${plan.planScope}|${plan.categoryId || ''}|${plan.formType}|${plan.fileFormat}`) && !String(plan.id).startsWith('demo-plan-'));
+  const retainedPlanIds = new Set(retainedPlans.map((plan) => plan.id));
+  const plans = [...retainedPlans];
+  const versions = read(keys.planVersions, []).filter((item) => retainedPlanIds.has(item.planId));
+  const executions = read(keys.planExecutions, []).filter((item) => retainedPlanIds.has(item.planId));
+  const chats = read(keys.planChats, []).filter((item) => retainedPlanIds.has(item.planId));
+
+  definitions.forEach((definition) => {
+    const category = definition.categoryId ? categoryById.get(definition.categoryId) : null;
+    if (definition.planScope === 'category' && !category) return;
+    const categoryName = category?.name || '';
+    const plan = {
+      id: demoPlanId(definition),
+      projectId: project.id,
+      solutionId: solution.id,
+      planScope: definition.planScope,
+      categoryId: definition.planScope === 'category' ? definition.categoryId : null,
+      formType: definition.formType,
+      fileFormat: definition.fileFormat,
+      status: 'active',
+      name: `${categoryName || project.name}${definition.formType}${definition.fileFormat}处理方案`,
+      createdAt: '2026-07-01 09:00',
+      updatedAt: '2026-07-09 09:30',
+    };
+    const nodes = demoNodeSets(definition.formType, definition.fileFormat);
+    const sample = demoSampleFile(definition.fileFormat);
+    plans.push(plan);
+    definition.versions.forEach((version, index) => {
+      const versionNodes = index === 0 && definition.versions.length > 1 ? nodes.slice(0, Math.max(2, nodes.length - 1)) : nodes;
+      const result = demoResult(sample, versionNodes, definition.formType, categoryName, version);
+      versions.push({
+        id: `demo-version-${plan.id}-${version.replace('.', '-')}`,
+        planId: plan.id,
+        version,
+        nodes: versionNodes,
+        sampleFiles: [sample],
+        results: [result],
+        createdAt: `2026-07-0${Math.min(index + 1, 9)} 10:00`,
+      });
+      if (index === definition.versions.length - 1 || index === 0) {
+        executions.push({
+          id: `demo-exec-${plan.id}-${version.replace('.', '-')}-${sample.id}`,
+          planId: plan.id,
+          planVersionId: `demo-version-${plan.id}-${version.replace('.', '-')}`,
+          version,
+          sampleFileId: sample.id,
+          sampleFileName: sample.name,
+          sampleFile: sample,
+          fileFormat: definition.fileFormat,
+          planNodes: versionNodes,
+          result,
+          status: 'completed',
+          createdAt: `2026-07-0${Math.min(index + 2, 9)} 15:30`,
+        });
+      }
+    });
+    chats.push({
+      id: `demo-chat-${plan.id}`,
+      planId: plan.id,
+      messages: demoChatMessages({ categoryName, formType: definition.formType, fileFormat: definition.fileFormat, versionCount: definition.versions.length }),
+      createdAt: '2026-07-01 09:15',
+      updatedAt: '2026-07-09 09:30',
+    });
+  });
+
+  write(keys.plans, plans);
+  write(keys.planVersions, versions);
+  write(keys.planExecutions, executions);
+  write(keys.planChats, chats);
+  write(keys.demoPlanSeedVersion, demoVersion);
+}
+
 function ensureSeeded() {
   const existingProjects = read(keys.projects, null);
   if (existingProjects) {
@@ -277,6 +470,7 @@ ensureProjectCategories();
 normalizeProjectCategories();
 normalizeCategoryPlans();
 migrateLegacyCategoryPlans();
+ensureDemoPlanData();
 
 export const knowledgeFormTypes = formTypes;
 

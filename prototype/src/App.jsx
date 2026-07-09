@@ -4198,7 +4198,21 @@ function hydrateStoredPlanNodes(nodes = []) {
   const demoNodes = createAgentDemoNodes(readWorkbenchCatalog());
   const byToolId = new Map(demoNodes.map((node) => [node.toolId, node]));
   const byToolName = new Map(demoNodes.map((node) => [node.toolName, node]));
-  const hydrated = nodes.map((node) => byToolId.get(node.toolId) || byToolName.get(node.toolName)).filter(Boolean);
+  const catalog = readWorkbenchCatalog();
+  const catalogById = new Map(catalog.map((tool) => [tool.id, tool]));
+  const catalogByName = new Map(catalog.map((tool) => [tool.name, tool]));
+  const hydrated = [];
+  nodes.forEach((node) => {
+    const demoNode = byToolId.get(node.toolId) || byToolName.get(node.toolName);
+    if (demoNode) {
+      hydrated.push(demoNode);
+      return;
+    }
+    const tool = catalogById.get(node.toolId) || catalogByName.get(node.toolName);
+    if (!tool) return;
+    const previous = hydrated.at(-1);
+    hydrated.push(createWorkbenchNode(tool, previous ? { type: 'upstream', sourceNodeId: previous.nodeId, outputPath: previous.outputs?.[0]?.path || 'data.result' } : { type: 'fixed' }));
+  });
   return hydrated.length ? cloneWorkbenchNodes(hydrated) : cloneWorkbenchNodes(demoNodes);
 }
 
