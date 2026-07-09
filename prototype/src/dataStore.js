@@ -8,6 +8,10 @@ const keys = {
   projectSolutions: 'ke-project-solutions-v2',
   projectCategories: 'ke-project-categories-v2',
   categoryPlans: 'ke-category-plans-v2',
+  plans: 'ke-plans-v1',
+  planVersions: 'ke-plan-versions-v1',
+  planExecutions: 'ke-plan-executions-v1',
+  planChats: 'ke-plan-chats-v1',
 };
 
 const formTypes = ['切片库', 'QA库', '知识点'];
@@ -31,6 +35,16 @@ function write(key, value) {
 
 function id(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function compareVersionAsc(a, b) {
+  const [aMajor = '0', aMinor = '0'] = `${a}`.split('.');
+  const [bMajor = '0', bMinor = '0'] = `${b}`.split('.');
+  return (Number(aMajor) || 0) - (Number(bMajor) || 0) || (Number(aMinor) || 0) - (Number(bMinor) || 0);
+}
+
+function getLatestVersion(versions) {
+  return [...versions].sort((a, b) => compareVersionAsc(a.version, b.version)).at(-1) || null;
 }
 
 const seed = {
@@ -181,6 +195,71 @@ function normalizeCategoryPlans() {
   if (changed) write(keys.categoryPlans, next);
 }
 
+function getLegacyPlanScope(plan) {
+  return plan.planScope === 'fallback' || `${plan.categoryId || ''}`.startsWith('fallback-plan-') ? 'fallback' : 'category';
+}
+
+function migrateLegacyCategoryPlans() {
+  const legacyPlans = read(keys.categoryPlans, []);
+  if (!legacyPlans.length) return;
+
+  const plans = read(keys.plans, []);
+  const versions = read(keys.planVersions, []);
+  let nextPlans = [...plans];
+  let nextVersions = [...versions];
+  let changed = false;
+
+  legacyPlans.forEach((legacyPlan) => {
+    const planScope = getLegacyPlanScope(legacyPlan);
+    const categoryId = planScope === 'category' ? legacyPlan.categoryId : null;
+    const formType = legacyFormTypeMap[legacyPlan.formType] || legacyPlan.formType || '切片库';
+    const fileFormat = legacyPlan.fileFormat || 'pdf';
+    const existingPlan = nextPlans.find((item) => (
+      item.projectId === legacyPlan.projectId
+      && item.planScope === planScope
+      && (item.categoryId || null) === categoryId
+      && item.formType === formType
+      && item.fileFormat === fileFormat
+    ));
+    const plan = existingPlan || {
+      id: legacyPlan.id?.startsWith('plan-') ? legacyPlan.id : id('plan'),
+      projectId: legacyPlan.projectId,
+      solutionId: legacyPlan.solutionId,
+      planScope,
+      categoryId,
+      formType,
+      fileFormat,
+      status: legacyPlan.status || 'active',
+      name: legacyPlan.name,
+      createdAt: legacyPlan.createdAt || legacyPlan.updatedAt || new Date().toISOString().slice(0, 16).replace('T', ' '),
+      updatedAt: legacyPlan.updatedAt || new Date().toISOString().slice(0, 16).replace('T', ' '),
+    };
+    if (!existingPlan) {
+      nextPlans.push(plan);
+      changed = true;
+    }
+    const version = legacyPlan.version || '1.0';
+    const hasVersion = nextVersions.some((item) => item.planId === plan.id && item.version === version);
+    if (!hasVersion) {
+      nextVersions.push({
+        id: id('plan-version'),
+        planId: plan.id,
+        version,
+        nodes: legacyPlan.nodes || [],
+        sampleFiles: [],
+        results: [],
+        createdAt: legacyPlan.createdAt || legacyPlan.updatedAt || new Date().toISOString().slice(0, 16).replace('T', ' '),
+      });
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    write(keys.plans, nextPlans);
+    write(keys.planVersions, nextVersions);
+  }
+}
+
 function ensureSeeded() {
   const existingProjects = read(keys.projects, null);
   if (existingProjects) {
@@ -197,6 +276,7 @@ ensureSeeded();
 ensureProjectCategories();
 normalizeProjectCategories();
 normalizeCategoryPlans();
+migrateLegacyCategoryPlans();
 
 export const knowledgeFormTypes = formTypes;
 
@@ -214,7 +294,8 @@ export const dataStore = {
   getTemplates() { return this.list('templates'); },
   getProjects() { return this.list('projects'); },
   getCategoryPlans(solutionId) {
-    const plans = this.list('categoryPlans');
+    const versionPlanIds = new Set(this.list('planVersions').map((item) => item.planId));
+    const plans = this.list('plans').filter((item) => versionPlanIds.has(item.id));
     return solutionId ? plans.filter((item) => item.solutionId === solutionId) : plans;
   },
   getRelationship(relationshipId) {
@@ -308,35 +389,128 @@ export const dataStore = {
   getProjectCategories(solutionId) {
     return this.list('projectCategories').filter((item) => item.solutionId === solutionId);
   },
+  getPlanByRoute(route) {
+    const planScope = route.planScope || (route.categoryId ? 'category' : 'fallback');
+    const categoryId = planScope === 'category' ? route.categoryId : null;
+    return this.list('plans').find((item) => (
+      item.projectId === route.projectId
+      && item.planScope === planScope
+      && (item.categoryId || null) === categoryId
+      && item.formType === route.formType
+      && item.fileFormat === route.fileFormat
+    )) || null;
+  },
+  ensurePlan(route) {
+    const existing = this.getPlanByRoute(route);
+    if (existing) return existing;
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const planScope = route.planScope || (route.categoryId ? 'category' : 'fallback');
+    const next = {
+      id: id('plan'),
+      projectId: route.projectId,
+      solutionId: route.solutionId,
+      planScope,
+      categoryId: planScope === 'category' ? route.categoryId : null,
+      formType: route.formType,
+      fileFormat: route.fileFormat,
+      status: 'active',
+      name: route.name,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.save('plans', [...this.list('plans'), next]);
+    return next;
+  },
+  getPlanVersions(planId) {
+    return this.list('planVersions').filter((item) => item.planId === planId);
+  },
+  getPlanVersion(planId, version) {
+    return this.getPlanVersions(planId).find((item) => item.version === version) || null;
+  },
+  createPlanVersion(payload) {
+    const existing = this.getPlanVersion(payload.planId, payload.version);
+    if (existing) return existing;
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const next = {
+      id: id('plan-version'),
+      createdAt: now,
+      ...payload,
+    };
+    this.save('planVersions', [...this.list('planVersions'), next]);
+    this.save('plans', this.list('plans').map((item) => (item.id === payload.planId ? { ...item, updatedAt: now } : item)));
+    return next;
+  },
+  getPlanWithVersionsByRoute(route) {
+    const plan = this.getPlanByRoute(route);
+    if (!plan) return { plan: null, versions: [] };
+    return { plan, versions: this.getPlanVersions(plan.id) };
+  },
+  getPlanExecutions(planId) {
+    return this.list('planExecutions').filter((item) => item.planId === planId);
+  },
+  createPlanExecution(payload) {
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const next = { id: id('plan-exec'), status: 'completed', createdAt: now, ...payload };
+    this.save('planExecutions', [...this.list('planExecutions'), next]);
+    return next;
+  },
+  getPlanChat(planId) {
+    return this.list('planChats').find((item) => item.planId === planId)?.messages || null;
+  },
+  savePlanChat(planId, messages) {
+    if (!planId) return null;
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const chats = this.list('planChats');
+    const existing = chats.find((item) => item.planId === planId);
+    const next = existing ? { ...existing, messages, updatedAt: now } : { id: id('plan-chat'), planId, messages, createdAt: now, updatedAt: now };
+    this.save('planChats', existing ? chats.map((item) => (item.id === existing.id ? next : item)) : [...chats, next]);
+    return next;
+  },
   getCategoryPlan(categoryId, formType, fileFormat) {
-    return this.list('categoryPlans').find((item) => {
-      if (item.categoryId !== categoryId || item.formType !== formType) return false;
-      return fileFormat ? (item.fileFormat || 'pdf') === fileFormat : true;
-    }) || null;
+    const plan = this.list('plans').find((item) => (
+      item.categoryId === categoryId
+      && item.formType === formType
+      && (fileFormat ? item.fileFormat === fileFormat : true)
+    ));
+    if (!plan) return null;
+    const versions = this.getPlanVersions(plan.id);
+    return { ...plan, versions, nodes: getLatestVersion(versions)?.nodes || [] };
   },
   upsertCategoryPlan(payload) {
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    const plans = this.list('categoryPlans');
-    const payloadFileFormat = payload.fileFormat || 'pdf';
-    const existing = plans.find((item) => item.categoryId === payload.categoryId && item.formType === payload.formType && (item.fileFormat || 'pdf') === payloadFileFormat);
-    const next = existing
-      ? { ...existing, ...payload, updatedAt: now }
-      : { id: id('plan'), status: 'active', createdAt: now, updatedAt: now, ...payload };
-    this.save('categoryPlans', existing ? plans.map((item) => (item.id === existing.id ? next : item)) : [...plans, next]);
-    return next;
+    const plan = this.ensurePlan({
+      projectId: payload.projectId,
+      solutionId: payload.solutionId,
+      planScope: payload.planScope || 'category',
+      categoryId: payload.categoryId,
+      formType: payload.formType,
+      fileFormat: payload.fileFormat || 'pdf',
+      name: payload.name,
+    });
+    return this.createPlanVersion({
+      planId: plan.id,
+      version: payload.version || '1.0',
+      nodes: payload.nodes || [],
+      sampleFiles: payload.sampleFiles || [],
+      results: payload.results || [],
+    });
   },
   getFormalPlanReferencesByToolId(toolId) {
     const projects = this.getProjects();
     const solutions = this.list('projectSolutions');
     const categories = this.list('projectCategories');
-    const activePlans = this.list('categoryPlans').filter((plan) => plan.status === 'active' && plan.nodes?.some((node) => node.toolId === toolId));
+    const versions = this.list('planVersions');
+    const activePlans = this.list('plans').filter((plan) => {
+      const latestVersion = getLatestVersion(versions.filter((item) => item.planId === plan.id));
+      return plan.status === 'active' && latestVersion?.nodes?.some((node) => node.toolId === toolId);
+    });
     const spaces = new Map();
     const references = activePlans.map((plan) => {
       const project = projects.find((item) => item.id === plan.projectId);
       const solution = solutions.find((item) => item.id === plan.solutionId);
       const category = categories.find((item) => item.id === plan.categoryId);
+      const latestVersion = getLatestVersion(versions.filter((item) => item.planId === plan.id));
       if (project) spaces.set(project.id, project);
-      return { ...plan, project, solution, category };
+      return { ...plan, nodes: latestVersion?.nodes || [], version: latestVersion?.version, project, solution, category };
     });
     return {
       spaceCount: spaces.size,

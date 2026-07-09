@@ -3535,7 +3535,13 @@ const sortPlanVersionsDesc = (versions) => [...versions].sort((a, b) => {
 const getNextPlanVersion = (versions) => {
   if (!versions.length) return '1.0';
   const latest = parsePlanVersion(sortPlanVersionsDesc(versions)[0]);
-  return `${latest.major}.${latest.minor + 1}`;
+  const nextMinor = latest.minor + 1;
+  return nextMinor >= 10 ? `${latest.major + 1}.0` : `${latest.major}.${nextMinor}`;
+};
+const getLatestPlanVersionRecord = (versions = []) => {
+  if (!versions.length) return null;
+  const latestVersion = sortPlanVersionsDesc(versions.map((item) => item.version))[0];
+  return versions.find((item) => item.version === latestVersion) || null;
 };
 const getPlanTargetKey = (target) => `${target.formType}__${target.fileFormat}`;
 const initialAgentEvents = [{
@@ -4184,6 +4190,27 @@ function cloneWorkbenchNode(node) {
 
 function cloneWorkbenchNodes(nodes) {
   return nodes.map(cloneWorkbenchNode);
+}
+
+function hydrateStoredPlanNodes(nodes = []) {
+  if (!nodes.length) return [];
+  if (nodes.some((node) => node.nodeId && node.params && node.outputs)) return cloneWorkbenchNodes(nodes);
+  const demoNodes = createAgentDemoNodes(readWorkbenchCatalog());
+  const byToolId = new Map(demoNodes.map((node) => [node.toolId, node]));
+  const byToolName = new Map(demoNodes.map((node) => [node.toolName, node]));
+  const hydrated = nodes.map((node) => byToolId.get(node.toolId) || byToolName.get(node.toolName)).filter(Boolean);
+  return hydrated.length ? cloneWorkbenchNodes(hydrated) : cloneWorkbenchNodes(demoNodes);
+}
+
+function buildVersionSnapshotsFromRecords(versions = []) {
+  return Object.fromEntries(versions.map((version) => [
+    version.version,
+    {
+      planNodes: hydrateStoredPlanNodes(version.nodes || version.planNodes || []),
+      results: (version.results || []).map((result) => ({ ...result })),
+      sampleFiles: (version.sampleFiles || []).map((file) => ({ ...file })),
+    },
+  ]));
 }
 
 function emptyParamValue(param) {
@@ -5004,10 +5031,6 @@ function getRuntimeLabel(status) {
   }[status] || '';
 }
 
-function getFallbackPlanCategoryId(projectId) {
-  return `fallback-plan-${projectId || 'default'}`;
-}
-
 function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, onBack }) {
   const qaParams = new URLSearchParams(window.location.search);
   const qaMode = qaParams.get('qa') === '1';
@@ -5022,28 +5045,85 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const solution = dataStore.getProjectSolution(project.id);
   const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
   const category = categories.find((item) => item.id === categoryId) || null;
-  const planStorageCategoryId = category ? category.id : getFallbackPlanCategoryId(project.id);
   const initialFormType = decodeURIComponent(formType || category?.formTypes?.[0] || '切片库');
-  const savedCategoryPlan = dataStore.getCategoryPlan(planStorageCategoryId, initialFormType, workbenchFileFormats[0]);
-  const hasSavedCategoryPlan = savedCategoryPlan?.status === 'active';
   const initialPlanTarget = { formType: initialFormType, fileFormat: workbenchFileFormats[0] };
-  const [catalog, setCatalog] = useState(() => readWorkbenchCatalog());
-  const [sampleFiles, setSampleFiles] = useState(() => (
-    qaGeneratedState || qaRunningState || hasSavedCategoryPlan
-      ? [{ ...sampleDemoFile, status: qaGeneratedState || hasSavedCategoryPlan ? '已完成' : '试跑中' }]
-      : createWorkbenchSampleFiles(initialPlanTarget)
-  ));
-  const [events, setEvents] = useState(() => (qaGeneratedState || hasSavedCategoryPlan ? generatedAgentEvents : qaRunningState ? runningAgentEvents : initialAgentEvents));
-  const [planNodes, setPlanNodes] = useState(() => {
-    if (qaGeneratedState || hasSavedCategoryPlan) return createAgentDemoNodes(readWorkbenchCatalog());
-    if (qaRunningState) return createAgentDemoNodes(readWorkbenchCatalog()).slice(0, 4);
-    return [];
+  const createSampleForTarget = (target, status = '未发送') => ({
+    ...createWorkbenchSampleFiles(target, status)[0],
+    id: `demo-${target.formType}-${target.fileFormat}`,
+    name: `医保政策样例.${target.fileFormat}`,
+    type: target.fileFormat.toUpperCase(),
+    status,
   });
-  const [rightTab, setRightTab] = useState(() => (['处理方案', '执行结果'].includes(qaRightTab) ? qaRightTab : '处理方案'));
-  const [running, setRunning] = useState(qaRunningState);
-  const [testing, setTesting] = useState(false);
-  const [confirmed, setConfirmed] = useState(hasSavedCategoryPlan);
-  const [results, setResults] = useState(() => (qaGeneratedState || hasSavedCategoryPlan ? [createSampleResult({ ...sampleDemoFile, status: '已完成' }, { includeKnowledge: true })] : []));
+  const buildPlanRoute = (target) => ({
+    projectId: project.id,
+    solutionId: solution?.id,
+    planScope: category ? 'category' : 'fallback',
+    categoryId: category ? category.id : null,
+    formType: target.formType,
+    fileFormat: target.fileFormat,
+    name: `${category ? category.name : project.name}${target.formType}${target.fileFormat}处理方案`,
+  });
+  const getExecutionRecordsForPlan = (planId) => Object.fromEntries(dataStore.getPlanExecutions(planId).map((execution) => {
+    const file = execution.sampleFile || { id: execution.sampleFileId, name: execution.sampleFileName, type: execution.fileFormat?.toUpperCase() || '' };
+    return [`${execution.sampleFileId}__${execution.version}`, {
+      file,
+      version: execution.version,
+      planVersionId: execution.planVersionId,
+      planNodes: hydrateStoredPlanNodes(execution.planNodes || []),
+      result: execution.result,
+    }];
+  }));
+  const createPlanContextState = (target) => {
+    const route = buildPlanRoute(target);
+    const { plan, versions } = dataStore.getPlanWithVersionsByRoute(route);
+    const latestVersion = getLatestPlanVersionRecord(versions);
+    const savedVersions = versions.map((item) => item.version);
+    const initialTarget = target.formType === initialFormType && target.fileFormat === workbenchFileFormats[0];
+    const generatedState = (qaGeneratedState && initialTarget) || Boolean(latestVersion);
+    const runningState = qaRunningState && initialTarget;
+    const fallbackSample = createSampleForTarget(target, generatedState ? '已完成' : runningState ? '试跑中' : '未发送');
+    const latestNodes = latestVersion ? hydrateStoredPlanNodes(latestVersion.nodes || latestVersion.planNodes || []) : [];
+    const latestSampleFiles = latestVersion?.sampleFiles?.length ? latestVersion.sampleFiles.map((file) => ({ ...file })) : [fallbackSample];
+    const latestResults = latestVersion?.results?.length ? latestVersion.results.map((result) => ({ ...result })) : generatedState ? [createSampleResult(fallbackSample, { includeKnowledge: true })] : [];
+    const storedChat = plan ? dataStore.getPlanChat(plan.id) : null;
+
+    return {
+      currentPlanId: plan?.id || null,
+      sampleFiles: generatedState || runningState ? latestSampleFiles : createWorkbenchSampleFiles(target),
+      events: storedChat || (generatedState ? generatedAgentEvents : runningState ? runningAgentEvents : initialAgentEvents),
+      planNodes: latestVersion ? latestNodes : runningState ? createAgentDemoNodes(readWorkbenchCatalog()).slice(0, 4) : qaGeneratedState && initialTarget ? createAgentDemoNodes(readWorkbenchCatalog()) : [],
+      rightTab: ['处理方案', '执行结果'].includes(qaRightTab) ? qaRightTab : '处理方案',
+      running: runningState,
+      testing: false,
+      confirmed: Boolean(latestVersion || (qaGeneratedState && initialTarget)),
+      results: latestResults,
+      connectionStates: {},
+      nodeRuntime: {},
+      agentInput: '',
+      agentTask: null,
+      savedPlanVersions: savedVersions,
+      selectedPlanVersion: latestVersion?.version || '1.0',
+      versionSnapshots: latestVersion ? buildVersionSnapshotsFromRecords(versions) : qaGeneratedState && initialTarget ? {
+        '1.0': {
+          planNodes: createAgentDemoNodes(readWorkbenchCatalog()),
+          results: [createSampleResult(fallbackSample, { includeKnowledge: true })],
+          sampleFiles: [fallbackSample],
+        },
+      } : {},
+      executionRecords: plan ? getExecutionRecordsForPlan(plan.id) : {},
+    };
+  };
+  const initialPlanContext = createPlanContextState(initialPlanTarget);
+  const [catalog, setCatalog] = useState(() => readWorkbenchCatalog());
+  const [currentPlanId, setCurrentPlanId] = useState(initialPlanContext.currentPlanId);
+  const [sampleFiles, setSampleFiles] = useState(initialPlanContext.sampleFiles);
+  const [events, setEvents] = useState(initialPlanContext.events);
+  const [planNodes, setPlanNodes] = useState(initialPlanContext.planNodes);
+  const [rightTab, setRightTab] = useState(initialPlanContext.rightTab);
+  const [running, setRunning] = useState(initialPlanContext.running);
+  const [testing, setTesting] = useState(initialPlanContext.testing);
+  const [confirmed, setConfirmed] = useState(initialPlanContext.confirmed);
+  const [results, setResults] = useState(initialPlanContext.results);
   const [connectionStates, setConnectionStates] = useState(() => {
     if (!['error', 'resolving', 'resolved'].includes(qaConnectionStatus)) return {};
     const [fromSection, toSection] = getCategorySections(planNodes);
@@ -5086,31 +5166,10 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const [dragInsertTarget, setDragInsertTarget] = useState(null);
   const [innerDragInsertTarget, setInnerDragInsertTarget] = useState(null);
   const [selectedPlanTarget, setSelectedPlanTarget] = useState(() => ({ formType: initialFormType, fileFormat: workbenchFileFormats[0] }));
-  const [savedPlanVersions, setSavedPlanVersions] = useState(() => (hasSavedCategoryPlan ? ['1.0'] : []));
-  const [selectedPlanVersion, setSelectedPlanVersion] = useState('1.0');
-  const [versionSnapshots, setVersionSnapshots] = useState(() => (
-    hasSavedCategoryPlan ? {
-      '1.0': {
-        planNodes: cloneWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog())),
-        results: [createSampleResult({ ...sampleDemoFile, status: '已完成' }, { includeKnowledge: true })],
-        sampleFiles: [{ ...sampleDemoFile, status: '已完成' }],
-      },
-    } : {}
-  ));
-  const [executionRecords, setExecutionRecords] = useState(() => {
-    if (!hasSavedCategoryPlan) return {};
-    const file = { ...sampleDemoFile, status: '已完成' };
-    const nodes = cloneWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog()));
-    const result = createSampleResultForPlan(file, nodes);
-    return {
-      [`${file.id}__1.0`]: {
-        file,
-        version: '1.0',
-        planNodes: nodes,
-        result,
-      },
-    };
-  });
+  const [savedPlanVersions, setSavedPlanVersions] = useState(initialPlanContext.savedPlanVersions);
+  const [selectedPlanVersion, setSelectedPlanVersion] = useState(initialPlanContext.selectedPlanVersion);
+  const [versionSnapshots, setVersionSnapshots] = useState(initialPlanContext.versionSnapshots);
+  const [executionRecords, setExecutionRecords] = useState(initialPlanContext.executionRecords);
   const [expandedPlanGroups, setExpandedPlanGroups] = useState(() => new Set([initialFormType]));
   const [samplePopoverOpen, setSamplePopoverOpen] = useState(false);
   const [planRunPopoverOpen, setPlanRunPopoverOpen] = useState(false);
@@ -5139,58 +5198,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   };
   const planVersions = savedPlanVersions.length ? sortPlanVersionsDesc(savedPlanVersions) : ['1.0'];
   const activePlanTargetKey = getPlanTargetKey(activePlanTarget);
-  const createSampleForTarget = (target, status = '未发送') => ({
-    ...createWorkbenchSampleFiles(target, status)[0],
-    id: `demo-${target.formType}-${target.fileFormat}`,
-    name: `医保政策样例.${target.fileFormat}`,
-    type: target.fileFormat.toUpperCase(),
-    status,
-  });
-  const getSavedPlanForTarget = (target) => {
-    const savedPlan = dataStore.getCategoryPlan(planStorageCategoryId, target.formType, target.fileFormat);
-    if (!savedPlan || savedPlan.status !== 'active') return null;
-    if (savedPlan.fileFormat) return savedPlan.fileFormat === target.fileFormat ? savedPlan : null;
-    return target.fileFormat === 'pdf' ? savedPlan : null;
-  };
-  const createPlanContextState = (target) => {
-    const savedPlan = getSavedPlanForTarget(target);
-    const initialTarget = target.formType === initialFormType && target.fileFormat === workbenchFileFormats[0];
-    const generated = (qaGeneratedState && initialTarget) || Boolean(savedPlan);
-    const runningState = qaRunningState && initialTarget;
-    const sample = createSampleForTarget(target, generated ? '已完成' : runningState ? '试跑中' : '未发送');
-    return {
-      sampleFiles: generated || runningState ? [sample] : createWorkbenchSampleFiles(target),
-      events: generated ? generatedAgentEvents : runningState ? runningAgentEvents : initialAgentEvents,
-      planNodes: generated ? createAgentDemoNodes(readWorkbenchCatalog()) : runningState ? createAgentDemoNodes(readWorkbenchCatalog()).slice(0, 4) : [],
-      rightTab: ['处理方案', '执行结果'].includes(qaRightTab) ? qaRightTab : '处理方案',
-      running: runningState,
-      testing: false,
-      confirmed: Boolean(generated),
-      results: generated ? [createSampleResult(sample, { includeKnowledge: true })] : [],
-      connectionStates: {},
-      nodeRuntime: {},
-      agentInput: '',
-      agentTask: null,
-      savedPlanVersions: generated ? ['1.0'] : [],
-      selectedPlanVersion: '1.0',
-      versionSnapshots: generated ? {
-        '1.0': {
-          planNodes: createAgentDemoNodes(readWorkbenchCatalog()),
-          results: [createSampleResult(sample, { includeKnowledge: true })],
-          sampleFiles: [sample],
-        },
-      } : {},
-      executionRecords: generated ? {
-        [`${sample.id}__1.0`]: {
-          file: sample,
-          version: '1.0',
-          planNodes: cloneWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog())),
-          result: createSampleResultForPlan(sample, createAgentDemoNodes(readWorkbenchCatalog())),
-        },
-      } : {},
-    };
-  };
   const getCurrentPlanContextState = () => ({
+    currentPlanId,
     sampleFiles,
     events,
     planNodes,
@@ -5209,6 +5218,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     executionRecords,
   });
   const applyPlanContextState = (state) => {
+    setCurrentPlanId(state.currentPlanId || null);
     setSampleFiles(state.sampleFiles);
     setEvents(state.events);
     setPlanNodes(state.planNodes);
@@ -5236,6 +5246,15 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     results: results.map((result) => ({ ...result })),
     sampleFiles: sampleFiles.map((file) => ({ ...file })),
   });
+  const ensureCurrentPlan = () => {
+    if (currentPlanId) {
+      const existing = dataStore.list('plans').find((item) => item.id === currentPlanId);
+      if (existing) return existing;
+    }
+    const plan = dataStore.ensurePlan(buildPlanRoute(activePlanTarget));
+    setCurrentPlanId(plan.id);
+    return plan;
+  };
   const selectPlanVersion = (version) => {
     const snapshot = versionSnapshots[version];
     setSelectedPlanVersion(version);
@@ -5254,6 +5273,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setConfirmed(true);
   };
   const switchPlanTarget = (target) => {
+    if (currentPlanId) dataStore.savePlanChat(currentPlanId, events);
     planContextRef.current[activePlanTargetKey] = getCurrentPlanContextState();
     const nextKey = getPlanTargetKey(target);
     const nextState = planContextRef.current[nextKey] || createPlanContextState(target);
@@ -5271,7 +5291,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const contextState = planContextRef.current[key];
     if (contextState?.confirmed && contextState.planNodes?.length) return 'done';
     if (contextState?.planNodes?.length) return 'configuring';
-    if (getSavedPlanForTarget(target)) return 'done';
+    if (dataStore.getPlanWithVersionsByRoute(buildPlanRoute(target)).versions.length) return 'done';
     return '';
   };
   const getFormTypeDoneCount = (item) => workbenchFileFormats.filter((format) => getFormatPlanStatus(item, format) === 'done').length;
@@ -5307,6 +5327,9 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     streamRef.current?.scrollTo({ top: streamRef.current.scrollHeight, behavior: 'smooth' });
   }, [events]);
   useEffect(() => {
+    if (currentPlanId) dataStore.savePlanChat(currentPlanId, events);
+  }, [currentPlanId, events]);
+  useEffect(() => {
     const input = agentInputRef.current;
     if (!input) return;
     input.style.height = 'auto';
@@ -5331,6 +5354,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   };
 
   const pushEvent = (event) => {
+    ensureCurrentPlan();
     const row = { ...event, id: makeId(event.role) };
     setEvents((current) => [...current, row]);
     return row.id;
@@ -5745,6 +5769,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       notify('方案测试未通过，失败原因已标记在流程连线上', 'error');
       return;
     }
+    const plan = ensureCurrentPlan();
+    const planVersion = dataStore.getPlanVersion(plan.id, selectedPlanVersion);
     setTesting(true);
     setRightTab('处理方案');
     setResults([]);
@@ -5773,6 +5799,22 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     scheduleAgentTimer(() => {
       const nextResults = runFiles.map((item) => createSampleResultForPlan(item, runnableNodes));
       setResults(nextResults);
+      if (planVersion) {
+        nextResults.forEach((result) => {
+          const fileRecord = runFiles.find((item) => item.id === result.fileId) || { id: result.fileId, name: result.fileName };
+          dataStore.createPlanExecution({
+            planId: plan.id,
+            planVersionId: planVersion.id,
+            version: runVersion,
+            sampleFileId: result.fileId,
+            sampleFileName: result.fileName,
+            sampleFile: { ...fileRecord, status: '已完成' },
+            fileFormat: activePlanTarget.fileFormat,
+            planNodes: cloneWorkbenchNodes(runPlanSnapshot),
+            result,
+          });
+        });
+      }
       setExecutionRecords((current) => ({
         ...current,
         ...Object.fromEntries(nextResults.map((result) => {
@@ -5780,6 +5822,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
           return [`${result.fileId}__${runVersion}`, {
             file: { ...file, status: '已完成' },
             version: runVersion,
+            planVersionId: planVersion?.id || null,
             planNodes: cloneWorkbenchNodes(runPlanSnapshot),
             result,
           }];
@@ -5807,30 +5850,23 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   };
 
   const savePlan = (versionToSave) => {
-    if (solution) {
-      dataStore.upsertCategoryPlan({
-        projectId: project.id,
-        solutionId: solution.id,
-        categoryId: planStorageCategoryId,
-        planScope: category ? 'category' : 'fallback',
-        formType: activePlanTarget.formType,
-        fileFormat: activePlanTarget.fileFormat,
-        version: versionToSave,
-        status: 'active',
-        name: `${category ? category.name : project.name}${activePlanTarget.formType}${activePlanTarget.fileFormat}处理方案V${versionToSave}`,
-        nodes: planNodes.filter((node) => node.toolId && !node.toolId.startsWith('system-')).map((node) => ({
-          toolId: node.toolId,
-          toolName: node.toolName,
-        })),
-      });
-    }
+    const plan = ensureCurrentPlan();
     const snapshot = createVersionSnapshot();
+    const versionRecord = dataStore.createPlanVersion({
+      planId: plan.id,
+      version: versionToSave,
+      nodes: snapshot.planNodes,
+      sampleFiles: snapshot.sampleFiles,
+      results: snapshot.results,
+    });
+    if (currentPlanId || plan.id) dataStore.savePlanChat(plan.id, events);
     setSavedPlanVersions((current) => sortPlanVersionsDesc(Array.from(new Set([...current, versionToSave]))));
     setVersionSnapshots((current) => ({ ...current, [versionToSave]: snapshot }));
+    setCurrentPlanId(plan.id);
     setSelectedPlanVersion(versionToSave);
     setSaveConfirmVersion(null);
     setConfirmed(true);
-    notify(`处理方案已保存为 V${versionToSave} 版本`, 'success');
+    notify(`处理方案已保存为 V${versionRecord.version} 版本`, 'success');
   };
 
   const updateNode = (node) => {
