@@ -1236,12 +1236,11 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   position: absolute;
   top: 58px;
   right: 10px;
+  bottom: 12px;
   z-index: 5;
   display: flex;
   width: 420px;
   height: auto;
-  min-height: calc((100% - 192px) / 2);
-  max-height: calc(100% - 76px);
   flex-direction: column;
   border: 1px solid #dbe6f3;
   border-radius: 18px;
@@ -1254,7 +1253,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .tabs button { display: inline-flex; align-items: center; height: 100%; padding: 0 12px; color: #667085; border-bottom: 2px solid transparent; line-height: 1; font-weight: 600; }
 .plan-column .tabs button.active { color: #0f63f6; border-color: #0f63f6; }
 .plan-column .badge.blue { color: #1d5fd6; background: #e9f2ff; border-color: #b5d3ff; }
-.plan-tab { display: flex; flex: 0 1 auto; min-height: 0; flex-direction: column; overflow: hidden; }
+.plan-tab { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; overflow: hidden; }
 .plan-summary { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px 14px; }
 .plan-summary.without-version { grid-template-columns: minmax(0, 1fr); justify-items: end; }
 .plan-summary::after { content: ""; position: absolute; left: 14px; right: 14px; bottom: 0; height: 1px; background: #edf0f5; }
@@ -1268,7 +1267,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .add-node-pill { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; border-radius: 999px; color: #fff; background: #0f63f6; font-size: 12px; font-weight: 600; }
 .add-node-pill:hover { background: #0b55d9; }
 .add-node-pill:disabled { color: #94a3b8; background: #f1f5f9; cursor: not-allowed; }
-.workflow-list { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; max-height: calc(100vh - 430px); padding: 14px; overflow-y: auto; }
+.workflow-list { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; padding: 14px; overflow-y: auto; }
 .empty-plan-column .workflow-list { padding-bottom: 14px; overflow: visible; }
 .workflow-section-wrap { position: relative; }
 .workflow-card, .workflow-section { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 9px; margin-bottom: 12px; }
@@ -1423,7 +1422,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .plan-empty strong { color: #344054; font-size: 13px; }
 .plan-empty span { max-width: 280px; color: #94a3b8; font-size: 12px; line-height: 1.5; }
 .result-empty { min-height: 260px; }
-.result-list { flex: 0 1 auto; min-height: 0; max-height: calc(100vh - 380px); padding: 12px; overflow-y: auto; }
+.result-list { flex: 1 1 auto; min-height: 0; padding: 12px; overflow-y: auto; }
 .result-filter-bar { display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 8px; max-width: 100%; margin-bottom: 12px; overflow: hidden; }
 .result-filter-bar label { display: grid; gap: 6px; min-width: 0; color: #64748b; font-size: 12px; }
 .result-filter-bar .result-filter-field.select-field-wrap { min-width: 0; width: 100%; max-width: 100%; }
