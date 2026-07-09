@@ -3218,7 +3218,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
 
   useEffect(() => {
     if (!solution) return;
-    setExpanded(new Set(categories.filter((item) => item.parentId === null).map((item) => item.id)));
+    setExpanded(new Set(categories.map((item) => item.id)));
   }, [solution?.id, categories.length]);
 
   const initSolution = (templateId = '') => {
@@ -3337,7 +3337,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
           <div className="category-actions viewer-category-actions">
             {leaf ? (
               <button type="button" className="secondary category-config-button" onClick={() => onWorkbench(project.id, cat.id, cat.formTypes[0] || '切片库')}>配置方案</button>
-            ) : <span className="category-note">知识形态由末级类目指定</span>}
+            ) : null}
           </div>
         </div>
         {children.length && open ? children.map(renderNode) : null}
