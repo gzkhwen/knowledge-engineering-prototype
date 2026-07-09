@@ -1109,7 +1109,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .sample-column .scheme-config-title { margin-top: 10px; }
 .scheme-overview-tip { margin: -2px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; }
 .scheme-config-divider { height: 1px; margin: 10px 0; background: #e5e7eb; }
-.scheme-overview-list { display: grid; flex: 1; min-height: 0; gap: 12px; overflow-y: auto; }
+.scheme-overview-list { display: grid; flex: 1; min-height: 0; align-content: start; grid-auto-rows: max-content; gap: 12px; overflow-y: auto; }
 .scheme-format-title { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 6px; width: 100%; margin-bottom: 6px; padding: 0; border: 0; color: #111827; background: transparent; font-size: 13px; line-height: 1.4; text-align: left; }
 .scheme-format-title .anticon { color: #64748b; font-size: 12px; }
 .scheme-format-title span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
