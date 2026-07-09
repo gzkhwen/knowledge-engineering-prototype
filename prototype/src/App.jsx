@@ -5132,6 +5132,13 @@ function createSampleResult(file, options = {}) {
       outputFull: JSON.stringify({ textChunkResult: [{ chunkId: 'chunk-001', title: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 }, { chunkId: 'chunk-002', title: '办理条件', text: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 }], stats: { chunkCount: 2, chunkSize: 800, overlap: 80 } }, null, 2),
     },
     ...(options.includeKnowledge ? [{
+      toolName: 'QA提取',
+      category: '知识提取',
+      outputPath: 'qaResult',
+      parameters: [{ name: 'input', value: 'textChunkResult' }, { name: 'qa_type', value: '政策问答' }, { name: 'model', value: 'qwen3-8b' }],
+      status: '成功',
+      outputFull: JSON.stringify({ qaResult: [{ qaId: 'qa-001', question: '哪些人员可以办理异地就医备案？', answer: '本市基本医疗保险参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。', sourceChunkId: 'chunk-002' }, { qaId: 'qa-002', question: '异地就医政策适用于哪些对象？', answer: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', sourceChunkId: 'chunk-001' }], stats: { qaCount: 2, sourceChunkCount: 2 } }, null, 2),
+    }, {
       toolName: '知识点提取',
       category: '知识提取',
       outputPath: 'summaryResult',
@@ -6408,7 +6415,10 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                       <div className="sample-file-popover">
                         <div className="sample-file-popover-head">
                           <strong>样例文件</strong>
-                          <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
+                          <span className="sample-file-popover-head-actions">
+                            <button type="button">选择已接入文件</button>
+                            <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
+                          </span>
                         </div>
                         <input ref={fileRef} type="file" accept={`.${activePlanTarget.fileFormat}`} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
                         {sampleFiles.length ? sampleFiles.map((file) => {
@@ -6528,7 +6538,10 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                     <div className="sample-file-popover plan-run-popover">
                       <div className="sample-file-popover-head">
                         <strong>样例文件</strong>
-                        <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
+                        <span className="sample-file-popover-head-actions">
+                          <button type="button">选择已接入文件</button>
+                          <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
+                        </span>
                       </div>
                       <input ref={fileRef} type="file" accept={`.${activePlanTarget.fileFormat}`} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
                       {sampleFiles.length ? sampleFiles.map((file) => {
@@ -7479,6 +7492,74 @@ function getKnowledgeResultPayload(formType, record) {
   return createFallbackKnowledgeResult(formType, record?.file?.name || record?.result?.fileName || '样例文件');
 }
 
+function normalizeKnowledgeItems(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
+  const arrayValue = Object.values(payload).find((value) => Array.isArray(value));
+  return arrayValue || [payload];
+}
+
+function getTextLength(text = '') {
+  return String(text || '').replace(/\s/g, '').length;
+}
+
+function getSourceText(item) {
+  const sources = item.sourceChunkIds || item.sourceChunks || item.sourceIds;
+  if (Array.isArray(sources) && sources.length) return `来源：${sources.join('、')}`;
+  if (item.sourceChunkId) return `来源：${item.sourceChunkId}`;
+  if (item.page) return `第${item.page}页`;
+  return '';
+}
+
+function KnowledgeResultItems({ formType, payload }) {
+  const items = normalizeKnowledgeItems(payload);
+  if (!items.length) return <div className="empty-mini">当前组合暂无知识结果</div>;
+  return (
+    <div className="knowledge-result-items">
+      {items.map((item, index) => {
+        if (formType === 'QA库') {
+          const sourceText = getSourceText(item);
+          return (
+            <article className="knowledge-result-item qa" key={`qa-${index}`}>
+              <div className="knowledge-result-item-head">
+                <strong>问答{index + 1}</strong>
+                {sourceText ? <span>{sourceText}</span> : null}
+              </div>
+              <p><b>Q：</b>{item.question || item.title || '-'}</p>
+              <p><b>A：</b>{item.answer || item.content || '-'}</p>
+            </article>
+          );
+        }
+        if (formType === '知识点') {
+          const tags = Array.isArray(item.tags) ? item.tags : item.category ? [item.category] : [];
+          const sourceText = getSourceText(item);
+          return (
+            <article className="knowledge-result-item" key={`knowledge-${index}`}>
+              <div className="knowledge-result-item-head">
+                <strong>{item.title || `知识点${index + 1}`}</strong>
+                {tags.length ? <span>标签：{tags.join('、')}</span> : null}
+              </div>
+              <p>{item.content || item.text || item.summary || '-'}</p>
+              {sourceText ? <em>{sourceText}</em> : null}
+            </article>
+          );
+        }
+        const content = item.content || item.text || item.summary || '';
+        const meta = [content ? `${getTextLength(content)}字` : '', item.page ? `第${item.page}页` : ''].filter(Boolean).join(' · ');
+        return (
+          <article className="knowledge-result-item" key={`slice-${index}`}>
+            <div className="knowledge-result-item-head">
+              <strong>分片{index + 1}</strong>
+              {meta ? <span>{meta}</span> : null}
+            </div>
+            <p>{content || '-'}</p>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function KnowledgeResultPreview({ formType, executionRecords = {} }) {
   const records = useMemo(() => Object.values(executionRecords), [executionRecords]);
   const fileOptions = useMemo(() => {
@@ -7535,9 +7616,8 @@ function KnowledgeResultPreview({ formType, executionRecords = {} }) {
         <section className="knowledge-preview-card">
           <div className="knowledge-preview-head">
             <strong>{resultName}</strong>
-            <span>{selectedRecord.file.name} · V{selectedRecord.version}</span>
           </div>
-          <pre>{JSON.stringify(payload, null, 2)}</pre>
+          <KnowledgeResultItems formType={formType} payload={payload} />
         </section>
       ) : <div className="plan-empty result-empty"><ThunderboltOutlined /><strong>暂无{resultName}</strong><span>请先配置处理方案，并上传样例文件试跑。</span></div>}
     </div>

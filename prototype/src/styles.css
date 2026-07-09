@@ -1212,6 +1212,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .agent-send-button:disabled { color: #94a3b8; background: #f1f5f9; cursor: not-allowed; }
 .sample-file-popover { position: absolute; left: 0; bottom: 40px; z-index: 20; display: grid; gap: 8px; width: 420px; padding: 12px; border: 1px solid #dbe6f3; border-radius: 12px; background: #fff; box-shadow: 0 16px 36px rgba(15, 23, 42, .16); }
 .sample-file-popover-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sample-file-popover-head-actions { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 8px; }
 .sample-file-popover strong { color: #111827; font-size: 13px; line-height: 1.2; }
 .sample-file-popover-head button { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 10px; color: #fff; background: #0f63f6; font-size: 12px; }
 .sample-file-popover-head button svg { width: 15px; height: 15px; }
@@ -1403,7 +1404,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .plan-actions { padding: 12px 14px; border-top: 1px solid #edf0f5; display: flex; justify-content: flex-end; gap: 10px; }
 .plan-run-wrap { position: relative; flex: 0 0 auto; min-width: 0; }
 .plan-run-wrap > .secondary { width: 80px; }
-.plan-run-popover { left: 0; bottom: 44px; z-index: 40; }
+.plan-run-popover { right: 0; left: auto; bottom: 44px; z-index: 40; }
 .plan-actions .secondary { height: 32px; border-color: #b5d3ff; border-radius: 10px; color: #0f63f6; background: #fff; }
 .plan-actions .secondary:hover { border-color: #9cc3ff; background: #f8fbff; }
 .plan-actions .secondary:disabled { color: #94a3b8; border-color: #e5e7eb; background: #fff; cursor: not-allowed; }
@@ -1446,7 +1447,14 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .knowledge-preview-head { display: grid; gap: 3px; padding: 10px 11px; border-bottom: 1px solid #eef2f7; background: #fbfcff; }
 .knowledge-preview-head strong { overflow: hidden; color: #111827; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .knowledge-preview-head span { overflow: hidden; color: #98a2b3; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.knowledge-preview-card pre { margin: 0; padding: 12px; overflow: visible; color: #344054; background: #f8fafc; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.knowledge-result-items { display: grid; gap: 10px; padding: 12px; background: #f8fafc; }
+.knowledge-result-item { display: grid; gap: 7px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.knowledge-result-item-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.knowledge-result-item-head strong { min-width: 0; overflow: hidden; color: #111827; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-result-item-head span { flex: 0 0 auto; color: #98a2b3; font-size: 11px; }
+.knowledge-result-item p { margin: 0; color: #344054; font-size: 12px; line-height: 1.6; word-break: break-word; }
+.knowledge-result-item p b { color: #475467; font-weight: 600; }
+.knowledge-result-item em { color: #98a2b3; font-size: 11px; font-style: normal; line-height: 1.4; }
 .run-card { padding: 0; margin-bottom: 0; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; overflow: hidden; }
 .run-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 11px; border-bottom: 1px solid #eef2f7; background: #fbfcff; }
 .run-card-head div { min-width: 0; display: grid; gap: 2px; }

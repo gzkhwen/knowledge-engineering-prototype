@@ -313,22 +313,52 @@ function demoSampleFile(fileFormat, seedName) {
 }
 
 function demoResult(file, nodes, formType, categoryName, version) {
-  const runs = nodes.map((node, index) => ({
-    toolName: node.toolName,
-    category: node.category,
-    outputPath: index === nodes.length - 1 ? 'data.storageRef' : `data.step${index + 1}`,
-    parameters: [{ name: index === 0 ? '样例文件' : '输入来源', value: index === 0 ? file.name : `data.step${index}` }],
-    status: '成功',
-    outputFull: JSON.stringify({
-      version,
-      target: `${categoryName || '兜底方案'} / ${formType}`,
-      node: node.toolName,
-      fileName: file.name,
-      result: index === nodes.length - 1
-        ? { storageRef: `es://knowledge-demo/${slugText(categoryName || 'fallback')}/${slugText(formType)}/${file.type.toLowerCase()}`, storedCount: formType === 'QA库' ? 18 : formType === '知识点' ? 24 : 42 }
-        : { status: 'success', count: 3 + index, sample: ['适用对象', '办理条件', '材料要求'].slice(0, Math.min(3, index + 1)) },
-    }, null, 2),
-  }));
+  const sliceItems = [
+    { chunkId: 'chunk-001', title: '适用范围', content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 },
+    { chunkId: 'chunk-002', title: '办理条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 },
+  ];
+  const qaItems = [
+    { qaId: 'qa-001', question: '哪些人员可以办理异地就医备案？', answer: '本市基本医疗保险参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。', sourceChunkId: 'chunk-002' },
+    { qaId: 'qa-002', question: '异地就医政策适用于哪些对象？', answer: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', sourceChunkId: 'chunk-001' },
+  ];
+  const knowledgeItems = [
+    { knowledgePointId: 'kp-001', title: '适用对象', content: '本政策面向本市医保参保人员。', tags: ['适用对象'], sourceChunkIds: ['chunk-001'] },
+    { knowledgePointId: 'kp-002', title: '备案条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', tags: ['办理条件', '备案流程'], sourceChunkIds: ['chunk-002'] },
+  ];
+  const getRunPayload = (node, index) => {
+    if (index === nodes.length - 1) {
+      return {
+        outputPath: 'data.storageRef',
+        outputFull: { data: { storageRef: `es://knowledge-demo/${slugText(categoryName || 'fallback')}/${slugText(formType)}/${file.type.toLowerCase()}`, storedCount: formType === 'QA库' ? 18 : formType === '知识点' ? 24 : 42 } },
+      };
+    }
+    if (node.toolName === 'Markdown结构化分块') return { outputPath: 'textChunkResult', outputFull: { textChunkResult: sliceItems, stats: { chunkCount: sliceItems.length } } };
+    if (node.toolName === 'QA提取') return { outputPath: 'qaResult', outputFull: { qaResult: qaItems, stats: { qaCount: qaItems.length } } };
+    if (node.toolName === '知识点提取') return { outputPath: 'summaryResult', outputFull: { summary: '该政策说明医保参保人员异地就医备案与费用结算要求。', summaryResult: knowledgeItems } };
+    if (node.toolName === '迭代执行') {
+      if (formType === 'QA库') return { outputPath: 'iterationResult', outputFull: { iterationResult: qaItems.map((item) => ({ ...item, verified: true })) } };
+      if (formType === '知识点') return { outputPath: 'iterationResult', outputFull: { iterationResult: knowledgeItems } };
+      return { outputPath: 'iterationResult', outputFull: { iterationResult: sliceItems } };
+    }
+    return { outputPath: `data.step${index + 1}`, outputFull: { result: { status: 'success', count: 3 + index, sample: ['适用对象', '办理条件', '材料要求'].slice(0, Math.min(3, index + 1)) } } };
+  };
+  const runs = nodes.map((node, index) => {
+    const payload = getRunPayload(node, index);
+    return {
+      toolName: node.toolName,
+      category: node.category,
+      outputPath: payload.outputPath,
+      parameters: [{ name: index === 0 ? '样例文件' : '输入来源', value: index === 0 ? file.name : `data.step${index}` }],
+      status: '成功',
+      outputFull: JSON.stringify({
+        version,
+        target: `${categoryName || '兜底方案'} / ${formType}`,
+        node: node.toolName,
+        fileName: file.name,
+        ...payload.outputFull,
+      }, null, 2),
+    };
+  });
   return { fileId: file.id, fileName: file.name, toolRuns: runs };
 }
 
@@ -385,7 +415,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount }) 
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v4';
+  const demoVersion = 'workbench-plan-demo-v5';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
