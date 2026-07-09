@@ -3211,7 +3211,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
 
   useEffect(() => {
     if (!solution) return;
-    setExpanded(new Set(categories.filter((item) => item.parentId === null).map((item) => item.id)));
+    setExpanded(new Set(categories.map((item) => item.id)));
   }, [solution?.id, categories.length]);
 
   const initSolution = (templateId = '') => {
@@ -3324,7 +3324,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
                 <Badge tone={hasActiveCategoryPlan(cat.id, form) ? 'success' : form === '非结构化切片' ? 'warning' : 'blue'}>{hasActiveCategoryPlan(cat.id, form) ? `${form} · 已确认` : form}</Badge>
                 <button type="button" onClick={() => onWorkbench(project.id, cat.id, form)}>生成处理方案</button>
               </div>
-            )) : <span className="category-note">知识形态由末级类目指定</span>}
+            )) : null}
           </div>
         </div>
         {children.length && open ? children.map(renderNode) : null}

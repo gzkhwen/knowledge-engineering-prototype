@@ -56,20 +56,20 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .nav-subitem:hover { background: #e7eef9; }
 .nav-subitem.active { color: #0f63f6; background: #e9f2ff; font-weight: 700; }
 .collapse-button { position: fixed; left: 24px; bottom: 24px; font-size: 18px; }
-.workspace { min-height: calc(100vh - 46px); padding: 24px 28px 32px; }
+.workspace { min-height: calc(100vh - 46px); padding: 10px 28px 32px; }
 .workspace.workbench-workspace {
   height: calc(100vh - 46px);
   min-height: 0;
   overflow: hidden;
-  padding: 20px 28px;
+  padding: 10px 28px;
 }
 .assistant-dot {
   position: fixed; right: 24px; bottom: 96px; z-index: 50; display: grid; place-items: center; width: 48px; height: 48px;
   border-radius: 999px; color: #0f63f6; background: #fff; border: 1px solid #e0e7f3; box-shadow: 0 12px 30px rgba(15,23,42,.16);
 }
 
-.page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; margin-bottom: 16px; }
-.page-header h1 { margin: 0; color: #111827; font-size: 22px; font-weight: 700; letter-spacing: 0; }
+.page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; margin-bottom: 10px; }
+.page-header h1 { margin: 0; color: #111827; font-size: 16px; font-weight: 700; letter-spacing: 0; }
 .page-header p { margin: 6px 0 0; color: #667085; font-size: 13px; }
 .page-actions { display: flex; gap: 8px; align-items: center; }
 .panel { background: #fff; border: 1px solid #e1e8f4; border-radius: 7px; box-shadow: 0 1px 0 rgba(15,23,42,.02); }
@@ -688,7 +688,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 }
 .knowledge-category-item.active { background: #e9f2ff; }
 .knowledge-main { min-width: 0; }
-.knowledge-main .page-header { margin-bottom: 12px; }
+.knowledge-main .page-header { margin-bottom: 10px; }
 .project-space-label {
   color: #1f2937;
   font-size: 13px;
@@ -1068,7 +1068,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .workbench-page .page-header {
   flex: 0 0 auto;
   min-height: 34px;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 .workbench-page .primary { background: #0f63f6; box-shadow: none; }
 .workbench-page .primary:hover { background: #0b55d8; }
@@ -1973,7 +1973,7 @@ select.select-field,
 }
 
 @media (max-width: 1500px) {
-  .workspace.workbench-workspace { padding: 20px 24px; }
+  .workspace.workbench-workspace { padding: 10px 24px; }
   .workbench-grid { grid-template-columns: 248px minmax(360px, 1fr) 420px; gap: 14px; }
 }
 
