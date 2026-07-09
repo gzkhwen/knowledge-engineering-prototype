@@ -282,42 +282,22 @@ function demoPlanId({ planScope, categoryId, formType, fileFormat }) {
 }
 
 function demoNodeSets(formType, fileFormat) {
-  const parserNames = {
-    pdf: 'PDF版式解析',
-    docx: 'Word结构解析',
-    xlsx: '表格字段解析',
-    pptx: 'PPT页面解析',
-    txt: '纯文本解析',
-    md: 'Markdown解析',
+  const parserNodes = {
+    pdf: { toolId: 'ke-idp-mineru-ocr', toolName: 'MinerU版面解析', category: '文档解析' },
+    docx: { toolId: 'ke-idp-mx-ocr', toolName: '通用OCR解析', category: '文档解析' },
+    xlsx: { toolId: 'ke-idp-glm-ocr', toolName: 'GLM文档解析', category: '文档解析' },
+    pptx: { toolId: 'ke-idp-hunyuan-ocr', toolName: 'Hunyuan文档解析', category: '文档解析' },
+    txt: { toolId: 'ke-idp-mx-ocr', toolName: '通用OCR解析', category: '文档解析' },
+    md: { toolId: 'ke-idp-deepseek-ocr', toolName: 'DeepSeek文档解析', category: '文档解析' },
   };
-  const adapterNames = {
-    pdf: 'PDF段落清洗',
-    docx: 'Word目录归并',
-    xlsx: '表格字段映射',
-    pptx: '页面文本整理',
-    txt: '工单文本规范化',
-    md: 'Markdown层级整理',
-  };
-  const splitterNames = {
-    pdf: '版式分片',
-    docx: '章节分片',
-    xlsx: '表格行块切分',
-    pptx: '页面分片',
-    txt: '段落分片',
-    md: 'Markdown结构化分块',
-  };
-  const storageNames = {
-    切片库: '切片入库',
-    QA库: 'QA入库',
-    知识点: '知识点入库',
-  };
-  const parser = { toolId: 'medical-policy-parser', toolName: parserNames[fileFormat] || '文件解析', category: '文档解析' };
-  const adapter = { toolId: 'system-code', toolName: adapterNames[fileFormat] || '内容规范化', category: '系统节点' };
-  const splitter = { toolId: 'medical-policy-splitter', toolName: splitterNames[fileFormat] || '文本分片', category: '文本分片' };
-  const storage = { toolId: 'system-storage', toolName: storageNames[formType] || '数据存储器', category: '系统节点' };
-  if (formType === '切片库') return [parser, adapter, splitter, storage];
-  if (formType === 'QA库') return [parser, adapter, splitter, { toolId: 'qa-extractor', toolName: 'QA提取', category: '知识提取' }, storage];
-  return [parser, adapter, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, { toolId: 'knowledge-tagging', toolName: '知识点打标', category: '知识提取' }, storage];
+  const parser = parserNodes[fileFormat] || parserNodes.pdf;
+  const adapter = { toolId: 'system-code', toolName: '代码执行器', category: '系统节点' };
+  const splitter = { toolId: 'ke-idp-markdown-chunk', toolName: 'Markdown结构化分块', category: '文本分片' };
+  const iteration = { toolId: 'system-iteration', toolName: '迭代执行', category: '系统节点' };
+  const storage = { toolId: 'system-storage', toolName: '数据存储器', category: '系统节点' };
+  if (formType === '切片库') return [parser, adapter, splitter, iteration, storage];
+  if (formType === 'QA库') return [parser, adapter, splitter, { toolId: 'qa-extractor', toolName: 'QA提取', category: '知识提取' }, iteration, storage];
+  return [parser, adapter, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration, storage];
 }
 
 function demoSampleFile(fileFormat, seedName) {
@@ -405,7 +385,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount }) 
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v3';
+  const demoVersion = 'workbench-plan-demo-v4';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
@@ -479,10 +459,7 @@ function ensureDemoPlanData() {
     const sample = demoSampleFile(definition.fileFormat);
     plans.push(plan);
     definition.versions.forEach((version, index) => {
-      const versionNodes = nodes.map((node, nodeIndex) => ({
-        ...node,
-        toolName: index === 0 && definition.versions.length > 1 && nodeIndex === nodes.length - 1 ? `${node.toolName}（旧版策略）` : node.toolName,
-      }));
+      const versionNodes = nodes.map((node) => ({ ...node }));
       const result = demoResult(sample, versionNodes, definition.formType, categoryName, version);
       versions.push({
         id: `demo-version-${plan.id}-${version.replace('.', '-')}`,

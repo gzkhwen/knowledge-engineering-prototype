@@ -4192,6 +4192,14 @@ function cloneWorkbenchNodes(nodes) {
   return nodes.map(cloneWorkbenchNode);
 }
 
+function getIterationInputOutputPath(previous, preferredPath) {
+  const outputs = getEffectiveNodeOutputs(previous);
+  const preferredOutput = outputs.find((output) => (output.path || output.id || output.name) === preferredPath);
+  const arrayOutput = outputs.find(isArrayOutput);
+  const output = preferredOutput || arrayOutput || outputs[0];
+  return output?.path || output?.id || output?.name || preferredPath;
+}
+
 function hydrateStoredPlanNodes(nodes = []) {
   if (!nodes.length) return [];
   if (nodes.some((node) => node.nodeId && node.params && node.outputs)) return cloneWorkbenchNodes(nodes);
@@ -4204,13 +4212,24 @@ function hydrateStoredPlanNodes(nodes = []) {
     if (!tool) return;
     const previous = hydrated.at(-1);
     const inputSource = previous ? { type: 'upstream', sourceNodeId: previous.nodeId, outputPath: previous.outputs?.[0]?.path || 'data.result' } : { type: 'fixed' };
+    if (tool.id === 'system-iteration' && previous) {
+      const hasQaNode = nodes.some((item) => item.toolId === 'qa-extractor' || item.toolName === 'QA提取');
+      const hasKnowledgeNode = nodes.some((item) => item.toolId === 'summary' || item.toolName === '知识点提取');
+      const formPlan = getAgentFormPlan(hasQaNode ? 'QA库' : hasKnowledgeNode ? '知识点' : '切片库');
+      const preferredIterationPath = hasQaNode ? 'qaResult' : hasKnowledgeNode ? 'summaryResult' : 'textChunkResult';
+      const iterationInputSource = { type: 'upstream', sourceNodeId: previous.nodeId, outputPath: getIterationInputOutputPath(previous, preferredIterationPath) };
+      const codeTool = catalogById.get('system-code');
+      const taggingTool = catalogById.get('knowledge-tagging') || catalogByName.get('知识点打标');
+      hydrated.push(hasKnowledgeNode && codeTool
+        ? createConfiguredIterationNode(tool, iterationInputSource, codeTool, taggingTool)
+        : createConfiguredGenericIterationNode(tool, iterationInputSource, codeTool, formPlan));
+      return;
+    }
     const workbenchNode = createWorkbenchNode(tool, inputSource);
     hydrated.push({
       ...workbenchNode,
-      toolName: node.toolName || workbenchNode.toolName,
-      name: node.toolName || workbenchNode.name,
-      category: node.category || workbenchNode.category,
-      semanticCategory: node.semanticCategory || workbenchNode.semanticCategory,
+      category: workbenchNode.category,
+      semanticCategory: workbenchNode.semanticCategory,
       description: node.description || workbenchNode.description,
     });
   });
@@ -4347,10 +4366,8 @@ function createConfiguredIterationNode(iterationTool, inputSource, codeTool, tag
     script: 'def main(knowledgePoint: dict, tagResult: dict) -> dict:\n    return {\n        "taggedKnowledge": {\n            **knowledgePoint,\n            "tags": tagResult.get("tags", []),\n            "category": tagResult.get("category"),\n            "confidence": tagResult.get("confidence")\n        }\n    }',
     codeOutputs: [{ id: 'taggedKnowledge', name: '最终打标结果', type: 'object', value: 'data.taggedKnowledge' }],
   }) : null;
-  const visiblePrepareCode = prepareCode ? renameWorkbenchNode(prepareCode, '打标入参整理') : null;
-  const visibleAssembleCode = assembleCode ? renameWorkbenchNode(assembleCode, '知识点结果拼装') : null;
-  const innerNodes = [visiblePrepareCode, configuredTaggingNode, visibleAssembleCode].filter(Boolean);
-  const outputSourceNode = visibleAssembleCode || configuredTaggingNode || visiblePrepareCode;
+  const innerNodes = [prepareCode, configuredTaggingNode, assembleCode].filter(Boolean);
+  const outputSourceNode = assembleCode || configuredTaggingNode || prepareCode;
   const outputSource = outputSourceNode?.outputs?.find((output) => output.path === 'data.taggedKnowledge') || outputSourceNode?.outputs?.[0];
   return {
     ...iterationNode,
@@ -4370,9 +4387,9 @@ function createConfiguredIterationNode(iterationTool, inputSource, codeTool, tag
 const agentFormatPlans = {
   pdf: {
     formatLabel: 'PDF版式文档',
-    parserName: 'PDF版式解析',
-    adapterName: 'PDF段落清洗',
-    splitterName: '版式分片',
+    parserName: 'MinerU版面解析',
+    adapterName: '代码执行器',
+    splitterName: 'Markdown结构化分块',
     adapterOutput: 'data.cleanBlocks',
     concern: '需要保留页码、标题层级和跨页段落，避免把页眉页脚写入正文。',
     parserReason: '适合处理版式复杂的 PDF 文件解析。',
@@ -4380,9 +4397,9 @@ const agentFormatPlans = {
   },
   docx: {
     formatLabel: 'Word结构化文档',
-    parserName: 'Word结构解析',
-    adapterName: 'Word目录归并',
-    splitterName: '章节分片',
+    parserName: '通用OCR解析',
+    adapterName: '代码执行器',
+    splitterName: 'Markdown结构化分块',
     adapterOutput: 'data.cleanBlocks',
     concern: '需要识别标题样式、列表层级和表格段落，避免目录文字干扰正文。',
     parserReason: '适合读取 Word 标题、段落和表格结构。',
@@ -4390,9 +4407,9 @@ const agentFormatPlans = {
   },
   xlsx: {
     formatLabel: 'Excel表格文件',
-    parserName: '表格字段解析',
-    adapterName: '表格字段映射',
-    splitterName: '表格行块切分',
+    parserName: 'GLM文档解析',
+    adapterName: '代码执行器',
+    splitterName: 'Markdown结构化分块',
     adapterOutput: 'data.cleanBlocks',
     concern: '需要过滤空行、合并单元格和说明行，并把多列字段映射为标准记录。',
     parserReason: '适合读取表头、行记录和字段值。',
@@ -4400,9 +4417,9 @@ const agentFormatPlans = {
   },
   pptx: {
     formatLabel: 'PPT课件文件',
-    parserName: 'PPT页面解析',
-    adapterName: '页面文本整理',
-    splitterName: '页面分片',
+    parserName: 'Hunyuan文档解析',
+    adapterName: '代码执行器',
+    splitterName: 'Markdown结构化分块',
     adapterOutput: 'data.cleanBlocks',
     concern: '需要保留页面顺序、标题、正文和备注，避免装饰性文字干扰知识内容。',
     parserReason: '适合按页面读取课件内容。',
@@ -4410,9 +4427,9 @@ const agentFormatPlans = {
   },
   txt: {
     formatLabel: '纯文本导出文件',
-    parserName: '纯文本解析',
-    adapterName: '工单文本规范化',
-    splitterName: '段落分片',
+    parserName: '通用OCR解析',
+    adapterName: '代码执行器',
+    splitterName: 'Markdown结构化分块',
     adapterOutput: 'data.cleanBlocks',
     concern: '需要识别记录边界和自然段落，避免把多条记录混成一个处理单元。',
     parserReason: '适合读取纯文本正文和行记录。',
@@ -4420,8 +4437,8 @@ const agentFormatPlans = {
   },
   md: {
     formatLabel: 'Markdown文档',
-    parserName: 'Markdown解析',
-    adapterName: 'Markdown层级整理',
+    parserName: 'DeepSeek文档解析',
+    adapterName: '代码执行器',
     splitterName: 'Markdown结构化分块',
     adapterOutput: 'data.cleanBlocks',
     concern: '需要保留标题层级、列表和代码块边界，避免破坏原始结构。',
@@ -4433,7 +4450,7 @@ const agentFormatPlans = {
 const agentFormPlans = {
   切片库: {
     objective: '稳定切片并写入切片库',
-    storageName: '切片入库',
+    storageName: '数据存储器',
     extractionTitle: '',
     extractionReason: '',
     iterationReason: '迭代处理分片结果，逐片完成质量检查、元数据补全和结果拼装。',
@@ -4448,7 +4465,7 @@ const agentFormPlans = {
   },
   QA库: {
     objective: '抽取标准问答并写入QA库',
-    storageName: 'QA入库',
+    storageName: '数据存储器',
     extractionTitle: 'QA提取节点',
     extractionReason: '需要先从分片结果中抽取候选问答对。',
     flowSteps: ['文件解析', '格式适配', '内容切分', 'QA提取', '迭代执行', 'QA入库'],
@@ -4463,7 +4480,7 @@ const agentFormPlans = {
   },
   知识点: {
     objective: '提取知识点、打标并写入知识点库',
-    storageName: '知识点入库',
+    storageName: '数据存储器',
     extractionTitle: '知识点提取节点',
     extractionReason: '需要先把分片结果提炼为知识点数组。',
     flowSteps: ['文件解析', '格式适配', '内容切分', '知识点提取', '迭代执行', '知识点入库'],
@@ -4498,7 +4515,7 @@ function createConfiguredGenericIterationNode(iterationTool, inputSource, codeTo
       codeOutputs: [{ id: step.outputId, name: step.outputName, type: 'object', value: step.outputPath }],
     });
     previousSource = { type: 'upstream', sourceNodeId: node.nodeId, outputPath: step.outputPath };
-    return renameWorkbenchNode({ ...node, expanded: true, adjusted: true }, step.name);
+    return { ...node, expanded: true, adjusted: true };
   });
   const outputSourceNode = innerNodes.at(-1);
   const outputSource = outputSourceNode?.outputs?.find((output) => output.path === previousSource.outputPath) || outputSourceNode?.outputs?.[0];
@@ -4536,22 +4553,20 @@ function findKnowledgeTaggingTool(catalog, byId) {
 
 function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf' }, catalog = readWorkbenchCatalog()) {
   const byId = new Map(catalog.map((tool) => [tool.id, tool]));
-  const demoById = new Map(baseTools.map((tool) => [tool.id, { ...tool, semanticCategory: getSemanticCategory(tool), status: tool.status || '可用' }]));
-  const demoTool = (toolId) => demoById.get(toolId) || byId.get(toolId);
   const formatPlan = getAgentFormatPlan(target.fileFormat);
   const formPlan = getAgentFormPlan(target.formType);
-  const parserTool = demoTool('medical-policy-parser') || demoTool('document-parser') || catalog.find((tool) => getSemanticCategory(tool) === '文档解析');
-  const adapterTool = demoTool('system-code');
-  const splitterTool = demoTool('medical-policy-splitter') || demoTool('recursive-separator-splitter') || demoTool('chunk-splitter') || catalog.find((tool) => getSemanticCategory(tool) === '文本分片');
-  const storageTool = demoTool('system-storage');
-  const qaTool = demoTool('qa-extractor') || findWorkbenchToolByName(catalog, 'QA提取');
-  const knowledgeTool = demoTool('summary') || findKnowledgeExtractionTool(catalog, byId);
-  const iterationTool = demoTool('system-iteration');
-  const taggingTool = demoTool('knowledge-tagging') || findKnowledgeTaggingTool(catalog, byId);
-  const parser = parserTool ? renameWorkbenchNode(createWorkbenchNode(parserTool, { type: 'fixed' }), formatPlan.parserName) : null;
-  const adapter = parser && adapterTool ? renameWorkbenchNode(createWorkbenchNode(adapterTool, { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: 'sections' }), formatPlan.adapterName) : null;
+  const parserTool = findWorkbenchToolByName(catalog, formatPlan.parserName) || catalog.find((tool) => getSemanticCategory(tool) === '文档解析');
+  const adapterTool = byId.get('system-code');
+  const splitterTool = findWorkbenchToolByName(catalog, formatPlan.splitterName) || catalog.find((tool) => getSemanticCategory(tool) === '文本分片');
+  const storageTool = byId.get('system-storage');
+  const qaTool = findWorkbenchToolByName(catalog, 'QA提取');
+  const knowledgeTool = findKnowledgeExtractionTool(catalog, byId);
+  const iterationTool = byId.get('system-iteration');
+  const taggingTool = findKnowledgeTaggingTool(catalog, byId);
+  const parser = parserTool ? createWorkbenchNode(parserTool, { type: 'fixed' }) : null;
+  const adapter = parser && adapterTool ? createWorkbenchNode(adapterTool, { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: getBestOutputPathForTarget(parser, adapterTool) }) : null;
   const splitterSource = adapter || parser;
-  const splitter = splitterTool && splitterSource ? renameWorkbenchNode(createWorkbenchNode(splitterTool, { type: 'upstream', sourceNodeId: splitterSource.nodeId, outputPath: adapter ? formatPlan.adapterOutput : 'sections' }), formatPlan.splitterName) : null;
+  const splitter = splitterTool && splitterSource ? createWorkbenchNode(splitterTool, { type: 'upstream', sourceNodeId: splitterSource.nodeId, outputPath: adapter ? getBestOutputPathForTarget(adapter, splitterTool) : getBestOutputPathForTarget(parser, splitterTool) }) : null;
   const extractionTool = target.formType === 'QA库' ? qaTool : target.formType === '知识点' ? knowledgeTool : null;
   const extraction = extractionTool && splitter ? createWorkbenchNode(extractionTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }) : null;
   const extractionOutputPath = target.formType === 'QA库' ? 'qaResult' : target.formType === '知识点' ? 'summaryResult' : 'textChunkResult';
@@ -4563,7 +4578,7 @@ function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf'
       : createConfiguredGenericIterationNode(iterationTool, iterationInputSource, adapterTool, formPlan))
     : null;
   const storageSource = iteration || extraction || splitter;
-  const storage = storageTool && storageSource ? renameWorkbenchNode(createWorkbenchNode(storageTool, { type: 'upstream', sourceNodeId: storageSource.nodeId, outputPath: iteration ? 'iterationResult' : extractionOutputPath }), formPlan.storageName) : null;
+  const storage = storageTool && storageSource ? createWorkbenchNode(storageTool, { type: 'upstream', sourceNodeId: storageSource.nodeId, outputPath: iteration ? 'iterationResult' : extractionOutputPath }) : null;
   const nodes = [parser, adapter, splitter, extraction, iteration, storage].filter(Boolean).map((node) => ({
     ...node,
     expanded: isIterationNode(node),

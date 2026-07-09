@@ -464,7 +464,10 @@ const idpDocumentTools = [
     endpoint: 'api/general/markdown_chunk',
     method: 'POST',
     inputs: [createFilesInput('待结构化分块的 Markdown 文件列表。'), createModeInput(true), createUserIdInput()],
-    outputs: [createRootedResponseOutput('result', '结构化分块后的 Markdown 文件列表。', { dataDescription: '结构化分块后的 Markdown 文件列表。', dataFileType: 'md' })],
+    outputs: [
+      createOutput('textChunkResult', 'array<object>', '分片后的文本片段集合，包含 chunkId、title、content 和 source。', 'textChunkResult'),
+      createOutput('stats', 'object', '分片数量、平均长度和重叠配置等统计信息。', 'stats'),
+    ],
   },
   {
     slug: 'extract-md-content-by-title',
@@ -545,6 +548,24 @@ const idpDocumentTools = [
       createOutput('summaryResult', 'array<object>', '知识点条目和来源引用，包含 title、content、sourceChunkIds。', 'summaryResult'),
       createOutput('applicableUsers', 'array<string>', '适用对象列表。', 'applicableUsers'),
       createOutput('keyRules', 'array<string>', '关键规则列表。', 'keyRules'),
+    ],
+  },
+  {
+    slug: 'qa-extraction',
+    name: 'QA提取接口',
+    description: '基于文本分片抽取标准问答对，输出问题、答案和来源片段引用。',
+    category: '内容抽取',
+    enabled: true,
+    endpoint: 'api/knowledge/qa_extract',
+    method: 'POST',
+    inputs: [
+      createInput('chunks', 'array<object>', true, '待抽取问答的文本分片列表。'),
+      createInput('system_prompt', 'string', false, '问答抽取提示词。', '请基于原文生成问答对，答案必须来自原文，并保留来源片段。'),
+      createInput('model', 'string', false, '使用的模型。', 'qwen3-8b'),
+    ],
+    outputs: [
+      createOutput('qaResult', 'array<object>', '抽取出的问答对及来源片段，包含 question、answer、sourceChunkId。', 'qaResult'),
+      createOutput('qaStats', 'object', '问答抽取数量、低质问答数量和处理耗时。', 'qaStats'),
     ],
   },
   {
@@ -805,6 +826,7 @@ const managedToolDefinitions = {
   'markdown-chunk': { name: 'Markdown结构化分块', category: '文档分块', description: '按标题层级或自适应策略对 Markdown 文档进行结构化分块。' },
   'extract-md-content-by-title': { name: '按标题抽取内容', category: '内容抽取', description: '根据指定标题从 Markdown 文档中抽取对应章节或区间内容。' },
   'knowledge-point-extraction': { name: '知识点提取', category: '内容抽取', description: '基于文本分片结果提取知识点、适用对象和关键规则。' },
+  'qa-extraction': { name: 'QA提取', category: '内容抽取', description: '基于文本分片结果抽取标准问答对，并保留答案来源片段。' },
   'knowledge-point-tagging': { name: '知识点打标', category: '知识打标', description: '针对单个知识点生成标签、分类和规则命中结果。' },
   'paddle-ocr': { name: 'PaddleOCR解析', category: '文档解析', description: '使用 Paddle 多模态 OCR 能力解析文档，适合多版式文件的文本抽取。' },
   'deepseek-ocr': { name: 'DeepSeek文档解析', category: '文档解析', description: '使用 DeepSeek 多模态能力解析文档内容，支持通过提示词补充解析要求。' },
