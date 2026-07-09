@@ -354,16 +354,58 @@ function demoResult(file, nodes, formType, categoryName, version) {
 
 function demoChatMessages({ categoryName, formType, fileFormat, versionCount }) {
   const scopeName = categoryName || '空间兜底';
-  return [
-    { id: `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}-1`, role: 'agent', title: '处理方案生成助手', content: `当前配置对象为${scopeName}的${formType} ${fileFormat}处理方案。`, status: 'done' },
-    { id: `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}-2`, role: 'user', title: '发送样例文件', content: `已发送${demoFileMeta[fileFormat]?.name || '样例文件'}，请生成可复用处理方案。`, status: 'done' },
-    { id: `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}-3`, role: 'thought', title: '分析样例结构', content: `已识别${fileFormat}文件结构，按${formType}目标选择解析、加工和存储节点。`, status: 'done' },
-    { id: `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}-4`, role: 'agent', title: '方案已生成', content: `已生成${versionCount > 1 ? `${versionCount}个历史版本，最新版本可直接试跑。` : '1个可保存版本，并完成样例试跑。'}`, status: 'done' },
+  const fileName = demoFileMeta[fileFormat]?.name || '样例文件';
+  const formatNames = {
+    pdf: 'PDF版式文档',
+    docx: 'Word结构化文档',
+    xlsx: 'Excel表格文件',
+    pptx: 'PPT课件文件',
+    txt: '纯文本导出文件',
+    md: 'Markdown文档',
+  };
+  const targetNames = {
+    切片库: '稳定切片并写入切片库',
+    QA库: '抽取标准问答并写入QA库',
+    知识点: '提取知识点、打标并写入知识点库',
+  };
+  const finalNodeNames = {
+    切片库: '切片入库',
+    QA库: 'QA入库',
+    知识点: '知识点入库',
+  };
+  const fileConcerns = {
+    pdf: '需要保留页码、标题层级和跨页段落，避免把页眉页脚写入正文。',
+    docx: '需要识别标题样式、列表层级和表格段落，避免目录文字干扰正文。',
+    xlsx: '需要把多列字段映射为问答候选，并过滤空行、合并单元格和说明行。',
+    pptx: '需要按页面抽取标题、正文和备注，避免把装饰性文字当成知识内容。',
+    txt: '需要按工单边界和自然段落切分，避免把多条记录混在一个处理单元里。',
+    md: '需要保留Markdown标题层级、列表和代码块边界，避免破坏原始结构。',
+  };
+  const baseId = `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}`;
+  const messages = [
+    { role: 'agent', title: '处理方案生成助手', content: `当前配置对象为${scopeName}的${formType} ${fileFormat}处理方案。你可以发送样例文件，我会先分析文件结构，再生成可保存的处理方案。` },
+    { role: 'user', title: '发送样例文件', content: `已发送${fileName}，这类文件后续会批量进入${scopeName}，请生成可复用的${formType}处理方案。` },
+    { role: 'thought', title: '分析样例文件', content: `样例类型识别为${formatNames[fileFormat] || fileFormat}。${fileConcerns[fileFormat] || '需要先判断文件结构和正文边界。'}` },
+    { role: 'thought', title: '识别处理目标', content: `目标是${targetNames[formType]}，因此方案不能只完成解析，还需要保证后续节点输出能被${finalNodeNames[formType]}稳定消费。` },
+    { role: 'thought', title: '查询可用节点', content: `已按${fileFormat}文件解析、文本分片、知识提取和系统节点进行匹配，准备生成第一版流程。`, kind: 'toolCall' },
+    { role: 'agent', title: '初步方案建议', content: `我建议先建立“解析 -> 清洗/适配 -> 分片 -> ${formType === '切片库' ? '入库' : formType === 'QA库' ? '问答抽取 -> 入库' : '知识点提取 -> 知识点打标 -> 入库'}”的主链路。` },
+    { role: 'user', title: '补充处理要求', content: `不要直接套固定流程。${fileFormat === 'xlsx' ? '表格里有些字段为空，需要先做字段标准化。' : fileFormat === 'pptx' ? '课件里有很多页标题，页面顺序要保留。' : fileFormat === 'md' ? '标题层级要保留，代码块不要拆散。' : '需要保留来源位置，后续方便追溯。'}` },
+    { role: 'thought', title: '调整流程设计', content: `已根据补充要求调整节点顺序：解析后先增加${fileFormat === 'pdf' ? 'PDF段落清洗' : fileFormat === 'docx' ? 'Word目录归并' : fileFormat === 'xlsx' ? '表格字段映射' : fileFormat === 'pptx' ? '页面文本整理' : fileFormat === 'txt' ? '工单文本规范化' : 'Markdown层级整理'}，再进入后续处理节点。`, kind: 'toolCall' },
+    { role: 'thought', title: '配置节点参数', content: `已补齐关键参数：样例文件输入、上游输出路径、分片策略、${formType === 'QA库' ? '问答抽取规则' : formType === '知识点' ? '知识点提取和打标策略' : '切片入库策略'}。`, kind: 'toolCall' },
+    { role: 'thought', title: '检查节点承接', content: `已检查每个节点的输入输出承接关系，当前链路可以从${fileName}执行到${finalNodeNames[formType]}。` },
+    { role: 'user', title: '试跑样例', content: `用这个样例先试跑一次，重点看是否能稳定生成${formType === '切片库' ? '切片结果' : formType === 'QA库' ? '问答结果' : '知识点和标签结果'}。` },
+    { role: 'thought', title: '样例试跑', content: `已执行样例试跑：解析、适配、分片和后置节点均执行成功，结果已写入${finalNodeNames[formType]}。`, kind: 'toolCall' },
+    { role: 'agent', title: '方案生成完成', content: `已完成方案搭建、参数配置、链路检查和样例试跑。${versionCount > 1 ? `当前已有${versionCount}个历史版本，最新版本可继续编辑后保存为新版本。` : '当前已有1个可保存版本，后续修改会保存为新版本。'}` },
   ];
+  return messages.map((message, index) => ({
+    id: `${baseId}-${index + 1}`,
+    status: 'done',
+    ...message,
+  }));
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v2';
+  const demoVersion = 'workbench-plan-demo-v3';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
