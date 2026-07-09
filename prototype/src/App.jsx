@@ -5410,6 +5410,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     fileFormat: workbenchFileFormats.includes(selectedPlanTarget.fileFormat) ? selectedPlanTarget.fileFormat : workbenchFileFormats[0],
   };
   const planVersions = savedPlanVersions.length ? sortPlanVersionsDesc(savedPlanVersions) : ['1.0'];
+  const showPlanVersionSelect = savedPlanVersions.length > 0;
   const activePlanTargetKey = getPlanTargetKey(activePlanTarget);
   const getCurrentPlanContextState = () => ({
     currentPlanId,
@@ -5525,7 +5526,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const planProblems = getPlanProblems(planNodes);
   const visibleProblems = running || !planNodes.length ? [] : planProblems;
   const canEdit = !running && !testing;
-  const canSave = canEdit && planNodes.length > 0 && visibleProblems.length === 0;
+  const canSave = canEdit && planNodes.length > 0 && !confirmed && visibleProblems.length === 0;
   const hasAgentTask = Boolean(agentTask);
   const canStopAgent = running || testing;
   const canSendAgentMessage = !running && !testing && (hasAgentTask || Boolean(agentInput.trim()) || (!planNodes.length && sampleFiles.length > 0));
@@ -5989,7 +5990,6 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setRightTab('处理方案');
     setResults([]);
     setNodeRuntime({});
-    setConfirmed(false);
     const runVersion = selectedPlanVersion;
     const runFileIds = new Set(runFiles.map((item) => item.id));
     setSampleFiles((current) => current.map((item) => (runFileIds.has(item.id) ? { ...item, status: '试跑中' } : item)));
@@ -6239,13 +6239,14 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
 
   return (
     <div className="workbench-page">
-      <PageHeader title="方案工作台" />
       <div className="workbench-grid">
         <aside className="panel sample-column">
           <div className="scheme-overview">
-            <h3>配置方案</h3>
-            <p className="scheme-overview-tip">按知识形态+文件格式来配置处理方案。</p>
-            <div className="scheme-config-divider" />
+            <div className="scheme-overview-head">
+              <h3>配置方案</h3>
+              <p className="scheme-overview-tip">按知识形态+文件格式来配置处理方案。</p>
+              <div className="scheme-config-divider" />
+            </div>
             <div className="scheme-overview-list">
               {planFormTypes.map((item) => (
                 <div className="scheme-format-group" key={item}>
@@ -6361,13 +6362,15 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
             <div className="tabs">{['处理方案', '执行结果'].map((tab) => <button type="button" key={tab} className={rightTab === tab ? 'active' : ''} onClick={() => setRightTab(tab)}>{tab}</button>)}</div>
             {rightTab === '处理方案' ? (
               <div className="plan-tab">
-                <div className="plan-summary">
-                  <div className="plan-version-select">
-                    <span>选择方案版本</span>
-                    <SelectField value={selectedPlanVersion} onChange={selectPlanVersion} className="plan-version-field">
-                      {planVersions.map((version) => <option key={version} value={version}>{version}</option>)}
-                    </SelectField>
-                  </div>
+                <div className={`plan-summary ${showPlanVersionSelect ? '' : 'without-version'}`.trim()}>
+                  {showPlanVersionSelect ? (
+                    <div className="plan-version-select">
+                      <span>方案版本</span>
+                      <SelectField value={selectedPlanVersion} onChange={selectPlanVersion} className="plan-version-field">
+                        {planVersions.map((version) => <option key={version} value={version}>{version}</option>)}
+                      </SelectField>
+                    </div>
+                  ) : null}
                   <button type="button" className="add-node-pill" disabled={!canEdit} onClick={() => openAddNode()}><PlusOutlined /> 添加节点</button>
                 </div>
                 <div className="workflow-list">
@@ -6429,39 +6432,41 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                 </div>
               </div>
             ) : <ResultPreview executionRecords={executionRecords} />}
-            <div className="plan-actions">
-              {visibleProblems.length && planNodes.length ? <div className="error-line">当前方案存在 {visibleProblems.length} 个校验问题，请处理后保存。</div> : null}
-              <div className="plan-run-wrap">
-                <button type="button" className="secondary" disabled={!planNodes.length || running || testing} onClick={() => { setSamplePopoverOpen(false); setPlanRunPopoverOpen((current) => !current); }}>{testing ? '试跑中' : '方案试跑'}</button>
-                {planRunPopoverOpen ? (
-                  <div className="sample-file-popover plan-run-popover">
-                    <div className="sample-file-popover-head">
-                      <strong>样例文件</strong>
-                      <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
+            {rightTab === '处理方案' && planNodes.length ? (
+              <div className="plan-actions">
+                {visibleProblems.length ? <div className="error-line">当前方案存在 {visibleProblems.length} 个校验问题，请处理后保存。</div> : null}
+                <div className="plan-run-wrap">
+                  <button type="button" className="secondary" disabled={running || testing} onClick={() => { setSamplePopoverOpen(false); setPlanRunPopoverOpen((current) => !current); }}>{testing ? '试跑中' : '方案试跑'}</button>
+                  {planRunPopoverOpen ? (
+                    <div className="sample-file-popover plan-run-popover">
+                      <div className="sample-file-popover-head">
+                        <strong>样例文件</strong>
+                        <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
+                      </div>
+                      <input ref={fileRef} type="file" accept={`.${activePlanTarget.fileFormat}`} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
+                      {sampleFiles.length ? sampleFiles.map((file) => {
+                        const format = getFileExtension(file.name) || activePlanTarget.fileFormat;
+                        const { Icon: SampleFormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+                        return (
+                          <div className="sample-file-popover-item" key={file.id} style={{ '--format-color': color }}>
+                            <span className="scheme-format-icon"><SampleFormatIcon /></span>
+                            <span className="sample-file-popover-name">
+                              <span>{file.name}</span>
+                              <em className={`sample-status-tag status-${file.status}`}>{file.status}</em>
+                            </span>
+                            <span className="sample-file-popover-actions">
+                              <button type="button" title="执行" disabled={running || testing} onClick={() => { setPlanRunPopoverOpen(false); testPlan(file); }}><SendOutlined /></button>
+                              <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
+                            </span>
+                          </div>
+                        );
+                      }) : <p>暂无样例文件</p>}
                     </div>
-                    <input ref={fileRef} type="file" accept={`.${activePlanTarget.fileFormat}`} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
-                    {sampleFiles.length ? sampleFiles.map((file) => {
-                      const format = getFileExtension(file.name) || activePlanTarget.fileFormat;
-                      const { Icon: SampleFormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
-                      return (
-                        <div className="sample-file-popover-item" key={file.id} style={{ '--format-color': color }}>
-                          <span className="scheme-format-icon"><SampleFormatIcon /></span>
-                          <span className="sample-file-popover-name">
-                            <span>{file.name}</span>
-                            <em className={`sample-status-tag status-${file.status}`}>{file.status}</em>
-                          </span>
-                          <span className="sample-file-popover-actions">
-                            <button type="button" title="执行" disabled={running || testing} onClick={() => { setPlanRunPopoverOpen(false); testPlan(file); }}><SendOutlined /></button>
-                            <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
-                          </span>
-                        </div>
-                      );
-                    }) : <p>暂无样例文件</p>}
-                  </div>
-                ) : null}
+                  ) : null}
+                </div>
+                <button type="button" className="primary" disabled={!canSave} onClick={openSaveConfirm}>保存方案</button>
               </div>
-              <button type="button" className="primary" disabled={!canSave} onClick={openSaveConfirm}>保存方案</button>
-            </div>
+            ) : null}
           </aside>
         </div>
       </div>
@@ -7334,7 +7339,7 @@ function ResultPreview({ executionRecords = {} }) {
     if (!versionsForFile.includes(selectedVersion)) setSelectedVersion(versionsForFile[0]);
   }, [versionsForFile, selectedVersion]);
 
-  if (!records.length) return <div className="empty-mini large">还没有执行结果，选择样例文件完成方案试跑后展示结果。</div>;
+  if (!records.length) return <div className="plan-empty result-empty"><ThunderboltOutlined /><strong>暂无执行结果</strong><span>请先配置处理方案，并上传样例文件试跑。</span></div>;
 
   const selectedRecord = records.find((record) => record.file.id === selectedFileId && record.version === selectedVersion);
   return (
@@ -7380,7 +7385,6 @@ function ToolRunResultCard({ run, node, file, index }) {
       <div className="run-card-head">
         <div>
           <strong>{node?.toolName || run.toolName}</strong>
-          <span>{node?.category || run.category}</span>
         </div>
       </div>
       <div className="run-block">
@@ -7389,7 +7393,7 @@ function ToolRunResultCard({ run, node, file, index }) {
       </div>
       {run.outputFull ? (
         <div className="run-block">
-          <h4>输出 <code>{run.outputPath}</code></h4>
+          <h4>输出</h4>
           <pre>{run.outputFull}</pre>
         </div>
       ) : null}
