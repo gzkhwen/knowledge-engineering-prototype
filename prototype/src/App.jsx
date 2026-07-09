@@ -100,7 +100,7 @@ function SearchBox({ value, onChange, placeholder }) {
   );
 }
 
-function SelectField({ value, onChange, children, className = '', disabled = false, missingLabel = '当前选项已失效' }) {
+function SelectField({ value, onChange, children, className = '', disabled = false, missingLabel = '当前选项已失效', dropdownClassName = '', dropdownMinWidth = 180 }) {
   const [open, setOpen] = useState(false);
   const [dropdownStyle, setDropdownStyle] = useState(null);
   const rootRef = useRef(null);
@@ -138,7 +138,7 @@ function SelectField({ value, onChange, children, className = '', disabled = fal
       const openUpward = below < minHeight && above > below;
       const maxHeight = Math.max(minHeight, Math.min(preferredHeight, openUpward ? above : below));
       const top = openUpward ? Math.max(viewportPadding, rect.top - maxHeight - gap) : rect.bottom + gap;
-      const width = Math.max(rect.width, 180);
+      const width = Math.max(rect.width, dropdownMinWidth);
       const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - width - viewportPadding);
       setDropdownStyle({ position: 'fixed', top, left, width, maxHeight, zIndex: 300 });
     };
@@ -149,7 +149,7 @@ function SelectField({ value, onChange, children, className = '', disabled = fal
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
-  }, [open]);
+  }, [open, dropdownMinWidth]);
 
   const chooseOption = (option) => {
     if (disabled || option.disabled) return;
@@ -164,7 +164,7 @@ function SelectField({ value, onChange, children, className = '', disabled = fal
         <DownOutlined />
       </button>
       {open && dropdownStyle ? createPortal(
-        <span ref={dropdownRef} className="select-dropdown" style={dropdownStyle}>
+        <span ref={dropdownRef} className={`select-dropdown ${dropdownClassName}`.trim()} style={dropdownStyle}>
           {options.map((option) => (
             <button
               type="button"
@@ -3521,6 +3521,20 @@ const workbenchFileFormatMeta = {
   md: { Icon: FileMarkdownFilled, color: '#334155' },
 };
 const getFileExtension = (name = '') => name.split('.').pop()?.toLowerCase() || '';
+const getSampleFileKey = (file = {}) => String(file.name || file.id || '').trim().toLowerCase();
+const mergeSampleFiles = (...groups) => {
+  const byKey = new Map();
+  groups.flat().filter(Boolean).forEach((file) => {
+    const key = getSampleFileKey(file);
+    if (!key) return;
+    byKey.set(key, { ...(byKey.get(key) || {}), ...file });
+  });
+  return Array.from(byKey.values());
+};
+const compactRunTime = (value = '') => {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 14 ? digits.slice(0, 14) : new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+};
 const getKnowledgePreviewTabName = (formType = '') => knowledgePreviewTabNames[formType] || `${formType || '知识'}结果预览`;
 const isKnowledgePreviewTab = (tab = '') => Object.values(knowledgePreviewTabNames).includes(tab) || tab.endsWith('结果预览');
 const createWorkbenchSampleFiles = (target, status = '未发送') => workbenchSampleNames.map((name, index) => ({
@@ -5302,19 +5316,35 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     fileFormat: target.fileFormat,
     name: `${category ? category.name : project.name}${target.formType}${target.fileFormat}处理方案`,
   });
-  const getExecutionRecordsForPlan = (planId) => Object.fromEntries(dataStore.getPlanExecutions(planId).map((execution) => {
+  const getRunLabel = (version, versionStatus, runAt) => `${version}${versionStatus === 'draft' ? '草稿' : ''}-${compactRunTime(runAt)}`;
+  const normalizeExecutionRecord = (execution) => {
     const file = execution.sampleFile || { id: execution.sampleFileId, name: execution.sampleFileName, type: execution.fileFormat?.toUpperCase() || '' };
-    return [`${execution.sampleFileId}__${execution.version}`, {
+    const versionStatus = execution.versionStatus || 'formal';
+    const runAt = execution.runAt || execution.createdAt || '';
+    const runId = execution.runId || execution.id || `${execution.sampleFileId}__${execution.version}__${compactRunTime(runAt)}`;
+    const planNodesSnapshot = execution.planSnapshot || execution.planNodes || [];
+    return {
+      id: execution.id,
+      runId,
+      runLabel: execution.runLabel || getRunLabel(execution.version, versionStatus, runAt),
+      runAt,
       file,
       version: execution.version,
+      versionStatus,
       planVersionId: execution.planVersionId,
-      planNodes: hydrateStoredPlanNodes(execution.planNodes || []),
+      planNodes: hydrateStoredPlanNodes(planNodesSnapshot),
+      planSnapshot: hydrateStoredPlanNodes(planNodesSnapshot),
       result: execution.result,
-    }];
+    };
+  };
+  const getExecutionRecordsForPlan = (planId) => Object.fromEntries(dataStore.getPlanExecutions(planId).map((execution) => {
+    const record = normalizeExecutionRecord(execution);
+    return [record.runId, record];
   }));
   const createPlanContextState = (target) => {
     const route = buildPlanRoute(target);
     const { plan, versions } = dataStore.getPlanWithVersionsByRoute(route);
+    const planExecutionRecords = plan ? getExecutionRecordsForPlan(plan.id) : {};
     const latestVersion = getLatestPlanVersionRecord(versions);
     const savedVersions = versions.map((item) => item.version);
     const initialTarget = target.formType === initialFormType && target.fileFormat === workbenchFileFormats[0];
@@ -5322,13 +5352,17 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const runningState = qaRunningState && initialTarget;
     const fallbackSample = createSampleForTarget(target, generatedState ? '已完成' : runningState ? '试跑中' : '未发送');
     const latestNodes = latestVersion ? collapseWorkbenchNodes(hydrateStoredPlanNodes(latestVersion.nodes || latestVersion.planNodes || [])) : [];
-    const latestSampleFiles = latestVersion?.sampleFiles?.length ? latestVersion.sampleFiles.map((file) => ({ ...file })) : [fallbackSample];
+    const versionSampleFiles = versions.flatMap((version) => version.sampleFiles || []);
+    const executionSampleFiles = Object.values(planExecutionRecords).map((record) => record.file).filter(Boolean);
+    const currentSampleFiles = generatedState || runningState
+      ? mergeSampleFiles(createWorkbenchSampleFiles(target), versionSampleFiles, executionSampleFiles, [fallbackSample])
+      : createWorkbenchSampleFiles(target);
     const latestResults = latestVersion?.results?.length ? latestVersion.results.map((result) => ({ ...result })) : generatedState ? [createSampleResult(fallbackSample, { includeKnowledge: true })] : [];
     const storedChat = plan ? dataStore.getPlanChat(plan.id) : null;
 
     return {
       currentPlanId: plan?.id || null,
-      sampleFiles: generatedState || runningState ? latestSampleFiles : createWorkbenchSampleFiles(target),
+      sampleFiles: currentSampleFiles,
       events: storedChat || (generatedState ? generatedAgentEvents : runningState ? runningAgentEvents : initialAgentEvents),
       planNodes: latestVersion ? latestNodes : runningState ? createAgentDemoNodes(readWorkbenchCatalog(), target).slice(0, 4) : qaGeneratedState && initialTarget ? collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(), target)) : [],
       rightTab: ['处理方案', '执行结果'].includes(qaRightTab) ? qaRightTab : '处理方案',
@@ -5350,7 +5384,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
           sampleFiles: [fallbackSample],
         },
       } : {},
-      executionRecords: plan ? getExecutionRecordsForPlan(plan.id) : {},
+      executionRecords: planExecutionRecords,
     };
   };
   const initialPlanContext = createPlanContextState(initialPlanTarget);
@@ -5520,7 +5554,6 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     if (!snapshot) return;
     setPlanNodes(collapseWorkbenchNodes(cloneWorkbenchNodes(snapshot.planNodes || [])));
     setResults((snapshot.results || []).map((result) => ({ ...result })));
-    setSampleFiles((snapshot.sampleFiles || []).map((file) => ({ ...file })));
     setConfirmed(true);
   };
   const requestSelectPlanVersion = (version) => {
@@ -5574,9 +5607,18 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const visibleProblems = running || !planNodes.length ? [] : planProblems;
   const canEdit = !running && !testing;
   const canSave = canEdit && planNodes.length > 0 && hasUnsavedDraft && visibleProblems.length === 0;
+  const selectedVersionStatus = hasUnsavedDraft ? 'draft' : 'formal';
   const hasAgentTask = Boolean(agentTask);
   const canStopAgent = running || testing;
   const canSendAgentMessage = !running && !testing && (hasAgentTask || Boolean(agentInput.trim()) || (!planNodes.length && sampleFiles.length > 0));
+  const hasCurrentVersionExecution = (file) => {
+    const fileKey = getSampleFileKey(file);
+    return selectedVersionStatus === 'formal' && Object.values(executionRecords).some((record) => (
+      record.version === selectedPlanVersion
+      && record.versionStatus !== 'draft'
+      && (record.file?.id === file?.id || getSampleFileKey(record.file) === fileKey)
+    ));
+  };
   const [toolCategories, setToolCategories] = useState(() => readUnifiedFlowNodeCatalog().categories || defaultCategories);
   const markPlanDraft = () => {
     setConfirmed(false);
@@ -6064,9 +6106,10 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   };
 
   const testPlan = (file) => {
-    const runFiles = file ? [file] : sampleFiles;
+    const requestedFiles = file ? [file] : sampleFiles;
+    const runFiles = requestedFiles.filter((item) => !hasCurrentVersionExecution(item));
     if (!planNodes.length || !runFiles.length) {
-      notify('请先准备方案和样例文件', 'error');
+      notify(requestedFiles.length ? '该文件已完成当前版本方案试跑。' : '请先准备方案和样例文件', 'error');
       return;
     }
     const failure = getFirstPlanFailure(planNodes);
@@ -6082,6 +6125,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setResults([]);
     setNodeRuntime({});
     const runVersion = selectedPlanVersion;
+    const runVersionStatus = selectedVersionStatus;
     const runFileIds = new Set(runFiles.map((item) => item.id));
     setSampleFiles((current) => current.map((item) => (runFileIds.has(item.id) ? { ...item, status: '试跑中' } : item)));
     const runnableNodes = planNodes.filter((node) => node.enabled);
@@ -6103,35 +6147,45 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     });
     scheduleAgentTimer(() => {
       const nextResults = runFiles.map((item) => createSampleResultForPlan(item, runnableNodes));
+      const runAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
       setResults(nextResults);
-      if (planVersion) {
-        nextResults.forEach((result) => {
-          const fileRecord = runFiles.find((item) => item.id === result.fileId) || { id: result.fileId, name: result.fileName };
-          dataStore.createPlanExecution({
-            planId: plan.id,
-            planVersionId: planVersion.id,
-            version: runVersion,
-            sampleFileId: result.fileId,
-            sampleFileName: result.fileName,
-            sampleFile: { ...fileRecord, status: '已完成' },
-            fileFormat: activePlanTarget.fileFormat,
-            planNodes: cloneWorkbenchNodes(runPlanSnapshot),
-            result,
-          });
+      const nextExecutionRecords = Object.fromEntries(nextResults.map((result) => {
+        const file = runFiles.find((item) => item.id === result.fileId) || { id: result.fileId, name: result.fileName };
+        const runId = makeId('run');
+        const runLabel = getRunLabel(runVersion, runVersionStatus, runAt);
+        const record = {
+          runId,
+          runLabel,
+          runAt,
+          file: { ...file, status: '已完成' },
+          version: runVersion,
+          versionStatus: runVersionStatus,
+          planVersionId: planVersion?.id || null,
+          planNodes: cloneWorkbenchNodes(runPlanSnapshot),
+          planSnapshot: cloneWorkbenchNodes(runPlanSnapshot),
+          result,
+        };
+        dataStore.createPlanExecution({
+          planId: plan.id,
+          planVersionId: planVersion?.id || null,
+          version: runVersion,
+          versionStatus: runVersionStatus,
+          runId,
+          runLabel,
+          runAt,
+          sampleFileId: result.fileId,
+          sampleFileName: result.fileName,
+          sampleFile: { ...file, status: '已完成' },
+          fileFormat: activePlanTarget.fileFormat,
+          planSnapshot: cloneWorkbenchNodes(runPlanSnapshot),
+          planNodes: cloneWorkbenchNodes(runPlanSnapshot),
+          result,
         });
-      }
+        return [runId, record];
+      }));
       setExecutionRecords((current) => ({
         ...current,
-        ...Object.fromEntries(nextResults.map((result) => {
-          const file = runFiles.find((item) => item.id === result.fileId) || { id: result.fileId, name: result.fileName };
-          return [`${result.fileId}__${runVersion}`, {
-            file: { ...file, status: '已完成' },
-            version: runVersion,
-            planVersionId: planVersion?.id || null,
-            planNodes: cloneWorkbenchNodes(runPlanSnapshot),
-            result,
-          }];
-        })),
+        ...nextExecutionRecords,
       }));
       setSampleFiles((current) => current.map((item) => (runFileIds.has(item.id) ? { ...item, status: '已完成' } : item)));
       setRuntimeForNodes(runnableNodes, { status: 'done' });
@@ -6176,14 +6230,13 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   };
 
   const updateNode = (node) => {
-    const nodeDescription = node.description?.trim() || '';
-    const namedNode = {
+    const preservedNode = {
       ...node,
-      toolName: node.toolName?.trim() || editingNode?.toolName || node.name || '未命名节点',
-      description: nodeDescription,
-      summary: nodeDescription || node.summary,
+      toolName: editingNode?.toolName || node.toolName,
+      description: editingNode?.description || node.description,
+      summary: editingNode?.summary || node.summary,
     };
-    const normalizedNode = normalizeIterationOutputSource(namedNode);
+    const normalizedNode = normalizeIterationOutputSource(preservedNode);
     const nextNode = isIterationNode(normalizedNode) ? { ...normalizedNode, outputs: getEffectiveNodeOutputs(normalizedNode) } : normalizedNode;
     setPlanNodes((current) => {
       if (!editingParentId) return current.map((item) => item.nodeId === nextNode.nodeId ? nextNode : item);
@@ -6463,7 +6516,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                     <div className="plan-version-select">
                       <span>方案版本</span>
                       <SelectField value={selectedPlanVersion} onChange={requestSelectPlanVersion} className="plan-version-field">
-                        {planVersions.map((version) => <option key={version} value={version}>{version}</option>)}
+                        {planVersions.map((version) => <option key={version} value={version}>{version}{draftPlanVersion === version ? ' 草稿' : ''}</option>)}
                       </SelectField>
                       {hasUnsavedDraft ? <em className="plan-version-draft-tag">未保存</em> : null}
                     </div>
@@ -6547,6 +6600,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                       {sampleFiles.length ? sampleFiles.map((file) => {
                         const format = getFileExtension(file.name) || activePlanTarget.fileFormat;
                         const { Icon: SampleFormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+                        const alreadyTested = hasCurrentVersionExecution(file);
                         return (
                           <div className="sample-file-popover-item" key={file.id} style={{ '--format-color': color }}>
                             <span className="scheme-format-icon"><SampleFormatIcon /></span>
@@ -6555,7 +6609,9 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                               <em className={`sample-status-tag status-${file.status}`}>{file.status}</em>
                             </span>
                             <span className="sample-file-popover-actions">
-                              <button type="button" title="执行" disabled={running || testing} onClick={() => { setPlanRunPopoverOpen(false); testPlan(file); }}><SendOutlined /></button>
+                              <span title={alreadyTested ? '该文件已完成当前版本方案试跑。' : '执行'}>
+                                <button type="button" aria-label={alreadyTested ? '该文件已完成当前版本方案试跑。' : '执行'} disabled={running || testing || alreadyTested} onClick={() => { setPlanRunPopoverOpen(false); testPlan(file); }}><SendOutlined /></button>
+                              </span>
                               <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
                             </span>
                           </div>
@@ -7245,17 +7301,6 @@ function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
       className="config-modal"
       footer={<><button type="button" className="secondary" onClick={onClose}>取消</button><button type="button" className="primary" onClick={() => onSave(draft)}>保存</button></>}
     >
-      <section className="config-section">
-        <div className="config-section-head"><h3>节点信息</h3></div>
-        <label className="node-info-setting">
-          <span>节点名称 <em>*</em></span>
-          <input value={draft.toolName || ''} onChange={(event) => setDraft((current) => ({ ...current, toolName: event.target.value }))} />
-        </label>
-        <label className="node-info-setting node-info-description">
-          <span>节点描述</span>
-          <input value={draft.description ?? draft.summary ?? ''} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} />
-        </label>
-      </section>
       {draft.toolId === 'system-iteration' ? (
         <>
           <section className="config-section">
@@ -7560,8 +7605,28 @@ function KnowledgeResultItems({ formType, payload }) {
   );
 }
 
+function getExecutionRecordTime(record) {
+  const time = Date.parse(String(record.runAt || record.createdAt || '').replace(' ', 'T'));
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function sortExecutionRecordsDesc(records) {
+  return [...records].sort((a, b) => getExecutionRecordTime(b) - getExecutionRecordTime(a));
+}
+
+function getExecutionRecordLabel(record) {
+  const version = record.version || '-';
+  const status = record.versionStatus === 'draft' ? '草稿' : '';
+  const time = compactRunTime(record.runAt || record.createdAt || '');
+  return `${version}${status}-${time}`;
+}
+
+function getExecutionRecordId(record) {
+  return record.runId || `${record.file?.id || record.result?.fileId || 'file'}__${record.version || 'version'}__${record.runAt || record.createdAt || 'latest'}`;
+}
+
 function KnowledgeResultPreview({ formType, executionRecords = {} }) {
-  const records = useMemo(() => Object.values(executionRecords), [executionRecords]);
+  const records = useMemo(() => sortExecutionRecordsDesc(Object.values(executionRecords)), [executionRecords]);
   const fileOptions = useMemo(() => {
     const byId = new Map();
     records.forEach((record) => {
@@ -7571,9 +7636,13 @@ function KnowledgeResultPreview({ formType, executionRecords = {} }) {
   }, [records]);
   const [selectedFileId, setSelectedFileId] = useState('');
   const versionsForFile = useMemo(() => (
-    sortPlanVersionsDesc(records.filter((record) => record.file.id === selectedFileId).map((record) => record.version))
+    sortPlanVersionsDesc(Array.from(new Set(records.filter((record) => record.file.id === selectedFileId).map((record) => record.version))))
   ), [records, selectedFileId]);
   const [selectedVersion, setSelectedVersion] = useState('');
+  const runOptions = useMemo(() => (
+    records.filter((record) => record.file.id === selectedFileId && record.version === selectedVersion)
+  ), [records, selectedFileId, selectedVersion]);
+  const [selectedRunId, setSelectedRunId] = useState('');
   const resultName = formType === 'QA库' ? 'QA结果' : formType === '知识点' ? '知识点结果' : '切片结果';
 
   useEffect(() => {
@@ -7592,13 +7661,21 @@ function KnowledgeResultPreview({ formType, executionRecords = {} }) {
     if (!versionsForFile.includes(selectedVersion)) setSelectedVersion(versionsForFile[0]);
   }, [versionsForFile, selectedVersion]);
 
+  useEffect(() => {
+    if (!runOptions.length) {
+      setSelectedRunId('');
+      return;
+    }
+    if (!runOptions.some((record) => getExecutionRecordId(record) === selectedRunId)) setSelectedRunId(getExecutionRecordId(runOptions[0]));
+  }, [runOptions, selectedRunId]);
+
   if (!records.length) return <div className="plan-empty result-empty"><ThunderboltOutlined /><strong>暂无{resultName}</strong><span>请先配置处理方案，并上传样例文件试跑。</span></div>;
 
-  const selectedRecord = records.find((record) => record.file.id === selectedFileId && record.version === selectedVersion);
+  const selectedRecord = records.find((record) => getExecutionRecordId(record) === selectedRunId);
   const payload = selectedRecord ? getKnowledgeResultPayload(formType, selectedRecord) : null;
   return (
     <div className="result-list knowledge-preview-list">
-      <div className="result-filter-bar">
+      <div className="result-filter-bar with-run">
         <label>
           <span>样例文件</span>
           <SelectField value={selectedFileId} onChange={setSelectedFileId} className="result-filter-field">
@@ -7609,6 +7686,12 @@ function KnowledgeResultPreview({ formType, executionRecords = {} }) {
           <span>方案版本</span>
           <SelectField value={selectedVersion} onChange={setSelectedVersion} className="result-filter-field">
             {versionsForFile.map((version) => <option key={version} value={version}>{version}</option>)}
+          </SelectField>
+        </label>
+        <label>
+          <span>试跑记录</span>
+          <SelectField value={selectedRunId} onChange={setSelectedRunId} className="result-filter-field" dropdownClassName="run-record-dropdown" dropdownMinWidth={200}>
+            {runOptions.map((record) => <option key={getExecutionRecordId(record)} value={getExecutionRecordId(record)}>{getExecutionRecordLabel(record)}</option>)}
           </SelectField>
         </label>
       </div>
@@ -7625,7 +7708,7 @@ function KnowledgeResultPreview({ formType, executionRecords = {} }) {
 }
 
 function ResultPreview({ executionRecords = {} }) {
-  const records = useMemo(() => Object.values(executionRecords), [executionRecords]);
+  const records = useMemo(() => sortExecutionRecordsDesc(Object.values(executionRecords)), [executionRecords]);
   const fileOptions = useMemo(() => {
     const byId = new Map();
     records.forEach((record) => {
@@ -7635,9 +7718,13 @@ function ResultPreview({ executionRecords = {} }) {
   }, [records]);
   const [selectedFileId, setSelectedFileId] = useState('');
   const versionsForFile = useMemo(() => (
-    sortPlanVersionsDesc(records.filter((record) => record.file.id === selectedFileId).map((record) => record.version))
+    sortPlanVersionsDesc(Array.from(new Set(records.filter((record) => record.file.id === selectedFileId).map((record) => record.version))))
   ), [records, selectedFileId]);
   const [selectedVersion, setSelectedVersion] = useState('');
+  const runOptions = useMemo(() => (
+    records.filter((record) => record.file.id === selectedFileId && record.version === selectedVersion)
+  ), [records, selectedFileId, selectedVersion]);
+  const [selectedRunId, setSelectedRunId] = useState('');
 
   useEffect(() => {
     if (!fileOptions.length) {
@@ -7655,12 +7742,20 @@ function ResultPreview({ executionRecords = {} }) {
     if (!versionsForFile.includes(selectedVersion)) setSelectedVersion(versionsForFile[0]);
   }, [versionsForFile, selectedVersion]);
 
+  useEffect(() => {
+    if (!runOptions.length) {
+      setSelectedRunId('');
+      return;
+    }
+    if (!runOptions.some((record) => getExecutionRecordId(record) === selectedRunId)) setSelectedRunId(getExecutionRecordId(runOptions[0]));
+  }, [runOptions, selectedRunId]);
+
   if (!records.length) return <div className="plan-empty result-empty"><ThunderboltOutlined /><strong>暂无执行结果</strong><span>请先配置处理方案，并上传样例文件试跑。</span></div>;
 
-  const selectedRecord = records.find((record) => record.file.id === selectedFileId && record.version === selectedVersion);
+  const selectedRecord = records.find((record) => getExecutionRecordId(record) === selectedRunId);
   return (
     <div className="result-list">
-      <div className="result-filter-bar">
+      <div className="result-filter-bar with-run">
         <label>
           <span>样例文件</span>
           <SelectField value={selectedFileId} onChange={setSelectedFileId} className="result-filter-field">
@@ -7671,6 +7766,12 @@ function ResultPreview({ executionRecords = {} }) {
           <span>方案版本</span>
           <SelectField value={selectedVersion} onChange={setSelectedVersion} className="result-filter-field">
             {versionsForFile.map((version) => <option key={version} value={version}>{version}</option>)}
+          </SelectField>
+        </label>
+        <label>
+          <span>试跑记录</span>
+          <SelectField value={selectedRunId} onChange={setSelectedRunId} className="result-filter-field" dropdownClassName="run-record-dropdown" dropdownMinWidth={200}>
+            {runOptions.map((record) => <option key={getExecutionRecordId(record)} value={getExecutionRecordId(record)}>{getExecutionRecordLabel(record)}</option>)}
           </SelectField>
         </label>
       </div>

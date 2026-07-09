@@ -415,7 +415,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount }) 
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v5';
+  const demoVersion = 'workbench-plan-demo-v7';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
@@ -500,9 +500,14 @@ function ensureDemoPlanData() {
         results: [result],
         createdAt: `2026-07-0${Math.min(index + 1, 9)} 10:00`,
       });
-      if (index === definition.versions.length - 1 || index === 0) {
+      const shouldSeedExecution = definition.versions.length > 1 && index === definition.versions.length - 1;
+      if (shouldSeedExecution) {
         executions.push({
           id: `demo-exec-${plan.id}-${version.replace('.', '-')}-${sample.id}`,
+          runId: `demo-run-${plan.id}-${version.replace('.', '-')}-${sample.id}`,
+          runLabel: `${version}-2026070${Math.min(index + 2, 9)}153000`,
+          runAt: `2026-07-0${Math.min(index + 2, 9)} 15:30:00`,
+          versionStatus: 'formal',
           planId: plan.id,
           planVersionId: `demo-version-${plan.id}-${version.replace('.', '-')}`,
           version,
@@ -510,10 +515,11 @@ function ensureDemoPlanData() {
           sampleFileName: sample.name,
           sampleFile: sample,
           fileFormat: definition.fileFormat,
+          planSnapshot: versionNodes,
           planNodes: versionNodes,
           result,
           status: 'completed',
-          createdAt: `2026-07-0${Math.min(index + 2, 9)} 15:30`,
+          createdAt: `2026-07-0${Math.min(index + 2, 9)} 15:30:00`,
         });
       }
     });
@@ -723,7 +729,7 @@ export const dataStore = {
     return this.list('planExecutions').filter((item) => item.planId === planId);
   },
   createPlanExecution(payload) {
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
     const next = { id: id('plan-exec'), status: 'completed', createdAt: now, ...payload };
     this.save('planExecutions', [...this.list('planExecutions'), next]);
     return next;
