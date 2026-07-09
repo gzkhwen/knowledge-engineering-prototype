@@ -4195,25 +4195,26 @@ function cloneWorkbenchNodes(nodes) {
 function hydrateStoredPlanNodes(nodes = []) {
   if (!nodes.length) return [];
   if (nodes.some((node) => node.nodeId && node.params && node.outputs)) return cloneWorkbenchNodes(nodes);
-  const demoNodes = createAgentDemoNodes(readWorkbenchCatalog());
-  const byToolId = new Map(demoNodes.map((node) => [node.toolId, node]));
-  const byToolName = new Map(demoNodes.map((node) => [node.toolName, node]));
   const catalog = readWorkbenchCatalog();
   const catalogById = new Map(catalog.map((tool) => [tool.id, tool]));
   const catalogByName = new Map(catalog.map((tool) => [tool.name, tool]));
   const hydrated = [];
   nodes.forEach((node) => {
-    const demoNode = byToolId.get(node.toolId) || byToolName.get(node.toolName);
-    if (demoNode) {
-      hydrated.push(demoNode);
-      return;
-    }
     const tool = catalogById.get(node.toolId) || catalogByName.get(node.toolName);
     if (!tool) return;
     const previous = hydrated.at(-1);
-    hydrated.push(createWorkbenchNode(tool, previous ? { type: 'upstream', sourceNodeId: previous.nodeId, outputPath: previous.outputs?.[0]?.path || 'data.result' } : { type: 'fixed' }));
+    const inputSource = previous ? { type: 'upstream', sourceNodeId: previous.nodeId, outputPath: previous.outputs?.[0]?.path || 'data.result' } : { type: 'fixed' };
+    const workbenchNode = createWorkbenchNode(tool, inputSource);
+    hydrated.push({
+      ...workbenchNode,
+      toolName: node.toolName || workbenchNode.toolName,
+      name: node.toolName || workbenchNode.name,
+      category: node.category || workbenchNode.category,
+      semanticCategory: node.semanticCategory || workbenchNode.semanticCategory,
+      description: node.description || workbenchNode.description,
+    });
   });
-  return hydrated.length ? cloneWorkbenchNodes(hydrated) : cloneWorkbenchNodes(demoNodes);
+  return cloneWorkbenchNodes(hydrated);
 }
 
 function buildVersionSnapshotsFromRecords(versions = []) {
