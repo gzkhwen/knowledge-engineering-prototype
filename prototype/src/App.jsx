@@ -4347,12 +4347,165 @@ function createConfiguredIterationNode(iterationTool, inputSource, codeTool, tag
     script: 'def main(knowledgePoint: dict, tagResult: dict) -> dict:\n    return {\n        "taggedKnowledge": {\n            **knowledgePoint,\n            "tags": tagResult.get("tags", []),\n            "category": tagResult.get("category"),\n            "confidence": tagResult.get("confidence")\n        }\n    }',
     codeOutputs: [{ id: 'taggedKnowledge', name: '最终打标结果', type: 'object', value: 'data.taggedKnowledge' }],
   }) : null;
-  const innerNodes = [prepareCode, configuredTaggingNode, assembleCode].filter(Boolean);
-  const outputSourceNode = assembleCode || configuredTaggingNode || prepareCode;
+  const visiblePrepareCode = prepareCode ? renameWorkbenchNode(prepareCode, '打标入参整理') : null;
+  const visibleAssembleCode = assembleCode ? renameWorkbenchNode(assembleCode, '知识点结果拼装') : null;
+  const innerNodes = [visiblePrepareCode, configuredTaggingNode, visibleAssembleCode].filter(Boolean);
+  const outputSourceNode = visibleAssembleCode || configuredTaggingNode || visiblePrepareCode;
   const outputSource = outputSourceNode?.outputs?.find((output) => output.path === 'data.taggedKnowledge') || outputSourceNode?.outputs?.[0];
   return {
     ...iterationNode,
     expanded: true,
+    innerNodes,
+    params: iterationNode.params.map((param) => {
+      if (param.id === 'iterationInput') return { ...param, source, value: '' };
+      if (param.id === 'iterationOutput' && outputSourceNode && outputSource) return { ...param, source: { type: 'upstream', sourceNodeId: outputSourceNode.nodeId, outputPath: outputSource.path || outputSource.id || outputSource.name }, value: '' };
+      if (param.id === 'concurrency') return { ...param, value: 1 };
+      if (param.id === 'iterationTimeout') return { ...param, value: 60 };
+      if (param.id === 'errorResponseMethod') return { ...param, value: '错误时终止' };
+      return param;
+    }),
+  };
+}
+
+const agentFormatPlans = {
+  pdf: {
+    formatLabel: 'PDF版式文档',
+    parserName: 'PDF版式解析',
+    adapterName: 'PDF段落清洗',
+    splitterName: '版式分片',
+    adapterOutput: 'data.cleanBlocks',
+    concern: '需要保留页码、标题层级和跨页段落，避免把页眉页脚写入正文。',
+    parserReason: '适合处理版式复杂的 PDF 文件解析。',
+    splitterReason: '按版式段落和标题层级生成稳定切片。',
+  },
+  docx: {
+    formatLabel: 'Word结构化文档',
+    parserName: 'Word结构解析',
+    adapterName: 'Word目录归并',
+    splitterName: '章节分片',
+    adapterOutput: 'data.cleanBlocks',
+    concern: '需要识别标题样式、列表层级和表格段落，避免目录文字干扰正文。',
+    parserReason: '适合读取 Word 标题、段落和表格结构。',
+    splitterReason: '按章节标题和段落边界生成文本片段。',
+  },
+  xlsx: {
+    formatLabel: 'Excel表格文件',
+    parserName: '表格字段解析',
+    adapterName: '表格字段映射',
+    splitterName: '表格行块切分',
+    adapterOutput: 'data.cleanBlocks',
+    concern: '需要过滤空行、合并单元格和说明行，并把多列字段映射为标准记录。',
+    parserReason: '适合读取表头、行记录和字段值。',
+    splitterReason: '按行记录和业务字段生成处理单元。',
+  },
+  pptx: {
+    formatLabel: 'PPT课件文件',
+    parserName: 'PPT页面解析',
+    adapterName: '页面文本整理',
+    splitterName: '页面分片',
+    adapterOutput: 'data.cleanBlocks',
+    concern: '需要保留页面顺序、标题、正文和备注，避免装饰性文字干扰知识内容。',
+    parserReason: '适合按页面读取课件内容。',
+    splitterReason: '按页面和标题层级生成文本片段。',
+  },
+  txt: {
+    formatLabel: '纯文本导出文件',
+    parserName: '纯文本解析',
+    adapterName: '工单文本规范化',
+    splitterName: '段落分片',
+    adapterOutput: 'data.cleanBlocks',
+    concern: '需要识别记录边界和自然段落，避免把多条记录混成一个处理单元。',
+    parserReason: '适合读取纯文本正文和行记录。',
+    splitterReason: '按段落和记录边界生成文本片段。',
+  },
+  md: {
+    formatLabel: 'Markdown文档',
+    parserName: 'Markdown解析',
+    adapterName: 'Markdown层级整理',
+    splitterName: 'Markdown结构化分块',
+    adapterOutput: 'data.cleanBlocks',
+    concern: '需要保留标题层级、列表和代码块边界，避免破坏原始结构。',
+    parserReason: '适合读取 Markdown 标题、列表和正文结构。',
+    splitterReason: '按 Markdown 标题层级生成结构化分块。',
+  },
+};
+
+const agentFormPlans = {
+  切片库: {
+    objective: '稳定切片并写入切片库',
+    storageName: '切片入库',
+    extractionTitle: '',
+    extractionReason: '',
+    iterationReason: '迭代处理分片结果，逐片完成质量检查、元数据补全和结果拼装。',
+    flowSteps: ['文件解析', '格式适配', '内容切分', '迭代执行', '切片入库'],
+    iterationInputPath: 'textChunkResult',
+    iterationBody: [
+      { name: '切片质量检查', inputName: 'chunk', outputId: 'checkedChunk', outputName: '质检切片', outputPath: 'data.checkedChunk', script: 'def main(chunk: dict) -> dict:\n    return {"checkedChunk": {**chunk, "qualityStatus": "passed"}}' },
+      { name: '元数据补全', inputName: 'checkedChunk', outputId: 'enrichedChunk', outputName: '补全切片', outputPath: 'data.enrichedChunk', script: 'def main(checkedChunk: dict) -> dict:\n    return {"enrichedChunk": {**checkedChunk, "metadataReady": True}}' },
+      { name: '切片结果拼装', inputName: 'enrichedChunk', outputId: 'sliceItem', outputName: '切片结果', outputPath: 'data.sliceItem', script: 'def main(enrichedChunk: dict) -> dict:\n    return {"sliceItem": enrichedChunk}' },
+    ],
+    runSummary: '试跑结果：所有节点执行成功；分片已逐条完成质检、元数据补全和切片结果拼装，并聚合写入切片库。',
+  },
+  QA库: {
+    objective: '抽取标准问答并写入QA库',
+    storageName: 'QA入库',
+    extractionTitle: 'QA提取节点',
+    extractionReason: '需要先从分片结果中抽取候选问答对。',
+    flowSteps: ['文件解析', '格式适配', '内容切分', 'QA提取', '迭代执行', 'QA入库'],
+    iterationInputPath: 'qaResult',
+    iterationReason: '迭代处理候选问答，逐条完成问题标准化、答案校验和来源片段绑定。',
+    iterationBody: [
+      { name: '问题标准化', inputName: 'qaPair', outputId: 'normalizedQa', outputName: '标准问答', outputPath: 'data.normalizedQa', script: 'def main(qaPair: dict) -> dict:\n    return {"normalizedQa": {**qaPair, "questionNormalized": True}}' },
+      { name: '答案校验', inputName: 'normalizedQa', outputId: 'verifiedQa', outputName: '校验问答', outputPath: 'data.verifiedQa', script: 'def main(normalizedQa: dict) -> dict:\n    return {"verifiedQa": {**normalizedQa, "answerVerified": True}}' },
+      { name: '来源片段绑定', inputName: 'verifiedQa', outputId: 'qaItem', outputName: 'QA结果', outputPath: 'data.qaItem', script: 'def main(verifiedQa: dict) -> dict:\n    return {"qaItem": verifiedQa}' },
+    ],
+    runSummary: '试跑结果：所有节点执行成功；候选问答已逐条完成问题标准化、答案校验和来源片段绑定，并聚合写入QA库。',
+  },
+  知识点: {
+    objective: '提取知识点、打标并写入知识点库',
+    storageName: '知识点入库',
+    extractionTitle: '知识点提取节点',
+    extractionReason: '需要先把分片结果提炼为知识点数组。',
+    flowSteps: ['文件解析', '格式适配', '内容切分', '知识点提取', '迭代执行', '知识点入库'],
+    iterationInputPath: 'summaryResult',
+    iterationReason: '迭代处理知识点数组，逐条完成打标、结构补全和结果拼装。',
+    runSummary: '试跑结果：所有节点执行成功；知识点打标结果已按知识点逐条生成，并聚合写入知识点库。',
+  },
+};
+
+function getAgentFormatPlan(fileFormat = 'pdf') {
+  return agentFormatPlans[fileFormat] || agentFormatPlans.pdf;
+}
+
+function getAgentFormPlan(formType = '知识点') {
+  return agentFormPlans[formType] || agentFormPlans.知识点;
+}
+
+function renameWorkbenchNode(node, toolName) {
+  if (!node || !toolName) return node;
+  return { ...node, name: toolName, toolName, adjusted: true };
+}
+
+function createConfiguredGenericIterationNode(iterationTool, inputSource, codeTool, formPlan) {
+  const iterationNode = createWorkbenchNode(iterationTool, inputSource);
+  const source = inputSource.type === 'upstream' ? { type: 'upstream', sourceNodeId: inputSource.sourceNodeId, outputPath: inputSource.outputPath } : { type: 'manual' };
+  const currentElementSource = { type: 'iteration', outputPath: 'currentElement' };
+  let previousSource = currentElementSource;
+  const innerNodes = (formPlan.iterationBody || []).map((step) => {
+    const node = createDemoCodeNode(codeTool, {
+      codeInputs: [{ name: step.inputName, source: previousSource }],
+      script: step.script,
+      codeOutputs: [{ id: step.outputId, name: step.outputName, type: 'object', value: step.outputPath }],
+    });
+    previousSource = { type: 'upstream', sourceNodeId: node.nodeId, outputPath: step.outputPath };
+    return renameWorkbenchNode({ ...node, expanded: true, adjusted: true }, step.name);
+  });
+  const outputSourceNode = innerNodes.at(-1);
+  const outputSource = outputSourceNode?.outputs?.find((output) => output.path === previousSource.outputPath) || outputSourceNode?.outputs?.[0];
+  return {
+    ...iterationNode,
+    expanded: true,
+    adjusted: true,
     innerNodes,
     params: iterationNode.params.map((param) => {
       if (param.id === 'iterationInput') return { ...param, source, value: '' };
@@ -4381,28 +4534,56 @@ function findKnowledgeTaggingTool(catalog, byId) {
     || catalog.find((tool) => tool.category === '知识打标' && tool.name.includes('打标'));
 }
 
-function createAgentDemoNodes(catalog = readWorkbenchCatalog()) {
+function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf' }, catalog = readWorkbenchCatalog()) {
   const byId = new Map(catalog.map((tool) => [tool.id, tool]));
+  const formatPlan = getAgentFormatPlan(target.fileFormat);
+  const formPlan = getAgentFormPlan(target.formType);
   const parserTool = byId.get('medical-policy-parser') || byId.get('document-parser') || catalog.find((tool) => getSemanticCategory(tool) === '文档解析');
   const adapterTool = byId.get('system-code');
   const splitterTool = byId.get('medical-policy-splitter') || byId.get('recursive-separator-splitter') || byId.get('chunk-splitter') || catalog.find((tool) => getSemanticCategory(tool) === '文本分片');
   const storageTool = byId.get('system-storage');
+  const qaTool = byId.get('qa-extractor') || findWorkbenchToolByName(catalog, 'QA提取');
   const knowledgeTool = findKnowledgeExtractionTool(catalog, byId);
   const iterationTool = byId.get('system-iteration');
   const taggingTool = findKnowledgeTaggingTool(catalog, byId);
-  const parser = parserTool ? createWorkbenchNode(parserTool, { type: 'fixed' }) : null;
-  const adapter = parser && adapterTool ? createWorkbenchNode(adapterTool, { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: 'sections' }) : null;
+  const parser = parserTool ? renameWorkbenchNode(createWorkbenchNode(parserTool, { type: 'fixed' }), formatPlan.parserName) : null;
+  const adapter = parser && adapterTool ? renameWorkbenchNode(createWorkbenchNode(adapterTool, { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: 'sections' }), formatPlan.adapterName) : null;
   const splitterSource = adapter || parser;
-  const splitter = splitterTool && splitterSource ? createWorkbenchNode(splitterTool, { type: 'upstream', sourceNodeId: splitterSource.nodeId, outputPath: adapter ? 'data.cleanBlocks' : 'sections' }) : null;
-  const knowledge = knowledgeTool && splitter ? createWorkbenchNode(knowledgeTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }) : null;
-  const iteration = iterationTool && knowledge ? createConfiguredIterationNode(iterationTool, { type: 'upstream', sourceNodeId: knowledge.nodeId, outputPath: 'summaryResult' }, adapterTool, taggingTool) : null;
-  const storageSource = iteration || knowledge || splitter;
-  const storage = storageTool && storageSource ? createWorkbenchNode(storageTool, { type: 'upstream', sourceNodeId: storageSource.nodeId, outputPath: iteration ? 'iterationResult' : knowledge ? 'summaryResult' : 'textChunkResult' }) : null;
-  return [parser, adapter, splitter, knowledge, iteration, storage].filter(Boolean).map((node) => ({
+  const splitter = splitterTool && splitterSource ? renameWorkbenchNode(createWorkbenchNode(splitterTool, { type: 'upstream', sourceNodeId: splitterSource.nodeId, outputPath: adapter ? formatPlan.adapterOutput : 'sections' }), formatPlan.splitterName) : null;
+  const extractionTool = target.formType === 'QA库' ? qaTool : target.formType === '知识点' ? knowledgeTool : null;
+  const extraction = extractionTool && splitter ? createWorkbenchNode(extractionTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }) : null;
+  const extractionOutputPath = target.formType === 'QA库' ? 'qaResult' : target.formType === '知识点' ? 'summaryResult' : 'textChunkResult';
+  const iterationSource = extraction || splitter;
+  const iterationInputSource = iterationSource ? { type: 'upstream', sourceNodeId: iterationSource.nodeId, outputPath: extractionOutputPath } : { type: 'fixed' };
+  const iteration = iterationTool && iterationSource && adapterTool
+    ? (target.formType === '知识点'
+      ? createConfiguredIterationNode(iterationTool, iterationInputSource, adapterTool, taggingTool)
+      : createConfiguredGenericIterationNode(iterationTool, iterationInputSource, adapterTool, formPlan))
+    : null;
+  const storageSource = iteration || extraction || splitter;
+  const storage = storageTool && storageSource ? renameWorkbenchNode(createWorkbenchNode(storageTool, { type: 'upstream', sourceNodeId: storageSource.nodeId, outputPath: iteration ? 'iterationResult' : extractionOutputPath }), formPlan.storageName) : null;
+  const nodes = [parser, adapter, splitter, extraction, iteration, storage].filter(Boolean).map((node) => ({
     ...node,
     expanded: isIterationNode(node),
     adjusted: true,
   }));
+  return {
+    ...formatPlan,
+    ...formPlan,
+    target,
+    parser,
+    adapter,
+    splitter,
+    extraction,
+    iteration,
+    storage,
+    nodes,
+    extractionOutputPath,
+  };
+}
+
+function createAgentDemoNodes(catalog = readWorkbenchCatalog(), target) {
+  return createAgentDemoPlan(target, catalog).nodes;
 }
 
 function createDraftNodesWithoutAdapter(catalog = readWorkbenchCatalog()) {
@@ -5106,7 +5287,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       currentPlanId: plan?.id || null,
       sampleFiles: generatedState || runningState ? latestSampleFiles : createWorkbenchSampleFiles(target),
       events: storedChat || (generatedState ? generatedAgentEvents : runningState ? runningAgentEvents : initialAgentEvents),
-      planNodes: latestVersion ? latestNodes : runningState ? createAgentDemoNodes(readWorkbenchCatalog()).slice(0, 4) : qaGeneratedState && initialTarget ? createAgentDemoNodes(readWorkbenchCatalog()) : [],
+      planNodes: latestVersion ? latestNodes : runningState ? createAgentDemoNodes(readWorkbenchCatalog(), target).slice(0, 4) : qaGeneratedState && initialTarget ? createAgentDemoNodes(readWorkbenchCatalog(), target) : [],
       rightTab: ['处理方案', '执行结果'].includes(qaRightTab) ? qaRightTab : '处理方案',
       running: runningState,
       testing: false,
@@ -5120,7 +5301,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       selectedPlanVersion: latestVersion?.version || '1.0',
       versionSnapshots: latestVersion ? buildVersionSnapshotsFromRecords(versions) : qaGeneratedState && initialTarget ? {
         '1.0': {
-          planNodes: createAgentDemoNodes(readWorkbenchCatalog()),
+          planNodes: createAgentDemoNodes(readWorkbenchCatalog(), target),
           results: [createSampleResult(fallbackSample, { includeKnowledge: true })],
           sampleFiles: [fallbackSample],
         },
@@ -5435,12 +5616,13 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       return;
     }
     clearAgentTimers();
-    const [parser, adapter, splitter, knowledge, iteration, storage] = createAgentDemoNodes(catalog);
+    const agentPlan = createAgentDemoPlan(activePlanTarget, catalog);
+    const { parser, adapter, splitter, extraction, iteration, storage } = agentPlan;
     const preFixNodes = [parser, splitter].filter(Boolean);
     const adaptedNodes = [parser, adapter, splitter].filter(Boolean);
-    const knowledgeNodes = [parser, adapter, splitter, knowledge].filter(Boolean);
-    const iterationNodes = [parser, adapter, splitter, knowledge, iteration].filter(Boolean);
-    const finalNodes = [parser, adapter, splitter, knowledge, iteration, storage].filter(Boolean);
+    const extractionNodes = [parser, adapter, splitter, extraction].filter(Boolean);
+    const iterationNodes = [parser, adapter, splitter, extraction, iteration].filter(Boolean);
+    const finalNodes = agentPlan.nodes;
     const filesSnapshot = [...files];
     const sendingIds = new Set(filesSnapshot.map((file) => file.id));
     setRunning(true);
@@ -5455,7 +5637,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       const merged = [...filesSnapshot.filter((file) => !currentIds.has(file.id)), ...current];
       return merged.map((file) => (sendingIds.has(file.id) ? { ...file, status: '试跑中' } : file));
     });
-    pushEvent({ role: 'user', title: '发送样例文件', content: `已发送 ${filesSnapshot.map((file) => file.name).join('、')}，请生成正式的知识处理方案。`, status: 'done' });
+    pushEvent({ role: 'user', title: '发送样例文件', content: `已发送 ${filesSnapshot.map((file) => file.name).join('、')}，请生成${activePlanTarget.formType} ${activePlanTarget.fileFormat}的正式知识处理方案。`, status: 'done' });
 
     let cursor = 0;
     const agentDelay = (delay) => (delay <= 0 ? 0 : Math.max(350, Math.round(delay * 0.58)));
@@ -5531,14 +5713,14 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     let executeEventId = '';
 
     step(800, () => {
-      analyzeEventId = pushEvent({ role: 'thought', title: '分析样例文件', content: '我先判断样例文件的类型、内容结构和处理目标，避免直接套用固定流程。', status: 'running' });
+      analyzeEventId = pushEvent({ role: 'thought', title: '分析样例文件', content: `我先判断样例文件的类型、内容结构和${activePlanTarget.formType}处理目标，避免直接套用固定流程。`, status: 'running' });
     });
     step(2800, () => {
-      updateEvent(analyzeEventId, { status: 'done', content: '样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。' });
-      parseEventId = pushEvent({ role: 'thought', title: '识别文档结构', content: '我会优先保留政策标题、条款层级和来源页码，因为后续分片和问答都依赖这些结构信息。', status: 'running' });
+      updateEvent(analyzeEventId, { status: 'done', content: `样例识别为${agentPlan.formatLabel}。${agentPlan.concern}` });
+      parseEventId = pushEvent({ role: 'thought', title: '识别文档结构', content: `我会优先保留当前格式里的有效结构信息，因为后续${agentPlan.objective}依赖这些结构。`, status: 'running' });
     });
     step(3200, () => {
-      updateEvent(parseEventId, { status: 'done', content: '结构识别完成：需要先解析文档，再做结构适配、分片、知识点提取，并对知识点数组逐项打标后存储。' });
+      updateEvent(parseEventId, { status: 'done', content: `结构识别完成：需要先解析文件，再做格式适配、内容切分，并通过迭代执行完成${activePlanTarget.formType}的逐项加工。` });
       setSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '试跑中' } : file)));
       queryEventId = pushEvent({ role: 'thought', title: '节点目录查询', content: '输入：节点状态=可用，分类=文档解析/文本分片/知识提取/系统节点；输出：候选节点清单。', status: 'running', kind: 'toolCall' });
     });
@@ -5547,47 +5729,47 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       designEventId = pushEvent({ role: 'thought', title: '开始设计处理方案', content: '我会先生成主链路，再检查节点输出能否被后置节点直接消费。', status: 'running' });
     });
     step(3300, () => {
-      updateEvent(designEventId, { status: 'done', content: '方案设计完成。先搭建解析、分片和知识点提取主链路，再通过迭代执行逐项处理知识点数组，并在迭代体内完成打标入参整理、知识点打标和结果拼装。', kind: 'flow', flowSteps: ['文档解析', '文本分片', '知识点提取', '迭代执行', '数据存储'] });
+      updateEvent(designEventId, { status: 'done', content: `方案设计完成。先搭建${agentPlan.formatLabel}的解析、适配和切分主链路，再通过迭代执行完成${activePlanTarget.formType}的逐项加工。`, kind: 'flow', flowSteps: agentPlan.flowSteps });
     });
 
-    buildFlowNode([parser], [parser], '文档解析节点', '候选节点=通用OCR解析；选择原因=该节点适合处理扫描件和 PDF 文件解析。');
-    buildFlowNode([splitter], [parser, splitter], '文本分片节点', '候选节点=Markdown结构化分块；选择原因=该节点适合按标题层级和段落结构生成文本切片。');
+    buildFlowNode([parser], [parser], '文档解析节点', `候选节点=${parser?.toolName || '文件解析'}；选择原因=${agentPlan.parserReason}`);
+    buildFlowNode([splitter], [parser, splitter].filter(Boolean), '文本分片节点', `候选节点=${splitter?.toolName || '文本分片'}；选择原因=${agentPlan.splitterReason}`);
 
     step(2200, () => {
       checkEventId = pushEvent({ role: 'thought', title: '检查节点承接', content: '文本分片节点已确定，我会检查文档解析输出能否被分片节点直接消费，再决定是否继续添加后置节点。', status: 'running' });
     });
     step(7200, () => {
       setPlanNodes(preFixNodes);
-      setConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'error', reason: '文档解析节点返回 sections[].content，分片节点需要 data.cleanBlocks，节点之间缺少结构适配。' } });
-      updateEvent(checkEventId, { status: 'done', content: '发现适配问题：文档解析节点返回 sections[].content，分片节点需要 data.cleanBlocks。' });
+      setConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'error', reason: `${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块，节点之间缺少格式适配。` } });
+      updateEvent(checkEventId, { status: 'done', content: `发现适配问题：${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块。` });
       issueAnalysisEventId = pushEvent({ role: 'thought', title: '正在分析适配问题', content: '我需要对比上游节点的实际返回和分片节点的参数要求，确认问题是字段命名不一致，还是缺少结构转换。', status: 'running' });
     });
     step(2800, () => {
-      updateEvent(issueAnalysisEventId, { status: 'done', content: '问题原因已确认：上游节点返回字段与后置节点入参不一致，需要先转换成平台可识别的 cleanBlocks。' });
-      pushEvent({ role: 'thought', title: '输出解决方案', content: '解决方案：在文档解析节点和文本分片节点之间插入代码执行器，生成 data.cleanBlocks 作为分片节点输入。', status: 'done' });
+      updateEvent(issueAnalysisEventId, { status: 'done', content: `问题原因已确认：${activePlanTarget.fileFormat}解析输出需要先转换成平台可识别的标准文本块。` });
+      pushEvent({ role: 'thought', title: '输出解决方案', content: `解决方案：在${parser?.toolName || '解析节点'}和${splitter?.toolName || '分片节点'}之间插入${adapter?.toolName || '格式适配节点'}，生成 ${agentPlan.adapterOutput} 作为分片节点输入。`, status: 'done' });
     });
     step(1600, () => {
-      resolveEventId = pushEvent({ role: 'thought', title: '开始解决适配问题', content: '我会在文档解析和文本分片之间插入代码执行器，把解析结果转换成分片节点可识别的数据结构。', status: 'running' });
-      setConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'resolving', reason: '正在插入代码执行器解决结构适配问题。' } });
+      resolveEventId = pushEvent({ role: 'thought', title: '开始解决适配问题', content: `我会插入${adapter?.toolName || '格式适配节点'}，把解析结果转换成${splitter?.toolName || '分片节点'}可识别的数据结构。`, status: 'running' });
+      setConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'resolving', reason: `正在插入${adapter?.toolName || '格式适配节点'}解决结构适配问题。` } });
     });
 
-    buildFlowNode([adapter].filter(Boolean), adaptedNodes, '系统节点', '候选节点=代码执行器；选择原因=需要把 sections[].content 转换为 data.cleanBlocks。');
+    buildFlowNode([adapter].filter(Boolean), adaptedNodes, '系统节点', `候选节点=${adapter?.toolName || '格式适配'}；选择原因=需要把解析输出转换为 ${agentPlan.adapterOutput}。`);
     configureFlowNode([splitter]);
 
     step(2000, () => {
       setConnectionStates({
-        [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(adapter))]: { status: 'resolved', reason: '代码执行器输出 data.cleanBlocks，分片节点可直接引用。' },
-        [getConnectionKey(getSemanticCategory(adapter), getSemanticCategory(splitter))]: { status: 'resolved', reason: '分片节点输入已改为 data.cleanBlocks。' },
+        [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(adapter))]: { status: 'resolved', reason: `${adapter?.toolName || '格式适配节点'}输出 ${agentPlan.adapterOutput}。` },
+        [getConnectionKey(getSemanticCategory(adapter), getSemanticCategory(splitter))]: { status: 'resolved', reason: `${splitter?.toolName || '分片节点'}输入已改为 ${agentPlan.adapterOutput}。` },
       });
-      updateEvent(resolveEventId, { status: 'done', content: '适配问题已解决：代码执行器输出 data.cleanBlocks，分片节点可直接引用。' });
+      updateEvent(resolveEventId, { status: 'done', content: `适配问题已解决：${adapter?.toolName || '格式适配节点'}输出 ${agentPlan.adapterOutput}，${splitter?.toolName || '分片节点'}可直接引用。` });
     });
     step(2200, () => {
       setConnectionStates({});
     });
 
-    buildFlowNode([knowledge].filter(Boolean), knowledgeNodes, '知识点提取节点', '候选节点=知识点提取；选择原因=需要先把分片结果提炼为知识点数组。');
-    buildFlowNode([iteration].filter(Boolean), iterationNodes, '系统节点', '候选节点=迭代执行；选择原因=知识点打标一次只处理一个知识点，需要在迭代体内按“代码执行器-知识点打标-代码执行器”逐项处理知识点数组。');
-    buildFlowNode([storage].filter(Boolean), finalNodes, '系统节点', '候选节点=数据存储器；选择原因=需要把迭代执行聚合后的打标结果写入 ES。');
+    if (extraction) buildFlowNode([extraction], extractionNodes, agentPlan.extractionTitle, `候选节点=${extraction.toolName}；选择原因=${agentPlan.extractionReason}`);
+    buildFlowNode([iteration].filter(Boolean), iterationNodes, '迭代执行节点', `候选节点=迭代执行；选择原因=${agentPlan.iterationReason}`);
+    buildFlowNode([storage].filter(Boolean), finalNodes, '系统节点', `候选节点=${storage?.toolName || '数据存储器'}；选择原因=需要把迭代执行聚合结果写入目标知识库。`);
 
     step(2200, () => {
       setConnectionStates({});
@@ -5605,7 +5787,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     });
     step(2000, () => {
       setRuntimeForNodes(finalNodes, { status: 'success' });
-      updateEvent(executeEventId, { status: 'done', content: '试跑结果：所有节点执行成功；知识点打标结果已按知识点逐条生成，并聚合为迭代结果写入存储。' });
+      updateEvent(executeEventId, { status: 'done', content: agentPlan.runSummary });
     });
     step(1200, () => {
       setRuntimeForNodes(finalNodes, { status: 'done' });
@@ -5615,8 +5797,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
         innerNodes: isIterationNode(node) ? (node.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded: false })) : node.innerNodes,
       })));
       setSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '已完成' } : file)));
-      setResults(filesSnapshot.map((file) => createSampleResult(file, { includeKnowledge: true })));
-      pushEvent({ role: 'agent', title: '方案生成与样例执行完成', content: '已完成方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。', status: 'done' });
+      setResults(filesSnapshot.map((file) => createSampleResultForPlan(file, finalNodes)));
+      pushEvent({ role: 'agent', title: '方案生成与样例执行完成', content: `已完成${activePlanTarget.formType} ${activePlanTarget.fileFormat}方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。`, status: 'done' });
       setRunning(false);
       notify('Agent 已完成方案生成和样例执行', 'success');
     });
