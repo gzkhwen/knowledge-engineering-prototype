@@ -4192,6 +4192,18 @@ function cloneWorkbenchNodes(nodes) {
   return nodes.map(cloneWorkbenchNode);
 }
 
+function collapseWorkbenchNode(node) {
+  return {
+    ...node,
+    expanded: false,
+    innerNodes: node.innerNodes?.map(collapseWorkbenchNode),
+  };
+}
+
+function collapseWorkbenchNodes(nodes) {
+  return nodes.map(collapseWorkbenchNode);
+}
+
 function getIterationInputOutputPath(previous, preferredPath) {
   const outputs = getEffectiveNodeOutputs(previous);
   const preferredOutput = outputs.find((output) => (output.path || output.id || output.name) === preferredPath);
@@ -5295,7 +5307,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const generatedState = (qaGeneratedState && initialTarget) || Boolean(latestVersion);
     const runningState = qaRunningState && initialTarget;
     const fallbackSample = createSampleForTarget(target, generatedState ? '已完成' : runningState ? '试跑中' : '未发送');
-    const latestNodes = latestVersion ? hydrateStoredPlanNodes(latestVersion.nodes || latestVersion.planNodes || []) : [];
+    const latestNodes = latestVersion ? collapseWorkbenchNodes(hydrateStoredPlanNodes(latestVersion.nodes || latestVersion.planNodes || [])) : [];
     const latestSampleFiles = latestVersion?.sampleFiles?.length ? latestVersion.sampleFiles.map((file) => ({ ...file })) : [fallbackSample];
     const latestResults = latestVersion?.results?.length ? latestVersion.results.map((result) => ({ ...result })) : generatedState ? [createSampleResult(fallbackSample, { includeKnowledge: true })] : [];
     const storedChat = plan ? dataStore.getPlanChat(plan.id) : null;
@@ -5304,7 +5316,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       currentPlanId: plan?.id || null,
       sampleFiles: generatedState || runningState ? latestSampleFiles : createWorkbenchSampleFiles(target),
       events: storedChat || (generatedState ? generatedAgentEvents : runningState ? runningAgentEvents : initialAgentEvents),
-      planNodes: latestVersion ? latestNodes : runningState ? createAgentDemoNodes(readWorkbenchCatalog(), target).slice(0, 4) : qaGeneratedState && initialTarget ? createAgentDemoNodes(readWorkbenchCatalog(), target) : [],
+      planNodes: latestVersion ? latestNodes : runningState ? createAgentDemoNodes(readWorkbenchCatalog(), target).slice(0, 4) : qaGeneratedState && initialTarget ? collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(), target)) : [],
       rightTab: ['处理方案', '执行结果'].includes(qaRightTab) ? qaRightTab : '处理方案',
       running: runningState,
       testing: false,
@@ -5318,7 +5330,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       selectedPlanVersion: latestVersion?.version || '1.0',
       versionSnapshots: latestVersion ? buildVersionSnapshotsFromRecords(versions) : qaGeneratedState && initialTarget ? {
         '1.0': {
-          planNodes: createAgentDemoNodes(readWorkbenchCatalog(), target),
+          planNodes: collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(), target)),
           results: [createSampleResult(fallbackSample, { includeKnowledge: true })],
           sampleFiles: [fallbackSample],
         },
@@ -5456,7 +5468,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setEditingParentId(null);
   };
   const createVersionSnapshot = () => ({
-    planNodes: cloneWorkbenchNodes(planNodes),
+    planNodes: collapseWorkbenchNodes(cloneWorkbenchNodes(planNodes)),
     results: results.map((result) => ({ ...result })),
     sampleFiles: sampleFiles.map((file) => ({ ...file })),
   });
@@ -5481,7 +5493,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setEditingNode(null);
     setEditingParentId(null);
     if (!snapshot) return;
-    setPlanNodes(cloneWorkbenchNodes(snapshot.planNodes || []));
+    setPlanNodes(collapseWorkbenchNodes(cloneWorkbenchNodes(snapshot.planNodes || [])));
     setResults((snapshot.results || []).map((result) => ({ ...result })));
     setSampleFiles((snapshot.sampleFiles || []).map((file) => ({ ...file })));
     setConfirmed(true);
@@ -5667,11 +5679,36 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const visibleParams = (node) => node.params.filter((param) => isParamVisible(node, param)).slice(0, 4);
     const withExpandedNodes = (nodes, expandedNodes = []) => {
       const expandedIds = new Set(expandedNodes.map((node) => node.nodeId));
-      return nodes.map((node) => ({ ...node, expanded: expandedIds.has(node.nodeId) }));
+      return nodes.map((node) => {
+        const expanded = expandedIds.has(node.nodeId);
+        return {
+          ...node,
+          expanded,
+          innerNodes: isIterationNode(node) ? (node.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded })) : node.innerNodes,
+        };
+      });
     };
     const activateRuntimeNodes = (nodes) => {
       const ids = new Set(nodes.map((node) => node.nodeId));
-      setPlanNodes((current) => current.map((node) => ({ ...node, expanded: ids.has(node.nodeId) })));
+      setPlanNodes((current) => current.map((node) => {
+        const expanded = ids.has(node.nodeId);
+        return {
+          ...node,
+          expanded,
+          innerNodes: isIterationNode(node) ? (node.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded })) : node.innerNodes,
+        };
+      }));
+    };
+    const collapseRuntimeNodes = (nodes) => {
+      const ids = new Set(nodes.map((node) => node.nodeId));
+      setPlanNodes((current) => current.map((node) => {
+        if (ids.has(node.nodeId)) return collapseWorkbenchNode(node);
+        if (!(node.innerNodes || []).some((innerNode) => ids.has(innerNode.nodeId))) return node;
+        return {
+          ...node,
+          innerNodes: node.innerNodes.map((innerNode) => (ids.has(innerNode.nodeId) ? collapseWorkbenchNode(innerNode) : innerNode)),
+        };
+      }));
     };
     const buildAndSelectFlowNode = (nodes, allNodes, title, nodeText) => {
       if (!nodes.length) return;
@@ -5713,6 +5750,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       });
       step(1100, () => {
         setRuntimeForNodes(nodes, { status: 'done' });
+        collapseRuntimeNodes(nodes);
       });
     };
     const buildFlowNode = (nodes, allNodes, title, nodeText) => {

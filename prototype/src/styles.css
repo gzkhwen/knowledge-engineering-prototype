@@ -1108,8 +1108,9 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .sample-column .scheme-config-title { margin-top: 10px; }
 .scheme-overview-tip { margin: -2px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; }
 .scheme-config-divider { height: 1px; margin: 10px 0; background: #e5e7eb; }
-.scheme-overview-list { display: grid; flex: 1; min-height: 0; align-content: start; grid-auto-rows: max-content; gap: 12px; overflow-y: auto; }
-.scheme-format-title { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 6px; width: 100%; margin-bottom: 6px; padding: 0; border: 0; color: #111827; background: transparent; font-size: 13px; line-height: 1.4; text-align: left; }
+.scheme-overview-list { display: grid; flex: 1; min-height: 0; align-content: start; grid-auto-rows: max-content; gap: 12px; overflow-x: hidden; overflow-y: auto; }
+.scheme-format-group { min-width: 0; max-width: 100%; }
+.scheme-format-title { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 6px; width: 100%; min-width: 0; max-width: 100%; margin-bottom: 6px; padding: 0; border: 0; color: #111827; background: transparent; font-size: 13px; line-height: 1.4; text-align: left; }
 .scheme-format-title .anticon { color: #64748b; font-size: 12px; }
 .scheme-format-title span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scheme-format-title em { padding: 2px 6px; border-radius: 999px; color: #475569; background: #eef2f7; font-size: 11px; font-style: normal; line-height: 1.2; }
@@ -1195,6 +1196,8 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .agent-input-box { position: relative; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; min-height: 104px; gap: 8px; padding: 12px; border: 1px solid #d3dbe8; border-radius: 14px; background: #fff; }
 .agent-input-box:focus-within { border-color: #9cc3ff; box-shadow: 0 0 0 3px rgba(15,99,246,.08); }
 .agent-input-box textarea { width: 100%; min-width: 0; max-height: 132px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; color: #111827; font: inherit; font-size: 13px; line-height: 1.65; resize: none; overflow-y: auto; }
+.agent-input-box textarea { scrollbar-width: none; }
+.agent-input-box textarea::-webkit-scrollbar { display: none; }
 .agent-input-box textarea:focus { outline: 0; }
 .agent-input-box textarea:disabled { color: #94a3b8; cursor: not-allowed; }
 .agent-input-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; }
@@ -1268,6 +1271,8 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .add-node-pill:hover { background: #0b55d9; }
 .add-node-pill:disabled { color: #94a3b8; background: #f1f5f9; cursor: not-allowed; }
 .workflow-list { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; padding: 14px; overflow-y: auto; }
+.workflow-list { scrollbar-width: none; }
+.workflow-list::-webkit-scrollbar { display: none; }
 .empty-plan-column .workflow-list { padding-bottom: 14px; overflow: visible; }
 .workflow-section-wrap { position: relative; }
 .workflow-card, .workflow-section { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 9px; margin-bottom: 12px; }
@@ -1423,6 +1428,8 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .plan-empty span { max-width: 280px; color: #94a3b8; font-size: 12px; line-height: 1.5; }
 .result-empty { min-height: 260px; }
 .result-list { flex: 1 1 auto; min-height: 0; padding: 12px; overflow-y: auto; }
+.result-list { scrollbar-width: none; }
+.result-list::-webkit-scrollbar { display: none; }
 .result-filter-bar { display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 8px; max-width: 100%; margin-bottom: 12px; overflow: hidden; }
 .result-filter-bar label { display: grid; gap: 6px; min-width: 0; color: #64748b; font-size: 12px; }
 .result-filter-bar .result-filter-field.select-field-wrap { min-width: 0; width: 100%; max-width: 100%; }
