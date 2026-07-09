@@ -1441,6 +1441,12 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .sample-result-head .badge { margin-left: auto; }
 .sample-result-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .sample-result-head span { color: #98a2b3; font-size: 11px; }
+.knowledge-preview-list { display: flex; flex-direction: column; }
+.knowledge-preview-card { display: flex; flex-direction: column; min-height: 0; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; overflow: hidden; }
+.knowledge-preview-head { display: grid; gap: 3px; padding: 10px 11px; border-bottom: 1px solid #eef2f7; background: #fbfcff; }
+.knowledge-preview-head strong { overflow: hidden; color: #111827; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-preview-head span { overflow: hidden; color: #98a2b3; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-preview-card pre { margin: 0; padding: 12px; overflow: visible; color: #344054; background: #f8fafc; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .run-card { padding: 0; margin-bottom: 0; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; overflow: hidden; }
 .run-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 11px; border-bottom: 1px solid #eef2f7; background: #fbfcff; }
 .run-card-head div { min-width: 0; display: grid; gap: 2px; }

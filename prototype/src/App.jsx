@@ -3505,6 +3505,11 @@ function FileUploadIcon({ className = '' }) {
 const toolDialogCategoryOrder = [...defaultCategories, '系统节点', '未分类'];
 const categoryAliases = { 内容处理: '文本分片', 文档分块: '文本分片', 智能生成: '知识提取', 内容抽取: '知识提取', 系统工具: '系统节点' };
 const sampleDemoFile = { id: 'demo-policy-sample', name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB', status: '未发送' };
+const knowledgePreviewTabNames = {
+  切片库: '切片结果预览',
+  QA库: 'QA结果预览',
+  知识点: '知识点结果预览',
+};
 const workbenchFileFormats = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md'];
 const workbenchSampleNames = ['医保政策样例', '理财产品说明书', '客户问答清单'];
 const workbenchFileFormatMeta = {
@@ -3516,6 +3521,8 @@ const workbenchFileFormatMeta = {
   md: { Icon: FileMarkdownFilled, color: '#334155' },
 };
 const getFileExtension = (name = '') => name.split('.').pop()?.toLowerCase() || '';
+const getKnowledgePreviewTabName = (formType = '') => knowledgePreviewTabNames[formType] || `${formType || '知识'}结果预览`;
+const isKnowledgePreviewTab = (tab = '') => Object.values(knowledgePreviewTabNames).includes(tab) || tab.endsWith('结果预览');
 const createWorkbenchSampleFiles = (target, status = '未发送') => workbenchSampleNames.map((name, index) => ({
   id: `sample-${target.formType}-${target.fileFormat}-${index}`,
   name: `${name}.${target.fileFormat}`,
@@ -5549,6 +5556,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   };
   const workbenchContextText = category ? `${project.name} / ${category.name} / ${decodeURIComponent(formType || '切片库')}` : `${project.name} / 临时方案`;
   const workbenchPlanTitle = category ? `${category.name} · ${activePlanTarget.formType} · ${activePlanTarget.fileFormat}` : `兜底方案 · ${activePlanTarget.formType} · ${activePlanTarget.fileFormat}`;
+  const knowledgePreviewTab = getKnowledgePreviewTabName(activePlanTarget.formType);
+  const rightTabs = ['处理方案', '执行结果', knowledgePreviewTab];
   const { Icon: ActiveFormatIcon, color: activeFormatColor } = workbenchFileFormatMeta[activePlanTarget.fileFormat] || { Icon: FileOutlined, color: '#64748b' };
   const categorySections = getCategorySections(planNodes);
   const nodeWarnings = getNodeWarnings(planNodes);
@@ -6436,7 +6445,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
             </div>
           </section>
           <aside className={`plan-column ${rightTab === '处理方案' && !planNodes.length ? 'empty-plan-column' : ''}`}>
-            <div className="tabs">{['处理方案', '执行结果'].map((tab) => <button type="button" key={tab} className={rightTab === tab ? 'active' : ''} onClick={() => setRightTab(tab)}>{tab}</button>)}</div>
+            <div className="tabs">{rightTabs.map((tab) => <button type="button" key={tab} className={rightTab === tab || (tab === knowledgePreviewTab && isKnowledgePreviewTab(rightTab)) ? 'active' : ''} onClick={() => setRightTab(tab)}>{tab}</button>)}</div>
             {rightTab === '处理方案' ? (
               <div className="plan-tab">
                 <div className={`plan-summary ${showPlanVersionSelect ? '' : 'without-version'}`.trim()}>
@@ -6509,7 +6518,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                   )}
                 </div>
               </div>
-            ) : <ResultPreview executionRecords={executionRecords} />}
+            ) : rightTab === '执行结果' ? <ResultPreview executionRecords={executionRecords} /> : <KnowledgeResultPreview formType={activePlanTarget.formType} executionRecords={executionRecords} />}
             {rightTab === '处理方案' && planNodes.length ? (
               <div className="plan-actions">
                 {visibleProblems.length ? <div className="error-line">当前方案存在 {visibleProblems.length} 个校验问题，请处理后保存。</div> : null}
@@ -7398,6 +7407,141 @@ function syncCodeOutputs(node, codeOutputs) {
     outputs,
     params: node.params.map((param) => param.id === 'outputVariables' ? { ...param, value: outputVariables } : param),
   };
+}
+
+function parseRunOutput(run) {
+  if (!run?.outputFull) return null;
+  try {
+    return JSON.parse(run.outputFull);
+  } catch {
+    return null;
+  }
+}
+
+function readPathValue(source, path) {
+  if (!source || !path) return undefined;
+  const direct = source[path];
+  if (direct !== undefined) return direct;
+  const normalized = path.startsWith('data.') ? path : `data.${path}`;
+  const value = normalized.split('.').reduce((current, key) => (current && current[key] !== undefined ? current[key] : undefined), source);
+  if (value !== undefined) return value;
+  return source[path.split('.').pop()];
+}
+
+function isUsefulKnowledgePayload(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (!value || typeof value !== 'object') return Boolean(value);
+  const keys = Object.keys(value);
+  return keys.some((key) => !['sourceFile', 'nodeId', 'status'].includes(key));
+}
+
+function getKnowledgeResultPaths(formType) {
+  if (formType === '切片库') return ['textChunkResult', 'data.textChunkResult', 'sliceItem', 'data.sliceItem'];
+  if (formType === 'QA库') return ['qaResult', 'data.qaResult', 'qaItem', 'data.qaItem', 'iterationResult', 'data.iterationResult'];
+  return ['iterationResult', 'data.iterationResult', 'summaryResult', 'data.summaryResult'];
+}
+
+function createFallbackKnowledgeResult(formType, fileName) {
+  if (formType === '切片库') {
+    return [
+      { chunkId: 'chunk-001', title: '适用范围', content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1, sourceFile: fileName },
+      { chunkId: 'chunk-002', title: '办理条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2, sourceFile: fileName },
+    ];
+  }
+  if (formType === 'QA库') {
+    return [
+      { question: '哪些人员可以办理异地就医备案？', answer: '本市基本医疗保险参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。', sourceChunkId: 'chunk-002', sourceFile: fileName },
+      { question: '异地就医费用结算是否需要人工复核？', answer: '结算结果需支持人工复核，以确保费用结算准确。', sourceChunkId: 'chunk-001', sourceFile: fileName },
+    ];
+  }
+  return [
+    { knowledgePointId: 'kp-001', title: '适用对象', content: '本政策面向本市医保参保人员。', tags: ['适用对象'], sourceChunkIds: ['chunk-001'], sourceFile: fileName },
+    { knowledgePointId: 'kp-002', title: '备案条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', tags: ['办理条件', '备案流程'], sourceChunkIds: ['chunk-002'], sourceFile: fileName },
+  ];
+}
+
+function getKnowledgeResultPayload(formType, record) {
+  const paths = getKnowledgeResultPaths(formType);
+  const runs = [...(record?.result?.toolRuns || [])].reverse();
+  for (const path of paths) {
+    const run = runs.find((item) => item.outputPath === path || item.outputPath === path.replace('data.', '') || item.outputPath === `data.${path}`);
+    const parsed = parseRunOutput(run);
+    const value = readPathValue(parsed, path);
+    if (isUsefulKnowledgePayload(value)) return value;
+  }
+  for (const run of runs) {
+    const parsed = parseRunOutput(run);
+    for (const path of paths) {
+      const value = readPathValue(parsed, path);
+      if (isUsefulKnowledgePayload(value)) return value;
+    }
+  }
+  return createFallbackKnowledgeResult(formType, record?.file?.name || record?.result?.fileName || '样例文件');
+}
+
+function KnowledgeResultPreview({ formType, executionRecords = {} }) {
+  const records = useMemo(() => Object.values(executionRecords), [executionRecords]);
+  const fileOptions = useMemo(() => {
+    const byId = new Map();
+    records.forEach((record) => {
+      if (!byId.has(record.file.id)) byId.set(record.file.id, record.file);
+    });
+    return Array.from(byId.values());
+  }, [records]);
+  const [selectedFileId, setSelectedFileId] = useState('');
+  const versionsForFile = useMemo(() => (
+    sortPlanVersionsDesc(records.filter((record) => record.file.id === selectedFileId).map((record) => record.version))
+  ), [records, selectedFileId]);
+  const [selectedVersion, setSelectedVersion] = useState('');
+  const resultName = formType === 'QA库' ? 'QA结果' : formType === '知识点' ? '知识点结果' : '切片结果';
+
+  useEffect(() => {
+    if (!fileOptions.length) {
+      setSelectedFileId('');
+      return;
+    }
+    if (!fileOptions.some((file) => file.id === selectedFileId)) setSelectedFileId(fileOptions[0].id);
+  }, [fileOptions, selectedFileId]);
+
+  useEffect(() => {
+    if (!versionsForFile.length) {
+      setSelectedVersion('');
+      return;
+    }
+    if (!versionsForFile.includes(selectedVersion)) setSelectedVersion(versionsForFile[0]);
+  }, [versionsForFile, selectedVersion]);
+
+  if (!records.length) return <div className="plan-empty result-empty"><ThunderboltOutlined /><strong>暂无{resultName}</strong><span>请先配置处理方案，并上传样例文件试跑。</span></div>;
+
+  const selectedRecord = records.find((record) => record.file.id === selectedFileId && record.version === selectedVersion);
+  const payload = selectedRecord ? getKnowledgeResultPayload(formType, selectedRecord) : null;
+  return (
+    <div className="result-list knowledge-preview-list">
+      <div className="result-filter-bar">
+        <label>
+          <span>样例文件</span>
+          <SelectField value={selectedFileId} onChange={setSelectedFileId} className="result-filter-field">
+            {fileOptions.map((file) => <option key={file.id} value={file.id}>{file.name}</option>)}
+          </SelectField>
+        </label>
+        <label>
+          <span>方案版本</span>
+          <SelectField value={selectedVersion} onChange={setSelectedVersion} className="result-filter-field">
+            {versionsForFile.map((version) => <option key={version} value={version}>{version}</option>)}
+          </SelectField>
+        </label>
+      </div>
+      {selectedRecord ? (
+        <section className="knowledge-preview-card">
+          <div className="knowledge-preview-head">
+            <strong>{resultName}</strong>
+            <span>{selectedRecord.file.name} · V{selectedRecord.version}</span>
+          </div>
+          <pre>{JSON.stringify(payload, null, 2)}</pre>
+        </section>
+      ) : <div className="plan-empty result-empty"><ThunderboltOutlined /><strong>暂无{resultName}</strong><span>请先配置处理方案，并上传样例文件试跑。</span></div>}
+    </div>
+  );
 }
 
 function ResultPreview({ executionRecords = {} }) {
