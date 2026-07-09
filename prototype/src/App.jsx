@@ -6416,7 +6416,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                         <div className="sample-file-popover-head">
                           <strong>样例文件</strong>
                           <span className="sample-file-popover-head-actions">
-                            <button type="button">选择已接入文件</button>
+                            <button type="button">已接入文件</button>
                             <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
                           </span>
                         </div>
@@ -6539,7 +6539,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                       <div className="sample-file-popover-head">
                         <strong>样例文件</strong>
                         <span className="sample-file-popover-head-actions">
-                          <button type="button">选择已接入文件</button>
+                          <button type="button">已接入文件</button>
                           <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
                         </span>
                       </div>
