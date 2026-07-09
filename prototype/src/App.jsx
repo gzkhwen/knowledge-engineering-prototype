@@ -4536,16 +4536,18 @@ function findKnowledgeTaggingTool(catalog, byId) {
 
 function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf' }, catalog = readWorkbenchCatalog()) {
   const byId = new Map(catalog.map((tool) => [tool.id, tool]));
+  const demoById = new Map(baseTools.map((tool) => [tool.id, { ...tool, semanticCategory: getSemanticCategory(tool), status: tool.status || '可用' }]));
+  const demoTool = (toolId) => demoById.get(toolId) || byId.get(toolId);
   const formatPlan = getAgentFormatPlan(target.fileFormat);
   const formPlan = getAgentFormPlan(target.formType);
-  const parserTool = byId.get('medical-policy-parser') || byId.get('document-parser') || catalog.find((tool) => getSemanticCategory(tool) === '文档解析');
-  const adapterTool = byId.get('system-code');
-  const splitterTool = byId.get('medical-policy-splitter') || byId.get('recursive-separator-splitter') || byId.get('chunk-splitter') || catalog.find((tool) => getSemanticCategory(tool) === '文本分片');
-  const storageTool = byId.get('system-storage');
-  const qaTool = byId.get('qa-extractor') || findWorkbenchToolByName(catalog, 'QA提取');
-  const knowledgeTool = findKnowledgeExtractionTool(catalog, byId);
-  const iterationTool = byId.get('system-iteration');
-  const taggingTool = findKnowledgeTaggingTool(catalog, byId);
+  const parserTool = demoTool('medical-policy-parser') || demoTool('document-parser') || catalog.find((tool) => getSemanticCategory(tool) === '文档解析');
+  const adapterTool = demoTool('system-code');
+  const splitterTool = demoTool('medical-policy-splitter') || demoTool('recursive-separator-splitter') || demoTool('chunk-splitter') || catalog.find((tool) => getSemanticCategory(tool) === '文本分片');
+  const storageTool = demoTool('system-storage');
+  const qaTool = demoTool('qa-extractor') || findWorkbenchToolByName(catalog, 'QA提取');
+  const knowledgeTool = demoTool('summary') || findKnowledgeExtractionTool(catalog, byId);
+  const iterationTool = demoTool('system-iteration');
+  const taggingTool = demoTool('knowledge-tagging') || findKnowledgeTaggingTool(catalog, byId);
   const parser = parserTool ? renameWorkbenchNode(createWorkbenchNode(parserTool, { type: 'fixed' }), formatPlan.parserName) : null;
   const adapter = parser && adapterTool ? renameWorkbenchNode(createWorkbenchNode(adapterTool, { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: 'sections' }), formatPlan.adapterName) : null;
   const splitterSource = adapter || parser;
