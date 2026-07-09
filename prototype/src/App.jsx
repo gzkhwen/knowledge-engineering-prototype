@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   ApiOutlined,
   CheckCircleOutlined,
+  CopyOutlined,
   DownOutlined as AntDownOutlined,
   LeftOutlined,
   CloseOutlined,
@@ -346,7 +347,6 @@ function Shell({ active, onNavigate, children }) {
         <button type="button" className="collapse-button"><MenuFoldOutlined /></button>
       </aside>
       <main className={`workspace ${active === 'ops-workbench' ? 'workbench-workspace' : ''}`}>{children}</main>
-      <button type="button" className="assistant-dot"><RobotOutlined /></button>
     </div>
   );
 }
@@ -7694,8 +7694,38 @@ function getRunInputPreview({ run, node, file, index }) {
   return JSON.stringify({ source: 'upstream', input: inputPath }, null, 2);
 }
 
+function copyText(text) {
+  if (!text) return;
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+}
+
+function RunResultBlock({ title, content }) {
+  return (
+    <div className="run-block">
+      <div className="run-block-head">
+        <h4>{title}</h4>
+        <button type="button" title={`复制${title}`} aria-label={`复制${title}`} onClick={() => copyText(content)}><CopyOutlined /></button>
+      </div>
+      <pre>{content}</pre>
+    </div>
+  );
+}
+
 function ToolRunResultCard({ run, node, file, index }) {
   if (!run) return null;
+  const inputPreview = getRunInputPreview({ run, node, file, index });
   return (
     <section className="run-card">
       <div className="run-card-head">
@@ -7703,16 +7733,8 @@ function ToolRunResultCard({ run, node, file, index }) {
           <strong>{node?.toolName || run.toolName}</strong>
         </div>
       </div>
-      <div className="run-block">
-        <h4>输入</h4>
-        <pre>{getRunInputPreview({ run, node, file, index })}</pre>
-      </div>
-      {run.outputFull ? (
-        <div className="run-block">
-          <h4>输出</h4>
-          <pre>{run.outputFull}</pre>
-        </div>
-      ) : null}
+      <RunResultBlock title="输入" content={inputPreview} />
+      {run.outputFull ? <RunResultBlock title="输出" content={run.outputFull} /> : null}
     </section>
   );
 }
