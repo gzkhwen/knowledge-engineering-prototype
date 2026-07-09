@@ -5328,6 +5328,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       agentTask: null,
       savedPlanVersions: savedVersions,
       selectedPlanVersion: latestVersion?.version || '1.0',
+      draftPlanVersion: null,
       versionSnapshots: latestVersion ? buildVersionSnapshotsFromRecords(versions) : qaGeneratedState && initialTarget ? {
         '1.0': {
           planNodes: collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(), target)),
@@ -5393,12 +5394,14 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const [selectedPlanTarget, setSelectedPlanTarget] = useState(() => ({ formType: initialFormType, fileFormat: workbenchFileFormats[0] }));
   const [savedPlanVersions, setSavedPlanVersions] = useState(initialPlanContext.savedPlanVersions);
   const [selectedPlanVersion, setSelectedPlanVersion] = useState(initialPlanContext.selectedPlanVersion);
+  const [draftPlanVersion, setDraftPlanVersion] = useState(initialPlanContext.draftPlanVersion);
   const [versionSnapshots, setVersionSnapshots] = useState(initialPlanContext.versionSnapshots);
   const [executionRecords, setExecutionRecords] = useState(initialPlanContext.executionRecords);
   const [expandedPlanGroups, setExpandedPlanGroups] = useState(() => new Set([initialFormType]));
   const [samplePopoverOpen, setSamplePopoverOpen] = useState(false);
   const [planRunPopoverOpen, setPlanRunPopoverOpen] = useState(false);
   const [saveConfirmVersion, setSaveConfirmVersion] = useState(null);
+  const [pendingPlanVersionSwitch, setPendingPlanVersionSwitch] = useState(null);
   const streamRef = useRef(null);
   const fileRef = useRef(null);
   const agentInputRef = useRef(null);
@@ -5421,8 +5424,13 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     formType: planFormTypes.includes(selectedPlanTarget.formType) ? selectedPlanTarget.formType : planFormTypes[0],
     fileFormat: workbenchFileFormats.includes(selectedPlanTarget.fileFormat) ? selectedPlanTarget.fileFormat : workbenchFileFormats[0],
   };
-  const planVersions = savedPlanVersions.length ? sortPlanVersionsDesc(savedPlanVersions) : ['1.0'];
-  const showPlanVersionSelect = savedPlanVersions.length > 0;
+  const hasUnsavedDraft = Boolean(draftPlanVersion) && selectedPlanVersion === draftPlanVersion && planNodes.length > 0;
+  const planVersions = (() => {
+    const versions = Array.from(new Set([...(draftPlanVersion ? [draftPlanVersion] : []), ...savedPlanVersions]));
+    if (!versions.length && planNodes.length) return [selectedPlanVersion || '1.0'];
+    return sortPlanVersionsDesc(versions);
+  })();
+  const showPlanVersionSelect = savedPlanVersions.length > 0 || planNodes.length > 0;
   const activePlanTargetKey = getPlanTargetKey(activePlanTarget);
   const getCurrentPlanContextState = () => ({
     currentPlanId,
@@ -5440,6 +5448,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     agentTask,
     savedPlanVersions,
     selectedPlanVersion,
+    draftPlanVersion,
     versionSnapshots,
     executionRecords,
   });
@@ -5459,6 +5468,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setAgentTask(state.agentTask);
     setSavedPlanVersions(state.savedPlanVersions || []);
     setSelectedPlanVersion(state.selectedPlanVersion || '1.0');
+    setDraftPlanVersion(state.draftPlanVersion || null);
     setVersionSnapshots(state.versionSnapshots || {});
     setExecutionRecords(state.executionRecords || {});
     setSamplePopoverOpen(false);
@@ -5483,6 +5493,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   };
   const selectPlanVersion = (version) => {
     const snapshot = versionSnapshots[version];
+    setDraftPlanVersion(null);
     setSelectedPlanVersion(version);
     setRightTab('处理方案');
     setRunning(false);
@@ -5497,6 +5508,14 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setResults((snapshot.results || []).map((result) => ({ ...result })));
     setSampleFiles((snapshot.sampleFiles || []).map((file) => ({ ...file })));
     setConfirmed(true);
+  };
+  const requestSelectPlanVersion = (version) => {
+    if (version === selectedPlanVersion) return;
+    if (hasUnsavedDraft) {
+      setPendingPlanVersionSwitch(version);
+      return;
+    }
+    selectPlanVersion(version);
   };
   const switchPlanTarget = (target) => {
     if (currentPlanId) dataStore.savePlanChat(currentPlanId, events);
@@ -5538,17 +5557,31 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const planProblems = getPlanProblems(planNodes);
   const visibleProblems = running || !planNodes.length ? [] : planProblems;
   const canEdit = !running && !testing;
-  const canSave = canEdit && planNodes.length > 0 && !confirmed && visibleProblems.length === 0;
+  const canSave = canEdit && planNodes.length > 0 && hasUnsavedDraft && visibleProblems.length === 0;
   const hasAgentTask = Boolean(agentTask);
   const canStopAgent = running || testing;
   const canSendAgentMessage = !running && !testing && (hasAgentTask || Boolean(agentInput.trim()) || (!planNodes.length && sampleFiles.length > 0));
   const [toolCategories, setToolCategories] = useState(() => readUnifiedFlowNodeCatalog().categories || defaultCategories);
+  const markPlanDraft = () => {
+    setConfirmed(false);
+    setDraftPlanVersion((current) => {
+      const nextVersion = current || getNextPlanVersion(savedPlanVersions);
+      setSelectedPlanVersion(nextVersion);
+      return nextVersion;
+    });
+  };
 
   useEffect(() => subscribeCatalog(() => {
     const snapshot = readUnifiedFlowNodeCatalog();
     setCatalog(readWorkbenchCatalog());
     setToolCategories(snapshot.categories || defaultCategories);
   }), []);
+  useEffect(() => {
+    if (planNodes.length || !draftPlanVersion || running || testing) return;
+    setDraftPlanVersion(null);
+    setSelectedPlanVersion(sortPlanVersionsDesc(savedPlanVersions)[0] || '1.0');
+    setConfirmed(false);
+  }, [planNodes.length, draftPlanVersion, running, testing, savedPlanVersions]);
   useEffect(() => {
     streamRef.current?.scrollTo({ top: streamRef.current.scrollHeight, behavior: 'smooth' });
   }, [events]);
@@ -5717,6 +5750,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       const nodeTitle = title.replace('节点', '');
       const nodeNames = nodes.map((node) => node.toolName).join('、');
       step(1800, () => {
+        markPlanDraft();
         setPlanNodes(withExpandedNodes(allNodes));
         setRuntimeForNodes(nodes, { status: 'building' });
         buildEventId = pushEvent({ role: 'thought', title: `设计流程节点：${nodeTitle}`, content: `我会把${nodeTitle}放在当前处理链路中，并确认它与前后节点的职责边界。`, status: 'running' });
@@ -5795,6 +5829,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       checkEventId = pushEvent({ role: 'thought', title: '检查节点承接', content: '文本分片节点已确定，我会检查文档解析输出能否被分片节点直接消费，再决定是否继续添加后置节点。', status: 'running' });
     });
     step(7200, () => {
+      markPlanDraft();
       setPlanNodes(preFixNodes);
       setConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'error', reason: `${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块，节点之间缺少格式适配。` } });
       updateEvent(checkEventId, { status: 'done', content: `发现适配问题：${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块。` });
@@ -5874,6 +5909,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const repairResult = repairConnectionIssue(planNodes, failure);
     const repaired = repairResult.nodes;
     const repairTargets = repaired.filter((node) => repairResult.targetIds.includes(node.nodeId));
+    markPlanDraft();
     setPlanNodes(repaired);
     setRuntimeForNodes(repairTargets, { status: 'configuring', visibleParamCount: 2 });
     updateEvent(eventId, { content: repairResult.actionText, status: 'running' });
@@ -5900,7 +5936,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const failure = getFirstPlanFailure(nextNodes);
     clearAgentTimers();
     setRunning(true);
-    setConfirmed(false);
+    markPlanDraft();
     setRightTab('处理方案');
     setConnectionStates({});
     pushEvent({ role: 'user', title: `设置${node.toolName}参数`, content: configureInstruction, status: 'done' });
@@ -5963,6 +5999,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     clearAgentTimers();
     scheduleAgentTimer(() => {
       const next = createOptimizedNodes(planNodes, catalog);
+      markPlanDraft();
       setPlanNodes(next);
       updateEvent(eventId, { content: '更新结果：按当前 Higress 工具链调整节点承接；当前方案中的工具保持不变。', status: 'done' });
       pushEvent({ role: 'agent', title: '方案已调整', content: '右侧流程已按现有方案局部更新，后续节点引用已同步到新的分片结果。', status: 'done' });
@@ -5996,7 +6033,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       setConnectionStates({});
       setAddOpen(false);
       setAddParentId(null);
-      setConfirmed(false);
+      markPlanDraft();
       notify(`已添加内部节点：${node.toolName}`, 'success');
       return;
     }
@@ -6006,7 +6043,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setPlanNodes((current) => [...current, { ...node, expanded: true, adjusted: true }]);
     setAddOpen(false);
     setAddParentId(null);
-    setConfirmed(false);
+    markPlanDraft();
     notify(`已添加节点，已归入${node.category}`, 'success');
   };
 
@@ -6098,7 +6135,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       notify('当前方案仍存在校验问题', 'error');
       return;
     }
-    setSaveConfirmVersion(getNextPlanVersion(savedPlanVersions));
+    setSaveConfirmVersion(selectedPlanVersion);
   };
 
   const savePlan = (versionToSave) => {
@@ -6116,6 +6153,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setVersionSnapshots((current) => ({ ...current, [versionToSave]: snapshot }));
     setCurrentPlanId(plan.id);
     setSelectedPlanVersion(versionToSave);
+    setDraftPlanVersion(null);
     setSaveConfirmVersion(null);
     setConfirmed(true);
     notify(`处理方案已保存为 V${versionRecord.version} 版本`, 'success');
@@ -6139,7 +6177,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     });
     setEditingNode(null);
     setEditingParentId(null);
-    setConfirmed(false);
+    markPlanDraft();
   };
 
   const openAddNode = (parentId = null) => {
@@ -6161,7 +6199,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
         innerNodes: nextInnerNodes,
       };
     }));
-    setConfirmed(false);
+    markPlanDraft();
   };
 
   const clearManualConnectionStates = () => setConnectionStates({});
@@ -6192,7 +6230,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     nextSections.splice(position === 'after' ? targetIndex + 1 : targetIndex, 0, moved);
     clearManualConnectionStates();
     setPlanNodes(nextSections.flatMap((section) => section.nodes.map((node) => ({ ...node, adjusted: section.sectionId === sectionId ? true : node.adjusted }))));
-    setConfirmed(false);
+    markPlanDraft();
     clearSectionDragState();
   };
 
@@ -6229,7 +6267,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     next.splice(to, 0, { ...moved, adjusted: true });
     clearManualConnectionStates();
     setPlanNodes(next);
-    setConfirmed(false);
+    markPlanDraft();
     setDraggingNodeId(null);
   };
 
@@ -6271,7 +6309,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       return { ...node, innerNodes: nextInnerNodes };
     }));
     clearManualConnectionStates();
-    setConfirmed(false);
+    markPlanDraft();
     clearInnerDragState();
   };
 
@@ -6405,9 +6443,10 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                   {showPlanVersionSelect ? (
                     <div className="plan-version-select">
                       <span>方案版本</span>
-                      <SelectField value={selectedPlanVersion} onChange={selectPlanVersion} className="plan-version-field">
+                      <SelectField value={selectedPlanVersion} onChange={requestSelectPlanVersion} className="plan-version-field">
                         {planVersions.map((version) => <option key={version} value={version}>{version}</option>)}
                       </SelectField>
+                      {hasUnsavedDraft ? <em className="plan-version-draft-tag">未保存</em> : null}
                     </div>
                   ) : null}
                   <button type="button" className="add-node-pill" disabled={!canEdit} onClick={() => openAddNode()}><PlusOutlined /> 添加节点</button>
@@ -6455,7 +6494,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                           onInnerDrop={dropInnerNodeAtInsertTarget}
                           onInnerDragEnd={clearInnerDragState}
                           onToggle={toggleNodeExpanded}
-                          onDelete={(node) => { setPlanNodes((current) => current.filter((item) => item.nodeId !== node.nodeId)); setConfirmed(false); }}
+                          onDelete={(node) => { setPlanNodes((current) => current.filter((item) => item.nodeId !== node.nodeId)); markPlanDraft(); }}
                           onSmartConfigure={(node) => setAgentTask({ type: 'tool-config', nodeId: node.nodeId, toolName: node.toolName })}
                         />
                         {insertPosition === 'after' ? <div className="workflow-drop-indicator" /> : null}
@@ -6519,6 +6558,20 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
           confirmText="确认保存"
           onCancel={() => setSaveConfirmVersion(null)}
           onConfirm={() => savePlan(saveConfirmVersion)}
+        />
+      ) : null}
+      {pendingPlanVersionSwitch ? (
+        <ConfirmDialog
+          title="切换版本"
+          message="切换版本后将丢失当前未保存方案，确定切换？"
+          cancelText="取消"
+          confirmText="确认切换"
+          onCancel={() => setPendingPlanVersionSwitch(null)}
+          onConfirm={() => {
+            const version = pendingPlanVersionSwitch;
+            setPendingPlanVersionSwitch(null);
+            selectPlanVersion(version);
+          }}
         />
       ) : null}
     </div>
