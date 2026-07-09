@@ -6243,7 +6243,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
         <aside className="panel sample-column">
           <div className="scheme-overview">
             <div className="scheme-overview-head">
-              <h3>配置方案</h3>
+              <h3>方案工作台</h3>
               <p className="scheme-overview-tip">按知识形态+文件格式来配置处理方案。</p>
               <div className="scheme-config-divider" />
             </div>
@@ -6253,7 +6253,9 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                   <button type="button" className="scheme-format-title" onClick={() => togglePlanGroup(item)}>
                     <span>{item}</span>
                     <em>{getFormTypeDoneCount(item)}/{workbenchFileFormats.length}</em>
-                    {expandedPlanGroups.has(item) ? <AntDownOutlined /> : <RightChevron />}
+                    <span className={`scheme-format-arrow ${expandedPlanGroups.has(item) ? 'expanded' : 'collapsed'}`}>
+                      <AntDownOutlined />
+                    </span>
                   </button>
                   {expandedPlanGroups.has(item) ? (
                     <div className="scheme-format-list">
@@ -6283,20 +6285,19 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
             </div>
           </div>
         </aside>
-        <div className="workbench-top-strip">
-          <span className="workbench-strip-tag">{category ? '类目方案' : '兜底方案'}</span>
-          <span className="workbench-strip-separator">·</span>
-          <span className="workbench-strip-text">{project.name}</span>
-          {category ? <span className="workbench-strip-separator">·</span> : null}
-          {category ? <span className="workbench-strip-text">{categoryPath}</span> : null}
-          <span className="workbench-strip-separator">·</span>
-          <span className="workbench-strip-tag">{activePlanTarget.formType}</span>
-          <span className="workbench-strip-separator">·</span>
-          <span className="workbench-strip-tag format" style={{ '--format-color': activeFormatColor }}><ActiveFormatIcon />{activePlanTarget.fileFormat}</span>
-        </div>
         <div className="panel workbench-main-panel">
           <section className="agent-column">
-            <div className="panel-title"><BotMessageSquareIcon className="agent-title-icon" /> 处理方案生成助手</div>
+            <div className="panel-title workbench-context-title">
+              <span className="workbench-strip-tag">{category ? '类目方案' : '兜底方案'}</span>
+              <span className="workbench-strip-separator">·</span>
+              <span className="workbench-strip-text">{project.name}</span>
+              {category ? <span className="workbench-strip-separator">·</span> : null}
+              {category ? <span className="workbench-strip-text">{categoryPath}</span> : null}
+              <span className="workbench-strip-separator">·</span>
+              <span className="workbench-strip-tag">{activePlanTarget.formType}</span>
+              <span className="workbench-strip-separator">·</span>
+              <span className="workbench-strip-tag format" style={{ '--format-color': activeFormatColor }}><ActiveFormatIcon />{activePlanTarget.fileFormat}</span>
+            </div>
             <div className="agent-stream" ref={streamRef}>{events.map((event) => <AgentEvent key={event.id} event={event} />)}</div>
             <div className="agent-input">
               <div className="agent-input-box">
