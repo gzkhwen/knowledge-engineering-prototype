@@ -5453,6 +5453,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
         },
       } : {},
       executionRecords: planExecutionRecords,
+      issueRecords: plan ? dataStore.getPlanIssues(plan.id) : [],
     };
   };
   const initialPlanContextRef = useRef(null);
@@ -5517,6 +5518,9 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const [executionRecords, setExecutionRecords] = useState(initialPlanContext.executionRecords);
   const [expandedPlanGroups, setExpandedPlanGroups] = useState(() => new Set([initialFormType]));
   const [samplePopoverOpen, setSamplePopoverOpen] = useState(false);
+  const [issuePopoverOpen, setIssuePopoverOpen] = useState(false);
+  const [issueTab, setIssueTab] = useState('unresolved');
+  const [issueRecords, setIssueRecords] = useState(initialPlanContext.issueRecords);
   const [planRunPopoverOpen, setPlanRunPopoverOpen] = useState(false);
   const [saveConfirmVersion, setSaveConfirmVersion] = useState(null);
   const [pendingPlanVersionSwitch, setPendingPlanVersionSwitch] = useState(null);
@@ -5587,6 +5591,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     draftPlanVersion,
     versionSnapshots,
     executionRecords,
+    issueRecords,
   });
   const applyPlanContextState = (state) => {
     setCurrentPlanId(state.currentPlanId || null);
@@ -5607,7 +5612,10 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setDraftPlanVersion(state.draftPlanVersion || null);
     setVersionSnapshots(state.versionSnapshots || {});
     setExecutionRecords(state.executionRecords || {});
+    setIssueRecords(state.issueRecords || []);
     setSamplePopoverOpen(false);
+    setIssuePopoverOpen(false);
+    setIssueTab('unresolved');
     setAddOpen(false);
     setAddParentId(null);
     setEditingNode(null);
@@ -5639,6 +5647,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setAddOpen(false);
     setEditingNode(null);
     setEditingParentId(null);
+    setIssuePopoverOpen(false);
+    setIssueTab('unresolved');
     if (!snapshot) return;
     setPlanNodes(collapseWorkbenchNodes(cloneWorkbenchNodes(snapshot.planNodes || [])));
     setResults((snapshot.results || []).map((result) => ({ ...result })));
@@ -5695,6 +5705,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const displayedNodeWarnings = running ? {} : getNodeDisplayWarnings(nodeWarnings);
   const planProblems = getPlanProblems(planNodes);
   const visibleProblems = running || !planNodes.length ? [] : planProblems;
+  const unresolvedIssues = issueRecords.filter((item) => item.status !== 'resolved');
+  const resolvedIssues = issueRecords.filter((item) => item.status === 'resolved');
   const canEdit = !running && !testing;
   const canSave = canEdit && planNodes.length > 0 && hasUnsavedDraft && visibleProblems.length === 0;
   const latestSavedPlanVersion = sortPlanVersionsDesc(savedPlanVersions)[0] || null;
@@ -5791,6 +5803,9 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   useEffect(() => {
     if (currentPlanId) dataStore.savePlanChat(currentPlanId, events);
   }, [currentPlanId, events]);
+  useEffect(() => {
+    if (currentPlanId) dataStore.savePlanIssues(currentPlanId, issueRecords);
+  }, [currentPlanId, issueRecords]);
   useEffect(() => {
     const input = agentInputRef.current;
     if (!input) return;
@@ -5929,6 +5944,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       setRunDraftPlanVersion(nextVersion);
       setRunSelectedPlanVersion(nextVersion);
     };
+    setIssuePopoverOpen(false);
     clearAgentTimers(runContextKey);
     const agentPlan = createAgentDemoPlan(activePlanTarget, catalog);
     const { parser, adapter, splitter, extraction, iteration, storage } = agentPlan;
@@ -6299,8 +6315,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     }, 3200, contextKey);
   };
 
-  const sendAgentInstruction = () => {
-    const instruction = agentInput.trim();
+  const sendAgentInstruction = (instructionOverride = null, eventTitle = '调整意见') => {
+    const instruction = instructionOverride ?? agentInput.trim();
     const task = agentTask;
     setAgentInput('');
     setAgentTask(null);
@@ -6318,7 +6334,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       return;
     }
     if (!instruction) return;
-    pushEvent({ role: 'user', title: '调整意见', content: instruction, status: 'done' });
+    pushEvent({ role: 'user', title: eventTitle, content: instruction, status: 'done' });
     if (!planNodes.length) {
       if (sampleFiles.length) {
         runAgent(sampleFiles);
@@ -6344,6 +6360,22 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       scoped.persistChat();
       if (activePlanTargetKeyRef.current === contextKey) notify('Agent 已调整处理方案', 'success');
     }, 1600, contextKey);
+  };
+
+  const sendIssueToAgent = (issue) => {
+    if (!issue) return;
+    const instruction = `请根据以下问题调整当前处理方案：\n${issue.title}：${issue.content}`;
+    setIssuePopoverOpen(false);
+    sendAgentInstruction(instruction, '处理问题清单');
+  };
+
+  const closeIssue = (issue) => {
+    if (!issue) return;
+    const nextIssues = issueRecords.map((item) => (item.id === issue.id ? { ...item, status: 'resolved', resolvedAt: nowText() } : item));
+    setIssueRecords(nextIssues);
+    if (currentPlanId) dataStore.savePlanIssues(currentPlanId, nextIssues);
+    planContextRef.current[activePlanTargetKey] = { ...(planContextRef.current[activePlanTargetKey] || getCurrentPlanContextState()), issueRecords: nextIssues };
+    notify('问题已关闭', 'success');
   };
 
   const sendSampleFile = (file) => {
@@ -6763,36 +6795,71 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                   }}
                 />
                 <div className="agent-input-footer">
-                  <div className="sample-file-trigger-wrap">
-                    <button type="button" className="sample-file-trigger" onClick={() => { setPlanRunPopoverOpen(false); setSamplePopoverOpen((current) => !current); }}><PaperClipOutlined /> 样例文件</button>
-                    {samplePopoverOpen ? (
-                      <div className="sample-file-popover">
-                        <div className="sample-file-popover-head">
-                          <strong>样例文件</strong>
-                          <span className="sample-file-popover-head-actions">
-                            <button type="button">已接入文件</button>
-                            <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
-                          </span>
+                  <div className="agent-input-tools">
+                    <div className="sample-file-trigger-wrap">
+                      <button type="button" className="sample-file-trigger" onClick={() => { setPlanRunPopoverOpen(false); setIssuePopoverOpen(false); setSamplePopoverOpen((current) => !current); }}><PaperClipOutlined /> 样例文件</button>
+                      {samplePopoverOpen ? (
+                        <div className="sample-file-popover">
+                          <div className="sample-file-popover-head">
+                            <strong>样例文件</strong>
+                            <span className="sample-file-popover-head-actions">
+                              <button type="button">已接入文件</button>
+                              <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
+                            </span>
+                          </div>
+                          <input ref={fileRef} type="file" accept={`.${activePlanTarget.fileFormat}`} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
+                          {sampleFiles.length ? sampleFiles.map((file) => {
+                            const format = getFileExtension(file.name) || activePlanTarget.fileFormat;
+                            const { Icon: SampleFormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+                            return (
+                              <div className="sample-file-popover-item" key={file.id} style={{ '--format-color': color }}>
+                                <span className="scheme-format-icon"><SampleFormatIcon /></span>
+                                <span className="sample-file-popover-name">
+                                  <span>{file.name}</span>
+                                </span>
+                                <span className="sample-file-popover-actions">
+                                  <button type="button" title="发送" disabled={running || testing} onClick={() => sendSampleFile(file)}><SendOutlined /></button>
+                                  <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
+                                </span>
+                              </div>
+                            );
+                          }) : <p>暂无样例文件</p>}
                         </div>
-                        <input ref={fileRef} type="file" accept={`.${activePlanTarget.fileFormat}`} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
-                        {sampleFiles.length ? sampleFiles.map((file) => {
-                          const format = getFileExtension(file.name) || activePlanTarget.fileFormat;
-                          const { Icon: SampleFormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
-                          return (
-                            <div className="sample-file-popover-item" key={file.id} style={{ '--format-color': color }}>
-                              <span className="scheme-format-icon"><SampleFormatIcon /></span>
-                              <span className="sample-file-popover-name">
-                                <span>{file.name}</span>
-                              </span>
-                              <span className="sample-file-popover-actions">
-                                <button type="button" title="发送" disabled={running || testing} onClick={() => sendSampleFile(file)}><SendOutlined /></button>
-                                <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
-                              </span>
-                            </div>
-                          );
-                        }) : <p>暂无样例文件</p>}
-                      </div>
-                    ) : null}
+                      ) : null}
+                    </div>
+                    <div className="issue-list-trigger-wrap">
+                      <button type="button" className="sample-file-trigger issue-list-trigger" onClick={() => { setPlanRunPopoverOpen(false); setSamplePopoverOpen(false); setIssuePopoverOpen((current) => !current); }}><ExclamationCircleOutlined /> 问题清单</button>
+                      {issuePopoverOpen ? (
+                        <div className="sample-file-popover issue-list-popover">
+                          <div className="sample-file-popover-head">
+                            <strong>问题清单</strong>
+                          </div>
+                          <div className="issue-list-tabs">
+                            <button type="button" className={issueTab === 'unresolved' ? 'active' : ''} onClick={() => setIssueTab('unresolved')}>未解决 ({unresolvedIssues.length})</button>
+                            <button type="button" className={issueTab === 'resolved' ? 'active' : ''} onClick={() => setIssueTab('resolved')}>已解决 ({resolvedIssues.length})</button>
+                          </div>
+                          {issueTab === 'unresolved' ? (
+                            unresolvedIssues.length ? <div className="issue-list-items">
+                              {unresolvedIssues.map((issue) => (
+                                <div className="issue-list-item" key={issue.id}>
+                                  <span><strong>{issue.title}</strong><em>{issue.content}</em></span>
+                                  <span className="issue-list-item-actions">
+                                    <button type="button" title="发送" disabled={running || testing} onClick={() => sendIssueToAgent(issue)}><SendOutlined /></button>
+                                    <button type="button" title="关闭" disabled={running || testing} onClick={() => closeIssue(issue)}><CheckCircleOutlined /></button>
+                                  </span>
+                                </div>
+                              ))}
+                            </div> : <p>暂无未解决问题</p>
+                          ) : resolvedIssues.length ? <div className="issue-list-items">
+                            {resolvedIssues.map((issue) => (
+                              <div className="issue-list-item resolved" key={issue.id}>
+                                <span><strong>{issue.title}</strong><em>{issue.content}</em></span>
+                              </div>
+                            ))}
+                          </div> : <p>暂无已解决问题</p>}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                   <button
                     type="button"

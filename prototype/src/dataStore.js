@@ -12,6 +12,7 @@ const keys = {
   planVersions: 'ke-plan-versions-v1',
   planExecutions: 'ke-plan-executions-v1',
   planChats: 'ke-plan-chats-v1',
+  planIssues: 'ke-plan-issues-v1',
   demoPlanSeedVersion: 'ke-demo-plan-seed-version',
 };
 
@@ -281,7 +282,7 @@ function demoPlanId({ planScope, categoryId, formType, fileFormat }) {
   return `demo-plan-${planScope}-${categoryId || 'space'}-${slugText(formType)}-${fileFormat}`;
 }
 
-function demoNodeSets(formType, fileFormat) {
+function demoNodeSets(formType, fileFormat, categoryId = '') {
   const parserNodes = {
     pdf: { toolId: 'ke-idp-mineru-ocr', toolName: 'MinerU版面解析', category: '文档解析' },
     docx: { toolId: 'ke-idp-mx-ocr', toolName: '通用OCR解析', category: '文档解析' },
@@ -295,6 +296,9 @@ function demoNodeSets(formType, fileFormat) {
   const splitter = { toolId: 'ke-idp-markdown-chunk', toolName: 'Markdown结构化分块', category: '文本分片' };
   const iteration = { toolId: 'system-iteration', toolName: '迭代执行', category: '系统节点' };
   const storage = { toolId: 'system-storage', toolName: '数据存储器', category: '系统节点' };
+  if (categoryId === 'cat-wealth-fund' && formType === '知识点' && fileFormat === 'pdf') {
+    return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration, storage];
+  }
   if (formType === '切片库') return [parser, adapter, splitter, iteration, storage];
   if (formType === 'QA库') return [parser, adapter, splitter, { toolId: 'qa-extractor', toolName: 'QA提取', category: '知识提取' }, iteration, storage];
   return [parser, adapter, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration, storage];
@@ -312,8 +316,13 @@ function demoSampleFile(fileFormat, seedName) {
   };
 }
 
-function demoResult(file, nodes, formType, categoryName, version) {
-  const sliceItems = [
+function demoResult(file, nodes, formType, categoryName, version, categoryId = '') {
+  const isFundKnowledgePdf = categoryId === 'cat-wealth-fund' && formType === '知识点' && file.type === 'PDF';
+  const sliceItems = isFundKnowledgePdf ? [
+    { chunkId: 'fund-chunk-001', title: '基金概况与投资目标', content: '本基金主要投资于符合基金合同约定的资产，投资者应结合自身风险承受能力审慎决策。', page: 2 },
+    { chunkId: 'fund-chunk-002', title: '风险收益特征', content: '基金净值可能波动，过往业绩不代表未来表现，投资者需关注产品风险等级和投资范围。', page: 6 },
+    { chunkId: 'fund-chunk-003', title: '申购赎回规则', content: '申购、赎回申请按交易日规则确认，到账时间以基金合同和销售机构公告为准。', page: 14 },
+  ] : [
     { chunkId: 'chunk-001', title: '适用范围', content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 },
     { chunkId: 'chunk-002', title: '办理条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 },
   ];
@@ -321,7 +330,11 @@ function demoResult(file, nodes, formType, categoryName, version) {
     { qaId: 'qa-001', question: '哪些人员可以办理异地就医备案？', answer: '本市基本医疗保险参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。', sourceChunkId: 'chunk-002' },
     { qaId: 'qa-002', question: '异地就医政策适用于哪些对象？', answer: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', sourceChunkId: 'chunk-001' },
   ];
-  const knowledgeItems = [
+  const knowledgeItems = isFundKnowledgePdf ? [
+    { knowledgePointId: 'fund-kp-001', title: '基金适当性要求', content: '投资者应根据自身风险承受能力选择与产品风险等级相匹配的基金产品。', tags: ['适当性', '风险等级'], sourceChunkIds: ['fund-chunk-001'] },
+    { knowledgePointId: 'fund-kp-002', title: '申购确认时间', content: '申购申请通常按交易日确认规则处理，具体确认时间以基金合同和销售机构规则为准。', tags: ['申购规则', '交易确认'], sourceChunkIds: ['fund-chunk-003'] },
+    { knowledgePointId: 'fund-kp-003', title: '基金投资风险', content: '基金净值可能波动，过往业绩不代表未来表现，投资前应充分了解产品风险。', tags: ['风险提示', '投资风险'], sourceChunkIds: ['fund-chunk-002'] },
+  ] : [
     { knowledgePointId: 'kp-001', title: '适用对象', content: '本政策面向本市医保参保人员。', tags: ['适用对象'], sourceChunkIds: ['chunk-001'] },
     { knowledgePointId: 'kp-002', title: '备案条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', tags: ['办理条件', '备案流程'], sourceChunkIds: ['chunk-002'] },
   ];
@@ -332,9 +345,10 @@ function demoResult(file, nodes, formType, categoryName, version) {
         outputFull: { data: { storageRef: `es://knowledge-demo/${slugText(categoryName || 'fallback')}/${slugText(formType)}/${file.type.toLowerCase()}`, storedCount: formType === 'QA库' ? 18 : formType === '知识点' ? 24 : 42 } },
       };
     }
-    if (node.toolName === 'Markdown结构化分块') return { outputPath: 'textChunkResult', outputFull: { textChunkResult: sliceItems, stats: { chunkCount: sliceItems.length } } };
+    if (isFundKnowledgePdf && node.toolName === 'MinerU版面解析') return { outputPath: 'documentParseResult', outputFull: { documentParseResult: { pageCount: 26, titleCount: 38, tableCount: 6, markdownReady: true } } };
+    if (node.toolName === 'Markdown结构化分块') return { outputPath: 'textChunkResult', outputFull: { textChunkResult: sliceItems, stats: { chunkCount: isFundKnowledgePdf ? 18 : sliceItems.length } } };
     if (node.toolName === 'QA提取') return { outputPath: 'qaResult', outputFull: { qaResult: qaItems, stats: { qaCount: qaItems.length } } };
-    if (node.toolName === '知识点提取') return { outputPath: 'summaryResult', outputFull: { summary: '该政策说明医保参保人员异地就医备案与费用结算要求。', summaryResult: knowledgeItems } };
+    if (node.toolName === '知识点提取') return { outputPath: 'summaryResult', outputFull: { summary: isFundKnowledgePdf ? '已识别基金适当性、申购赎回、费用与风险提示等知识点。' : '该政策说明医保参保人员异地就医备案与费用结算要求。', summaryResult: knowledgeItems } };
     if (node.toolName === '迭代执行') {
       if (formType === 'QA库') return { outputPath: 'iterationResult', outputFull: { iterationResult: qaItems.map((item) => ({ ...item, verified: true })) } };
       if (formType === '知识点') return { outputPath: 'iterationResult', outputFull: { iterationResult: knowledgeItems } };
@@ -362,9 +376,9 @@ function demoResult(file, nodes, formType, categoryName, version) {
   return { fileId: file.id, fileName: file.name, toolRuns: runs };
 }
 
-function demoChatMessages({ categoryName, formType, fileFormat, versionCount }) {
+function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sampleName, categoryId }) {
   const scopeName = categoryName || '空间兜底';
-  const fileName = demoFileMeta[fileFormat]?.name || '样例文件';
+  const fileName = sampleName || demoFileMeta[fileFormat]?.name || '样例文件';
   const formatNames = {
     pdf: 'PDF版式文档',
     docx: 'Word结构化文档',
@@ -392,6 +406,21 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount }) 
     md: '需要保留Markdown标题层级、列表和代码块边界，避免破坏原始结构。',
   };
   const baseId = `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}`;
+  if (categoryId === 'cat-wealth-fund' && formType === '知识点' && fileFormat === 'pdf') {
+    const messages = [
+      { role: 'agent', title: '处理方案生成助手', content: '请发送基金产品说明书样例，我会识别文档版式与章节结构，并生成可复用的知识点处理方案。' },
+      { role: 'user', title: '发送样例文件', content: `已发送${fileName}，请提取基金产品相关知识点并保留来源信息。` },
+      { role: 'thought', title: '分析样例文件', content: '该文件为基金产品说明书，包含基金概况、投资范围、风险收益特征、申购赎回与费用等章节。' },
+      { role: 'thought', title: '节点目录查询', content: '已匹配 MinerU 版面解析、Markdown结构化分块、知识点提取、迭代执行和数据存储器。', kind: 'toolCall' },
+      { role: 'thought', title: '开始设计处理方案', content: '方案采用 MinerU版面解析 -> Markdown结构化分块 -> 知识点提取 -> 迭代执行 -> 数据存储器的处理链路。' },
+      { role: 'thought', title: '配置迭代执行', content: '迭代体依次完成知识点字段整理、知识点打标和最终入库记录组装。', kind: 'toolCall' },
+      { role: 'thought', title: '检查节点承接', content: '已确认分块结果、知识点数组、迭代打标结果与入库字段可以稳定承接。' },
+      { role: 'user', title: '试跑样例', content: '请使用当前样例试跑，重点检查风险提示、申购赎回规则和适当性要求是否完整。' },
+      { role: 'thought', title: '样例试跑', content: '已完成 26 页版面解析、18 个结构化分块、24 条知识点的提取与打标。', kind: 'toolCall' },
+      { role: 'agent', title: '方案生成完成', content: '已完成方案搭建、参数配置和样例试跑，可保存为 1.0 正式版本。' },
+    ];
+    return messages.map((message, index) => ({ id: `${baseId}-${index + 1}`, status: 'done', ...message }));
+  }
   const messages = [
     { role: 'agent', title: '处理方案生成助手', content: `当前配置对象为${scopeName}的${formType} ${fileFormat}处理方案。你可以发送样例文件，我会先分析文件结构，再生成可保存的处理方案。` },
     { role: 'user', title: '发送样例文件', content: `已发送${fileName}，这类文件后续会批量进入${scopeName}，请生成可复用的${formType}处理方案。` },
@@ -415,7 +444,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount }) 
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v9';
+  const demoVersion = 'workbench-plan-demo-v11';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
@@ -458,7 +487,7 @@ function ensureDemoPlanData() {
     { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
     { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'docx', versions: ['1.0'] },
   ]
-    .filter((item) => !(item.formType === '知识点' && item.fileFormat === 'pdf'))
+    .filter((item) => !(item.formType === '知识点' && item.fileFormat === 'pdf' && item.categoryId !== 'cat-wealth-fund'))
     .map((item) => ({ planScope: item.planScope || 'category', creationMode: 'agent', ...item }));
 
   const routeKeys = new Set(definitions.map((item) => `${item.planScope}|${item.categoryId || ''}|${item.formType}|${item.fileFormat}`));
@@ -469,6 +498,7 @@ function ensureDemoPlanData() {
   const versions = read(keys.planVersions, []).filter((item) => retainedPlanIds.has(item.planId));
   const executions = read(keys.planExecutions, []).filter((item) => retainedPlanIds.has(item.planId));
   const chats = read(keys.planChats, []).filter((item) => retainedPlanIds.has(item.planId));
+  const planIssues = read(keys.planIssues, []).filter((item) => !String(item.id).startsWith('demo-plan-issue-'));
 
   definitions.forEach((definition) => {
     const category = definition.categoryId ? categoryById.get(definition.categoryId) : null;
@@ -487,9 +517,37 @@ function ensureDemoPlanData() {
       createdAt: '2026-07-01 09:00',
       updatedAt: '2026-07-09 09:30',
     };
-    const nodes = demoNodeSets(definition.formType, definition.fileFormat);
-    const sample = demoSampleFile(definition.fileFormat);
+    const nodes = demoNodeSets(definition.formType, definition.fileFormat, definition.categoryId);
+    const sample = demoSampleFile(definition.fileFormat, definition.categoryId === 'cat-wealth-fund' && definition.formType === '知识点' && definition.fileFormat === 'pdf' ? '基金产品说明书.pdf' : undefined);
     plans.push(plan);
+    const issueTemplates = definition.formType === '切片库'
+      ? [
+        ['上下文完整性', '部分切片缺少章节标题，阅读时无法判断原文所属段落。', 'unresolved'],
+        ['表格内容保留', '表格中的条件与说明被拆分到不同切片，建议保留同一行内容。', 'unresolved'],
+        ['切片粒度', '过短的标题切片已与后续正文合并。', 'resolved'],
+      ]
+      : definition.formType === 'QA库'
+        ? [
+          ['答案约束', '部分问答答案未保留办理条件和例外说明。', 'unresolved'],
+          ['问题表达', '部分问题表达与用户常见提问方式不一致。', 'unresolved'],
+          ['来源引用', '已补充问答结果中的原文来源定位。', 'resolved'],
+        ]
+        : [
+          ['适用对象', '部分知识点未保留适用对象与适用范围。', 'unresolved'],
+          ['内容去重', '相近知识点在结果中重复出现，需要合并。', 'unresolved'],
+          ['标签完整性', '已补充知识点的主题标签。', 'resolved'],
+        ];
+    issueTemplates.forEach(([title, content, status], issueIndex) => {
+      planIssues.push({
+        id: `demo-plan-issue-${plan.id}-${issueIndex + 1}`,
+        planId: plan.id,
+        title,
+        content,
+        status,
+        createdAt: `2026-07-0${issueIndex + 3} 11:00`,
+        resolvedAt: status === 'resolved' ? `2026-07-0${issueIndex + 4} 16:20` : null,
+      });
+    });
     const seedExecution = ({ version, versionNodes, result, index, versionStatus }) => {
       const isDraft = versionStatus === 'draft';
       const runDay = Math.min(index + (isDraft ? 1 : 2), 9);
@@ -518,7 +576,7 @@ function ensureDemoPlanData() {
     };
     definition.versions.forEach((version, index) => {
       const versionNodes = nodes.map((node) => ({ ...node }));
-      const result = demoResult(sample, versionNodes, definition.formType, categoryName, version);
+      const result = demoResult(sample, versionNodes, definition.formType, categoryName, version, definition.categoryId);
       versions.push({
         id: `demo-version-${plan.id}-${version.replace('.', '-')}`,
         planId: plan.id,
@@ -538,7 +596,7 @@ function ensureDemoPlanData() {
     chats.push({
       id: `demo-chat-${plan.id}`,
       planId: plan.id,
-      messages: demoChatMessages({ categoryName, formType: definition.formType, fileFormat: definition.fileFormat, versionCount: definition.versions.length }),
+      messages: demoChatMessages({ categoryName, formType: definition.formType, fileFormat: definition.fileFormat, versionCount: definition.versions.length, sampleName: sample.name, categoryId: definition.categoryId }),
       createdAt: '2026-07-01 09:15',
       updatedAt: '2026-07-09 09:30',
     });
@@ -548,6 +606,7 @@ function ensureDemoPlanData() {
   write(keys.planVersions, versions);
   write(keys.planExecutions, executions);
   write(keys.planChats, chats);
+  write(keys.planIssues, planIssues);
   write(keys.demoPlanSeedVersion, demoVersion);
 }
 
@@ -742,7 +801,18 @@ export const dataStore = {
     this.save('plans', this.list('plans').filter((item) => item.id !== planId));
     this.save('planExecutions', this.list('planExecutions').filter((item) => item.planId !== planId));
     this.save('planChats', this.list('planChats').filter((item) => item.planId !== planId));
+    this.save('planIssues', this.list('planIssues').filter((item) => item.planId !== planId));
     return true;
+  },
+  getPlanIssues(planId) {
+    return this.list('planIssues').filter((item) => item.planId === planId);
+  },
+  savePlanIssues(planId, issues) {
+    if (!planId) return [];
+    const current = this.list('planIssues').filter((item) => item.planId !== planId);
+    const next = issues.map((item) => ({ ...item, planId }));
+    this.save('planIssues', [...current, ...next]);
+    return next;
   },
   getPlanExecutions(planId) {
     return this.list('planExecutions').filter((item) => item.planId === planId);
