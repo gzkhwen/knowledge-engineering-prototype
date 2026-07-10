@@ -5350,7 +5350,12 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   }));
   const createPlanContextState = (target) => {
     const route = buildPlanRoute(target);
-    const { plan, versions } = dataStore.getPlanWithVersionsByRoute(route);
+    let { plan, versions } = dataStore.getPlanWithVersionsByRoute(route);
+    if (isDirectKnowledgePdfTarget(target) && plan && versions.length === 0) {
+      dataStore.discardUnsavedPlan(plan.id);
+      plan = null;
+      versions = [];
+    }
     const planExecutionRecords = plan ? getExecutionRecordsForPlan(plan.id) : {};
     const latestVersion = getLatestPlanVersionRecord(versions);
     const savedVersions = versions.map((item) => item.version);
@@ -5394,7 +5399,9 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       executionRecords: planExecutionRecords,
     };
   };
-  const initialPlanContext = createPlanContextState(initialPlanTarget);
+  const initialPlanContextRef = useRef(null);
+  if (!initialPlanContextRef.current) initialPlanContextRef.current = createPlanContextState(initialPlanTarget);
+  const initialPlanContext = initialPlanContextRef.current;
   const [catalog, setCatalog] = useState(() => readWorkbenchCatalog());
   const [currentPlanId, setCurrentPlanId] = useState(initialPlanContext.currentPlanId);
   const [sampleFiles, setSampleFiles] = useState(initialPlanContext.sampleFiles);
@@ -5828,6 +5835,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const setRunConnectionStates = (updater) => setRunField('connectionStates', setConnectionStates, updater);
     const setRunSampleFiles = (updater) => setRunField('sampleFiles', setSampleFiles, updater);
     const setRunResults = (updater) => setRunField('results', setResults, updater);
+    const setRunExecutionRecords = (updater) => setRunField('executionRecords', setExecutionRecords, updater);
     const setRunRunning = (updater) => setRunField('running', setRunning, updater);
     const setRunConfirmed = (updater) => setRunField('confirmed', setConfirmed, updater);
     const setRunRightTab = (updater) => setRunField('rightTab', setRightTab, updater);
@@ -5862,6 +5870,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     clearAgentTimers(runContextKey);
     const agentPlan = createAgentDemoPlan(activePlanTarget, catalog);
     const { parser, adapter, splitter, extraction, iteration, storage } = agentPlan;
+    const runFileFormat = activePlanTarget.fileFormat;
     const preFixNodes = [parser, splitter].filter(Boolean);
     const adaptedNodes = [parser, adapter, splitter].filter(Boolean);
     const extractionNodes = [parser, adapter, splitter, extraction].filter(Boolean);
@@ -6085,6 +6094,45 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       updateRunEvent(executeEventId, { status: 'done', content: agentPlan.runSummary });
     });
     step(1200, () => {
+      const nextResults = filesSnapshot.map((file) => createSampleResultForPlan(file, finalNodes));
+      const runAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      const runState = planContextRef.current[runContextKey] || {};
+      const runVersion = runState.draftPlanVersion || runState.selectedPlanVersion || '1.0';
+      const runPlanSnapshot = cloneWorkbenchNodes(finalNodes);
+      const nextExecutionRecords = Object.fromEntries(nextResults.map((result) => {
+        const file = filesSnapshot.find((item) => item.id === result.fileId) || { id: result.fileId, name: result.fileName };
+        const runId = makeId('run');
+        const runLabel = getRunLabel(runVersion, 'draft', runAt);
+        const record = {
+          runId,
+          runLabel,
+          runAt,
+          file: { ...file, status: '已完成' },
+          version: runVersion,
+          versionStatus: 'draft',
+          planVersionId: null,
+          planNodes: cloneWorkbenchNodes(runPlanSnapshot),
+          planSnapshot: cloneWorkbenchNodes(runPlanSnapshot),
+          result,
+        };
+        dataStore.createPlanExecution({
+          planId: runPlan.id,
+          planVersionId: null,
+          version: runVersion,
+          versionStatus: 'draft',
+          runId,
+          runLabel,
+          runAt,
+          sampleFileId: result.fileId,
+          sampleFileName: result.fileName,
+          sampleFile: { ...file, status: '已完成' },
+          fileFormat: runFileFormat,
+          planSnapshot: cloneWorkbenchNodes(runPlanSnapshot),
+          planNodes: cloneWorkbenchNodes(runPlanSnapshot),
+          result,
+        });
+        return [runId, record];
+      }));
       setRunRuntimeForNodes(finalNodes, { status: 'done' });
       setRunPlanNodes((current) => current.map((node) => ({
         ...node,
@@ -6092,7 +6140,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
         innerNodes: isIterationNode(node) ? (node.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded: false })) : node.innerNodes,
       })));
       setRunSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '已完成' } : file)));
-      setRunResults(filesSnapshot.map((file) => createSampleResultForPlan(file, finalNodes)));
+      setRunResults(nextResults);
+      setRunExecutionRecords((current) => ({ ...current, ...nextExecutionRecords }));
       pushRunEvent({ role: 'agent', title: '方案生成与样例执行完成', content: `已完成${activePlanTarget.formType} ${activePlanTarget.fileFormat}方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。`, status: 'done' });
       setRunRunning(false);
       persistRunChat();

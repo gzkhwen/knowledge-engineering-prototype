@@ -737,6 +737,13 @@ export const dataStore = {
     if (!plan) return { plan: null, versions: [] };
     return { plan, versions: this.getPlanVersions(plan.id) };
   },
+  discardUnsavedPlan(planId) {
+    if (!planId || this.getPlanVersions(planId).length) return false;
+    this.save('plans', this.list('plans').filter((item) => item.id !== planId));
+    this.save('planExecutions', this.list('planExecutions').filter((item) => item.planId !== planId));
+    this.save('planChats', this.list('planChats').filter((item) => item.planId !== planId));
+    return true;
+  },
   getPlanExecutions(planId) {
     return this.list('planExecutions').filter((item) => item.planId === planId);
   },
