@@ -4584,10 +4584,15 @@ function findKnowledgeTaggingTool(catalog, byId) {
     || catalog.find((tool) => tool.category === '知识打标' && tool.name.includes('打标'));
 }
 
+function isDirectKnowledgePdfTarget(target) {
+  return target.formType === '知识点' && target.fileFormat === 'pdf';
+}
+
 function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf' }, catalog = readWorkbenchCatalog()) {
   const byId = new Map(catalog.map((tool) => [tool.id, tool]));
   const formatPlan = getAgentFormatPlan(target.fileFormat);
   const formPlan = getAgentFormPlan(target.formType);
+  const directParserToSplitter = isDirectKnowledgePdfTarget(target);
   const parserTool = findWorkbenchToolByName(catalog, formatPlan.parserName) || catalog.find((tool) => getSemanticCategory(tool) === '文档解析');
   const adapterTool = byId.get('system-code');
   const splitterTool = findWorkbenchToolByName(catalog, formatPlan.splitterName) || catalog.find((tool) => getSemanticCategory(tool) === '文本分片');
@@ -4597,7 +4602,7 @@ function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf'
   const iterationTool = byId.get('system-iteration');
   const taggingTool = findKnowledgeTaggingTool(catalog, byId);
   const parser = parserTool ? createWorkbenchNode(parserTool, { type: 'fixed' }) : null;
-  const adapter = parser && adapterTool ? createWorkbenchNode(adapterTool, { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: getBestOutputPathForTarget(parser, adapterTool) }) : null;
+  const adapter = !directParserToSplitter && parser && adapterTool ? createWorkbenchNode(adapterTool, { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: getBestOutputPathForTarget(parser, adapterTool) }) : null;
   const splitterSource = adapter || parser;
   const splitter = splitterTool && splitterSource ? createWorkbenchNode(splitterTool, { type: 'upstream', sourceNodeId: splitterSource.nodeId, outputPath: adapter ? getBestOutputPathForTarget(adapter, splitterTool) : getBestOutputPathForTarget(parser, splitterTool) }) : null;
   const extractionTool = target.formType === 'QA库' ? qaTool : target.formType === '知识点' ? knowledgeTool : null;
@@ -4620,7 +4625,9 @@ function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf'
   return {
     ...formatPlan,
     ...formPlan,
+    flowSteps: directParserToSplitter ? ['MinerU版面解析', 'Markdown结构化分块', '知识点提取', '迭代执行', '数据存储器'] : formPlan.flowSteps,
     target,
+    directParserToSplitter,
     parser,
     adapter,
     splitter,
@@ -5984,7 +5991,12 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       parseEventId = pushRunEvent({ role: 'thought', title: '识别文档结构', content: `我会优先保留当前格式里的有效结构信息，因为后续${agentPlan.objective}依赖这些结构。`, status: 'running' });
     });
     step(3200, () => {
-      updateRunEvent(parseEventId, { status: 'done', content: `结构识别完成：需要先解析文件，再做格式适配、内容切分，并通过迭代执行完成${activePlanTarget.formType}的逐项加工。` });
+      updateRunEvent(parseEventId, {
+        status: 'done',
+        content: agentPlan.directParserToSplitter
+          ? '结构识别完成：MinerU 已输出可直接用于 Markdown 结构化分块的解析结果，后续将继续提取知识点并逐项加工。'
+          : `结构识别完成：需要先解析文件，再做格式适配、内容切分，并通过迭代执行完成${activePlanTarget.formType}的逐项加工。`,
+      });
       setRunSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '试跑中' } : file)));
       queryEventId = pushRunEvent({ role: 'thought', title: '节点目录查询', content: '输入：节点状态=可用，分类=文档解析/文本分片/知识提取/系统节点；输出：候选节点清单。', status: 'running', kind: 'toolCall' });
     });
@@ -5993,44 +6005,62 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       designEventId = pushRunEvent({ role: 'thought', title: '开始设计处理方案', content: '我会先生成主链路，再检查节点输出能否被后置节点直接消费。', status: 'running' });
     });
     step(3300, () => {
-      updateRunEvent(designEventId, { status: 'done', content: `方案设计完成。先搭建${agentPlan.formatLabel}的解析、适配和切分主链路，再通过迭代执行完成${activePlanTarget.formType}的逐项加工。`, kind: 'flow', flowSteps: agentPlan.flowSteps });
+      updateRunEvent(designEventId, {
+        status: 'done',
+        content: agentPlan.directParserToSplitter
+          ? '方案设计完成。先搭建 MinerU 版面解析、Markdown 结构化分块和知识点提取主链路，再通过迭代执行逐项完成知识点打标与结果拼装。'
+          : `方案设计完成。先搭建${agentPlan.formatLabel}的解析、适配和切分主链路，再通过迭代执行完成${activePlanTarget.formType}的逐项加工。`,
+        kind: 'flow',
+        flowSteps: agentPlan.flowSteps,
+      });
     });
 
     buildFlowNode([parser], [parser], '文档解析节点', `候选节点=${parser?.toolName || '文件解析'}；选择原因=${agentPlan.parserReason}`);
     buildFlowNode([splitter], [parser, splitter].filter(Boolean), '文本分片节点', `候选节点=${splitter?.toolName || '文本分片'}；选择原因=${agentPlan.splitterReason}`);
 
-    step(2200, () => {
-      checkEventId = pushRunEvent({ role: 'thought', title: '检查节点承接', content: '文本分片节点已确定，我会检查文档解析输出能否被分片节点直接消费，再决定是否继续添加后置节点。', status: 'running' });
-    });
-    step(7200, () => {
-      markRunPlanDraft();
-      setRunPlanNodes(preFixNodes);
-      setRunConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'error', reason: `${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块，节点之间缺少格式适配。` } });
-      updateRunEvent(checkEventId, { status: 'done', content: `发现适配问题：${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块。` });
-      issueAnalysisEventId = pushRunEvent({ role: 'thought', title: '正在分析适配问题', content: '我需要对比上游节点的实际返回和分片节点的参数要求，确认问题是字段命名不一致，还是缺少结构转换。', status: 'running' });
-    });
-    step(2800, () => {
-      updateRunEvent(issueAnalysisEventId, { status: 'done', content: `问题原因已确认：${activePlanTarget.fileFormat}解析输出需要先转换成平台可识别的标准文本块。` });
-      pushRunEvent({ role: 'thought', title: '输出解决方案', content: `解决方案：在${parser?.toolName || '解析节点'}和${splitter?.toolName || '分片节点'}之间插入${adapter?.toolName || '格式适配节点'}，生成 ${agentPlan.adapterOutput} 作为分片节点输入。`, status: 'done' });
-    });
-    step(1600, () => {
-      resolveEventId = pushRunEvent({ role: 'thought', title: '开始解决适配问题', content: `我会插入${adapter?.toolName || '格式适配节点'}，把解析结果转换成${splitter?.toolName || '分片节点'}可识别的数据结构。`, status: 'running' });
-      setRunConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'resolving', reason: `正在插入${adapter?.toolName || '格式适配节点'}解决结构适配问题。` } });
-    });
-
-    buildFlowNode([adapter].filter(Boolean), adaptedNodes, '系统节点', `候选节点=${adapter?.toolName || '格式适配'}；选择原因=需要把解析输出转换为 ${agentPlan.adapterOutput}。`);
-    configureFlowNode([splitter]);
-
-    step(2000, () => {
-      setRunConnectionStates({
-        [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(adapter))]: { status: 'resolved', reason: `${adapter?.toolName || '格式适配节点'}输出 ${agentPlan.adapterOutput}。` },
-        [getConnectionKey(getSemanticCategory(adapter), getSemanticCategory(splitter))]: { status: 'resolved', reason: `${splitter?.toolName || '分片节点'}输入已改为 ${agentPlan.adapterOutput}。` },
+    if (agentPlan.directParserToSplitter) {
+      step(2200, () => {
+        checkEventId = pushRunEvent({ role: 'thought', title: '检查节点承接', content: '我会检查 MinerU 版面解析输出能否被 Markdown 结构化分块直接消费。', status: 'running' });
       });
-      updateRunEvent(resolveEventId, { status: 'done', content: `适配问题已解决：${adapter?.toolName || '格式适配节点'}输出 ${agentPlan.adapterOutput}，${splitter?.toolName || '分片节点'}可直接引用。` });
-    });
-    step(2200, () => {
-      setRunConnectionStates({});
-    });
+      step(1800, () => {
+        markRunPlanDraft();
+        setRunPlanNodes(preFixNodes);
+        updateRunEvent(checkEventId, { status: 'done', content: '节点承接检查通过：MinerU 版面解析输出可直接作为 Markdown 结构化分块输入，无需增加格式适配节点。' });
+      });
+    } else {
+      step(2200, () => {
+        checkEventId = pushRunEvent({ role: 'thought', title: '检查节点承接', content: '文本分片节点已确定，我会检查文档解析输出能否被分片节点直接消费，再决定是否继续添加后置节点。', status: 'running' });
+      });
+      step(7200, () => {
+        markRunPlanDraft();
+        setRunPlanNodes(preFixNodes);
+        setRunConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'error', reason: `${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块，节点之间缺少格式适配。` } });
+        updateRunEvent(checkEventId, { status: 'done', content: `发现适配问题：${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块。` });
+        issueAnalysisEventId = pushRunEvent({ role: 'thought', title: '正在分析适配问题', content: '我需要对比上游节点的实际返回和分片节点的参数要求，确认问题是字段命名不一致，还是缺少结构转换。', status: 'running' });
+      });
+      step(2800, () => {
+        updateRunEvent(issueAnalysisEventId, { status: 'done', content: `问题原因已确认：${activePlanTarget.fileFormat}解析输出需要先转换成平台可识别的标准文本块。` });
+        pushRunEvent({ role: 'thought', title: '输出解决方案', content: `解决方案：在${parser?.toolName || '解析节点'}和${splitter?.toolName || '分片节点'}之间插入${adapter?.toolName || '格式适配节点'}，生成 ${agentPlan.adapterOutput} 作为分片节点输入。`, status: 'done' });
+      });
+      step(1600, () => {
+        resolveEventId = pushRunEvent({ role: 'thought', title: '开始解决适配问题', content: `我会插入${adapter?.toolName || '格式适配节点'}，把解析结果转换成${splitter?.toolName || '分片节点'}可识别的数据结构。`, status: 'running' });
+        setRunConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'resolving', reason: `正在插入${adapter?.toolName || '格式适配节点'}解决结构适配问题。` } });
+      });
+
+      buildFlowNode([adapter].filter(Boolean), adaptedNodes, '系统节点', `候选节点=${adapter?.toolName || '格式适配'}；选择原因=需要把解析输出转换为 ${agentPlan.adapterOutput}。`);
+      configureFlowNode([splitter]);
+
+      step(2000, () => {
+        setRunConnectionStates({
+          [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(adapter))]: { status: 'resolved', reason: `${adapter?.toolName || '格式适配节点'}输出 ${agentPlan.adapterOutput}。` },
+          [getConnectionKey(getSemanticCategory(adapter), getSemanticCategory(splitter))]: { status: 'resolved', reason: `${splitter?.toolName || '分片节点'}输入已改为 ${agentPlan.adapterOutput}。` },
+        });
+        updateRunEvent(resolveEventId, { status: 'done', content: `适配问题已解决：${adapter?.toolName || '格式适配节点'}输出 ${agentPlan.adapterOutput}，${splitter?.toolName || '分片节点'}可直接引用。` });
+      });
+      step(2200, () => {
+        setRunConnectionStates({});
+      });
+    }
 
     if (extraction) buildFlowNode([extraction], extractionNodes, agentPlan.extractionTitle, `候选节点=${extraction.toolName}；选择原因=${agentPlan.extractionReason}`);
     buildFlowNode([iteration].filter(Boolean), iterationNodes, '迭代执行节点', `候选节点=迭代执行；选择原因=${agentPlan.iterationReason}`);
@@ -6555,7 +6585,6 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                             <span className="scheme-format-icon"><FormatIcon /></span>
                             <span className="scheme-format-name">{format}</span>
                             {status === 'done' ? <CheckCircleOutlined className="scheme-format-status done" /> : null}
-                            {status === 'configuring' ? <SyncOutlined spin className="scheme-format-status configuring" /> : null}
                           </button>
                         );
                       })}

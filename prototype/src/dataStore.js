@@ -415,7 +415,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount }) 
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v8';
+  const demoVersion = 'workbench-plan-demo-v9';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
@@ -457,7 +457,9 @@ function ensureDemoPlanData() {
     { categoryId: 'cat-copy-review', formType: 'QA库', fileFormat: 'md', versions: ['1.0'] },
     { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
     { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'docx', versions: ['1.0'] },
-  ].map((item) => ({ planScope: item.planScope || 'category', creationMode: 'agent', ...item }));
+  ]
+    .filter((item) => !(item.formType === '知识点' && item.fileFormat === 'pdf'))
+    .map((item) => ({ planScope: item.planScope || 'category', creationMode: 'agent', ...item }));
 
   const routeKeys = new Set(definitions.map((item) => `${item.planScope}|${item.categoryId || ''}|${item.formType}|${item.fileFormat}`));
   const currentPlans = read(keys.plans, []);

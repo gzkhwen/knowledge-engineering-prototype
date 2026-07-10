@@ -1130,7 +1130,6 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .scheme-format-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scheme-format-status { margin-left: auto; font-size: 12px; }
 .scheme-format-status.done { color: #16a34a; }
-.scheme-format-status.configuring { color: #0f63f6; }
 .scheme-format-item:hover { color: #0f63f6; background: #eef5ff; }
 .scheme-format-item.active { color: #0f63f6; background: #e8f1ff; font-weight: 600; }
 .upload-box {
