@@ -4740,6 +4740,40 @@ function createOptimizedNodes(currentNodes, catalog = readWorkbenchCatalog()) {
   return next;
 }
 
+function createIssueFeedbackAdjustedNodes(currentNodes, issue) {
+  const next = currentNodes.map(cloneWorkbenchNode);
+  const target = next.find(isKnowledgeExtractionNode)
+    || next.find((node) => getSemanticCategory(node) === '文本分片')
+    || next[0];
+  if (!target) return next;
+  const feedbackText = `人工反馈：${issue.title}。${issue.content}`;
+  const promptIndex = target.params.findIndex((param) => /prompt|guide|instruction|system|user/i.test(param.id));
+  const configurableIndex = promptIndex >= 0 ? promptIndex : target.params.findIndex((param) => param.id !== target.inputParamId);
+  return next.map((node) => {
+    const collapsedInnerNodes = isIterationNode(node) ? (node.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded: false })) : node.innerNodes;
+    if (node.nodeId !== target.nodeId) return { ...node, expanded: false, innerNodes: collapsedInnerNodes };
+    return {
+      ...node,
+      expanded: false,
+      adjusted: true,
+      feedbackNote: `已按“${issue.title}”调整`,
+      innerNodes: collapsedInnerNodes,
+      params: node.params.map((param, index) => {
+        if (index !== configurableIndex) return param;
+        if (promptIndex < 0 && param.type === 'number') {
+          const currentValue = Number(param.value) || 800;
+          return { ...param, value: Math.max(100, currentValue - 100), source: { type: 'manual' } };
+        }
+        return {
+          ...param,
+          value: `${String(param.value || '').trim()}${param.value ? '\n' : ''}${feedbackText}`,
+          source: { type: 'manual' },
+        };
+      }),
+    };
+  });
+}
+
 function replaceToolKeepingStep(currentNode, tool, inputSource) {
   const replacement = createWorkbenchNode(tool, inputSource);
   if (!currentNode) return { ...replacement, adjusted: true };
@@ -6315,7 +6349,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     }, 3200, contextKey);
   };
 
-  const sendAgentInstruction = (instructionOverride = null, eventTitle = '调整意见') => {
+  const sendAgentInstruction = (instructionOverride = null, eventTitle = '调整意见', issue = null) => {
     const instruction = instructionOverride ?? agentInput.trim();
     const task = agentTask;
     setAgentInput('');
@@ -6347,15 +6381,16 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const plan = ensureCurrentPlan();
     planContextRef.current[contextKey] = { ...getCurrentPlanContextState(), currentPlanId: plan.id };
     const scoped = createScopedPlanContext(contextKey, plan.id);
+    clearAgentTimers(contextKey);
     scoped.setRunning(true);
     const eventId = scoped.pushEvent({ role: 'thought', title: '局部更新方案', content: '正在基于当前方案识别需要调整的节点，不重新生成完整链路。', status: 'running', kind: 'toolCall' });
-    clearAgentTimers(contextKey);
     scheduleAgentTimer(() => {
-      const next = createOptimizedNodes(planNodes, catalog);
+      const next = issue ? createIssueFeedbackAdjustedNodes(planNodes, issue) : createOptimizedNodes(planNodes, catalog);
       scoped.markDraft();
       scoped.setPlanNodes(next);
-      scoped.updateEvent(eventId, { content: '更新结果：按当前 Higress 工具链调整节点承接；当前方案中的工具保持不变。', status: 'done' });
-      scoped.pushEvent({ role: 'agent', title: '方案已调整', content: '右侧流程已按现有方案局部更新，后续节点引用已同步到新的分片结果。', status: 'done' });
+      const updateMessage = issue ? `已根据“${issue.title}”调整「${next.find((node) => node.feedbackNote)?.toolName || '目标节点'}」的处理配置。` : '更新结果：按当前 Higress 工具链调整节点承接；当前方案中的工具保持不变。';
+      scoped.updateEvent(eventId, { content: updateMessage, status: 'done' });
+      scoped.pushEvent({ role: 'agent', title: '方案已调整', content: issue ? `已根据问题反馈更新方案配置，并创建新的草稿版本。` : '右侧流程已按现有方案局部更新，后续节点引用已同步到新的分片结果。', status: 'done' });
       scoped.setRunning(false);
       scoped.persistChat();
       if (activePlanTargetKeyRef.current === contextKey) notify('Agent 已调整处理方案', 'success');
@@ -6366,7 +6401,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     if (!issue) return;
     const instruction = `请根据以下问题调整当前处理方案：\n${issue.title}：${issue.content}`;
     setIssuePopoverOpen(false);
-    sendAgentInstruction(instruction, '处理问题清单');
+    sendAgentInstruction(instruction, '处理问题清单', issue);
   };
 
   const closeIssue = (issue) => {
@@ -7142,7 +7177,7 @@ function IterationRuntimeCard({ node, nodes, warnings, runtime, canEdit, onEdit,
       <div className="tool-runtime-main" role="button" tabIndex={0} onClick={onToggle} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onToggle(); }}>
         <span className="tool-runtime-icon iteration-icon">{status === 'running' || status === 'configuring' ? <SyncOutlined spin /> : <SyncOutlined />}</span>
         <span className="tool-runtime-name">{node.toolName}</span>
-        {runtimeLabel ? <em>{runtimeLabel}</em> : null}
+        {runtimeLabel || node.feedbackNote ? <em>{runtimeLabel || node.feedbackNote}</em> : null}
       </div>
       <div className="tool-runtime-actions">
         <button type="button" disabled={!canEdit} onClick={onEdit}><EditOutlined /></button>
