@@ -5453,8 +5453,9 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const streamRef = useRef(null);
   const fileRef = useRef(null);
   const agentInputRef = useRef(null);
-  const agentTimersRef = useRef([]);
+  const agentTimersRef = useRef(new Map());
   const planContextRef = useRef({});
+  const [, setPlanContextRevision] = useState(0);
   const categoryPath = category ? (() => {
     const byId = new Map(categories.map((item) => [item.id, item]));
     const path = [];
@@ -5480,6 +5481,23 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   })();
   const showPlanVersionSelect = savedPlanVersions.length > 0 || planNodes.length > 0;
   const activePlanTargetKey = getPlanTargetKey(activePlanTarget);
+  const activePlanTargetKeyRef = useRef(activePlanTargetKey);
+  activePlanTargetKeyRef.current = activePlanTargetKey;
+  const setPlanContextField = (contextKey, field, setter, updater) => {
+    const resolveNext = (current) => (typeof updater === 'function' ? updater(current) : updater);
+    if (activePlanTargetKeyRef.current === contextKey) {
+      setter((current) => {
+        const next = resolveNext(current);
+        planContextRef.current[contextKey] = { ...(planContextRef.current[contextKey] || {}), [field]: next };
+        return next;
+      });
+      return;
+    }
+    const context = planContextRef.current[contextKey];
+    if (!context) return;
+    planContextRef.current[contextKey] = { ...context, [field]: resolveNext(context[field]) };
+    setPlanContextRevision((current) => current + 1);
+  };
   const getCurrentPlanContextState = () => ({
     currentPlanId,
     sampleFiles,
@@ -5569,6 +5587,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     planContextRef.current[activePlanTargetKey] = getCurrentPlanContextState();
     const nextKey = getPlanTargetKey(target);
     const nextState = planContextRef.current[nextKey] || createPlanContextState(target);
+    planContextRef.current[nextKey] = nextState;
+    activePlanTargetKeyRef.current = nextKey;
     setSelectedPlanTarget(target);
     setExpandedPlanGroups((current) => new Set(current).add(target.formType));
     applyPlanContextState(nextState);
@@ -5628,6 +5648,55 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       return nextVersion;
     });
   };
+  const createScopedPlanContext = (contextKey, planId = currentPlanId) => {
+    if (!planContextRef.current[contextKey]) {
+      planContextRef.current[contextKey] = { ...getCurrentPlanContextState(), currentPlanId: planId || currentPlanId };
+    }
+    const setField = (field, setter, updater) => setPlanContextField(contextKey, field, setter, updater);
+    const persistChat = () => {
+      const scopedPlanId = planId || planContextRef.current[contextKey]?.currentPlanId;
+      if (scopedPlanId && activePlanTargetKeyRef.current !== contextKey) {
+        dataStore.savePlanChat(scopedPlanId, planContextRef.current[contextKey]?.events || []);
+      }
+    };
+    const context = {
+      setRunning: (updater) => setField('running', setRunning, updater),
+      setTesting: (updater) => setField('testing', setTesting, updater),
+      setRightTab: (updater) => setField('rightTab', setRightTab, updater),
+      setPlanNodes: (updater) => setField('planNodes', setPlanNodes, updater),
+      setNodeRuntime: (updater) => setField('nodeRuntime', setNodeRuntime, updater),
+      setConnectionStates: (updater) => setField('connectionStates', setConnectionStates, updater),
+      setSampleFiles: (updater) => setField('sampleFiles', setSampleFiles, updater),
+      setResults: (updater) => setField('results', setResults, updater),
+      setExecutionRecords: (updater) => setField('executionRecords', setExecutionRecords, updater),
+      setConfirmed: (updater) => setField('confirmed', setConfirmed, updater),
+      setDraftPlanVersion: (updater) => setField('draftPlanVersion', setDraftPlanVersion, updater),
+      setSelectedPlanVersion: (updater) => setField('selectedPlanVersion', setSelectedPlanVersion, updater),
+      pushEvent: (event) => {
+        const row = { ...event, id: makeId(event.role) };
+        setField('events', setEvents, (current = []) => [...current, row]);
+        persistChat();
+        return row.id;
+      },
+      updateEvent: (idValue, patchValue) => {
+        setField('events', setEvents, (current = []) => current.map((item) => (item.id === idValue ? { ...item, ...patchValue } : item)));
+        persistChat();
+      },
+      setRuntimeForNodes: (nodes, state) => setField('nodeRuntime', setNodeRuntime, (current = {}) => ({
+        ...current,
+        ...Object.fromEntries(nodes.map((node) => [node.nodeId, state])),
+      })),
+      markDraft: () => {
+        const scopedState = planContextRef.current[contextKey] || {};
+        const nextVersion = scopedState.draftPlanVersion || getNextPlanVersion(scopedState.savedPlanVersions || savedPlanVersions);
+        context.setConfirmed(false);
+        context.setDraftPlanVersion(nextVersion);
+        context.setSelectedPlanVersion(nextVersion);
+      },
+      persistChat,
+    };
+    return context;
+  };
 
   useEffect(() => subscribeCatalog(() => {
     const snapshot = readUnifiedFlowNodeCatalog();
@@ -5653,20 +5722,26 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     input.style.height = `${Math.min(input.scrollHeight, 132)}px`;
   }, [agentInput]);
   useEffect(() => () => {
-    agentTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-    agentTimersRef.current = [];
+    agentTimersRef.current.forEach((timers) => timers.forEach((timer) => window.clearTimeout(timer)));
+    agentTimersRef.current.clear();
   }, []);
 
-  const clearAgentTimers = () => {
-    agentTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-    agentTimersRef.current = [];
+  const clearAgentTimers = (contextKey = activePlanTargetKeyRef.current) => {
+    const timers = agentTimersRef.current.get(contextKey);
+    if (!timers) return;
+    timers.forEach((timer) => window.clearTimeout(timer));
+    agentTimersRef.current.delete(contextKey);
   };
-  const scheduleAgentTimer = (callback, delay) => {
+  const scheduleAgentTimer = (callback, delay, contextKey = activePlanTargetKeyRef.current) => {
     const timer = window.setTimeout(() => {
-      agentTimersRef.current = agentTimersRef.current.filter((item) => item !== timer);
+      const timers = agentTimersRef.current.get(contextKey);
+      timers?.delete(timer);
+      if (timers?.size === 0) agentTimersRef.current.delete(contextKey);
       callback();
     }, delay);
-    agentTimersRef.current.push(timer);
+    const timers = agentTimersRef.current.get(contextKey) || new Set();
+    timers.add(timer);
+    agentTimersRef.current.set(contextKey, timers);
     return timer;
   };
 
@@ -5736,7 +5811,48 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       notify('请先上传或添加样例文件', 'error');
       return;
     }
-    clearAgentTimers();
+    const runContextKey = activePlanTargetKey;
+    const runPlan = ensureCurrentPlan();
+    planContextRef.current[runContextKey] = { ...getCurrentPlanContextState(), currentPlanId: runPlan.id };
+    const setRunField = (field, setter, updater) => setPlanContextField(runContextKey, field, setter, updater);
+    const setRunEvents = (updater) => setRunField('events', setEvents, updater);
+    const setRunPlanNodes = (updater) => setRunField('planNodes', setPlanNodes, updater);
+    const setRunNodeRuntime = (updater) => setRunField('nodeRuntime', setNodeRuntime, updater);
+    const setRunConnectionStates = (updater) => setRunField('connectionStates', setConnectionStates, updater);
+    const setRunSampleFiles = (updater) => setRunField('sampleFiles', setSampleFiles, updater);
+    const setRunResults = (updater) => setRunField('results', setResults, updater);
+    const setRunRunning = (updater) => setRunField('running', setRunning, updater);
+    const setRunConfirmed = (updater) => setRunField('confirmed', setConfirmed, updater);
+    const setRunRightTab = (updater) => setRunField('rightTab', setRightTab, updater);
+    const setRunDraftPlanVersion = (updater) => setRunField('draftPlanVersion', setDraftPlanVersion, updater);
+    const setRunSelectedPlanVersion = (updater) => setRunField('selectedPlanVersion', setSelectedPlanVersion, updater);
+    const persistRunChat = () => {
+      if (activePlanTargetKeyRef.current !== runContextKey) {
+        dataStore.savePlanChat(runPlan.id, planContextRef.current[runContextKey]?.events || []);
+      }
+    };
+    const pushRunEvent = (event) => {
+      const row = { ...event, id: makeId(event.role) };
+      setRunEvents((current = []) => [...current, row]);
+      persistRunChat();
+      return row.id;
+    };
+    const updateRunEvent = (idValue, patchValue) => {
+      setRunEvents((current = []) => current.map((item) => (item.id === idValue ? { ...item, ...patchValue } : item)));
+      persistRunChat();
+    };
+    const setRunRuntimeForNodes = (nodes, state) => setRunNodeRuntime((current = {}) => ({
+      ...current,
+      ...Object.fromEntries(nodes.map((node) => [node.nodeId, state])),
+    }));
+    const markRunPlanDraft = () => {
+      const context = planContextRef.current[runContextKey] || {};
+      const nextVersion = context.draftPlanVersion || getNextPlanVersion(context.savedPlanVersions || savedPlanVersions);
+      setRunConfirmed(false);
+      setRunDraftPlanVersion(nextVersion);
+      setRunSelectedPlanVersion(nextVersion);
+    };
+    clearAgentTimers(runContextKey);
     const agentPlan = createAgentDemoPlan(activePlanTarget, catalog);
     const { parser, adapter, splitter, extraction, iteration, storage } = agentPlan;
     const preFixNodes = [parser, splitter].filter(Boolean);
@@ -5746,25 +5862,25 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const finalNodes = agentPlan.nodes;
     const filesSnapshot = [...files];
     const sendingIds = new Set(filesSnapshot.map((file) => file.id));
-    setRunning(true);
-    setConfirmed(false);
-    setRightTab('处理方案');
-    setPlanNodes([]);
-    setResults([]);
-    setConnectionStates({});
-    setNodeRuntime({});
-    setSampleFiles((current) => {
+    setRunRunning(true);
+    setRunConfirmed(false);
+    setRunRightTab('处理方案');
+    setRunPlanNodes([]);
+    setRunResults([]);
+    setRunConnectionStates({});
+    setRunNodeRuntime({});
+    setRunSampleFiles((current) => {
       const currentIds = new Set(current.map((file) => file.id));
       const merged = [...filesSnapshot.filter((file) => !currentIds.has(file.id)), ...current];
       return merged.map((file) => (sendingIds.has(file.id) ? { ...file, status: '试跑中' } : file));
     });
-    pushEvent({ role: 'user', title: '发送样例文件', content: `已发送 ${filesSnapshot.map((file) => file.name).join('、')}，请生成${activePlanTarget.formType} ${activePlanTarget.fileFormat}的正式知识处理方案。`, status: 'done' });
+    pushRunEvent({ role: 'user', title: '发送样例文件', content: `已发送 ${filesSnapshot.map((file) => file.name).join('、')}，请生成${activePlanTarget.formType} ${activePlanTarget.fileFormat}的正式知识处理方案。`, status: 'done' });
 
     let cursor = 0;
     const agentDelay = (delay) => (delay <= 0 ? 0 : Math.max(350, Math.round(delay * 0.58)));
     const step = (delay, action) => {
       cursor += agentDelay(delay);
-      scheduleAgentTimer(action, cursor);
+      scheduleAgentTimer(action, cursor, runContextKey);
     };
 
     const visibleParams = (node) => node.params.filter((param) => isParamVisible(node, param)).slice(0, 4);
@@ -5781,7 +5897,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     };
     const activateRuntimeNodes = (nodes) => {
       const ids = new Set(nodes.map((node) => node.nodeId));
-      setPlanNodes((current) => current.map((node) => {
+      setRunPlanNodes((current) => current.map((node) => {
         const expanded = ids.has(node.nodeId);
         return {
           ...node,
@@ -5792,7 +5908,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     };
     const collapseRuntimeNodes = (nodes) => {
       const ids = new Set(nodes.map((node) => node.nodeId));
-      setPlanNodes((current) => current.map((node) => {
+      setRunPlanNodes((current) => current.map((node) => {
         if (ids.has(node.nodeId)) return collapseWorkbenchNode(node);
         if (!(node.innerNodes || []).some((innerNode) => ids.has(innerNode.nodeId))) return node;
         return {
@@ -5808,19 +5924,19 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       const nodeTitle = title.replace('节点', '');
       const nodeNames = nodes.map((node) => node.toolName).join('、');
       step(1800, () => {
-        markPlanDraft();
-        setPlanNodes(withExpandedNodes(allNodes));
-        setRuntimeForNodes(nodes, { status: 'building' });
-        buildEventId = pushEvent({ role: 'thought', title: `设计流程节点：${nodeTitle}`, content: `我会把${nodeTitle}放在当前处理链路中，并确认它与前后节点的职责边界。`, status: 'running' });
+        markRunPlanDraft();
+        setRunPlanNodes(withExpandedNodes(allNodes));
+        setRunRuntimeForNodes(nodes, { status: 'building' });
+        buildEventId = pushRunEvent({ role: 'thought', title: `设计流程节点：${nodeTitle}`, content: `我会把${nodeTitle}放在当前处理链路中，并确认它与前后节点的职责边界。`, status: 'running' });
       });
       step(2300, () => {
-        updateEvent(buildEventId, { status: 'done', content: `${nodeTitle}节点已加入方案。下一步需要确认节点配置。` });
-        setRuntimeForNodes(nodes, { status: 'selectingTool' });
-        selectEventId = pushEvent({ role: 'thought', title: `节点匹配：${nodeTitle}`, content: `候选依据：${nodeText} 匹配结果：${nodeNames}。`, status: 'running', kind: 'toolCall' });
+        updateRunEvent(buildEventId, { status: 'done', content: `${nodeTitle}节点已加入方案。下一步需要确认节点配置。` });
+        setRunRuntimeForNodes(nodes, { status: 'selectingTool' });
+        selectEventId = pushRunEvent({ role: 'thought', title: `节点匹配：${nodeTitle}`, content: `候选依据：${nodeText} 匹配结果：${nodeNames}。`, status: 'running', kind: 'toolCall' });
       });
       step(2300, () => {
-        updateEvent(selectEventId, { status: 'done', content: `已确认节点：${nodeNames}；所属流程节点：${nodeTitle}。` });
-        setRuntimeForNodes(nodes, { status: 'done' });
+        updateRunEvent(selectEventId, { status: 'done', content: `已确认节点：${nodeNames}；所属流程节点：${nodeTitle}。` });
+        setRunRuntimeForNodes(nodes, { status: 'done' });
       });
     };
     const configureFlowNode = (nodes, initialDelay = 0) => {
@@ -5830,18 +5946,18 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       const paramSummary = nodes.flatMap((node) => visibleParams(node).map((param) => param.label)).slice(0, 5).join('、');
       step(initialDelay, () => {
         activateRuntimeNodes(nodes);
-        setRuntimeForNodes(nodes, { status: 'configuring', visibleParamCount: 0 });
-        configEventId = pushEvent({ role: 'thought', title: `节点配置：${nodeNames}`, content: `配置依据：节点参数定义、样例分析结果、上游输出路径。配置项：${paramSummary || '无额外配置项'}。`, status: 'running', kind: 'toolCall' });
+        setRunRuntimeForNodes(nodes, { status: 'configuring', visibleParamCount: 0 });
+        configEventId = pushRunEvent({ role: 'thought', title: `节点配置：${nodeNames}`, content: `配置依据：节点参数定义、样例分析结果、上游输出路径。配置项：${paramSummary || '无额外配置项'}。`, status: 'running', kind: 'toolCall' });
       });
       [1, 2, 3, 4].forEach((count) => {
-        step(900, () => setRuntimeForNodes(nodes, { status: 'configuring', visibleParamCount: count }));
+        step(900, () => setRunRuntimeForNodes(nodes, { status: 'configuring', visibleParamCount: count }));
       });
       step(900, () => {
-        setRuntimeForNodes(nodes, { status: 'configured', visibleParamCount: 4 });
-        updateEvent(configEventId, { status: 'done', content: `节点配置完成：${nodeNames} 已形成当前方案中的 Step 执行契约。` });
+        setRunRuntimeForNodes(nodes, { status: 'configured', visibleParamCount: 4 });
+        updateRunEvent(configEventId, { status: 'done', content: `节点配置完成：${nodeNames} 已形成当前方案中的 Step 执行契约。` });
       });
       step(1100, () => {
-        setRuntimeForNodes(nodes, { status: 'done' });
+        setRunRuntimeForNodes(nodes, { status: 'done' });
         collapseRuntimeNodes(nodes);
       });
     };
@@ -5861,59 +5977,59 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     let executeEventId = '';
 
     step(800, () => {
-      analyzeEventId = pushEvent({ role: 'thought', title: '分析样例文件', content: `我先判断样例文件的类型、内容结构和${activePlanTarget.formType}处理目标，避免直接套用固定流程。`, status: 'running' });
+      analyzeEventId = pushRunEvent({ role: 'thought', title: '分析样例文件', content: `我先判断样例文件的类型、内容结构和${activePlanTarget.formType}处理目标，避免直接套用固定流程。`, status: 'running' });
     });
     step(2800, () => {
-      updateEvent(analyzeEventId, { status: 'done', content: `样例识别为${agentPlan.formatLabel}。${agentPlan.concern}` });
-      parseEventId = pushEvent({ role: 'thought', title: '识别文档结构', content: `我会优先保留当前格式里的有效结构信息，因为后续${agentPlan.objective}依赖这些结构。`, status: 'running' });
+      updateRunEvent(analyzeEventId, { status: 'done', content: `样例识别为${agentPlan.formatLabel}。${agentPlan.concern}` });
+      parseEventId = pushRunEvent({ role: 'thought', title: '识别文档结构', content: `我会优先保留当前格式里的有效结构信息，因为后续${agentPlan.objective}依赖这些结构。`, status: 'running' });
     });
     step(3200, () => {
-      updateEvent(parseEventId, { status: 'done', content: `结构识别完成：需要先解析文件，再做格式适配、内容切分，并通过迭代执行完成${activePlanTarget.formType}的逐项加工。` });
-      setSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '试跑中' } : file)));
-      queryEventId = pushEvent({ role: 'thought', title: '节点目录查询', content: '输入：节点状态=可用，分类=文档解析/文本分片/知识提取/系统节点；输出：候选节点清单。', status: 'running', kind: 'toolCall' });
+      updateRunEvent(parseEventId, { status: 'done', content: `结构识别完成：需要先解析文件，再做格式适配、内容切分，并通过迭代执行完成${activePlanTarget.formType}的逐项加工。` });
+      setRunSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '试跑中' } : file)));
+      queryEventId = pushRunEvent({ role: 'thought', title: '节点目录查询', content: '输入：节点状态=可用，分类=文档解析/文本分片/知识提取/系统节点；输出：候选节点清单。', status: 'running', kind: 'toolCall' });
     });
     step(3000, () => {
-      updateEvent(queryEventId, { status: 'done', content: `查询结果：命中 ${catalog.filter((node) => node.status === '可用').length} 个可用节点，其中包含系统节点和外部接入节点。` });
-      designEventId = pushEvent({ role: 'thought', title: '开始设计处理方案', content: '我会先生成主链路，再检查节点输出能否被后置节点直接消费。', status: 'running' });
+      updateRunEvent(queryEventId, { status: 'done', content: `查询结果：命中 ${catalog.filter((node) => node.status === '可用').length} 个可用节点，其中包含系统节点和外部接入节点。` });
+      designEventId = pushRunEvent({ role: 'thought', title: '开始设计处理方案', content: '我会先生成主链路，再检查节点输出能否被后置节点直接消费。', status: 'running' });
     });
     step(3300, () => {
-      updateEvent(designEventId, { status: 'done', content: `方案设计完成。先搭建${agentPlan.formatLabel}的解析、适配和切分主链路，再通过迭代执行完成${activePlanTarget.formType}的逐项加工。`, kind: 'flow', flowSteps: agentPlan.flowSteps });
+      updateRunEvent(designEventId, { status: 'done', content: `方案设计完成。先搭建${agentPlan.formatLabel}的解析、适配和切分主链路，再通过迭代执行完成${activePlanTarget.formType}的逐项加工。`, kind: 'flow', flowSteps: agentPlan.flowSteps });
     });
 
     buildFlowNode([parser], [parser], '文档解析节点', `候选节点=${parser?.toolName || '文件解析'}；选择原因=${agentPlan.parserReason}`);
     buildFlowNode([splitter], [parser, splitter].filter(Boolean), '文本分片节点', `候选节点=${splitter?.toolName || '文本分片'}；选择原因=${agentPlan.splitterReason}`);
 
     step(2200, () => {
-      checkEventId = pushEvent({ role: 'thought', title: '检查节点承接', content: '文本分片节点已确定，我会检查文档解析输出能否被分片节点直接消费，再决定是否继续添加后置节点。', status: 'running' });
+      checkEventId = pushRunEvent({ role: 'thought', title: '检查节点承接', content: '文本分片节点已确定，我会检查文档解析输出能否被分片节点直接消费，再决定是否继续添加后置节点。', status: 'running' });
     });
     step(7200, () => {
-      markPlanDraft();
-      setPlanNodes(preFixNodes);
-      setConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'error', reason: `${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块，节点之间缺少格式适配。` } });
-      updateEvent(checkEventId, { status: 'done', content: `发现适配问题：${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块。` });
-      issueAnalysisEventId = pushEvent({ role: 'thought', title: '正在分析适配问题', content: '我需要对比上游节点的实际返回和分片节点的参数要求，确认问题是字段命名不一致，还是缺少结构转换。', status: 'running' });
+      markRunPlanDraft();
+      setRunPlanNodes(preFixNodes);
+      setRunConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'error', reason: `${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块，节点之间缺少格式适配。` } });
+      updateRunEvent(checkEventId, { status: 'done', content: `发现适配问题：${parser?.toolName || '解析节点'}返回原始结构，${splitter?.toolName || '分片节点'}需要标准文本块。` });
+      issueAnalysisEventId = pushRunEvent({ role: 'thought', title: '正在分析适配问题', content: '我需要对比上游节点的实际返回和分片节点的参数要求，确认问题是字段命名不一致，还是缺少结构转换。', status: 'running' });
     });
     step(2800, () => {
-      updateEvent(issueAnalysisEventId, { status: 'done', content: `问题原因已确认：${activePlanTarget.fileFormat}解析输出需要先转换成平台可识别的标准文本块。` });
-      pushEvent({ role: 'thought', title: '输出解决方案', content: `解决方案：在${parser?.toolName || '解析节点'}和${splitter?.toolName || '分片节点'}之间插入${adapter?.toolName || '格式适配节点'}，生成 ${agentPlan.adapterOutput} 作为分片节点输入。`, status: 'done' });
+      updateRunEvent(issueAnalysisEventId, { status: 'done', content: `问题原因已确认：${activePlanTarget.fileFormat}解析输出需要先转换成平台可识别的标准文本块。` });
+      pushRunEvent({ role: 'thought', title: '输出解决方案', content: `解决方案：在${parser?.toolName || '解析节点'}和${splitter?.toolName || '分片节点'}之间插入${adapter?.toolName || '格式适配节点'}，生成 ${agentPlan.adapterOutput} 作为分片节点输入。`, status: 'done' });
     });
     step(1600, () => {
-      resolveEventId = pushEvent({ role: 'thought', title: '开始解决适配问题', content: `我会插入${adapter?.toolName || '格式适配节点'}，把解析结果转换成${splitter?.toolName || '分片节点'}可识别的数据结构。`, status: 'running' });
-      setConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'resolving', reason: `正在插入${adapter?.toolName || '格式适配节点'}解决结构适配问题。` } });
+      resolveEventId = pushRunEvent({ role: 'thought', title: '开始解决适配问题', content: `我会插入${adapter?.toolName || '格式适配节点'}，把解析结果转换成${splitter?.toolName || '分片节点'}可识别的数据结构。`, status: 'running' });
+      setRunConnectionStates({ [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(splitter))]: { status: 'resolving', reason: `正在插入${adapter?.toolName || '格式适配节点'}解决结构适配问题。` } });
     });
 
     buildFlowNode([adapter].filter(Boolean), adaptedNodes, '系统节点', `候选节点=${adapter?.toolName || '格式适配'}；选择原因=需要把解析输出转换为 ${agentPlan.adapterOutput}。`);
     configureFlowNode([splitter]);
 
     step(2000, () => {
-      setConnectionStates({
+      setRunConnectionStates({
         [getConnectionKey(getSemanticCategory(parser), getSemanticCategory(adapter))]: { status: 'resolved', reason: `${adapter?.toolName || '格式适配节点'}输出 ${agentPlan.adapterOutput}。` },
         [getConnectionKey(getSemanticCategory(adapter), getSemanticCategory(splitter))]: { status: 'resolved', reason: `${splitter?.toolName || '分片节点'}输入已改为 ${agentPlan.adapterOutput}。` },
       });
-      updateEvent(resolveEventId, { status: 'done', content: `适配问题已解决：${adapter?.toolName || '格式适配节点'}输出 ${agentPlan.adapterOutput}，${splitter?.toolName || '分片节点'}可直接引用。` });
+      updateRunEvent(resolveEventId, { status: 'done', content: `适配问题已解决：${adapter?.toolName || '格式适配节点'}输出 ${agentPlan.adapterOutput}，${splitter?.toolName || '分片节点'}可直接引用。` });
     });
     step(2200, () => {
-      setConnectionStates({});
+      setRunConnectionStates({});
     });
 
     if (extraction) buildFlowNode([extraction], extractionNodes, agentPlan.extractionTitle, `候选节点=${extraction.toolName}；选择原因=${agentPlan.extractionReason}`);
@@ -5921,35 +6037,36 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     buildFlowNode([storage].filter(Boolean), finalNodes, '系统节点', `候选节点=${storage?.toolName || '数据存储器'}；选择原因=需要把迭代执行聚合结果写入目标知识库。`);
 
     step(2200, () => {
-      setConnectionStates({});
-      recheckEventId = pushEvent({ role: 'thought', title: '检查完整方案', content: '我会重新检查修复后的节点顺序、输入输出映射和 Step 执行契约。', status: 'running' });
+      setRunConnectionStates({});
+      recheckEventId = pushRunEvent({ role: 'thought', title: '检查完整方案', content: '我会重新检查修复后的节点顺序、输入输出映射和 Step 执行契约。', status: 'running' });
     });
     step(6800, () => {
-      updateEvent(recheckEventId, { status: 'done', content: '方案检查通过：节点顺序、节点参数、变量承接和存储策略均可执行。' });
+      updateRunEvent(recheckEventId, { status: 'done', content: '方案检查通过：节点顺序、节点参数、变量承接和存储策略均可执行。' });
     });
     step(1800, () => {
-      executeEventId = pushEvent({ role: 'thought', title: '样例试跑', content: `输入：${filesSnapshot[0].name}；执行对象：最终处理方案；输出：每个节点的输入、输出和执行状态。`, status: 'running', kind: 'toolCall' });
+      executeEventId = pushRunEvent({ role: 'thought', title: '样例试跑', content: `输入：${filesSnapshot[0].name}；执行对象：最终处理方案；输出：每个节点的输入、输出和执行状态。`, status: 'running', kind: 'toolCall' });
     });
     finalNodes.forEach((node) => {
-      step(1700, () => setRuntimeForNodes([node], { status: 'running' }));
-      step(1200, () => setRuntimeForNodes([node], { status: 'success' }));
+      step(1700, () => setRunRuntimeForNodes([node], { status: 'running' }));
+      step(1200, () => setRunRuntimeForNodes([node], { status: 'success' }));
     });
     step(2000, () => {
-      setRuntimeForNodes(finalNodes, { status: 'success' });
-      updateEvent(executeEventId, { status: 'done', content: agentPlan.runSummary });
+      setRunRuntimeForNodes(finalNodes, { status: 'success' });
+      updateRunEvent(executeEventId, { status: 'done', content: agentPlan.runSummary });
     });
     step(1200, () => {
-      setRuntimeForNodes(finalNodes, { status: 'done' });
-      setPlanNodes((current) => current.map((node) => ({
+      setRunRuntimeForNodes(finalNodes, { status: 'done' });
+      setRunPlanNodes((current) => current.map((node) => ({
         ...node,
         expanded: false,
         innerNodes: isIterationNode(node) ? (node.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded: false })) : node.innerNodes,
       })));
-      setSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '已完成' } : file)));
-      setResults(filesSnapshot.map((file) => createSampleResultForPlan(file, finalNodes)));
-      pushEvent({ role: 'agent', title: '方案生成与样例执行完成', content: `已完成${activePlanTarget.formType} ${activePlanTarget.fileFormat}方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。`, status: 'done' });
-      setRunning(false);
-      notify('Agent 已完成方案生成和样例执行', 'success');
+      setRunSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '已完成' } : file)));
+      setRunResults(filesSnapshot.map((file) => createSampleResultForPlan(file, finalNodes)));
+      pushRunEvent({ role: 'agent', title: '方案生成与样例执行完成', content: `已完成${activePlanTarget.formType} ${activePlanTarget.fileFormat}方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。`, status: 'done' });
+      setRunRunning(false);
+      persistRunChat();
+      if (activePlanTargetKeyRef.current === runContextKey) notify('Agent 已完成方案生成和样例执行', 'success');
     });
   };
 
@@ -5959,32 +6076,37 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       notify('当前没有检测到需要修复的连接问题', 'info');
       return;
     }
-    clearAgentTimers();
-    setRunning(true);
-    pushEvent({ role: 'user', title: '处理流程连接问题', content: task.reason, status: 'done' });
-    const eventId = pushEvent({ role: 'thought', title: '修复节点承接', content: '正在读取当前流程节点顺序、输入来源和工具输出路径。', status: 'running', kind: 'toolCall' });
+    const contextKey = activePlanTargetKey;
+    const plan = ensureCurrentPlan();
+    planContextRef.current[contextKey] = { ...getCurrentPlanContextState(), currentPlanId: plan.id };
+    const scoped = createScopedPlanContext(contextKey, plan.id);
+    clearAgentTimers(contextKey);
+    scoped.setRunning(true);
+    scoped.pushEvent({ role: 'user', title: '处理流程连接问题', content: task.reason, status: 'done' });
+    const eventId = scoped.pushEvent({ role: 'thought', title: '修复节点承接', content: '正在读取当前流程节点顺序、输入来源和工具输出路径。', status: 'running', kind: 'toolCall' });
     scheduleAgentTimer(() => {
-    const repairResult = repairConnectionIssue(planNodes, failure);
-    const repaired = repairResult.nodes;
-    const repairTargets = repaired.filter((node) => repairResult.targetIds.includes(node.nodeId));
-    markPlanDraft();
-    setPlanNodes(repaired);
-    setRuntimeForNodes(repairTargets, { status: 'configuring', visibleParamCount: 2 });
-    updateEvent(eventId, { content: repairResult.actionText, status: 'running' });
-    setConnectionStates(task.fromCategory && task.toCategory ? { [`${task.fromCategory}->${task.toCategory}`]: { status: 'resolving', reason: failure.reason } } : {});
-    scheduleAgentTimer(() => {
-      setRuntimeForNodes(repairTargets, { status: 'configured', visibleParamCount: 4 });
-      setConnectionStates(task.fromCategory && task.toCategory ? { [`${task.fromCategory}->${task.toCategory}`]: { status: 'resolved', reason: failure.reason } } : {});
-      updateEvent(eventId, { content: '节点承接已修复：仅更新受影响节点，未重写其他节点参数。', status: 'done' });
-    }, 900);
-    scheduleAgentTimer(() => {
-      setConnectionStates({});
-      setRuntimeForNodes(repairTargets, { status: 'done' });
-      pushEvent({ role: 'agent', title: '智能修复完成', content: '当前方案已完成局部修复，可以点击测试重新试跑样例文件。', status: 'done' });
-      setRunning(false);
-      notify('智能修复完成', 'success');
-    }, 1800);
-  }, 900);
+      const repairResult = repairConnectionIssue(planNodes, failure);
+      const repaired = repairResult.nodes;
+      const repairTargets = repaired.filter((node) => repairResult.targetIds.includes(node.nodeId));
+      scoped.markDraft();
+      scoped.setPlanNodes(repaired);
+      scoped.setRuntimeForNodes(repairTargets, { status: 'configuring', visibleParamCount: 2 });
+      scoped.updateEvent(eventId, { content: repairResult.actionText, status: 'running' });
+      scoped.setConnectionStates(task.fromCategory && task.toCategory ? { [`${task.fromCategory}->${task.toCategory}`]: { status: 'resolving', reason: failure.reason } } : {});
+      scheduleAgentTimer(() => {
+        scoped.setRuntimeForNodes(repairTargets, { status: 'configured', visibleParamCount: 4 });
+        scoped.setConnectionStates(task.fromCategory && task.toCategory ? { [`${task.fromCategory}->${task.toCategory}`]: { status: 'resolved', reason: failure.reason } } : {});
+        scoped.updateEvent(eventId, { content: '节点承接已修复：仅更新受影响节点，未重写其他节点参数。', status: 'done' });
+      }, 900, contextKey);
+      scheduleAgentTimer(() => {
+        scoped.setConnectionStates({});
+        scoped.setRuntimeForNodes(repairTargets, { status: 'done' });
+        scoped.pushEvent({ role: 'agent', title: '智能修复完成', content: '当前方案已完成局部修复，可以点击测试重新试跑样例文件。', status: 'done' });
+        scoped.setRunning(false);
+        scoped.persistChat();
+        if (activePlanTargetKeyRef.current === contextKey) notify('智能修复完成', 'success');
+      }, 1800, contextKey);
+    }, 900, contextKey);
   };
 
   const smartConfigureNode = (node, instruction = '') => {
@@ -5992,36 +6114,41 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const configured = createSmartConfiguredNode(node, planNodes, configureInstruction);
     const nextNodes = planNodes.map((item) => item.nodeId === node.nodeId ? configured : item);
     const failure = getFirstPlanFailure(nextNodes);
-    clearAgentTimers();
-    setRunning(true);
-    markPlanDraft();
-    setRightTab('处理方案');
-    setConnectionStates({});
-    pushEvent({ role: 'user', title: `设置${node.toolName}参数`, content: configureInstruction, status: 'done' });
-    const understandEventId = pushEvent({ role: 'thought', title: `理解${node.toolName}参数需求`, content: '正在读取当前节点位置、上游输出和工具必填参数，准备写入可执行配置。', status: 'running' });
+    const contextKey = activePlanTargetKey;
+    const plan = ensureCurrentPlan();
+    planContextRef.current[contextKey] = { ...getCurrentPlanContextState(), currentPlanId: plan.id };
+    const scoped = createScopedPlanContext(contextKey, plan.id);
+    clearAgentTimers(contextKey);
+    scoped.setRunning(true);
+    scoped.markDraft();
+    scoped.setRightTab('处理方案');
+    scoped.setConnectionStates({});
+    scoped.pushEvent({ role: 'user', title: `设置${node.toolName}参数`, content: configureInstruction, status: 'done' });
+    const understandEventId = scoped.pushEvent({ role: 'thought', title: `理解${node.toolName}参数需求`, content: '正在读取当前节点位置、上游输出和工具必填参数，准备写入可执行配置。', status: 'running' });
     scheduleAgentTimer(() => {
-      updateEvent(understandEventId, { content: `已确认本次只处理「${node.toolName}」的参数配置，不重建其他工具节点。`, status: 'done' });
-      setRuntimeForNodes([configured], { status: 'configuring', visibleParamCount: 2 });
-    }, 700);
+      scoped.updateEvent(understandEventId, { content: `已确认本次只处理「${node.toolName}」的参数配置，不重建其他工具节点。`, status: 'done' });
+      scoped.setRuntimeForNodes([configured], { status: 'configuring', visibleParamCount: 2 });
+    }, 700, contextKey);
     let configEventId = '';
     scheduleAgentTimer(() => {
-      configEventId = pushEvent({ role: 'thought', title: `配置${node.toolName}参数`, content: '根据用户需求补齐输入来源、必填参数和取值路径，并写回当前工具节点。', status: 'running', kind: 'toolCall' });
-      setPlanNodes(nextNodes);
-      setRuntimeForNodes([configured], { status: 'configuring', visibleParamCount: 4 });
-    }, 1300);
+      configEventId = scoped.pushEvent({ role: 'thought', title: `配置${node.toolName}参数`, content: '根据用户需求补齐输入来源、必填参数和取值路径，并写回当前工具节点。', status: 'running', kind: 'toolCall' });
+      scoped.setPlanNodes(nextNodes);
+      scoped.setRuntimeForNodes([configured], { status: 'configuring', visibleParamCount: 4 });
+    }, 1300, contextKey);
     scheduleAgentTimer(() => {
-      updateEvent(configEventId, { content: `${node.toolName} 参数已写入，开始校验前后节点连通性。`, status: 'done' });
-      setRuntimeForNodes([configured], { status: 'configured', visibleParamCount: 4 });
+      scoped.updateEvent(configEventId, { content: `${node.toolName} 参数已写入，开始校验前后节点连通性。`, status: 'done' });
+      scoped.setRuntimeForNodes([configured], { status: 'configured', visibleParamCount: 4 });
       if (failure?.fromCategory && failure.toCategory) {
-        setConnectionStates({ [`${failure.fromCategory}->${failure.toCategory}`]: { status: 'error', reason: failure.reason } });
+        scoped.setConnectionStates({ [`${failure.fromCategory}->${failure.toCategory}`]: { status: 'error', reason: failure.reason } });
       }
-    }, 2300);
+    }, 2300, contextKey);
     scheduleAgentTimer(() => {
-      setRuntimeForNodes([configured], { status: 'done' });
-      pushEvent({ role: 'agent', title: failure ? '参数已配置，连通性待处理' : '参数配置完成', content: failure ? `已完成「${node.toolName}」参数配置，但方案仍存在连通性问题：${failure.reason}` : `已完成「${node.toolName}」参数配置，并校验通过前后节点的输入输出承接关系。`, status: 'done' });
-      setRunning(false);
-      notify(failure ? '参数已配置，仍需处理连通性' : 'Agent 已完成节点参数配置', failure ? 'warning' : 'success');
-    }, 3200);
+      scoped.setRuntimeForNodes([configured], { status: 'done' });
+      scoped.pushEvent({ role: 'agent', title: failure ? '参数已配置，连通性待处理' : '参数配置完成', content: failure ? `已完成「${node.toolName}」参数配置，但方案仍存在连通性问题：${failure.reason}` : `已完成「${node.toolName}」参数配置，并校验通过前后节点的输入输出承接关系。`, status: 'done' });
+      scoped.setRunning(false);
+      scoped.persistChat();
+      if (activePlanTargetKeyRef.current === contextKey) notify(failure ? '参数已配置，仍需处理连通性' : 'Agent 已完成节点参数配置', failure ? 'warning' : 'success');
+    }, 3200, contextKey);
   };
 
   const sendAgentInstruction = () => {
@@ -6052,18 +6179,23 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       pushEvent({ role: 'agent', title: '等待样例处理', content: '当前还没有可调整的处理方案。请先上传或选择样例文件。', status: 'done' });
       return;
     }
-    setRunning(true);
-    const eventId = pushEvent({ role: 'thought', title: '局部更新方案', content: '正在基于当前方案识别需要调整的节点，不重新生成完整链路。', status: 'running', kind: 'toolCall' });
-    clearAgentTimers();
+    const contextKey = activePlanTargetKey;
+    const plan = ensureCurrentPlan();
+    planContextRef.current[contextKey] = { ...getCurrentPlanContextState(), currentPlanId: plan.id };
+    const scoped = createScopedPlanContext(contextKey, plan.id);
+    scoped.setRunning(true);
+    const eventId = scoped.pushEvent({ role: 'thought', title: '局部更新方案', content: '正在基于当前方案识别需要调整的节点，不重新生成完整链路。', status: 'running', kind: 'toolCall' });
+    clearAgentTimers(contextKey);
     scheduleAgentTimer(() => {
       const next = createOptimizedNodes(planNodes, catalog);
-      markPlanDraft();
-      setPlanNodes(next);
-      updateEvent(eventId, { content: '更新结果：按当前 Higress 工具链调整节点承接；当前方案中的工具保持不变。', status: 'done' });
-      pushEvent({ role: 'agent', title: '方案已调整', content: '右侧流程已按现有方案局部更新，后续节点引用已同步到新的分片结果。', status: 'done' });
-      setRunning(false);
-      notify('Agent 已调整处理方案', 'success');
-    }, 1600);
+      scoped.markDraft();
+      scoped.setPlanNodes(next);
+      scoped.updateEvent(eventId, { content: '更新结果：按当前 Higress 工具链调整节点承接；当前方案中的工具保持不变。', status: 'done' });
+      scoped.pushEvent({ role: 'agent', title: '方案已调整', content: '右侧流程已按现有方案局部更新，后续节点引用已同步到新的分片结果。', status: 'done' });
+      scoped.setRunning(false);
+      scoped.persistChat();
+      if (activePlanTargetKeyRef.current === contextKey) notify('Agent 已调整处理方案', 'success');
+    }, 1600, contextKey);
   };
 
   const sendSampleFile = (file) => {
@@ -6119,36 +6251,40 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       return;
     }
     const plan = ensureCurrentPlan();
+    const contextKey = activePlanTargetKey;
+    planContextRef.current[contextKey] = { ...getCurrentPlanContextState(), currentPlanId: plan.id };
+    const scoped = createScopedPlanContext(contextKey, plan.id);
     const planVersion = dataStore.getPlanVersion(plan.id, selectedPlanVersion);
-    setTesting(true);
-    setRightTab('处理方案');
-    setResults([]);
-    setNodeRuntime({});
+    scoped.setTesting(true);
+    scoped.setRightTab('处理方案');
+    scoped.setResults([]);
+    scoped.setNodeRuntime({});
     const runVersion = selectedPlanVersion;
     const runVersionStatus = selectedVersionStatus;
+    const runFileFormat = activePlanTarget.fileFormat;
     const runFileIds = new Set(runFiles.map((item) => item.id));
-    setSampleFiles((current) => current.map((item) => (runFileIds.has(item.id) ? { ...item, status: '试跑中' } : item)));
+    scoped.setSampleFiles((current) => current.map((item) => (runFileIds.has(item.id) ? { ...item, status: '试跑中' } : item)));
     const runnableNodes = planNodes.filter((node) => node.enabled);
     const runPlanSnapshot = cloneWorkbenchNodes(runnableNodes);
-    clearAgentTimers();
+    clearAgentTimers(contextKey);
     runnableNodes.forEach((node, index) => {
       const startAt = 250 + index * 900;
       scheduleAgentTimer(() => {
-        setPlanNodes((current) => current.map((item) => ({
+        scoped.setPlanNodes((current) => current.map((item) => ({
           ...item,
           expanded: item.nodeId === node.nodeId,
           innerNodes: isIterationNode(item) ? (item.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded: item.nodeId === node.nodeId })) : item.innerNodes,
         })));
-        setNodeRuntime((current) => ({ ...current, [node.nodeId]: { status: 'running' } }));
-      }, startAt);
+        scoped.setNodeRuntime((current) => ({ ...current, [node.nodeId]: { status: 'running' } }));
+      }, startAt, contextKey);
       scheduleAgentTimer(() => {
-        setNodeRuntime((current) => ({ ...current, [node.nodeId]: { status: 'success' } }));
-      }, startAt + 650);
+        scoped.setNodeRuntime((current) => ({ ...current, [node.nodeId]: { status: 'success' } }));
+      }, startAt + 650, contextKey);
     });
     scheduleAgentTimer(() => {
       const nextResults = runFiles.map((item) => createSampleResultForPlan(item, runnableNodes));
       const runAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
-      setResults(nextResults);
+      scoped.setResults(nextResults);
       const nextExecutionRecords = Object.fromEntries(nextResults.map((result) => {
         const file = runFiles.find((item) => item.id === result.fileId) || { id: result.fileId, name: result.fileName };
         const runId = makeId('run');
@@ -6176,28 +6312,28 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
           sampleFileId: result.fileId,
           sampleFileName: result.fileName,
           sampleFile: { ...file, status: '已完成' },
-          fileFormat: activePlanTarget.fileFormat,
+          fileFormat: runFileFormat,
           planSnapshot: cloneWorkbenchNodes(runPlanSnapshot),
           planNodes: cloneWorkbenchNodes(runPlanSnapshot),
           result,
         });
         return [runId, record];
       }));
-      setExecutionRecords((current) => ({
+      scoped.setExecutionRecords((current) => ({
         ...current,
         ...nextExecutionRecords,
       }));
-      setSampleFiles((current) => current.map((item) => (runFileIds.has(item.id) ? { ...item, status: '已完成' } : item)));
-      setRuntimeForNodes(runnableNodes, { status: 'done' });
-      setPlanNodes((current) => current.map((node) => ({
+      scoped.setSampleFiles((current) => current.map((item) => (runFileIds.has(item.id) ? { ...item, status: '已完成' } : item)));
+      scoped.setRuntimeForNodes(runnableNodes, { status: 'done' });
+      scoped.setPlanNodes((current) => current.map((node) => ({
         ...node,
         expanded: false,
         innerNodes: isIterationNode(node) ? (node.innerNodes || []).map((innerNode) => ({ ...innerNode, expanded: false })) : node.innerNodes,
       })));
-      setRightTab('执行结果');
-      setTesting(false);
-      notify('方案测试通过', 'success');
-    }, 1100 + runnableNodes.length * 900);
+      scoped.setRightTab('执行结果');
+      scoped.setTesting(false);
+      if (activePlanTargetKeyRef.current === contextKey) notify('方案测试通过', 'success');
+    }, 1100 + runnableNodes.length * 900, contextKey);
   };
 
   const openSaveConfirm = () => {
@@ -6482,7 +6618,6 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                               <span className="scheme-format-icon"><SampleFormatIcon /></span>
                               <span className="sample-file-popover-name">
                                 <span>{file.name}</span>
-                                <em className={`sample-status-tag status-${file.status}`}>{file.status}</em>
                               </span>
                               <span className="sample-file-popover-actions">
                                 <button type="button" title="发送" disabled={running || testing} onClick={() => sendSampleFile(file)}><SendOutlined /></button>
@@ -6606,7 +6741,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                             <span className="scheme-format-icon"><SampleFormatIcon /></span>
                             <span className="sample-file-popover-name">
                               <span>{file.name}</span>
-                              <em className={`sample-status-tag status-${file.status}`}>{file.status}</em>
+                              {alreadyTested ? <em className="sample-status-tag status-已试跑">已试跑</em> : null}
                             </span>
                             <span className="sample-file-popover-actions">
                               <span title={alreadyTested ? '该文件已完成当前版本方案试跑。' : '执行'}>

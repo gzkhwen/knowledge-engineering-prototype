@@ -415,7 +415,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount }) 
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v7';
+  const demoVersion = 'workbench-plan-demo-v8';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
@@ -457,7 +457,7 @@ function ensureDemoPlanData() {
     { categoryId: 'cat-copy-review', formType: 'QA库', fileFormat: 'md', versions: ['1.0'] },
     { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
     { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'docx', versions: ['1.0'] },
-  ].map((item) => ({ planScope: item.planScope || 'category', ...item }));
+  ].map((item) => ({ planScope: item.planScope || 'category', creationMode: 'agent', ...item }));
 
   const routeKeys = new Set(definitions.map((item) => `${item.planScope}|${item.categoryId || ''}|${item.formType}|${item.fileFormat}`));
   const currentPlans = read(keys.plans, []);
@@ -488,6 +488,32 @@ function ensureDemoPlanData() {
     const nodes = demoNodeSets(definition.formType, definition.fileFormat);
     const sample = demoSampleFile(definition.fileFormat);
     plans.push(plan);
+    const seedExecution = ({ version, versionNodes, result, index, versionStatus }) => {
+      const isDraft = versionStatus === 'draft';
+      const runDay = Math.min(index + (isDraft ? 1 : 2), 9);
+      const runTime = isDraft ? '09:30:00' : '15:30:00';
+      const compactRunTime = isDraft ? '093000' : '153000';
+      const statusSlug = isDraft ? 'draft' : 'formal';
+      executions.push({
+        id: `demo-exec-${plan.id}-${version.replace('.', '-')}-${statusSlug}-${sample.id}`,
+        runId: `demo-run-${plan.id}-${version.replace('.', '-')}-${statusSlug}-${sample.id}`,
+        runLabel: `${version}${isDraft ? '草稿' : ''}-2026070${runDay}${compactRunTime}`,
+        runAt: `2026-07-0${runDay} ${runTime}`,
+        versionStatus,
+        planId: plan.id,
+        planVersionId: isDraft ? null : `demo-version-${plan.id}-${version.replace('.', '-')}`,
+        version,
+        sampleFileId: sample.id,
+        sampleFileName: sample.name,
+        sampleFile: sample,
+        fileFormat: definition.fileFormat,
+        planSnapshot: versionNodes,
+        planNodes: versionNodes,
+        result,
+        status: 'completed',
+        createdAt: `2026-07-0${runDay} ${runTime}`,
+      });
+    };
     definition.versions.forEach((version, index) => {
       const versionNodes = nodes.map((node) => ({ ...node }));
       const result = demoResult(sample, versionNodes, definition.formType, categoryName, version);
@@ -500,27 +526,11 @@ function ensureDemoPlanData() {
         results: [result],
         createdAt: `2026-07-0${Math.min(index + 1, 9)} 10:00`,
       });
-      const shouldSeedExecution = definition.versions.length > 1 && index === definition.versions.length - 1;
-      if (shouldSeedExecution) {
-        executions.push({
-          id: `demo-exec-${plan.id}-${version.replace('.', '-')}-${sample.id}`,
-          runId: `demo-run-${plan.id}-${version.replace('.', '-')}-${sample.id}`,
-          runLabel: `${version}-2026070${Math.min(index + 2, 9)}153000`,
-          runAt: `2026-07-0${Math.min(index + 2, 9)} 15:30:00`,
-          versionStatus: 'formal',
-          planId: plan.id,
-          planVersionId: `demo-version-${plan.id}-${version.replace('.', '-')}`,
-          version,
-          sampleFileId: sample.id,
-          sampleFileName: sample.name,
-          sampleFile: sample,
-          fileFormat: definition.fileFormat,
-          planSnapshot: versionNodes,
-          planNodes: versionNodes,
-          result,
-          status: 'completed',
-          createdAt: `2026-07-0${Math.min(index + 2, 9)} 15:30:00`,
-        });
+      if (definition.creationMode === 'agent' && index === 0) {
+        seedExecution({ version, versionNodes, result, index, versionStatus: 'draft' });
+      }
+      if (definition.versions.length > 1 && index === definition.versions.length - 1) {
+        seedExecution({ version, versionNodes, result, index, versionStatus: 'formal' });
       }
     });
     chats.push({

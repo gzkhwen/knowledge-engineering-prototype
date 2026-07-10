@@ -1224,6 +1224,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .sample-file-popover-name .status-未发送 { color: #64748b; background: #eef2f7; }
 .sample-file-popover-name .status-试跑中 { color: #c2410c; background: #ffedd5; }
 .sample-file-popover-name .status-已完成 { color: #15803d; background: #dcfce7; }
+.sample-file-popover-name .status-已试跑 { color: #15803d; background: #dcfce7; }
 .sample-file-popover-actions { display: none; align-items: center; gap: 4px; }
 .sample-file-popover-item:hover .sample-file-popover-actions { display: inline-flex; }
 .sample-file-popover-actions > span { display: grid; place-items: center; width: 26px; height: 26px; }
