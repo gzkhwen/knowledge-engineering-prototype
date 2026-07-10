@@ -1767,6 +1767,76 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 }
 .output-schema-panel { padding-bottom: 8px; }
 .binding-panel { margin-bottom: 0; }
+.persistence-panel { position: relative; gap: 10px; overflow: visible; }
+.persistence-head .switch-control {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  margin: 0;
+}
+.persistence-config-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: flex-start;
+  padding: 2px 0 4px;
+}
+.persistence-shape-field {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  color: #344054;
+  font-size: 13px;
+}
+.persistence-shape-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.persistence-shape-label > span:first-child { display: inline-flex; align-items: center; }
+.persistence-shape-field em { margin-right: 4px; color: #e5484d; font-style: normal; }
+.persistence-shape-field .select-field-wrap,
+.persistence-shape-field .select-field { width: 100%; }
+.persistence-shape-field .select-field {
+  height: 36px;
+  color: #111827;
+  background: #fff;
+  border: 1px solid #d3dbe8;
+}
+.storage-schema-trigger { position: relative; display: inline-flex; flex: 0 0 auto; }
+.storage-schema-link { height: auto; padding: 0; font-size: 12px; white-space: nowrap; }
+.storage-schema-popover {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  color: #1f2937;
+  background: #fff;
+  border: 1px solid #cbd8eb;
+  border-radius: 6px;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, .16);
+}
+.storage-schema-popover strong { font-size: 13px; }
+.storage-schema-popover pre {
+  max-height: 250px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  color: #1e3a5f;
+  background: #f6f9fd;
+  border-radius: 4px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.persistence-config-fields {
+  display: grid;
+  gap: 10px;
+  margin-top: 2px;
+}
+.persistence-config-fields .form-field { gap: 6px; }
+.persistence-output-tip {
+  margin: 0;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.45;
+}
 .standardization-code-editor {
   height: 285px;
   min-height: 285px;
@@ -1776,6 +1846,17 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   resize: none;
   white-space: pre;
 }
+.compact-code-editor {
+  height: 180px;
+  min-height: 180px;
+}
+.node-output-config {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+.node-output-actions { display: flex; justify-content: flex-start; }
 .binding-list { display: grid; gap: 10px; min-width: 0; overflow: visible; }
 .output-binding-table { min-width: 0; }
 .output-binding-table th { height: 34px; padding: 0 10px; }
@@ -1794,6 +1875,9 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .node-output-table th:nth-child(4) { width: 22%; }
 .node-output-table th:nth-child(5) { width: 20%; }
 .node-output-table th:nth-child(6) { width: 8%; }
+.system-output-row { background: #f6faff; }
+.system-output-row td { color: #415066; }
+.system-output-label { color: #667085; font-size: 12px; white-space: nowrap; }
 .exception-rule-table th:nth-child(1) { width: 14%; }
 .exception-rule-table th:nth-child(2) { width: 12%; }
 .exception-rule-table th:nth-child(3) { width: 22%; }

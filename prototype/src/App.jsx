@@ -1213,10 +1213,13 @@ function ToolManagementPage({ notify }) {
       category: createDraft.category,
       inputArtifacts: createDraft.inputArtifacts,
       inputs: createDraft.inputs,
-      outputs: createDraft.outputs,
+      outputs: buildDraftOutputs(createDraft),
       parameterMappingCode: createDraft.parameterMappingCode,
-      storageRules: createDraft.storageRules,
-      standardizationCode: createDraft.standardizationCode,
+      storageRules: buildPersistenceStorageRules(createDraft),
+      persistenceEnabled: createDraft.persistenceEnabled,
+      persistenceArtifactType: createDraft.persistenceArtifactType,
+      persistenceParseCode: createDraft.persistenceParseCode,
+      nodeOutputParseCode: createDraft.nodeOutputParseCode,
       indexConfig: createDraft.indexConfig,
       exceptionRules: createDraft.exceptionRules,
     };
@@ -1395,11 +1398,15 @@ function makeKnowledgeToolDraft(source, category) {
     name: source?.tool?.name || '',
     description: source?.tool?.description || '',
     category,
-    inputArtifacts: [],
-    inputs: [],
-    outputs: [],
-    storageRules: [],
-    standardizationCode: '',
+    inputArtifacts: [createEmptyInputArtifact()],
+    inputs: [createEmptyConfigParam()],
+    outputs: [createEmptyNodeOutput()],
+    persistenceEnabled: false,
+    persistenceArtifactType: '文本切片',
+    persistenceParseCode: '',
+    persistenceOutputDisplayName: '',
+    persistenceOutputDescription: '',
+    nodeOutputParseCode: '',
     parameterMappingCode: '',
     indexConfig: createIndexConfig(''),
     exceptionRules: createDefaultExceptionRules(),
@@ -1411,7 +1418,8 @@ function hasOutputSchema(source) {
 }
 
 function makeKnowledgeToolEditDraft(tool) {
-  const hasStorageRule = tool.storageContract?.enabled === false
+  const persistenceOutput = (tool.outputs || []).find((output) => output.isPersistenceOutput);
+  const persistenceEnabled = tool.storageContract?.enabled === false
     ? false
     : Boolean(
       tool.storageContract?.enabled
@@ -1431,9 +1439,13 @@ function makeKnowledgeToolEditDraft(tool) {
     category: tool.category || '未分类',
     inputArtifacts: normalizeInputArtifacts(tool.inputArtifacts || [], tool.inputs || []),
     inputs: normalizeDraftInputs(tool.inputs || []),
-    outputs: normalizeDraftOutputs(tool.outputs || []),
-    storageRules: hasStorageRule ? normalizeStorageRules(tool.storageContract, tool.outputs || []).slice(0, 1) : [],
-    standardizationCode: tool.storageContract?.standardizationCode || createDefaultStandardizationCode(tool.storageContract?.outputName || tool.outputs?.[0]?.name || ''),
+    outputs: normalizeDraftOutputs(tool.outputs || []).filter((output) => !output.isPersistenceOutput),
+    persistenceEnabled,
+    persistenceArtifactType: tool.storageContract?.artifactType || normalizeStorageRules(tool.storageContract, tool.outputs || [])[0]?.artifactType || '文本切片',
+    persistenceParseCode: tool.storageContract?.persistenceParseCode || tool.storageContract?.standardizationCode || '',
+    persistenceOutputDisplayName: persistenceOutput?.displayName || '',
+    persistenceOutputDescription: persistenceOutput?.description || '',
+    nodeOutputParseCode: tool.storageContract?.nodeOutputParseCode || tool.storageContract?.standardizationCode || createDefaultStandardizationCode(tool.outputs?.find((output) => !output.isPersistenceOutput)?.name || ''),
     parameterMappingCode: tool.parameterMappingCode || createDefaultParameterMappingCode(tool.inputs || []),
     indexConfig: normalizeIndexConfig(tool.storageContract, tool.outputs || []),
     exceptionRules: normalizeExceptionRules(tool.exceptionRules || []),
@@ -1448,9 +1460,9 @@ function applyKnowledgeToolDraft(tool, draft) {
     category: draft.category || tool.category,
     inputArtifacts: draft.inputArtifacts || tool.inputArtifacts || [],
     inputs: draft.inputs || tool.inputs,
-    outputs: draft.outputs || tool.outputs,
+    outputs: buildDraftOutputs(draft),
     parameterMappingCode: draft.parameterMappingCode || tool.parameterMappingCode || '',
-    storageContract: buildStorageContractFromRules(draft.storageRules || [], draft.indexConfig, tool.storageContract, draft.standardizationCode),
+    storageContract: buildStorageContractFromDraft(draft, tool.storageContract),
     exceptionRules: draft.exceptionRules || tool.exceptionRules || [],
     updatedAt: nowText(),
   };
@@ -1480,6 +1492,10 @@ function createEmptyInputArtifact() {
     sourceName: '',
     description: '',
   };
+}
+
+function createEmptyConfigParam() {
+  return { name: '', displayName: '', type: 'string', required: false, defaultValue: '', description: '', exposed: true };
 }
 
 function inferInputArtifactType(type = 'object') {
@@ -1576,6 +1592,32 @@ function createDefaultParameterMappingCode(inputs = []) {
 }
 
 const knowledgeShapeOptions = ['文本切片', '父子切片', 'QA对', '知识点'];
+
+const knowledgeShapeStorageSchemas = {
+  '文本切片': {
+    chunkId: 'string',
+    content: 'string',
+    sequence: 'number',
+    metadata: { documentId: 'string', sourceFileId: 'string', page: 'number' },
+  },
+  '父子切片': {
+    parent: { chunkId: 'string', content: 'string', metadata: { documentId: 'string' } },
+    children: [{ chunkId: 'string', parentChunkId: 'string', content: 'string', sequence: 'number' }],
+  },
+  'QA对': {
+    question: 'string',
+    answer: 'string',
+    sourceChunkIds: ['string'],
+    metadata: { documentId: 'string', sourceFileId: 'string' },
+  },
+  '知识点': {
+    knowledgeId: 'string',
+    title: 'string',
+    content: 'string',
+    sourceChunkIds: ['string'],
+    tags: ['string'],
+  },
+};
 
 function createOutputRule(outputName = '') {
   return {
@@ -1697,6 +1739,51 @@ function buildStorageContractFromRules(rules = [], indexConfig = createIndexConf
   };
 }
 
+function createPersistenceNodeOutput(artifactType = '', displayName = '', description = '') {
+  return {
+    name: 'persistentResult',
+    displayName,
+    type: 'array<object>',
+    codeOutput: 'persistenceResult',
+    description,
+    artifactType: artifactType || '原始结果',
+    sourceType: 'persistence',
+    isPersistenceOutput: true,
+  };
+}
+
+function createEmptyNodeOutput() {
+  return { name: '', displayName: '', type: 'string', codeOutput: '', description: '' };
+}
+
+function buildPersistenceStorageRules(draft) {
+  if (!draft.persistenceEnabled) return [];
+  return [{
+    ...createOutputRule('persistentResult'),
+    outputName: 'persistentResult',
+    fieldType: 'array<object>',
+    artifactType: draft.persistenceArtifactType || '',
+    nodeOutputRef: true,
+  }];
+}
+
+function buildDraftOutputs(draft) {
+  const outputs = (draft.outputs || []).filter((output) => !output.isPersistenceOutput);
+  return draft.persistenceEnabled ? [createPersistenceNodeOutput(draft.persistenceArtifactType, draft.persistenceOutputDisplayName, draft.persistenceOutputDescription), ...outputs] : outputs;
+}
+
+function buildStorageContractFromDraft(draft, fallback = {}) {
+  const rules = buildPersistenceStorageRules(draft);
+  return {
+    ...buildStorageContractFromRules(rules, draft.indexConfig, fallback, draft.persistenceParseCode || ''),
+    enabled: Boolean(draft.persistenceEnabled),
+    artifactType: draft.persistenceArtifactType || '原始结果',
+    standardizationCode: draft.persistenceParseCode || '',
+    persistenceParseCode: draft.persistenceParseCode || '',
+    nodeOutputParseCode: draft.nodeOutputParseCode || '',
+  };
+}
+
 const hasText = (value) => String(value ?? '').trim().length > 0;
 
 function getDraftConfigRows(draft) {
@@ -1735,14 +1822,13 @@ function getKnowledgeToolDraftStepError(draft, step) {
     return '';
   }
   if (step === 2) {
-    const rules = draft.storageRules || [];
     const outputs = draft.outputs || [];
-    if (!hasText(draft.standardizationCode)) return 'MCP工具结果解析代码不能为空';
-    for (const rule of rules) {
-      if (!hasText(rule.outputName)) return '存储规则代码返回不能为空';
-      if (!hasText(rule.artifactType)) return '存储规则知识形态不能为空';
+    if (draft.persistenceEnabled) {
+      if (!hasText(draft.persistenceArtifactType)) return '持久化存储知识形态不能为空';
+      if (!hasText(draft.persistenceParseCode)) return '持久化存储结果解析代码不能为空';
     }
-    if (outputs.length === 0) return '至少需要添加一个节点输出';
+    if (!hasText(draft.nodeOutputParseCode)) return '节点输出解析代码不能为空';
+    if (outputs.length === 0 && !draft.persistenceEnabled) return '至少需要添加一个节点输出';
     for (const output of outputs) {
       if (!hasText(output.name)) return '节点输出字段名称不能为空';
       if (!hasText(output.displayName)) return '节点输出显示名称不能为空';
@@ -1825,7 +1911,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   };
   const addConfigParam = () => setDraft((current) => ({
     ...current,
-    inputs: [...(current.inputs || []), { name: '', displayName: '', type: 'string', required: false, defaultValue: '', description: '', exposed: true }],
+    inputs: [...(current.inputs || []), createEmptyConfigParam()],
   }));
   const removeConfigParam = (index) => setDraft((current) => ({
     ...current,
@@ -1833,77 +1919,15 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   }));
   const addOutput = () => setDraft((current) => ({
     ...current,
-    outputs: [...current.outputs, { name: '', displayName: '', type: 'string', codeOutput: '', description: '' }],
+    outputs: [...current.outputs, createEmptyNodeOutput()],
   }));
   const removeOutput = (index) => {
-    setDraft((current) => ({
-      ...current,
-      outputs: current.outputs.filter((_, itemIndex) => itemIndex !== index),
-      storageRules: current.outputs[index]?.storageRuleId
-        ? (current.storageRules || []).map((rule) => (rule.id === current.outputs[index].storageRuleId ? { ...rule, nodeOutputRef: false } : rule))
-        : current.storageRules,
-    }));
+    setDraft((current) => ({ ...current, outputs: current.outputs.filter((_, itemIndex) => itemIndex !== index) }));
   };
-  const updateStorageRule = (ruleId, patch) => {
-    setDraft((current) => ({
-      ...current,
-      storageRules: (current.storageRules || []).map((rule) => (rule.id === ruleId ? { ...rule, ...patch } : rule)),
-      outputs: (current.outputs || []).map((output) => (
-        output.storageRuleId === ruleId
-          ? {
-            ...output,
-            ...(patch.fieldType ? { type: patch.fieldType } : {}),
-            ...(Object.prototype.hasOwnProperty.call(patch, 'outputName') ? { codeOutput: patch.outputName } : {}),
-          }
-          : output
-      )),
-    }));
-  };
-  const toggleStorageRuleOutputRef = (ruleId) => {
-    setDraft((current) => {
-      const rule = (current.storageRules || []).find((item) => item.id === ruleId);
-      if (!rule) return current;
-      const nextEnabled = !rule.nodeOutputRef;
-      return {
-        ...current,
-        storageRules: (current.storageRules || []).map((item) => (item.id === ruleId ? { ...item, nodeOutputRef: nextEnabled } : item)),
-        outputs: nextEnabled
-          ? [
-            ...(current.outputs || []).filter((output) => output.storageRuleId !== ruleId),
-            {
-              name: '',
-              displayName: '',
-              type: rule.fieldType || 'string',
-              codeOutput: rule.outputName || '',
-              description: '',
-              storageRuleId: ruleId,
-            },
-          ]
-          : (current.outputs || []).filter((output) => output.storageRuleId !== ruleId),
-      };
-    });
-  };
-  const updateStandardizationCode = (standardizationCode) => {
-    setDraft((current) => ({ ...current, standardizationCode }));
-  };
+  const updatePersistenceConfig = (patch) => setDraft((current) => ({ ...current, ...patch }));
   const updateParameterMappingCode = (parameterMappingCode) => {
     setDraft((current) => ({ ...current, parameterMappingCode }));
   };
-  const updateIndexConfig = (patch) => {
-    setDraft((current) => ({
-      ...current,
-      indexConfig: { ...createIndexConfig(current.storageRules?.[0]?.outputName || ''), ...(current.indexConfig || {}), ...patch },
-    }));
-  };
-  const addStorageRule = () => setDraft((current) => ({
-    ...current,
-    storageRules: (current.storageRules || []).length ? current.storageRules.slice(0, 1) : [createEmptyOutputRule()],
-  }));
-  const removeStorageRule = (ruleId) => setDraft((current) => ({
-    ...current,
-    storageRules: (current.storageRules || []).filter((rule) => rule.id !== ruleId),
-    outputs: (current.outputs || []).filter((output) => output.storageRuleId !== ruleId),
-  }));
   return (
     <Modal
       title={draft.mode === 'edit' ? '编辑流程节点' : '新建流程节点'}
@@ -1969,14 +1993,14 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
         {activeStep === 2 ? (
           <OutputStandardizationPanel
             source={selectedSource}
-            rules={draft.storageRules || []}
-            code={draft.standardizationCode || ''}
+            persistenceEnabled={Boolean(draft.persistenceEnabled)}
+            persistenceArtifactType={draft.persistenceArtifactType || ''}
+            persistenceCode={draft.persistenceParseCode || ''}
+            persistenceOutputDisplayName={draft.persistenceOutputDisplayName || ''}
+            persistenceOutputDescription={draft.persistenceOutputDescription || ''}
+            nodeOutputCode={draft.nodeOutputParseCode || ''}
             outputs={draft.outputs || []}
-            onCodeChange={updateStandardizationCode}
-            onAdd={addStorageRule}
-            onRemove={removeStorageRule}
-            onChange={updateStorageRule}
-            onToggleOutputRef={toggleStorageRuleOutputRef}
+            onPersistenceChange={updatePersistenceConfig}
             onOutputChange={updateParam}
             onOutputAdd={addOutput}
             onOutputRemove={removeOutput}
@@ -2197,86 +2221,101 @@ function RawMcpToolPreview({ source }) {
   );
 }
 
-function OutputStandardizationPanel({ source, rules, code, outputs, onCodeChange, onAdd, onRemove, onChange, onToggleOutputRef, onOutputChange, onOutputAdd, onOutputRemove }) {
+function OutputStandardizationPanel({ source, persistenceEnabled, persistenceArtifactType, persistenceCode, persistenceOutputDisplayName, persistenceOutputDescription, nodeOutputCode, outputs, onPersistenceChange, onOutputChange, onOutputAdd, onOutputRemove }) {
   const outputSchema = buildRawOutputJsonSchema(source?.tool?.outputs || []);
+  const [schemaPopoverOpen, setSchemaPopoverOpen] = useState(false);
+  const [schemaPopoverStyle, setSchemaPopoverStyle] = useState(null);
+  const schemaTriggerRef = useRef(null);
+  const schemaPopoverRef = useRef(null);
+  const selectedStorageSchema = knowledgeShapeStorageSchemas[persistenceArtifactType] || knowledgeShapeStorageSchemas['文本切片'];
+
+  useEffect(() => {
+    if (!schemaPopoverOpen) return undefined;
+    const updatePosition = () => {
+      const rect = schemaTriggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewportPadding = 16;
+      const width = Math.min(420, window.innerWidth - viewportPadding * 2);
+      const gap = 10;
+      const hasRoomOnRight = rect.right + gap + width <= window.innerWidth - viewportPadding;
+      const left = hasRoomOnRight
+        ? rect.right + gap
+        : Math.max(viewportPadding, rect.left - gap - width);
+      const top = Math.min(Math.max(viewportPadding, rect.top - 12), window.innerHeight - 290);
+      setSchemaPopoverStyle({ position: 'fixed', top: Math.max(viewportPadding, top), left, width, zIndex: 400 });
+    };
+    const closeOnOutsidePointer = (event) => {
+      if (!schemaTriggerRef.current?.contains(event.target) && !schemaPopoverRef.current?.contains(event.target)) setSchemaPopoverOpen(false);
+    };
+    updatePosition();
+    document.addEventListener('mousedown', closeOnOutsidePointer);
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsidePointer);
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [schemaPopoverOpen]);
   return (
     <section className="standardization-grid">
       <NodeDetailSchemaBlock title="原始MCP工具 Output Schema" schema={outputSchema} structured />
       <div className="standardization-right-stack">
-        <div className="schema-card standardization-panel code-editor-panel">
-          <div className="schema-head"><strong>MCP工具结果解析提取代码</strong></div>
-          <p className="plain-step-tip">通过代码对MCP工具的返回结果做标准化解析和提取，再做持久化存储和节点输出映射。</p>
-          <textarea
-            className="standardization-code-editor"
-            spellCheck={false}
-            value={code}
-            onChange={(event) => onCodeChange(event.target.value)}
-          />
-        </div>
-        <div className="schema-card standardization-panel binding-panel">
-          <div className="schema-head">
+        <div className="schema-card standardization-panel persistence-panel">
+          <div className="schema-head persistence-head">
             <strong>MCP工具结果持久化存储</strong>
-            {rules.length === 0 ? <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加绑定</button> : null}
+            <button type="button" className={`switch-control ${persistenceEnabled ? 'active' : ''}`} onClick={() => onPersistenceChange({ persistenceEnabled: !persistenceEnabled })} aria-label="是否配置持久化存储" aria-pressed={persistenceEnabled}>
+              <span />
+            </button>
           </div>
-          <p className="plain-step-tip">通过代码对MCP工具的返回结果做标准化提取和处理，并绑定知识形态，系统会按所选知识形态完成存储落库。</p>
-          <div className="binding-list">
-            <table className="data-table compact-table editable-schema-table output-binding-table">
-              <thead>
-                <tr>
-                  <th>代码返回</th>
-                  <th>类型</th>
-                  <th>知识形态</th>
-                  <th>节点输出引用</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rules.map((rule) => (
-                  <tr key={rule.id}>
-                    <td><input value={rule.outputName || ''} placeholder="例如 chunks 或 result.qaPairs" onChange={(event) => onChange(rule.id, { outputName: event.target.value })} /></td>
-                    <td>
-                      <SelectField value={rule.fieldType || 'string'} onChange={(fieldType) => onChange(rule.id, { fieldType })}>
-                        {outputFieldTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
-                      </SelectField>
-                    </td>
-                    <td>
-                      <SelectField value={rule.artifactType || ''} onChange={(artifactType) => onChange(rule.id, { artifactType })}>
-                        <option value="">请选择</option>
-                        {knowledgeShapeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-                      </SelectField>
-                    </td>
-                    <td>
-                      <button type="button" className={`switch-control ${rule.nodeOutputRef ? 'active' : ''}`} onClick={() => onToggleOutputRef(rule.id)} aria-pressed={Boolean(rule.nodeOutputRef)}>
-                        <span />
-                      </button>
-                    </td>
-                    <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(rule.id)}><DeleteOutlined /></button></td>
-                  </tr>
-                ))}
-                {rules.length === 0 ? <tr><td colSpan={5} className="empty-table-cell">暂无绑定</td></tr> : null}
-              </tbody>
-            </table>
-          </div>
+          <p className="plain-step-tip">如果需要对 MCP 工具的结果进行持久化存储，请设置 Output Schema 解析代码并设置存储的知识形态。</p>
+          {persistenceEnabled ? (
+            <div className="persistence-config-fields">
+              <Field label="结果解析代码" required>
+                <textarea className="standardization-code-editor compact-code-editor" spellCheck={false} value={persistenceCode} onChange={(event) => onPersistenceChange({ persistenceParseCode: event.target.value })} />
+              </Field>
+              <div className="persistence-config-row">
+                <label className="persistence-shape-field">
+                  <span className="persistence-shape-label">
+                    <span><em>*</em> 知识形态</span>
+                    <span ref={schemaTriggerRef} className="storage-schema-trigger">
+                      <button type="button" className="text-link storage-schema-link" onClick={() => setSchemaPopoverOpen((open) => !open)}>查看知识形态存储Schema</button>
+                    </span>
+                  </span>
+                  <SelectField value={persistenceArtifactType} onChange={(value) => onPersistenceChange({ persistenceArtifactType: value })}>
+                    {knowledgeShapeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </SelectField>
+                </label>
+                {schemaPopoverOpen && schemaPopoverStyle ? createPortal(
+                  <section ref={schemaPopoverRef} className="storage-schema-popover" style={schemaPopoverStyle} role="dialog">
+                    <strong>{persistenceArtifactType}存储 Schema</strong>
+                    <pre>{JSON.stringify(selectedStorageSchema, null, 2)}</pre>
+                  </section>,
+                  document.body,
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </div>
-        <NodeOutputTable
-          outputs={outputs}
-          onChange={onOutputChange}
-          onAdd={onOutputAdd}
-          onRemove={onOutputRemove}
-        />
+        <div className="schema-card standardization-panel code-editor-panel">
+          <div className="schema-head"><strong>节点输出</strong></div>
+          <p className="plain-step-tip">通过代码解析 MCP 工具返回结果，并定义为节点输出给下游节点使用。</p>
+          <Field label="解析代码" required>
+            <textarea className="standardization-code-editor compact-code-editor" spellCheck={false} value={nodeOutputCode} onChange={(event) => onPersistenceChange({ nodeOutputParseCode: event.target.value })} />
+          </Field>
+          <NodeOutputTable outputs={outputs} persistenceEnabled={persistenceEnabled} persistenceArtifactType={persistenceArtifactType} persistenceOutputDisplayName={persistenceOutputDisplayName} persistenceOutputDescription={persistenceOutputDescription} onPersistenceChange={onPersistenceChange} onChange={onOutputChange} onAdd={onOutputAdd} onRemove={onOutputRemove} />
+        </div>
       </div>
     </section>
   );
 }
 
-function NodeOutputTable({ outputs, onChange, onAdd, onRemove }) {
+function NodeOutputTable({ outputs, persistenceEnabled, persistenceArtifactType, persistenceOutputDisplayName, persistenceOutputDescription, onPersistenceChange, onChange, onAdd, onRemove }) {
   return (
-    <section className="schema-card standardization-panel node-output-panel">
-      <div className="schema-head">
-        <strong>节点输出</strong>
+    <section className="node-output-config">
+      <div className="node-output-actions">
         <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加节点输出</button>
       </div>
-      <p className="plain-step-tip">将提取代码处理后的结果作为节点输出给下游节点使用。</p>
       <table className="data-table compact-table editable-schema-table node-output-table">
         <thead>
           <tr>
@@ -2289,21 +2328,35 @@ function NodeOutputTable({ outputs, onChange, onAdd, onRemove }) {
           </tr>
         </thead>
         <tbody>
+          {persistenceEnabled ? (
+            <tr>
+              <td><input value="persistentResult" disabled /></td>
+              <td><input value={persistenceOutputDisplayName} onChange={(event) => onPersistenceChange({ persistenceOutputDisplayName: event.target.value })} /></td>
+              <td>
+                <SelectField value="array<object>" disabled>
+                  <option value="array<object>">array&lt;object&gt;</option>
+                </SelectField>
+              </td>
+              <td><input value="持久化存储结果" disabled /></td>
+              <td><input value={persistenceOutputDescription} onChange={(event) => onPersistenceChange({ persistenceOutputDescription: event.target.value })} /></td>
+              <td />
+            </tr>
+          ) : null}
           {outputs.map((output, index) => (
             <tr key={`output-${index}`}>
               <td><input value={output.name || ''} onChange={(event) => onChange('outputs', index, 'name', event.target.value)} /></td>
               <td><input value={output.displayName || ''} onChange={(event) => onChange('outputs', index, 'displayName', event.target.value)} /></td>
               <td>
-                <SelectField value={output.type || 'string'} onChange={(type) => onChange('outputs', index, 'type', type)} disabled={Boolean(output.storageRuleId)}>
+                <SelectField value={output.type || 'string'} onChange={(type) => onChange('outputs', index, 'type', type)}>
                   {outputFieldTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
                 </SelectField>
               </td>
-              <td><input value={output.codeOutput || output.path || ''} placeholder="例如 chunks 或 result.qaPairs" disabled={Boolean(output.storageRuleId)} onChange={(event) => onChange('outputs', index, 'codeOutput', event.target.value)} /></td>
+              <td><input value={output.codeOutput || output.path || ''} placeholder="例如 result.chunks" onChange={(event) => onChange('outputs', index, 'codeOutput', event.target.value)} /></td>
               <td><input value={output.description || ''} onChange={(event) => onChange('outputs', index, 'description', event.target.value)} /></td>
               <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(index)}><DeleteOutlined /></button></td>
             </tr>
           ))}
-          {outputs.length === 0 ? <tr><td colSpan={6} className="empty-table-cell">暂无节点输出</td></tr> : null}
+          {outputs.length === 0 && !persistenceEnabled ? <tr><td colSpan={6} className="empty-table-cell">暂无节点输出</td></tr> : null}
         </tbody>
       </table>
     </section>
@@ -2704,7 +2757,6 @@ function NodeInputMappingDetail({ tool, rawSource }) {
 }
 
 function NodeOutputMappingDetail({ tool, rawSource }) {
-  const storageRules = normalizeStorageRules(tool.storageContract, tool.outputs || []);
   const outputRows = (tool.outputs || []).map((output) => [
     output.name || '-',
     output.displayName || '-',
@@ -2712,12 +2764,11 @@ function NodeOutputMappingDetail({ tool, rawSource }) {
     output.codeOutput || output.path || output.name || '-',
     output.description || '-',
   ]);
-  const storageRows = storageRules.map((rule) => [
-    rule.outputName || '-',
-    rule.fieldType || 'string',
-    rule.artifactType || '-',
-    rule.nodeOutputRef ? '是' : '否',
-  ]);
+  const persistenceEnabled = Boolean(tool.storageContract?.enabled);
+  const storageRows = persistenceEnabled ? [[
+    tool.storageContract?.artifactType || '-',
+    '持久化存储结果（自动作为节点输出）',
+  ]] : [];
   const outputSchema = buildRawOutputJsonSchema(rawSource?.tool?.outputs || []);
   return (
     <section className="node-detail-section">
@@ -2725,19 +2776,24 @@ function NodeOutputMappingDetail({ tool, rawSource }) {
       <div className="node-detail-linear">
         <NodeDetailSchemaBlock title="原始MCP工具 Output Schema" schema={outputSchema} structured />
         <NodeDetailCodeBlock
-          title="MCP工具结果解析提取代码"
-          tip="通过代码对MCP工具的返回结果做标准化解析和提取，再做持久化存储和节点输出映射。"
-          code={tool.storageContract?.standardizationCode || ''}
+          title="MCP工具结果持久化存储"
+          tip={persistenceEnabled ? '已开启持久化存储；解析结果会自动作为节点输出。' : '未开启 MCP 工具结果持久化存储。'}
+          code={tool.storageContract?.persistenceParseCode || tool.storageContract?.standardizationCode || ''}
         />
         <NodeMappingSubTable
-          title="MCP工具结果持久化存储"
-          tip="通过代码对MCP工具的返回结果做标准化提取和处理，并绑定知识形态，系统会按所选知识形态完成存储落库。"
-          columns={['代码返回', '类型', '知识形态', '节点输出引用']}
+          title="持久化存储配置"
+          tip="持久化存储仅需指定知识形态，结果自动提供给下游节点。"
+          columns={['知识形态', '节点输出']}
           rows={storageRows}
+        />
+        <NodeDetailCodeBlock
+          title="节点输出解析代码"
+          tip="通过代码从 MCP 工具返回结果中解析节点输出。"
+          code={tool.storageContract?.nodeOutputParseCode || tool.storageContract?.standardizationCode || ''}
         />
         <NodeMappingSubTable
           title="节点输出"
-          tip="将提取代码处理后的结果作为节点输出给下游节点使用。"
+          tip="配置节点输出字段，供下游节点使用。"
           columns={['字段名称', '显示名称', '类型', '代码返回', '说明']}
           rows={outputRows}
         />
@@ -5351,7 +5407,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const createPlanContextState = (target) => {
     const route = buildPlanRoute(target);
     let { plan, versions } = dataStore.getPlanWithVersionsByRoute(route);
-    if (isDirectKnowledgePdfTarget(target) && plan && versions.length === 0) {
+    if (plan && versions.length === 0) {
       dataStore.discardUnsavedPlan(plan.id);
       plan = null;
       versions = [];
@@ -5893,7 +5949,14 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     pushRunEvent({ role: 'user', title: '发送样例文件', content: `已发送 ${filesSnapshot.map((file) => file.name).join('、')}，请生成${activePlanTarget.formType} ${activePlanTarget.fileFormat}的正式知识处理方案。`, status: 'done' });
 
     let cursor = 0;
-    const agentDelay = (delay) => (delay <= 0 ? 0 : Math.max(350, Math.round(delay * 0.58)));
+    const isFastOpeningKnowledgePdfDemo = category?.id === 'cat-open-account'
+      && activePlanTarget.formType === '知识点'
+      && activePlanTarget.fileFormat === 'pdf';
+    const agentDelay = (delay) => {
+      if (delay <= 0) return 0;
+      if (isFastOpeningKnowledgePdfDemo) return Math.max(120, Math.round(delay * 0.13));
+      return Math.max(350, Math.round(delay * 0.58));
+    };
     const step = (delay, action) => {
       cursor += agentDelay(delay);
       scheduleAgentTimer(action, cursor, runContextKey);

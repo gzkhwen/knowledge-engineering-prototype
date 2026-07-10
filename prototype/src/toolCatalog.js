@@ -186,10 +186,12 @@ function createStorageContract({
   recallJoinField = '',
   indexConfig = null,
   standardizationCode = '',
+  persistenceParseCode = '',
+  nodeOutputParseCode = '',
   note = '',
   rules = [],
 } = {}) {
-  return { enabled, outputName, artifactType, storageTargetType, storageType: storageTargetType, esAddress, esIndex, objectStorageAddress, objectStoragePath, knowledgeBase, database, directory, writeMode, indexEnabled, indexSource, indexField, recallSource, recallField, indexFields, filterFields, indexJoinField, recallJoinField, indexConfig, standardizationCode, note, rules };
+  return { enabled, outputName, artifactType, storageTargetType, storageType: storageTargetType, esAddress, esIndex, objectStorageAddress, objectStoragePath, knowledgeBase, database, directory, writeMode, indexEnabled, indexSource, indexField, recallSource, recallField, indexFields, filterFields, indexJoinField, recallJoinField, indexConfig, standardizationCode, persistenceParseCode, nodeOutputParseCode, note, rules };
 }
 
 function normalizeStorageContract(contract) {
@@ -1179,9 +1181,9 @@ export function createKnowledgeToolFromRaw(source, overrides = {}) {
     outputs: hasOverride('outputs') ? overrides.outputs : (rawTool.outputs || defaultToolOutputs(rawTool.name || '')),
     parameterMappingCode: hasOverride('parameterMappingCode') ? overrides.parameterMappingCode : '',
     storageContract: createStorageContract({
-      enabled: Boolean(overrides.storageRules?.length),
-      outputName: overrides.storageRules?.[0]?.outputName || rawTool.outputs?.[0]?.name || '',
-      artifactType: overrides.storageRules?.[0]?.artifactType || '原始结果',
+      enabled: Boolean(overrides.persistenceEnabled),
+      outputName: overrides.storageRules?.[0]?.outputName || '',
+      artifactType: overrides.persistenceArtifactType || '原始结果',
       storageTargetType: overrides.storageRules?.[0]?.storageTargetType || 'Elasticsearch',
       esAddress: overrides.storageRules?.[0]?.esAddress || 'http://es.internal:9200',
       esIndex: overrides.storageRules?.[0]?.esIndex || '',
@@ -1200,7 +1202,9 @@ export function createKnowledgeToolFromRaw(source, overrides = {}) {
       indexJoinField: overrides.indexConfig?.indexJoinField || '',
       recallJoinField: overrides.indexConfig?.recallJoinField || '',
       indexConfig: overrides.indexConfig || null,
-      standardizationCode: overrides.standardizationCode || '',
+      standardizationCode: overrides.persistenceParseCode || '',
+      persistenceParseCode: overrides.persistenceParseCode || '',
+      nodeOutputParseCode: overrides.nodeOutputParseCode || '',
       rules: overrides.storageRules || [],
       note: overrides.storageNote || '创建后可在工具详情中继续完善结果存储设置。',
     }),
