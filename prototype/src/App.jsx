@@ -5697,6 +5697,12 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const visibleProblems = running || !planNodes.length ? [] : planProblems;
   const canEdit = !running && !testing;
   const canSave = canEdit && planNodes.length > 0 && hasUnsavedDraft && visibleProblems.length === 0;
+  const latestSavedPlanVersion = sortPlanVersionsDesc(savedPlanVersions)[0] || null;
+  const canRestoreHistoricalVersion = canEdit
+    && !hasUnsavedDraft
+    && planNodes.length > 0
+    && savedPlanVersions.includes(selectedPlanVersion)
+    && selectedPlanVersion !== latestSavedPlanVersion;
   const selectedVersionStatus = hasUnsavedDraft ? 'draft' : 'formal';
   const hasAgentTask = Boolean(agentTask);
   const canStopAgent = running || testing;
@@ -6486,6 +6492,24 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     setSaveConfirmVersion(selectedPlanVersion);
   };
 
+  const restoreSelectedVersionAsDraft = () => {
+    if (!canRestoreHistoricalVersion) return;
+    const snapshot = versionSnapshots[selectedPlanVersion];
+    if (!snapshot) return;
+    const restoredFromVersion = selectedPlanVersion;
+    const nextVersion = getNextPlanVersion(savedPlanVersions);
+    setPlanNodes(collapseWorkbenchNodes(cloneWorkbenchNodes(snapshot.planNodes || [])));
+    setResults([]);
+    setConnectionStates({});
+    setNodeRuntime({});
+    setDraftPlanVersion(nextVersion);
+    setSelectedPlanVersion(nextVersion);
+    setConfirmed(false);
+    setRightTab('处理方案');
+    setPlanRunPopoverOpen(false);
+    notify(`已基于 V${restoredFromVersion} 创建 V${nextVersion} 草稿`, 'success');
+  };
+
   const savePlan = (versionToSave) => {
     const plan = ensureCurrentPlan();
     const snapshot = createVersionSnapshot();
@@ -6860,7 +6884,6 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
             ) : rightTab === '执行结果' ? <ResultPreview executionRecords={executionRecords} /> : <KnowledgeResultPreview formType={activePlanTarget.formType} executionRecords={executionRecords} />}
             {rightTab === '处理方案' && planNodes.length ? (
               <div className="plan-actions">
-                {visibleProblems.length ? <div className="error-line">当前方案存在 {visibleProblems.length} 个校验问题，请处理后保存。</div> : null}
                 <div className="plan-run-wrap">
                   <button type="button" className="secondary" disabled={running || testing} onClick={() => { setSamplePopoverOpen(false); setPlanRunPopoverOpen((current) => !current); }}>{testing ? '试跑中' : '方案试跑'}</button>
                   {planRunPopoverOpen ? (
@@ -6896,7 +6919,14 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                     </div>
                   ) : null}
                 </div>
-                <button type="button" className="primary" disabled={!canSave} onClick={openSaveConfirm}>保存方案</button>
+                <button
+                  type="button"
+                  className="primary plan-save-button"
+                  disabled={canRestoreHistoricalVersion ? false : !canSave}
+                  onClick={canRestoreHistoricalVersion ? restoreSelectedVersionAsDraft : openSaveConfirm}
+                >
+                  {canRestoreHistoricalVersion ? '恢复为新草稿' : '保存方案'}
+                </button>
               </div>
             ) : null}
           </aside>
