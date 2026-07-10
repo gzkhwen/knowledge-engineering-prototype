@@ -292,16 +292,14 @@ function demoNodeSets(formType, fileFormat, categoryId = '') {
     md: { toolId: 'ke-idp-deepseek-ocr', toolName: 'DeepSeek文档解析', category: '文档解析' },
   };
   const parser = parserNodes[fileFormat] || parserNodes.pdf;
-  const adapter = { toolId: 'system-code', toolName: '代码执行器', category: '系统节点' };
   const splitter = { toolId: 'ke-idp-markdown-chunk', toolName: 'Markdown结构化分块', category: '文本分片' };
   const iteration = { toolId: 'system-iteration', toolName: '迭代执行', category: '系统节点' };
-  const storage = { toolId: 'system-storage', toolName: '数据存储器', category: '系统节点' };
   if (categoryId === 'cat-wealth-fund' && formType === '知识点' && fileFormat === 'pdf') {
-    return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration, storage];
+    return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration];
   }
-  if (formType === '切片库') return [parser, adapter, splitter, iteration, storage];
-  if (formType === 'QA库') return [parser, adapter, splitter, { toolId: 'qa-extractor', toolName: 'QA提取', category: '知识提取' }, iteration, storage];
-  return [parser, adapter, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration, storage];
+  if (formType === '切片库') return [parser, splitter];
+  if (formType === 'QA库') return [parser, splitter, { toolId: 'qa-extractor', toolName: 'QA提取', category: '知识提取' }];
+  return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration];
 }
 
 function demoSampleFile(fileFormat, seedName) {
@@ -339,12 +337,6 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
     { knowledgePointId: 'kp-002', title: '备案条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', tags: ['办理条件', '备案流程'], sourceChunkIds: ['chunk-002'] },
   ];
   const getRunPayload = (node, index) => {
-    if (index === nodes.length - 1) {
-      return {
-        outputPath: 'data.storageRef',
-        outputFull: { data: { storageRef: `es://knowledge-demo/${slugText(categoryName || 'fallback')}/${slugText(formType)}/${file.type.toLowerCase()}`, storedCount: formType === 'QA库' ? 18 : formType === '知识点' ? 24 : 42 } },
-      };
-    }
     if (isFundKnowledgePdf && node.toolName === 'MinerU版面解析') return { outputPath: 'documentParseResult', outputFull: { documentParseResult: { pageCount: 26, titleCount: 38, tableCount: 6, markdownReady: true } } };
     if (node.toolName === 'Markdown结构化分块') return { outputPath: 'textChunkResult', outputFull: { textChunkResult: sliceItems, stats: { chunkCount: isFundKnowledgePdf ? 18 : sliceItems.length } } };
     if (node.toolName === 'QA提取') return { outputPath: 'qaResult', outputFull: { qaResult: qaItems, stats: { qaCount: qaItems.length } } };
@@ -388,14 +380,14 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
     md: 'Markdown文档',
   };
   const targetNames = {
-    切片库: '稳定切片并写入切片库',
-    QA库: '抽取标准问答并写入QA库',
-    知识点: '提取知识点、打标并写入知识点库',
+    切片库: '生成稳定切片结果',
+    QA库: '抽取标准问答结果',
+    知识点: '提取并打标知识点结果',
   };
   const finalNodeNames = {
-    切片库: '切片入库',
-    QA库: 'QA入库',
-    知识点: '知识点入库',
+    切片库: '切片结果',
+    QA库: 'QA结果',
+    知识点: '知识点结果',
   };
   const fileConcerns = {
     pdf: '需要保留页码、标题层级和跨页段落，避免把页眉页脚写入正文。',
@@ -411,10 +403,10 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
       { role: 'agent', title: '处理方案生成助手', content: '请发送基金产品说明书样例，我会识别文档版式与章节结构，并生成可复用的知识点处理方案。' },
       { role: 'user', title: '发送样例文件', content: `已发送${fileName}，请提取基金产品相关知识点并保留来源信息。` },
       { role: 'thought', title: '分析样例文件', content: '该文件为基金产品说明书，包含基金概况、投资范围、风险收益特征、申购赎回与费用等章节。' },
-      { role: 'thought', title: '节点目录查询', content: '已匹配 MinerU 版面解析、Markdown结构化分块、知识点提取、迭代执行和数据存储器。', kind: 'toolCall' },
-      { role: 'thought', title: '开始设计处理方案', content: '方案采用 MinerU版面解析 -> Markdown结构化分块 -> 知识点提取 -> 迭代执行 -> 数据存储器的处理链路。' },
-      { role: 'thought', title: '配置迭代执行', content: '迭代体依次完成知识点字段整理、知识点打标和最终入库记录组装。', kind: 'toolCall' },
-      { role: 'thought', title: '检查节点承接', content: '已确认分块结果、知识点数组、迭代打标结果与入库字段可以稳定承接。' },
+      { role: 'thought', title: '节点目录查询', content: '已匹配 MinerU 版面解析、Markdown结构化分块、知识点提取、迭代执行和知识点打标。', kind: 'toolCall' },
+      { role: 'thought', title: '开始设计处理方案', content: '方案采用 MinerU版面解析 -> Markdown结构化分块 -> 知识点提取 -> 迭代执行的处理链路。' },
+      { role: 'thought', title: '配置迭代执行', content: '迭代体逐条对知识点执行知识点打标。', kind: 'toolCall' },
+      { role: 'thought', title: '检查节点承接', content: '已确认分块结果、知识点数组与迭代打标结果可以稳定承接。' },
       { role: 'user', title: '试跑样例', content: '请使用当前样例试跑，重点检查风险提示、申购赎回规则和适当性要求是否完整。' },
       { role: 'thought', title: '样例试跑', content: '已完成 26 页版面解析、18 个结构化分块、24 条知识点的提取与打标。', kind: 'toolCall' },
       { role: 'agent', title: '方案生成完成', content: '已完成方案搭建、参数配置和样例试跑，可保存为 1.0 正式版本。' },
@@ -427,13 +419,13 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
     { role: 'thought', title: '分析样例文件', content: `样例类型识别为${formatNames[fileFormat] || fileFormat}。${fileConcerns[fileFormat] || '需要先判断文件结构和正文边界。'}` },
     { role: 'thought', title: '识别处理目标', content: `目标是${targetNames[formType]}，因此方案不能只完成解析，还需要保证后续节点输出能被${finalNodeNames[formType]}稳定消费。` },
     { role: 'thought', title: '查询可用节点', content: `已按${fileFormat}文件解析、文本分片、知识提取和系统节点进行匹配，准备生成第一版流程。`, kind: 'toolCall' },
-    { role: 'agent', title: '初步方案建议', content: `我建议先建立“解析 -> 清洗/适配 -> 分片 -> ${formType === '切片库' ? '入库' : formType === 'QA库' ? '问答抽取 -> 入库' : '知识点提取 -> 知识点打标 -> 入库'}”的主链路。` },
+    { role: 'agent', title: '初步方案建议', content: `我建议先建立“解析 -> 分片 -> ${formType === '切片库' ? '切片结果' : formType === 'QA库' ? '问答抽取' : '知识点提取 -> 知识点打标'}”的主链路。` },
     { role: 'user', title: '补充处理要求', content: `不要直接套固定流程。${fileFormat === 'xlsx' ? '表格里有些字段为空，需要先做字段标准化。' : fileFormat === 'pptx' ? '课件里有很多页标题，页面顺序要保留。' : fileFormat === 'md' ? '标题层级要保留，代码块不要拆散。' : '需要保留来源位置，后续方便追溯。'}` },
-    { role: 'thought', title: '调整流程设计', content: `已根据补充要求调整节点顺序：解析后先增加${fileFormat === 'pdf' ? 'PDF段落清洗' : fileFormat === 'docx' ? 'Word目录归并' : fileFormat === 'xlsx' ? '表格字段映射' : fileFormat === 'pptx' ? '页面文本整理' : fileFormat === 'txt' ? '工单文本规范化' : 'Markdown层级整理'}，再进入后续处理节点。`, kind: 'toolCall' },
-    { role: 'thought', title: '配置节点参数', content: `已补齐关键参数：样例文件输入、上游输出路径、分片策略、${formType === 'QA库' ? '问答抽取规则' : formType === '知识点' ? '知识点提取和打标策略' : '切片入库策略'}。`, kind: 'toolCall' },
+    { role: 'thought', title: '调整流程设计', content: '已根据补充要求调整解析与分片参数，后续节点可直接承接结构化结果。', kind: 'toolCall' },
+    { role: 'thought', title: '配置节点参数', content: `已补齐关键参数：样例文件输入、上游输出路径、分片策略、${formType === 'QA库' ? '问答抽取规则' : formType === '知识点' ? '知识点提取和打标策略' : '切片规则'}。`, kind: 'toolCall' },
     { role: 'thought', title: '检查节点承接', content: `已检查每个节点的输入输出承接关系，当前链路可以从${fileName}执行到${finalNodeNames[formType]}。` },
     { role: 'user', title: '试跑样例', content: `用这个样例先试跑一次，重点看是否能稳定生成${formType === '切片库' ? '切片结果' : formType === 'QA库' ? '问答结果' : '知识点和标签结果'}。` },
-    { role: 'thought', title: '样例试跑', content: `已执行样例试跑：解析、适配、分片和后置节点均执行成功，结果已写入${finalNodeNames[formType]}。`, kind: 'toolCall' },
+    { role: 'thought', title: '样例试跑', content: `已执行样例试跑：解析、分片和后置节点均执行成功，已生成${finalNodeNames[formType]}。`, kind: 'toolCall' },
     { role: 'agent', title: '方案生成完成', content: `已完成方案搭建、参数配置、链路检查和样例试跑。${versionCount > 1 ? `当前已有${versionCount}个历史版本，最新版本可继续编辑后保存为新版本。` : '当前已有1个可保存版本，后续修改会保存为新版本。'}` },
   ];
   return messages.map((message, index) => ({
@@ -444,7 +436,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v12';
+  const demoVersion = 'workbench-plan-demo-v13';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
