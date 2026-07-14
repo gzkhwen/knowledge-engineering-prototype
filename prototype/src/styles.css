@@ -1288,10 +1288,58 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .plan-version-select .plan-version-field.select-field-wrap { min-width: 100px; }
 .plan-version-select .select-field.plan-version-field { width: 100px; min-width: 100px; height: 28px; padding: 0 8px 0 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #1f2937; font-size: 12px; }
 .plan-version-select .select-field.plan-version-field:hover { border-color: #9cc3ff; background: #f8fbff; }
+.plan-version-copy { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid #d3dbe8; border-radius: 8px; color: #0f63f6; background: #fff; font-size: 14px; }
+.plan-version-copy:hover { border-color: #9cc3ff; background: #f0f6ff; }
 .plan-version-draft-tag { flex: 0 0 auto; display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border-radius: 999px; color: #b54708; background: #fff7e6; font-size: 11px; font-style: normal; font-weight: 400; }
 .add-node-pill { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; border-radius: 10px; color: #fff; background: #0f63f6; font-size: 12px; font-weight: 400; }
 .add-node-pill:hover { background: #0b55d9; }
 .add-node-pill:disabled { color: #94a3b8; background: #f1f5f9; cursor: not-allowed; }
+
+.modal-card.plan-copy-modal { width: min(760px, calc(100vw - 48px)); overflow: visible; border-radius: 12px; }
+.plan-copy-modal .modal-body { padding: 16px 18px 18px; overflow: visible; background: #fbfcff; }
+.plan-copy-content { display: grid; gap: 16px; }
+.plan-copy-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
+.plan-copy-grid .form-field { margin-bottom: 12px; }
+.plan-copy-dropdown { position: relative; }
+.plan-copy-select-trigger { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 36px; padding: 0 10px 0 12px; border: 1px solid #d3dbe8; border-radius: 8px; color: #344054; background: #fff; text-align: left; }
+.plan-copy-select-trigger:hover:not(:disabled) { border-color: #9cc3ff; }
+.plan-copy-select-trigger:disabled { color: #98a2b3; background: #f8fafc; cursor: not-allowed; }
+.plan-copy-select-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.plan-copy-select-trigger > svg { flex: 0 0 auto; margin-left: 8px; color: #98a2b3; font-size: 11px; }
+.plan-copy-dropdown-panel { position: absolute; z-index: 100; top: calc(100% + 6px); right: 0; left: 0; max-height: 236px; overflow: auto; padding: 6px; border: 1px solid #d3dbe8; border-radius: 8px; background: #fff; box-shadow: 0 8px 18px rgb(15 35 65 / 12%); scrollbar-width: thin; }
+.plan-copy-tree { display: grid; gap: 2px; }
+.plan-copy-tree p { margin: 8px; color: #98a2b3; font-size: 12px; }
+.plan-copy-tree-node { display: grid; gap: 2px; }
+.plan-copy-tree-row { display: grid; grid-template-columns: calc(var(--copy-tree-depth) * 18px) minmax(0, 1fr) auto; align-items: center; width: 100%; min-height: 30px; padding: 0 8px 0 0; color: #667085; border-radius: 6px; text-align: left; }
+.plan-copy-tree-row.selectable { color: #344054; cursor: pointer; }
+.plan-copy-tree-row.selectable:hover { background: #f2f6fc; }
+.plan-copy-tree-row.selected { color: #0f63f6; background: #e9f2ff; }
+.plan-copy-tree-row:disabled { cursor: default; }
+.plan-copy-tree-indent { height: 1px; }
+.plan-copy-tree-name { min-width: 0; overflow: hidden; padding-left: 8px; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.plan-copy-tree-meta { margin-left: 8px; color: #98a2b3; font-size: 11px; white-space: nowrap; }
+.plan-copy-format-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.plan-copy-format-option { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; width: 100%; min-height: 32px; padding: 0 8px; border: 0; border-radius: 6px; color: #475569; background: #fff; cursor: pointer; text-align: left; }
+.plan-copy-format-option:hover { background: #f8fbff; }
+.plan-copy-format-option.selected { color: #0f63f6; background: #eff6ff; }
+.plan-copy-format-option.disabled { color: #98a2b3; background: #f8fafc; cursor: not-allowed; }
+.plan-copy-format-option > span { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.plan-copy-format-option em { min-width: 0; overflow: hidden; color: #667085; font-size: 10px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.plan-copy-full-width .field-help { margin: 6px 0 0; }
+.modal-card.plan-copy-result-modal { width: min(620px, calc(100vw - 48px)); border-radius: 12px; }
+.plan-copy-result-summary { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
+.plan-copy-result-summary > svg { flex: 0 0 auto; margin-top: 2px; color: #16a34a; font-size: 22px; }
+.plan-copy-result-summary > div { display: grid; gap: 4px; }
+.plan-copy-result-summary strong { color: #111827; font-size: 15px; }
+.plan-copy-result-summary span { color: #667085; font-size: 12px; line-height: 1.5; }
+.plan-copy-result-list { display: grid; gap: 8px; }
+.plan-copy-result-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 11px; border: 1px solid #dce7f5; border-radius: 8px; background: #fbfdff; }
+.plan-copy-result-item.failed { border-color: #fecaca; background: #fffafa; }
+.plan-copy-result-item > div { display: grid; min-width: 0; gap: 3px; }
+.plan-copy-result-item strong { color: #344054; font-size: 13px; }
+.plan-copy-result-item span, .plan-copy-result-item em { overflow: hidden; color: #667085; font-size: 12px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.plan-copy-result-item em { color: #d92d20; }
+.plan-copy-result-item .secondary { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 5px; height: 30px; padding: 0 10px; border-radius: 8px; color: #0f63f6; background: #fff; font-size: 12px; }
 .workflow-list { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; padding: 14px; overflow-y: auto; }
 .workflow-list { scrollbar-width: none; }
 .workflow-list::-webkit-scrollbar { display: none; }

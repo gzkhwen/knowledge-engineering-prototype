@@ -5335,7 +5335,7 @@ function getRuntimeLabel(status) {
   }[status] || '';
 }
 
-function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, onBack }) {
+function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersion, entryNonce, notify, onBack, onOpenWorkbench }) {
   const qaParams = new URLSearchParams(window.location.search);
   const qaMode = qaParams.get('qa') === '1';
   const qaGeneratedState = qaMode && qaParams.get('demoState') === 'generated';
@@ -5350,7 +5350,8 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
   const category = categories.find((item) => item.id === categoryId) || null;
   const initialFormType = decodeURIComponent(formType || category?.formTypes?.[0] || '切片库');
-  const initialPlanTarget = { formType: initialFormType, fileFormat: workbenchFileFormats[0] };
+  const initialFileFormat = workbenchFileFormats.includes(fileFormat) ? fileFormat : workbenchFileFormats[0];
+  const initialPlanTarget = { formType: initialFormType, fileFormat: initialFileFormat };
   const createSampleForTarget = (target, status = '未发送') => ({
     ...createWorkbenchSampleFiles(target, status)[0],
     id: `demo-${target.formType}-${target.fileFormat}`,
@@ -5403,11 +5404,13 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     const planExecutionRecords = plan ? getExecutionRecordsForPlan(plan.id) : {};
     const latestVersion = getLatestPlanVersionRecord(versions);
     const savedVersions = versions.map((item) => item.version);
-    const initialTarget = target.formType === initialFormType && target.fileFormat === workbenchFileFormats[0];
+    const initialTarget = target.formType === initialFormType && target.fileFormat === initialFileFormat;
+    const focusedVersion = initialTarget && focusVersion ? versions.find((item) => item.version === focusVersion) || null : null;
+    const displayedVersion = focusedVersion || latestVersion;
     const generatedState = (qaGeneratedState && initialTarget) || Boolean(latestVersion);
     const runningState = qaRunningState && initialTarget;
     const fallbackSample = createSampleForTarget(target, generatedState ? '已完成' : runningState ? '试跑中' : '未发送');
-    const latestNodes = latestVersion ? collapseWorkbenchNodes(hydrateStoredPlanNodes(latestVersion.nodes || latestVersion.planNodes || [])) : [];
+    const latestNodes = displayedVersion ? collapseWorkbenchNodes(hydrateStoredPlanNodes(displayedVersion.nodes || displayedVersion.planNodes || [])) : [];
     const versionSampleFiles = versions.flatMap((version) => version.sampleFiles || []);
     const executionSampleFiles = Object.values(planExecutionRecords).map((record) => record.file).filter(Boolean);
     const currentSampleFiles = generatedState || runningState
@@ -5425,13 +5428,13 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
       running: runningState,
       testing: false,
       confirmed: Boolean(latestVersion || (qaGeneratedState && initialTarget)),
-      results: latestResults,
+      results: displayedVersion?.results?.length ? displayedVersion.results.map((result) => ({ ...result })) : latestResults,
       connectionStates: {},
       nodeRuntime: {},
       agentInput: '',
       agentTask: null,
       savedPlanVersions: savedVersions,
-      selectedPlanVersion: latestVersion?.version || '1.0',
+      selectedPlanVersion: displayedVersion?.version || '1.0',
       draftPlanVersion: null,
       versionSnapshots: latestVersion ? buildVersionSnapshotsFromRecords(versions) : qaGeneratedState && initialTarget ? {
         '1.0': {
@@ -5512,6 +5515,9 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
   const [planRunPopoverOpen, setPlanRunPopoverOpen] = useState(false);
   const [saveConfirmVersion, setSaveConfirmVersion] = useState(null);
   const [pendingPlanVersionSwitch, setPendingPlanVersionSwitch] = useState(null);
+  const [copyPlanForm, setCopyPlanForm] = useState(null);
+  const [copyProgress, setCopyProgress] = useState(null);
+  const [copyResults, setCopyResults] = useState(null);
   const streamRef = useRef(null);
   const fileRef = useRef(null);
   const agentInputRef = useRef(null);
@@ -5704,6 +5710,84 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     && savedPlanVersions.includes(selectedPlanVersion)
     && selectedPlanVersion !== latestSavedPlanVersion;
   const selectedVersionStatus = hasUnsavedDraft ? 'draft' : 'formal';
+  const canCopyFormalVersion = canEdit
+    && savedPlanVersions.includes(selectedPlanVersion)
+    && Boolean(versionSnapshots[selectedPlanVersion]?.planNodes?.length);
+  const sourcePlanScope = category ? 'category' : 'fallback';
+  const sourceCopyContext = {
+    projectId: project.id,
+    projectName: project.name,
+    planScope: sourcePlanScope,
+    categoryId: category?.id || null,
+    categoryName: category?.name || null,
+    formType: activePlanTarget.formType,
+    fileFormat: activePlanTarget.fileFormat,
+    version: selectedPlanVersion,
+  };
+  const getCopyCategories = (targetProjectId) => {
+    const targetSolution = dataStore.getProjectSolution(targetProjectId);
+    return targetSolution ? dataStore.getProjectCategories(targetSolution.id) : [];
+  };
+  const isSourceCopyContext = (form) => Boolean(form)
+    && form.projectId === sourceCopyContext.projectId
+    && form.planScope === sourceCopyContext.planScope
+    && (form.categoryId || null) === sourceCopyContext.categoryId
+    && form.formType === sourceCopyContext.formType;
+  const normalizeCopyPlanForm = (form) => {
+    if (!form) return form;
+    return isSourceCopyContext(form) && form.fileFormat === sourceCopyContext.fileFormat
+      ? { ...form, fileFormat: '' }
+      : form;
+  };
+  const copyTargetProject = copyPlanForm ? dataStore.getProject(copyPlanForm.projectId) : null;
+  const copyTargetSolution = copyTargetProject ? dataStore.getProjectSolution(copyTargetProject.id) : null;
+  const copyTargetCategories = copyPlanForm ? getCopyCategories(copyPlanForm.projectId) : [];
+  const copyTargetCategory = copyPlanForm?.planScope === 'category'
+    ? copyTargetCategories.find((item) => item.id === copyPlanForm.categoryId) || null
+    : null;
+  const copyTargetCategoryPath = copyTargetCategory ? (() => {
+    const byId = new Map(copyTargetCategories.map((item) => [item.id, item]));
+    const path = [];
+    let current = copyTargetCategory;
+    const seen = new Set();
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      path.unshift(current.name);
+      current = current.parentId ? byId.get(current.parentId) : null;
+    }
+    return path.join('>');
+  })() : null;
+  const copyTargetFormTypes = copyPlanForm?.planScope === 'fallback'
+    ? knowledgeFormTypes
+    : copyTargetCategory?.formTypes || [];
+  const buildCopyPlanRoute = (target, targetFormat) => ({
+    projectId: target.projectId,
+    solutionId: dataStore.getProjectSolution(target.projectId)?.id,
+    planScope: target.planScope,
+    categoryId: target.planScope === 'category' ? target.categoryId : null,
+    formType: target.formType,
+    fileFormat: targetFormat,
+    name: `${target.planScope === 'category' ? copyTargetCategory?.name || '知识类目' : dataStore.getProject(target.projectId)?.name || '兜底'}${target.formType}${targetFormat}处理方案`,
+  });
+  const copyTargets = copyPlanForm?.fileFormat ? [copyPlanForm.fileFormat].map((targetFormat) => {
+    const route = buildCopyPlanRoute(copyPlanForm, targetFormat);
+    const { versions } = dataStore.getPlanWithVersionsByRoute(route);
+    return {
+      ...route,
+      projectName: copyTargetProject?.name || '-',
+      categoryName: copyTargetCategory?.name || null,
+      categoryPath: copyTargetCategoryPath,
+      version: getNextPlanVersion(versions.map((item) => item.version)),
+    };
+  }) : [];
+  const canConfirmPlanCopy = Boolean(
+    canCopyFormalVersion
+    && copyPlanForm?.projectId
+    && copyPlanForm?.planScope
+    && copyPlanForm?.formType
+    && (copyPlanForm.planScope === 'fallback' || copyPlanForm.categoryId)
+    && copyTargets.length,
+  );
   const hasAgentTask = Boolean(agentTask);
   const canStopAgent = running || testing;
   const canSendAgentMessage = !running && !testing && (hasAgentTask || Boolean(agentInput.trim()) || (!planNodes.length && sampleFiles.length > 0));
@@ -6537,6 +6621,136 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
     notify(`处理方案已保存为 V${versionRecord.version} 版本`, 'success');
   };
 
+  const openPlanCopy = () => {
+    if (!canCopyFormalVersion) return;
+    setCopyProgress(null);
+    setCopyResults(null);
+    setCopyPlanForm({
+      projectId: sourceCopyContext.projectId,
+      planScope: sourceCopyContext.planScope,
+      categoryId: sourceCopyContext.categoryId,
+      formType: sourceCopyContext.formType,
+      fileFormat: '',
+    });
+  };
+
+  const updateCopyPlanForm = (updater) => {
+    setCopyPlanForm((current) => normalizeCopyPlanForm(typeof updater === 'function' ? updater(current) : updater));
+  };
+
+  const changeCopyProject = (targetProjectId) => {
+    updateCopyPlanForm((current) => {
+      const targetCategories = getCopyCategories(targetProjectId);
+      const categoryId = current.planScope === 'category' && targetProjectId === sourceCopyContext.projectId
+        ? sourceCopyContext.categoryId
+        : null;
+      const targetCategory = targetCategories.find((item) => item.id === categoryId) || null;
+      const formTypes = current.planScope === 'fallback' ? knowledgeFormTypes : targetCategory?.formTypes || [];
+      return {
+        ...current,
+        projectId: targetProjectId,
+        categoryId,
+        formType: formTypes.includes(sourceCopyContext.formType) ? sourceCopyContext.formType : formTypes[0] || '',
+      };
+    });
+  };
+
+  const changeCopyPlanScope = (planScope) => {
+    updateCopyPlanForm((current) => {
+      const targetCategories = getCopyCategories(current.projectId);
+      const categoryId = planScope === 'category' && current.projectId === sourceCopyContext.projectId
+        ? sourceCopyContext.categoryId
+        : null;
+      const targetCategory = targetCategories.find((item) => item.id === categoryId) || null;
+      const formTypes = planScope === 'fallback' ? knowledgeFormTypes : targetCategory?.formTypes || [];
+      return {
+        ...current,
+        planScope,
+        categoryId,
+        formType: formTypes.includes(sourceCopyContext.formType) ? sourceCopyContext.formType : formTypes[0] || '',
+      };
+    });
+  };
+
+  const changeCopyCategory = (targetCategoryId) => {
+    updateCopyPlanForm((current) => {
+      const targetCategory = getCopyCategories(current.projectId).find((item) => item.id === targetCategoryId) || null;
+      const formTypes = targetCategory?.formTypes || [];
+      return {
+        ...current,
+        categoryId: targetCategoryId,
+        formType: formTypes.includes(current.formType) ? current.formType : formTypes[0] || '',
+      };
+    });
+  };
+
+  const selectCopyFormat = (targetFormat) => {
+    updateCopyPlanForm((current) => ({
+      ...current,
+      fileFormat: targetFormat,
+    }));
+  };
+
+  const startPlanCopy = () => {
+    if (!canConfirmPlanCopy) {
+      notify('请完整选择复制目标和文件格式', 'error');
+      return;
+    }
+    const sourceSnapshot = versionSnapshots[selectedPlanVersion];
+    if (!sourceSnapshot?.planNodes?.length) {
+      notify('当前正式版本没有可复制的方案快照', 'error');
+      return;
+    }
+    const targets = copyTargets.map((item) => ({ ...item }));
+    const copiedNodes = collapseWorkbenchNodes(cloneWorkbenchNodes(sourceSnapshot.planNodes));
+    setCopyProgress({ completed: 0, total: targets.length });
+    const resultsForTargets = [];
+    const copyNext = (index) => {
+      window.setTimeout(() => {
+        const target = targets[index];
+        try {
+          const targetPlan = dataStore.ensurePlan(target);
+          const versionRecord = dataStore.createPlanVersion({
+            planId: targetPlan.id,
+            version: target.version,
+            nodes: collapseWorkbenchNodes(cloneWorkbenchNodes(copiedNodes)),
+            sampleFiles: [],
+            results: [],
+            copiedFrom: {
+              projectId: sourceCopyContext.projectId,
+              categoryId: sourceCopyContext.categoryId,
+              planScope: sourceCopyContext.planScope,
+              formType: sourceCopyContext.formType,
+              fileFormat: sourceCopyContext.fileFormat,
+              version: sourceCopyContext.version,
+            },
+          });
+          resultsForTargets.push({ ...target, planId: targetPlan.id, version: versionRecord.version, status: 'success' });
+        } catch (error) {
+          resultsForTargets.push({ ...target, status: 'failed', message: error instanceof Error ? error.message : '复制失败' });
+        }
+        const completed = index + 1;
+        setCopyProgress({ completed, total: targets.length });
+        if (completed < targets.length) {
+          copyNext(completed);
+          return;
+        }
+        setCopyProgress(null);
+        setCopyPlanForm(null);
+        setCopyResults(resultsForTargets);
+        const failedCount = resultsForTargets.filter((item) => item.status === 'failed').length;
+        notify(failedCount ? `${targets.length - failedCount} 个方案复制成功，${failedCount} 个失败` : '方案复制成功', failedCount ? 'warning' : 'success');
+      }, 360);
+    };
+    copyNext(0);
+  };
+
+  const viewCopiedPlan = (target) => {
+    if (!target || target.status !== 'success') return;
+    setCopyResults(null);
+    onOpenWorkbench?.(target.projectId, target.categoryId, target.formType, target.fileFormat, target.version);
+  };
+
   const updateNode = (node) => {
     const preservedNode = {
       ...node,
@@ -6860,6 +7074,7 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
                         {planVersions.map((version) => <option key={version} value={version}>{version}{draftPlanVersion === version ? ' 草稿' : ''}</option>)}
                       </SelectField>
                       {hasUnsavedDraft ? <em className="plan-version-draft-tag">未保存</em> : null}
+                      {canCopyFormalVersion ? <button type="button" className="plan-version-copy" title="复制方案" aria-label="复制方案" onClick={openPlanCopy}><CopyOutlined /></button> : null}
                     </div>
                   ) : null}
                   <button type="button" className="add-node-pill" disabled={!canEdit} onClick={() => openAddNode()}><PlusOutlined /> 添加节点</button>
@@ -6999,7 +7214,191 @@ function WorkbenchPage({ projectId, categoryId, formType, entryNonce, notify, on
           }}
         />
       ) : null}
+      {copyPlanForm ? (
+        <PlanCopyDialog
+          source={sourceCopyContext}
+          projects={dataStore.getProjects()}
+          form={copyPlanForm}
+          categories={copyTargetCategories}
+          formTypes={copyTargetFormTypes}
+          sourceFormatDisabled={isSourceCopyContext(copyPlanForm)}
+          copying={Boolean(copyProgress)}
+          progress={copyProgress}
+          canConfirm={canConfirmPlanCopy}
+          onClose={() => { if (!copyProgress) setCopyPlanForm(null); }}
+          onProjectChange={changeCopyProject}
+          onScopeChange={changeCopyPlanScope}
+          onCategoryChange={changeCopyCategory}
+          onFormTypeChange={(nextFormType) => updateCopyPlanForm((current) => ({ ...current, formType: nextFormType }))}
+          onFormatSelect={selectCopyFormat}
+          onConfirm={startPlanCopy}
+        />
+      ) : null}
+      {copyResults ? <PlanCopyResultDialog results={copyResults} onClose={() => setCopyResults(null)} onView={viewCopiedPlan} /> : null}
     </div>
+  );
+}
+
+function PlanCopyCategoryTree({ categories, selectedCategoryId, disabled, onSelect }) {
+  const childrenOf = (parentId) => categories.filter((item) => item.parentId === parentId).sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+  const renderNode = (item, depth = 0) => {
+    const children = childrenOf(item.id);
+    const isLeaf = children.length === 0;
+    const selectable = isLeaf && Boolean(item.formTypes?.length);
+    const selected = selectedCategoryId === item.id;
+    return (
+      <div className="plan-copy-tree-node" key={item.id}>
+        <button
+          type="button"
+          className={`plan-copy-tree-row ${selected ? 'selected' : ''} ${selectable ? 'selectable' : ''}`.trim()}
+          style={{ '--copy-tree-depth': depth }}
+          disabled={disabled || !selectable}
+          onClick={() => selectable && onSelect(item.id)}
+        >
+          <span className="plan-copy-tree-indent" />
+          <span className="plan-copy-tree-name">{item.name}</span>
+          {selectable ? <span className="plan-copy-tree-meta">{item.formTypes.join('、')}</span> : null}
+        </button>
+        {children.map((child) => renderNode(child, depth + 1))}
+      </div>
+    );
+  };
+  const roots = childrenOf(null);
+  return <div className="plan-copy-tree">{roots.length ? roots.map((item) => renderNode(item)) : <p>当前空间暂无可选末级类目</p>}</div>;
+}
+
+function PlanCopyDialog({
+  source,
+  projects,
+  form,
+  categories,
+  formTypes,
+  sourceFormatDisabled,
+  copying,
+  progress,
+  canConfirm,
+  onClose,
+  onProjectChange,
+  onScopeChange,
+  onCategoryChange,
+  onFormTypeChange,
+  onFormatSelect,
+  onConfirm,
+}) {
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [formatOpen, setFormatOpen] = useState(false);
+  const categoryDropdownRef = useRef(null);
+  const formatDropdownRef = useRef(null);
+  const selectedCategory = categories.find((item) => item.id === form.categoryId) || null;
+
+  useEffect(() => {
+    const closeDropdowns = (event) => {
+      if (!categoryDropdownRef.current?.contains(event.target)) setCategoryOpen(false);
+      if (!formatDropdownRef.current?.contains(event.target)) setFormatOpen(false);
+    };
+    document.addEventListener('mousedown', closeDropdowns);
+    return () => document.removeEventListener('mousedown', closeDropdowns);
+  }, []);
+
+  return (
+    <Modal
+      title="复制方案"
+      className="plan-copy-modal"
+      onClose={onClose}
+      footer={(
+        <>
+          <button type="button" className="secondary" disabled={copying} onClick={onClose}>取消</button>
+          <button type="button" className="primary" disabled={!canConfirm || copying} onClick={onConfirm}>
+            {copying ? <><SyncOutlined spin /> 复制中 {progress?.completed || 0}/{progress?.total || 0}</> : <><CopyOutlined /> 确认复制</>}
+          </button>
+        </>
+      )}
+    >
+      <div className="plan-copy-content">
+        <div className="plan-copy-grid">
+          <Field label="选择空间" required>
+            <SelectField value={form.projectId} onChange={onProjectChange} disabled={copying}>
+              {projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </SelectField>
+          </Field>
+          <Field label="选择方案类型" required>
+            <SelectField value={form.planScope} onChange={onScopeChange} disabled={copying}>
+              <option value="fallback">兜底方案</option>
+              <option value="category">类目方案</option>
+            </SelectField>
+          </Field>
+          {form.planScope === 'category' ? (
+            <div className="form-field plan-copy-full-width">
+              <span className="field-label-text"><em>*</em>选择末级类目</span>
+              <div className="plan-copy-dropdown" ref={categoryDropdownRef}>
+                <button type="button" className="plan-copy-select-trigger" disabled={copying} onClick={() => { setCategoryOpen((current) => !current); setFormatOpen(false); }}>
+                  <span>{selectedCategory?.name || '请选择末级类目'}</span><AntDownOutlined />
+                </button>
+                {categoryOpen ? <div className="plan-copy-dropdown-panel plan-copy-category-panel"><PlanCopyCategoryTree categories={categories} selectedCategoryId={form.categoryId} disabled={copying} onSelect={(categoryId) => { onCategoryChange(categoryId); setCategoryOpen(false); }} /></div> : null}
+              </div>
+            </div>
+          ) : null}
+          <Field label="选择知识形态" required>
+            <SelectField value={form.formType} onChange={onFormTypeChange} disabled={copying || !formTypes.length} missingLabel="请先选择末级类目">
+              {formTypes.map((item) => <option key={item} value={item}>{item}</option>)}
+            </SelectField>
+          </Field>
+          <div className="form-field plan-copy-full-width">
+            <span className="field-label-text"><em>*</em>选择文件格式</span>
+            <div className="plan-copy-dropdown" ref={formatDropdownRef}>
+              <button type="button" className="plan-copy-select-trigger" disabled={copying} onClick={() => { setFormatOpen((current) => !current); setCategoryOpen(false); }}>
+                <span>{form.fileFormat ? form.fileFormat.toUpperCase() : '请选择文件格式'}</span><AntDownOutlined />
+              </button>
+              {formatOpen ? <div className="plan-copy-dropdown-panel plan-copy-format-panel">
+                {workbenchFileFormats.map((format) => {
+                  const disabled = copying || (sourceFormatDisabled && format === source.fileFormat);
+                  const selected = form.fileFormat === format;
+                  return (
+                    <button type="button" className={`plan-copy-format-option ${selected ? 'selected' : ''} ${disabled ? 'disabled' : ''}`.trim()} key={format} disabled={disabled} onClick={() => { onFormatSelect(format); setFormatOpen(false); }}>
+                      <span>{format.toUpperCase()}</span>
+                      {disabled && format === source.fileFormat ? <em>来源组合</em> : null}
+                    </button>
+                  );
+                })}
+              </div> : null}
+            </div>
+            <p className="field-help">所选文件格式会创建一个独立的目标组合和正式版本。</p>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function PlanCopyResultDialog({ results, onClose, onView }) {
+  const succeeded = results.filter((item) => item.status === 'success');
+  const failed = results.filter((item) => item.status === 'failed');
+  const getTargetLabel = (item) => [
+    item.planScope === 'category' ? '类目方案' : '兜底方案',
+    item.projectName,
+    item.planScope === 'category' ? (item.categoryPath || item.categoryName || '知识类目') : '兜底方案',
+    item.formType,
+    `${item.fileFormat} V${item.version || '-'}`,
+  ].join(' · ');
+  return (
+    <Modal
+      title={failed.length ? '复制完成' : '复制成功'}
+      className="plan-copy-result-modal"
+      onClose={onClose}
+      footer={(
+        <>
+          <button type="button" className="secondary" onClick={onClose}>留在当前页</button>
+          <button type="button" className="primary" disabled={!succeeded.length} onClick={() => onView(succeeded[0])}><FolderOpenOutlined /> 查看方案</button>
+        </>
+      )}
+    >
+      <div className="plan-copy-result-summary">
+        <div>
+          <strong>方案已复制成功</strong>
+          {succeeded.map((item) => <span key={`${item.projectId}-${item.categoryId || 'fallback'}-${item.formType}-${item.fileFormat}`}>{getTargetLabel(item)}</span>)}
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -8208,6 +8607,8 @@ function getDefaultWorkbenchTarget(projectId = dataStore.getProjects()[0]?.id) {
     projectId: project?.id,
     categoryId: category?.id || null,
     formType: category?.formTypes?.[0] || '切片库',
+    fileFormat: workbenchFileFormats[0],
+    focusVersion: null,
     entryNonce: Date.now(),
   };
 }
@@ -8220,14 +8621,17 @@ export function App() {
   const [toast, setToast] = useState(null);
   const notify = (message, type = 'info') => setToast({ message, type });
   const openSolution = (id) => { setProjectId(id); setActive('ops-category'); };
-  const openWorkbench = (id, categoryId = null, formType = '切片库') => { setWorkbenchTarget({ projectId: id, categoryId, formType, entryNonce: Date.now() }); setActive('ops-workbench'); };
+  const openWorkbench = (id, categoryId = null, formType = '切片库', fileFormat = workbenchFileFormats[0], focusVersion = null) => {
+    setWorkbenchTarget({ projectId: id, categoryId, formType, fileFormat, focusVersion, entryNonce: Date.now() });
+    setActive('ops-workbench');
+  };
 
   let content;
   if (active === 'admin-mcp') content = <McpServicePage notify={notify} />;
   else if (active === 'admin-tools') content = <ToolManagementPage notify={notify} />;
   else if (active === 'ops-projects') content = <ProjectManagementPage notify={notify} onOpenSolution={openSolution} onOpenWorkbench={openWorkbench} />;
   else if (active === 'ops-category') content = <ProjectSolutionPage projectId={projectId} notify={notify} onBack={() => setActive('ops-projects')} onWorkbench={openWorkbench} />;
-  else if (active === 'ops-workbench') content = <WorkbenchPage {...workbenchTarget} notify={notify} onBack={() => setActive('ops-category')} />;
+  else if (active === 'ops-workbench') content = <WorkbenchPage key={workbenchTarget.entryNonce} {...workbenchTarget} notify={notify} onBack={() => setActive('ops-category')} onOpenWorkbench={openWorkbench} />;
   else if (active === 'ops-result' || active === 'ops-knowledge-points') content = <KnowledgePointsPage />;
   else if (active === 'ops-slice-library') content = <EmptyPage title="切片库" />;
   else if (active === 'ops-qa-library') content = <EmptyPage title="QA库" />;
