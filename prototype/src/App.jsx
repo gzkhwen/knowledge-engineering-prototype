@@ -4399,6 +4399,26 @@ function collapseWorkbenchNodes(nodes) {
   return nodes.map(collapseWorkbenchNode);
 }
 
+const knowledgeGraphDemoConfig = {
+  entity_types: ['人物', '组织', '政策文件'],
+  attribute_types: ['职务', '标签', '机构类型', '所在国家', '适用范围', '版本'],
+  relation_types: ['任职于', '制定', '支持'],
+  include_isolated_entities: true,
+  extraction_instruction: '抽取政策文件中的责任主体、发布机构和政策文件；保留来源分片与原文证据，仅输出当前文档的图谱片段。',
+};
+
+function applyKnowledgeGraphDemoConfig(node, config = knowledgeGraphDemoConfig) {
+  if (!isKnowledgeGraphExtractionNode(node)) return node;
+  return {
+    ...node,
+    params: node.params.map((param) => (
+      Object.prototype.hasOwnProperty.call(config, param.id)
+        ? { ...param, value: Array.isArray(config[param.id]) ? [...config[param.id]] : config[param.id] }
+        : param
+    )),
+  };
+}
+
 function getIterationInputOutputPath(previous, preferredPath) {
   const outputs = getEffectiveNodeOutputs(previous);
   const preferredOutput = outputs.find((output) => (output.path || output.id || output.name) === preferredPath);
@@ -4482,7 +4502,8 @@ function hydrateStoredPlanNodes(nodes = []) {
       hydrated.push(createFallbackNode(node, inputSource));
       return;
     }
-    const workbenchNode = createWorkbenchNode(tool, inputSource);
+    const baseWorkbenchNode = createWorkbenchNode(tool, inputSource);
+    const workbenchNode = node.demoConfig ? applyKnowledgeGraphDemoConfig(baseWorkbenchNode, node.demoConfig) : baseWorkbenchNode;
     hydrated.push({
       ...workbenchNode,
       category: workbenchNode.category,
@@ -4841,7 +4862,12 @@ function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf'
     : target.formType === '知识点' || target.formType === '知识图谱'
       ? knowledgeTool
       : null;
-  const extraction = extractionTool && splitter ? createWorkbenchNode(extractionTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }) : null;
+  const extractionBase = extractionTool && splitter
+    ? createWorkbenchNode(extractionTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' })
+    : null;
+  const extraction = target.formType === '知识图谱' && extractionBase
+    ? applyKnowledgeGraphDemoConfig(extractionBase)
+    : extractionBase;
   const extractionOutputPath = target.formType === 'QA库'
     ? 'qaResult'
     : target.formType === '知识点'
@@ -6285,6 +6311,8 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     setCatalog(latestCatalog);
     const agentPlan = createAgentDemoPlan(activePlanTarget, latestCatalog);
     const { parser, splitter, extraction, iteration } = agentPlan;
+    const isKnowledgeGraphTarget = activePlanTarget.formType === '知识图谱';
+    const graphSchemaSummary = '实体类型：人物、组织、政策文件；属性类型：职务、标签、机构类型、所在国家、适用范围、版本；关系类型：任职于、制定、支持。';
     const runFileFormat = activePlanTarget.fileFormat;
     const preFixNodes = [parser, splitter].filter(Boolean);
     const extractionNodes = [parser, splitter, extraction].filter(Boolean);
@@ -6381,17 +6409,22 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       let configEventId = '';
       const nodeNames = nodes.map((node) => node.toolName).join('、');
       const paramSummary = nodes.flatMap((node) => visibleParams(node).map((param) => param.label)).slice(0, 5).join('、');
+      const isGraphNode = nodes.some(isKnowledgeGraphExtractionNode);
       step(initialDelay, () => {
         activateRuntimeNodes(nodes);
         setRunRuntimeForNodes(nodes, { status: 'configuring', visibleParamCount: 0 });
-        configEventId = pushRunEvent({ role: 'thought', title: `节点配置：${nodeNames}`, content: `配置依据：节点参数定义、样例分析结果、上游输出路径。配置项：${paramSummary || '无额外配置项'}。`, status: 'running', kind: 'toolCall' });
+        configEventId = pushRunEvent({ role: 'thought', title: `节点配置：${nodeNames}`, content: isGraphNode
+          ? `配置依据：样例文件、单文档处理边界和图谱 Schema。${graphSchemaSummary} 保留孤立实体，并要求所有结果保留来源证据。`
+          : `配置依据：节点参数定义、样例分析结果、上游输出路径。配置项：${paramSummary || '无额外配置项'}。`, status: 'running', kind: 'toolCall' });
       });
       [1, 2, 3, 4].forEach((count) => {
         step(900, () => setRunRuntimeForNodes(nodes, { status: 'configuring', visibleParamCount: count }));
       });
       step(900, () => {
         setRunRuntimeForNodes(nodes, { status: 'configured', visibleParamCount: 4 });
-        updateRunEvent(configEventId, { status: 'done', content: `节点配置完成：${nodeNames} 已形成当前方案中的 Step 执行契约。` });
+        updateRunEvent(configEventId, { status: 'done', content: isGraphNode
+          ? `节点配置完成：${nodeNames} 将文本切片映射为 chunks，并输出当前文档的 graph_fragment。`
+          : `节点配置完成：${nodeNames} 已形成当前方案中的 Step 执行契约。` });
       });
       step(1100, () => {
         setRunRuntimeForNodes(nodes, { status: 'done' });
@@ -6414,7 +6447,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     let executeEventId = '';
 
     step(800, () => {
-      analyzeEventId = pushRunEvent({ role: 'thought', title: '分析样例文件', content: `我先判断样例文件的类型、内容结构和${getKnowledgeFormTypeLabel(activePlanTarget.formType)}处理目标，避免直接套用固定流程。`, status: 'running' });
+      analyzeEventId = pushRunEvent({ role: 'thought', title: '分析样例文件', content: isKnowledgeGraphTarget
+        ? '我会识别政策文档中的发布主体、责任主体、办理规则与来源片段，并确认本次仅构建单文档图谱片段。'
+        : `我先判断样例文件的类型、内容结构和${getKnowledgeFormTypeLabel(activePlanTarget.formType)}处理目标，避免直接套用固定流程。`, status: 'running' });
     });
     step(2800, () => {
       updateRunEvent(analyzeEventId, { status: 'done', content: `样例识别为${agentPlan.formatLabel}。${agentPlan.concern}` });
@@ -6431,8 +6466,12 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       queryEventId = pushRunEvent({ role: 'thought', title: '节点目录查询', content: '输入：节点状态=可用，分类=文档解析/文本分片/知识提取/系统节点；输出：候选节点清单。', status: 'running', kind: 'toolCall' });
     });
     step(3000, () => {
-      updateRunEvent(queryEventId, { status: 'done', content: `查询结果：命中 ${catalog.filter((node) => node.status === '可用').length} 个可用节点，其中包含系统节点和外部接入节点。` });
-      designEventId = pushRunEvent({ role: 'thought', title: '开始设计处理方案', content: '我会先生成主链路，再检查节点输出能否被后置节点直接消费。', status: 'running' });
+      updateRunEvent(queryEventId, { status: 'done', content: isKnowledgeGraphTarget
+        ? '查询结果：已匹配 MinerU版面解析、Markdown结构化分块和单文档图谱抽取节点；图谱抽取工具由 MCP 服务提供。'
+        : `查询结果：命中 ${catalog.filter((node) => node.status === '可用').length} 个可用节点，其中包含系统节点和外部接入节点。` });
+      designEventId = pushRunEvent({ role: 'thought', title: '开始设计处理方案', content: isKnowledgeGraphTarget
+        ? '我会建立“解析 → 分片 → 单文档图谱抽取”链路，并确保分片输入与 graph_fragment 输出可以稳定承接。'
+        : '我会先生成主链路，再检查节点输出能否被后置节点直接消费。', status: 'running' });
     });
     step(3300, () => {
       updateRunEvent(designEventId, {
@@ -6487,7 +6526,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       recheckEventId = pushRunEvent({ role: 'thought', title: '检查完整方案', content: '我会重新检查修复后的节点顺序、输入输出映射和 Step 执行契约。', status: 'running' });
     });
     step(6800, () => {
-      updateRunEvent(recheckEventId, { status: 'done', content: '方案检查通过：节点顺序、节点参数和变量承接均可执行。' });
+      updateRunEvent(recheckEventId, { status: 'done', content: isKnowledgeGraphTarget
+        ? '方案检查通过：文本切片已映射至 chunks，Graph Schema 参数完整，最终输出仅为单文档 graph_fragment。'
+        : '方案检查通过：节点顺序、节点参数和变量承接均可执行。' });
     });
     step(1800, () => {
       executeEventId = pushRunEvent({ role: 'thought', title: '样例试跑', content: `输入：${filesSnapshot[0].name}；执行对象：最终处理方案；输出：每个节点的输入、输出和执行状态。`, status: 'running', kind: 'toolCall' });
@@ -6498,7 +6539,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     });
     step(2000, () => {
       setRunRuntimeForNodes(finalNodes, { status: 'success' });
-      updateRunEvent(executeEventId, { status: 'done', content: agentPlan.runSummary });
+      updateRunEvent(executeEventId, { status: 'done', content: isKnowledgeGraphTarget
+        ? '试跑结果：已完成文本切片抽取，生成实体、实体关系、属性关系及来源证据；孤立实体按配置保留在 graph_fragment 中。'
+        : agentPlan.runSummary });
     });
     step(1200, () => {
       const nextResults = filesSnapshot.map((file) => createSampleResultForPlan(file, finalNodes));
@@ -6549,7 +6592,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       setRunSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '已完成' } : file)));
       setRunResults(nextResults);
       setRunExecutionRecords((current) => ({ ...current, ...nextExecutionRecords }));
-      pushRunEvent({ role: 'agent', title: '方案生成与样例执行完成', content: `已完成${getKnowledgeFormTypeLabel(activePlanTarget.formType)} ${activePlanTarget.fileFormat}方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。`, status: 'done' });
+      pushRunEvent({ role: 'agent', title: '方案生成与样例执行完成', content: isKnowledgeGraphTarget
+        ? '已完成单文档图谱抽取方案、Graph Schema 配置与样例试跑，当前输出为可追溯的 graph_fragment。跨文档归一化请在图谱管理侧单独发起。'
+        : `已完成${getKnowledgeFormTypeLabel(activePlanTarget.formType)} ${activePlanTarget.fileFormat}方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。`, status: 'done' });
       setRunRunning(false);
       persistRunChat();
       if (activePlanTargetKeyRef.current === runContextKey) notify('Agent 已完成方案生成和样例执行', 'success');

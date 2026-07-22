@@ -303,10 +303,17 @@ function demoNodeSets(formType, fileFormat, categoryId = '') {
   const parser = parserNodes[fileFormat] || parserNodes.pdf;
   const splitter = { toolId: 'ke-idp-markdown-chunk', toolName: 'Markdown结构化分块', category: '文本分片' };
   const iteration = { toolId: 'system-iteration', toolName: '迭代执行', category: '系统节点' };
+  const knowledgeGraphConfig = {
+    entity_types: ['人物', '组织', '政策文件'],
+    attribute_types: ['职务', '标签', '机构类型', '所在国家', '适用范围', '版本'],
+    relation_types: ['任职于', '制定', '支持'],
+    include_isolated_entities: true,
+    extraction_instruction: '抽取政策文件中的责任主体、发布机构和政策文件；保留来源分片与原文证据，仅输出当前文档的图谱片段。',
+  };
   if (categoryId === 'cat-wealth-fund' && formType === '知识点' && fileFormat === 'pdf') {
     return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration];
   }
-  if (formType === '知识图谱') return [parser, splitter, { toolId: 'ke-idp-extract_document_knowledge_graph', toolName: '单文档图谱抽取', category: '知识提取' }];
+  if (formType === '知识图谱') return [parser, splitter, { toolId: 'ke-idp-extract_document_knowledge_graph', toolName: '单文档图谱抽取', category: '知识提取', demoConfig: knowledgeGraphConfig }];
   if (formType === '切片库') return [parser, splitter];
   if (formType === 'QA库') return [parser, splitter, { toolId: 'qa-extractor', toolName: 'QA提取', category: '知识提取' }];
   return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration];
@@ -469,11 +476,19 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
   };
   const runs = nodes.map((node, index) => {
     const payload = getRunPayload(node, index);
+    const parameters = node.demoConfig ? [
+      { name: '文本分片', value: 'textChunkResult' },
+      { name: '实体类型', value: node.demoConfig.entity_types.join('、') },
+      { name: '属性类型', value: node.demoConfig.attribute_types.join('、') },
+      { name: '关系类型', value: node.demoConfig.relation_types.join('、') },
+      { name: '保留孤立实体', value: node.demoConfig.include_isolated_entities ? '是' : '否' },
+      { name: '补充抽取说明', value: node.demoConfig.extraction_instruction },
+    ] : [{ name: index === 0 ? '样例文件' : '输入来源', value: index === 0 ? file.name : `data.step${index}` }];
     return {
       toolName: node.toolName,
       category: node.category,
       outputPath: payload.outputPath,
-      parameters: [{ name: index === 0 ? '样例文件' : '输入来源', value: index === 0 ? file.name : `data.step${index}` }],
+      parameters,
       status: '成功',
       outputFull: JSON.stringify({
         version,
@@ -519,6 +534,23 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
     md: '需要保留Markdown标题层级、列表和代码块边界，避免破坏原始结构。',
   };
   const baseId = `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}`;
+  if (formType === '知识图谱' && fileFormat === 'pdf') {
+    const messages = [
+      { role: 'agent', title: '处理方案生成助手', content: `请发送${scopeName}的政策类 PDF 样例。我会先确认单文档处理边界，再生成可复用的单文档图谱抽取方案。` },
+      { role: 'user', title: '发送样例文件', content: `已发送${fileName}。请抽取人物、组织和政策文件，重点保留发布、任职和政策支持关系。` },
+      { role: 'thought', title: '分析样例文件', content: '已识别为医保政策类 PDF：包含发布主体、备案规则、办理条件与费用结算说明。将按章节保留页码、标题和来源分片。' },
+      { role: 'thought', title: '确认处理边界', content: '本方案只处理单份文档，输出可追溯的 graph_fragment；跨文档实体归一化与全局图谱合并不进入 Pipeline。' },
+      { role: 'thought', title: '查询可用节点', content: '已匹配 MinerU版面解析、Markdown结构化分块和单文档图谱抽取节点。', kind: 'toolCall' },
+      { role: 'agent', title: '方案建议', content: '建议采用“MinerU版面解析 → Markdown结构化分块 → 单文档图谱抽取”主链路，分片结果直接作为图谱抽取输入。' },
+      { role: 'user', title: '补充抽取约束', content: '实体类型限定为人物、组织、政策文件；保留孤立实体；每条结果都需要能回溯到来源分片。' },
+      { role: 'thought', title: '配置图谱抽取参数', content: '已配置实体类型：人物、组织、政策文件；属性类型：职务、标签、机构类型、所在国家、适用范围、版本；关系类型：任职于、制定、支持。', kind: 'toolCall' },
+      { role: 'thought', title: '检查节点承接', content: 'Markdown结构化分块输出的文本切片已映射到图谱抽取的 chunks 输入；节点唯一业务输出为 graph_fragment。' },
+      { role: 'user', title: '试跑样例', content: '请使用当前样例试跑，重点检查发布机构、政策文件和责任主体是否能形成可追溯关系。' },
+      { role: 'thought', title: '样例试跑', content: '已完成 18 个文本切片的图谱抽取，生成实体、实体关系、属性关系及来源证据；孤立实体已按配置保留。', kind: 'toolCall' },
+      { role: 'agent', title: '方案生成完成', content: `已完成方案搭建、Schema 参数配置与样例试跑。当前已有 ${versionCount} 个版本，最新版本可继续编辑并保存。` },
+    ];
+    return messages.map((message, index) => ({ id: `${baseId}-${index + 1}`, status: 'done', ...message }));
+  }
   if (categoryId === 'cat-wealth-fund' && formType === '知识点' && fileFormat === 'pdf') {
     const messages = [
       { role: 'agent', title: '处理方案生成助手', content: '请发送基金产品说明书样例，我会识别文档版式与章节结构，并生成可复用的知识点处理方案。' },
@@ -560,7 +592,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v18';
+  const demoVersion = 'workbench-plan-demo-v19';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
