@@ -2033,6 +2033,53 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .standardization-panel .schema-head { min-height: 24px; }
 .standardization-panel .schema-head strong { font-size: 14px; line-height: 1.25; }
 .standardization-panel .plain-step-tip { margin: -2px 0 4px; font-size: 12px; line-height: 1.45; }
+.agent-code-tip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+.standardization-panel .agent-code-tip-row .plain-step-tip {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.agent-code-editor-field { gap: 6px; }
+.agent-code-editor-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+.agent-code-generate-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  width: auto;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #a9cfff;
+  border-radius: 7px;
+  color: #0f63f6;
+  background: #f7fbff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.agent-code-generate-button:hover:not(:disabled) {
+  border-color: #6da9ff;
+  background: #edf6ff;
+}
+.agent-code-generate-button.generating {
+  border-color: #a9cfff;
+  color: #0f63f6;
+  background: #edf6ff;
+}
+.agent-code-generate-button:disabled { cursor: not-allowed; opacity: .72; }
 .standardization-panel .json-schema-preview {
   height: 500px;
   max-height: none;
@@ -2132,6 +2179,22 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   line-height: 1.55;
   resize: none;
   white-space: pre;
+}
+.standard-tool-form textarea.code-dependency-changed {
+  border-color: #f04438;
+  background: #fff8f7;
+  box-shadow: 0 0 0 1px rgba(240, 68, 56, .08);
+}
+.standard-tool-form textarea.code-dependency-changed:focus {
+  border-color: #d92d20;
+  outline: 2px solid rgba(240, 68, 56, .12);
+  outline-offset: 0;
+}
+.schema-card p.code-dependency-warning {
+  margin: 0;
+  color: #d92d20;
+  font-size: 12px;
+  line-height: 1.45;
 }
 .compact-code-editor {
   height: 180px;

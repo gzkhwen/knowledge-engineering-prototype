@@ -283,6 +283,39 @@ function Field({ label, children, required, help }) {
   );
 }
 
+function AgentCodeGenerateButton({ generating = false, disabled = false, onClick }) {
+  return (
+    <button
+      type="button"
+      className={`agent-code-generate-button ${generating ? 'generating' : ''}`.trim()}
+      disabled={disabled || generating}
+      onClick={onClick}
+    >
+      {generating ? <SyncOutlined spin /> : <StarOutlined />}
+      <span>{generating ? '生成中...' : 'Agent生成'}</span>
+    </button>
+  );
+}
+
+function AgentCodeEditorField({ label, value, onChange, onGenerate, generating = false, generationDisabled = false, dependencyWarning = '' }) {
+  return (
+    <div className="form-field agent-code-editor-field">
+      <div className="agent-code-editor-label-row">
+        <span className="field-label-text"><em>*</em>{label}</span>
+        <AgentCodeGenerateButton generating={generating} disabled={generationDisabled} onClick={onGenerate} />
+      </div>
+      <textarea
+        className={`standardization-code-editor compact-code-editor ${dependencyWarning ? 'code-dependency-changed' : ''}`.trim()}
+        spellCheck={false}
+        value={value}
+        onChange={onChange}
+        aria-invalid={dependencyWarning ? 'true' : undefined}
+      />
+      {dependencyWarning ? <p className="code-dependency-warning" role="alert">{dependencyWarning}</p> : null}
+    </div>
+  );
+}
+
 function Shell({ active, onNavigate, children }) {
   const navGroups = [
     {
@@ -1796,11 +1829,159 @@ function buildStorageContractFromDraft(draft, fallback = {}) {
 
 const hasText = (value) => String(value ?? '').trim().length > 0;
 
+function toCodeProperty(name = '') {
+  const value = String(name || 'result');
+  return /^[A-Za-z_$][\w$]*$/.test(value) ? value : JSON.stringify(value);
+}
+
+function toCodeMember(base, name = '') {
+  const value = String(name || 'result');
+  return /^[A-Za-z_$][\w$]*$/.test(value) ? `${base}.${value}` : `${base}[${JSON.stringify(value)}]`;
+}
+
+function getGeneratedValueFallback(type = '') {
+  const normalized = String(type).toLowerCase();
+  if (normalized.includes('array')) return '[]';
+  if (normalized.includes('object') || normalized.includes('json')) return '{}';
+  if (normalized.includes('boolean')) return 'false';
+  if (normalized.includes('number') || normalized.includes('integer')) return '0';
+  return "''";
+}
+
+function createAgentParameterMappingCode(source, draft) {
+  const nodeInputs = (draft.inputArtifacts || [])
+    .filter((item) => hasText(item.name))
+    .map((item) => ({ name: item.name.trim(), expression: toCodeMember('nodeInput', item.name.trim()) }));
+  const configInputs = getDraftConfigRows(draft)
+    .filter((item) => hasText(item.name))
+    .map((item) => ({ name: item.name.trim(), expression: toCodeMember('config', item.name.trim()) }));
+  const availableInputs = [...nodeInputs, ...configInputs];
+  const rawInputs = (source?.tool?.inputs || []).filter((item) => hasText(item.name));
+  const targetInputs = rawInputs.length ? rawInputs : availableInputs;
+  const mappingLines = targetInputs.map((target, index) => {
+    const targetName = String(target.name || '').trim();
+    const matchedInput = availableInputs.find((item) => item.name === targetName) || availableInputs[index] || availableInputs[0];
+    const expression = matchedInput?.expression || toCodeMember('nodeInput', targetName || 'input');
+    return `    ${toCodeProperty(targetName || `input${index + 1}`)}: ${expression},`;
+  });
+
+  return `function mapParams(context) {
+  const nodeInput = context.nodeInput || {};
+  const config = context.config || {};
+
+  return {
+${mappingLines.join('\n')}
+  };
+}`;
+}
+
+function getStorageFieldExpression(fieldName) {
+  const sourceValue = toCodeMember('item', fieldName);
+  if (fieldName === 'chunkId') return `${sourceValue} || \`chunk-\${index + 1}\``;
+  if (fieldName === 'knowledgeId') return `${sourceValue} || \`knowledge-\${index + 1}\``;
+  if (fieldName === 'content') return `${sourceValue} || item.text || String(item)`;
+  if (fieldName === 'title') return `${sourceValue} || item.name || ''`;
+  if (fieldName === 'question' || fieldName === 'answer') return `${sourceValue} || ''`;
+  if (fieldName === 'sequence') return `${sourceValue} ?? index + 1`;
+  if (fieldName === 'metadata' || fieldName === 'parent') return `${sourceValue} || {}`;
+  if (fieldName === 'children' || fieldName === 'sourceChunkIds' || fieldName === 'tags') return `${sourceValue} || []`;
+  return `${sourceValue} ?? null`;
+}
+
+function createAgentPersistenceParseCode(source, draft) {
+  const outputNames = (source?.tool?.outputs || []).map((item) => item.name).filter(hasText);
+  const preferredOutput = outputNames.find((name) => name === 'data') || outputNames[0] || '';
+  const sourceExpression = preferredOutput ? `${toCodeMember('mcpResult', preferredOutput)} ?? mcpResult` : 'mcpResult';
+  const storageSchema = knowledgeShapeStorageSchemas[draft.persistenceArtifactType] || knowledgeShapeStorageSchemas['文本切片'];
+  const fieldLines = Object.keys(storageSchema).map((fieldName) => `      ${toCodeProperty(fieldName)}: ${getStorageFieldExpression(fieldName)},`);
+
+  return `function parsePersistenceResult(mcpResult) {
+  const source = ${sourceExpression};
+  const items = Array.isArray(source) ? source : [source];
+
+  return items
+    .filter((item) => item != null)
+    .map((item, index) => ({
+${fieldLines.join('\n')}
+    }));
+}`;
+}
+
+function createAgentNodeOutputResult(source, draft) {
+  const rawOutputs = (source?.tool?.outputs || []).filter((item) => hasText(item.name));
+  const configuredOutputs = (draft.outputs || []).filter((item) => hasText(item.name));
+  const mappedOutputs = configuredOutputs.map((output, index) => {
+    const outputName = output.name.trim();
+    const rawOutput = rawOutputs.find((item) => item.name === outputName) || rawOutputs[index] || rawOutputs[0];
+    const rawName = rawOutput?.name || outputName;
+    return {
+      outputName,
+      sourceExpression: toCodeMember('payload', rawName),
+      fallback: getGeneratedValueFallback(output.type),
+      codeOutput: toCodeMember('result', outputName),
+    };
+  });
+  const outputLines = mappedOutputs.map((item) => `    ${toCodeProperty(item.outputName)}: ${item.sourceExpression} ?? ${item.fallback},`);
+  const codeOutputsByName = new Map(mappedOutputs.map((item) => [item.outputName, item.codeOutput]));
+
+  return {
+    code: `function parseNodeOutput(mcpResult) {
+  const payload = mcpResult || {};
+
+  return {
+${outputLines.join('\n')}
+  };
+}`,
+    outputs: (draft.outputs || []).map((output) => {
+      const outputName = String(output.name || '').trim();
+      return codeOutputsByName.has(outputName) ? { ...output, codeOutput: codeOutputsByName.get(outputName) } : output;
+    }),
+  };
+}
+
 function getDraftConfigRows(draft) {
   const selectedArtifactSources = new Set((draft.inputArtifacts || []).map((artifact) => artifact.sourcePath || artifact.sourceName).filter(Boolean));
   return (draft.inputs || [])
     .map((input, index) => ({ ...input, __draftIndex: index }))
     .filter((input) => !selectedArtifactSources.has(input.sourceName || input.name));
+}
+
+function createCodeDependencySnapshot(draft, target) {
+  if (target === 'parameterMapping') {
+    return JSON.stringify({
+      inputArtifacts: (draft.inputArtifacts || []).map((artifact) => ({
+        name: artifact.name || '',
+        type: artifact.type || '',
+      })),
+      configParams: getDraftConfigRows(draft).map((input) => ({
+        name: input.name || '',
+        type: input.type || '',
+        required: Boolean(input.required),
+        defaultValue: input.defaultValue ?? '',
+      })),
+    });
+  }
+  if (target === 'persistence') return String(draft.persistenceArtifactType || '');
+  return JSON.stringify((draft.outputs || []).map((output) => ({
+    name: output.name || '',
+    type: output.type || '',
+    codeOutput: output.codeOutput || output.path || '',
+  })));
+}
+
+function withCodeDependencyBaseline(draft, target) {
+  return {
+    ...draft,
+    codeGenerationBaselines: {
+      ...(draft.codeGenerationBaselines || {}),
+      [target]: createCodeDependencySnapshot(draft, target),
+    },
+  };
+}
+
+function hasCodeDependencyChanged(draft, target) {
+  const baseline = draft.codeGenerationBaselines?.[target];
+  return baseline != null && baseline !== createCodeDependencySnapshot(draft, target);
 }
 
 function getKnowledgeToolDraftStepError(draft, step) {
@@ -1852,10 +2033,15 @@ function getKnowledgeToolDraftStepError(draft, step) {
 
 function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClose, onSave, notify }) {
   const selectedSource = sources.find((item) => item.id === draft.sourceId);
+  const [generatingCode, setGeneratingCode] = useState('');
+  const codeGenerationTimerRef = useRef(null);
   const mcpOptions = Array.from(new Map(sources.map((source) => [source.serviceId, { id: source.serviceId, name: source.serviceName }])).values());
   const selectedMcpId = draft.selectedMcpId || selectedSource?.serviceId || mcpOptions[0]?.id || '';
   const filteredSources = sources.filter((source) => source.serviceId === selectedMcpId);
   const configInputRows = getDraftConfigRows(draft);
+  const parameterMappingDependencyChanged = hasCodeDependencyChanged(draft, 'parameterMapping');
+  const persistenceDependencyChanged = hasCodeDependencyChanged(draft, 'persistence');
+  const nodeOutputDependencyChanged = hasCodeDependencyChanged(draft, 'nodeOutput');
   const steps = ['流程节点绑定MCP工具', 'MCP工具入参映射', 'MCP工具返回映射'];
   const activeStep = Math.min(draft.step || 0, steps.length - 1);
   const showValidationError = (message) => notify?.(message, 'error');
@@ -1934,9 +2120,48 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   const removeOutput = (index) => {
     setDraft((current) => ({ ...current, outputs: current.outputs.filter((_, itemIndex) => itemIndex !== index) }));
   };
-  const updatePersistenceConfig = (patch) => setDraft((current) => ({ ...current, ...patch }));
+  const updatePersistenceConfig = (patch) => setDraft((current) => {
+    const next = { ...current, ...patch };
+    if (Object.prototype.hasOwnProperty.call(patch, 'persistenceParseCode')) return withCodeDependencyBaseline(next, 'persistence');
+    if (Object.prototype.hasOwnProperty.call(patch, 'nodeOutputParseCode')) return withCodeDependencyBaseline(next, 'nodeOutput');
+    return next;
+  });
   const updateParameterMappingCode = (parameterMappingCode) => {
-    setDraft((current) => ({ ...current, parameterMappingCode }));
+    setDraft((current) => withCodeDependencyBaseline({ ...current, parameterMappingCode }, 'parameterMapping'));
+  };
+  useEffect(() => () => {
+    if (codeGenerationTimerRef.current) window.clearTimeout(codeGenerationTimerRef.current);
+  }, []);
+  const generateCode = (target) => {
+    if (generatingCode) return;
+    if (target === 'parameterMapping' && !(draft.inputArtifacts || []).some((item) => hasText(item.name))) {
+      notify?.('请先配置节点输入', 'warning');
+      return;
+    }
+    if (target === 'nodeOutput' && !(draft.outputs || []).some((item) => hasText(item.name))) {
+      notify?.('请先配置节点输出', 'warning');
+      return;
+    }
+    setGeneratingCode(target);
+    codeGenerationTimerRef.current = window.setTimeout(() => {
+      setDraft((current) => {
+        if (target === 'parameterMapping') {
+          return withCodeDependencyBaseline({ ...current, parameterMappingCode: createAgentParameterMappingCode(selectedSource, current) }, target);
+        }
+        if (target === 'persistence') {
+          return withCodeDependencyBaseline({ ...current, persistenceParseCode: createAgentPersistenceParseCode(selectedSource, current) }, target);
+        }
+        const generated = createAgentNodeOutputResult(selectedSource, current);
+        return withCodeDependencyBaseline({ ...current, nodeOutputParseCode: generated.code, outputs: generated.outputs }, target);
+      });
+      setGeneratingCode('');
+      codeGenerationTimerRef.current = null;
+      notify?.(target === 'parameterMapping'
+        ? '参数映射代码已生成'
+        : target === 'persistence'
+          ? '持久化存储结果解析代码已生成'
+          : '节点输出解析代码和代码返回值已生成', 'success');
+    }, 1200);
   };
   return (
     <Modal
@@ -1998,6 +2223,10 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
             onParamChange={updateParam}
             onParamAdd={addConfigParam}
             onParamRemove={removeConfigParam}
+            onGenerateCode={() => generateCode('parameterMapping')}
+            codeGenerating={generatingCode === 'parameterMapping'}
+            generationDisabled={Boolean(generatingCode)}
+            codeDependencyWarning={parameterMappingDependencyChanged ? '节点输入和配置参数已变更，请核实代码逻辑是否需要更新。' : ''}
           />
         ) : null}
         {activeStep === 2 ? (
@@ -2014,6 +2243,13 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
             onOutputChange={updateParam}
             onOutputAdd={addOutput}
             onOutputRemove={removeOutput}
+            onGeneratePersistenceCode={() => generateCode('persistence')}
+            onGenerateNodeOutputCode={() => generateCode('nodeOutput')}
+            persistenceCodeGenerating={generatingCode === 'persistence'}
+            nodeOutputCodeGenerating={generatingCode === 'nodeOutput'}
+            generationDisabled={Boolean(generatingCode)}
+            persistenceCodeDependencyWarning={persistenceDependencyChanged ? '知识形态已变更，请核实代码逻辑是否需要更新。' : ''}
+            nodeOutputCodeDependencyWarning={nodeOutputDependencyChanged ? '节点输出已变更，请核实代码逻辑是否需要更新。' : ''}
           />
         ) : null}
       </div>
@@ -2115,7 +2351,7 @@ function NodeInputArtifactTable({ artifacts, onAdd, onRemove, onChange }) {
   );
 }
 
-function InputMappingPanel({ source, code, artifacts, configRows, onCodeChange, onArtifactAdd, onArtifactRemove, onArtifactChange, onParamChange, onParamAdd, onParamRemove }) {
+function InputMappingPanel({ source, code, artifacts, configRows, onCodeChange, onArtifactAdd, onArtifactRemove, onArtifactChange, onParamChange, onParamAdd, onParamRemove, onGenerateCode, codeGenerating, generationDisabled, codeDependencyWarning }) {
   const inputSchema = buildRawInputJsonSchema(source?.tool?.inputs || []);
   return (
     <section className="standardization-grid mapping-grid">
@@ -2136,13 +2372,18 @@ function InputMappingPanel({ source, code, artifacts, configRows, onCodeChange, 
         </div>
         <div className="schema-card standardization-panel code-editor-panel">
           <div className="schema-head"><strong>参数映射代码</strong></div>
-          <p className="plain-step-tip">通过代码将流程节点的输入和配置参数映射到MCP工具的Input Schema。</p>
+          <div className="agent-code-tip-row">
+            <p className="plain-step-tip">通过代码将流程节点的输入和配置参数映射到MCP工具的Input Schema。</p>
+            <AgentCodeGenerateButton generating={codeGenerating} disabled={generationDisabled} onClick={onGenerateCode} />
+          </div>
           <textarea
-            className="standardization-code-editor"
+            className={`standardization-code-editor ${codeDependencyWarning ? 'code-dependency-changed' : ''}`.trim()}
             spellCheck={false}
             value={code}
             onChange={(event) => onCodeChange(event.target.value)}
+            aria-invalid={codeDependencyWarning ? 'true' : undefined}
           />
+          {codeDependencyWarning ? <p className="code-dependency-warning" role="alert">{codeDependencyWarning}</p> : null}
         </div>
       </div>
       <NodeDetailSchemaBlock title="原始MCP工具 Input Schema" schema={inputSchema} structured />
@@ -2231,7 +2472,7 @@ function RawMcpToolPreview({ source }) {
   );
 }
 
-function OutputStandardizationPanel({ source, persistenceEnabled, persistenceArtifactType, persistenceCode, persistenceOutputDisplayName, persistenceOutputDescription, nodeOutputCode, outputs, onPersistenceChange, onOutputChange, onOutputAdd, onOutputRemove }) {
+function OutputStandardizationPanel({ source, persistenceEnabled, persistenceArtifactType, persistenceCode, persistenceOutputDisplayName, persistenceOutputDescription, nodeOutputCode, outputs, onPersistenceChange, onOutputChange, onOutputAdd, onOutputRemove, onGeneratePersistenceCode, onGenerateNodeOutputCode, persistenceCodeGenerating, nodeOutputCodeGenerating, generationDisabled, persistenceCodeDependencyWarning, nodeOutputCodeDependencyWarning }) {
   const outputSchema = buildRawOutputJsonSchema(source?.tool?.outputs || []);
   const [schemaPopoverOpen, setSchemaPopoverOpen] = useState(false);
   const [schemaPopoverStyle, setSchemaPopoverStyle] = useState(null);
@@ -2281,9 +2522,15 @@ function OutputStandardizationPanel({ source, persistenceEnabled, persistenceArt
           <p className="plain-step-tip">如果需要对 MCP 工具的结果进行持久化存储，请设置 Output Schema 解析代码并设置存储的知识形态。</p>
           {persistenceEnabled ? (
             <div className="persistence-config-fields">
-              <Field label="结果解析代码" required>
-                <textarea className="standardization-code-editor compact-code-editor" spellCheck={false} value={persistenceCode} onChange={(event) => onPersistenceChange({ persistenceParseCode: event.target.value })} />
-              </Field>
+              <AgentCodeEditorField
+                label="结果解析代码"
+                value={persistenceCode}
+                onChange={(event) => onPersistenceChange({ persistenceParseCode: event.target.value })}
+                onGenerate={onGeneratePersistenceCode}
+                generating={persistenceCodeGenerating}
+                generationDisabled={generationDisabled}
+                dependencyWarning={persistenceCodeDependencyWarning}
+              />
               <div className="persistence-config-row">
                 <label className="persistence-shape-field">
                   <span className="persistence-shape-label">
@@ -2310,9 +2557,15 @@ function OutputStandardizationPanel({ source, persistenceEnabled, persistenceArt
         <div className="schema-card standardization-panel code-editor-panel">
           <div className="schema-head"><strong>节点输出</strong></div>
           <p className="plain-step-tip">通过代码解析 MCP 工具返回结果，并定义为节点输出给下游节点使用。</p>
-          <Field label="解析代码" required>
-            <textarea className="standardization-code-editor compact-code-editor" spellCheck={false} value={nodeOutputCode} onChange={(event) => onPersistenceChange({ nodeOutputParseCode: event.target.value })} />
-          </Field>
+          <AgentCodeEditorField
+            label="解析代码"
+            value={nodeOutputCode}
+            onChange={(event) => onPersistenceChange({ nodeOutputParseCode: event.target.value })}
+            onGenerate={onGenerateNodeOutputCode}
+            generating={nodeOutputCodeGenerating}
+            generationDisabled={generationDisabled}
+            dependencyWarning={nodeOutputCodeDependencyWarning}
+          />
           <NodeOutputTable outputs={outputs} persistenceEnabled={persistenceEnabled} persistenceArtifactType={persistenceArtifactType} persistenceOutputDisplayName={persistenceOutputDisplayName} persistenceOutputDescription={persistenceOutputDescription} onPersistenceChange={onPersistenceChange} onChange={onOutputChange} onAdd={onOutputAdd} onRemove={onOutputRemove} />
         </div>
       </div>
