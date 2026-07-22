@@ -35,7 +35,7 @@ import {
   ThunderboltOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
-import { dataStore, knowledgeFormTypes } from './dataStore.js';
+import { dataStore, getKnowledgeFormTypeLabel, knowledgeFormTypes } from './dataStore.js';
 import {
   createKnowledgeToolFromRaw,
   createEmptyServiceDraft,
@@ -57,6 +57,16 @@ function makeId(prefix) {
 
 function nowText() {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
+}
+
+function toObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function toStringValue(value) {
+  if (Array.isArray(value)) return value.join('、');
+  if (value && typeof value === 'object') return JSON.stringify(value);
+  return value == null || value === '' ? '-' : String(value);
 }
 
 function Badge({ children, tone = 'neutral' }) {
@@ -283,8 +293,8 @@ function Shell({ active, onNavigate, children }) {
         ['ops-workbench', '方案工作台'],
         ['ops-access', '知识接入'],
         ['ops-result', '知识加工结果', [
-          ['ops-slice-library', '切片库'],
-          ['ops-qa-library', 'QA库'],
+          ['ops-slice-library', '文本切片'],
+          ['ops-qa-library', '问答库'],
           ['ops-knowledge-points', '知识点'],
         ]],
         ['ops-package', '知识包管理'],
@@ -1591,7 +1601,7 @@ function createDefaultParameterMappingCode(inputs = []) {
 }`;
 }
 
-const knowledgeShapeOptions = ['文本切片', '父子切片', 'QA对', '知识点'];
+const knowledgeShapeOptions = ['文本切片', '父子切片', 'QA对', '知识点', '知识图谱'];
 
 const knowledgeShapeStorageSchemas = {
   '文本切片': {
@@ -3384,7 +3394,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
               {leaf ? (
                 <span className="viewer-form-tags">
                   {cat.formTypes.map((form) => (
-                    <Badge key={form} tone={hasActiveCategoryPlan(cat.id, form) ? 'success' : form === '切片库' ? 'warning' : 'blue'}>{form}</Badge>
+                    <Badge key={form} tone={hasActiveCategoryPlan(cat.id, form) ? 'success' : form === '切片库' ? 'warning' : 'blue'}>{getKnowledgeFormTypeLabel(form)}</Badge>
                   ))}
                 </span>
               ) : null}
@@ -3498,7 +3508,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
                       checked={categoryForm.formTypes.includes(formType)}
                       onChange={() => toggleCategoryFormType(formType)}
                     />
-                    <span>{formType}</span>
+                    <span>{getKnowledgeFormTypeLabel(formType)}</span>
                   </label>
                 ))}
               </div>
@@ -3562,9 +3572,10 @@ const toolDialogCategoryOrder = [...defaultCategories, '系统节点', '未分�
 const categoryAliases = { 内容处理: '文本分片', 文档分块: '文本分片', 智能生成: '知识提取', 内容抽取: '知识提取', 系统工具: '系统节点' };
 const sampleDemoFile = { id: 'demo-policy-sample', name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB', status: '未发送' };
 const knowledgePreviewTabNames = {
-  切片库: '切片结果预览',
-  QA库: 'QA结果预览',
+  切片库: '文本切片预览',
+  QA库: '问答结果预览',
   知识点: '知识点结果预览',
+  知识图谱: '知识图谱结果预览',
 };
 const workbenchFileFormats = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md'];
 const workbenchSampleNames = ['医保政策样例', '理财产品说明书', '客户问答清单'];
@@ -4191,7 +4202,41 @@ function isIterationNode(node) {
 }
 
 function isKnowledgeExtractionNode(node) {
-  return node?.toolId === 'summary' || node?.toolName === '知识点提取' || node?.name === '知识点提取';
+  return node?.toolId === 'summary'
+    || node?.toolId === 'ke-idp-extract_document_knowledge_graph'
+    || node?.toolId === 'ke-platform-entity-relation-extraction'
+    || node?.toolId === 'knowledge-graph'
+    || node?.sourceToolName === 'extract_document_knowledge_graph'
+    || node?.slug === 'extract_document_knowledge_graph'
+    || node?.toolName === '知识点提取'
+    || node?.toolName === '知识图谱抽取'
+    || node?.toolName === '单文档图谱抽取'
+    || node?.toolName === '实体关系抽取'
+    || node?.name === '知识点提取'
+    || node?.name === '知识图谱抽取'
+    || node?.name === '单文档图谱抽取'
+    || node?.name === '实体关系抽取';
+}
+
+function isKnowledgeGraphExtractionNode(node) {
+  return node?.toolId === 'extract_document_knowledge_graph'
+    || node?.toolId === 'extract-document-knowledge-graph'
+    || node?.toolId === 'knowledge-graph'
+    || node?.toolId === 'ke-idp-extract_document_knowledge_graph'
+    || node?.sourceToolName === 'extract_document_knowledge_graph'
+    || node?.sourceToolName === '文档知识图谱抽取'
+    || node?.slug === 'extract_document_knowledge_graph'
+    || node?.toolName === '知识图谱抽取'
+    || node?.toolName === '单文档图谱抽取'
+    || node?.name === '知识图谱抽取'
+    || node?.name === '单文档图谱抽取'
+    || node?.toolName === '文档知识图谱抽取';
+}
+
+function isEntityRelationExtractionNode(node) {
+  return node?.toolId === 'ke-platform-entity-relation-extraction'
+    || node?.toolName === '实体关系抽取'
+    || node?.name === '实体关系抽取';
 }
 
 function isKnowledgeTaggingNode(node) {
@@ -4203,6 +4248,81 @@ function getIterationVariables() {
     { value: 'currentElement', label: '当前元素', type: 'object' },
     { value: 'currentIndex', label: '当前序号', type: 'number' },
   ];
+}
+
+function getKnowledgeExtractionOutputPath(node) {
+  if (!node) return '';
+  if (isKnowledgeGraphExtractionNode(node)) return 'graph_fragment';
+  if (isEntityRelationExtractionNode(node)) return 'entity_relation_candidates';
+  return 'summaryResult';
+}
+
+function normalizeKnowledgeGraphSchema(rawSchema) {
+  const value = rawSchema === undefined || rawSchema === null ? {} : rawSchema;
+  const parsed = (() => {
+    if (typeof value === 'string') {
+      try {
+        return value.trim() ? JSON.parse(value) : {};
+      } catch {
+        return null;
+      }
+    }
+    return typeof value === 'object' ? value : {};
+  })();
+  const payload = parsed || {};
+  const normalizeText = (text) => String(text || '').trim();
+  const normalizeSchemaList = (value) => {
+    const toText = (item) => {
+      if (item == null) return '';
+      if (typeof item === 'string' || typeof item === 'number') return normalizeText(item);
+      if (typeof item !== 'object') return normalizeText(item);
+      return normalizeText(item.name || item.type || item.entityType || item.relationType || item.key || item.attributeType || item.predicate);
+    };
+    const output = [];
+    const seen = new Set();
+    const rawItems = Array.isArray(value) ? value : [];
+    rawItems.forEach((item) => {
+      const text = toText(item);
+      if (!text || seen.has(text.toLowerCase())) return;
+      seen.add(text.toLowerCase());
+      output.push(text);
+    });
+    return output;
+  };
+  const getSchemaItems = (value, legacyValue = []) => {
+    const normalizedValue = normalizeSchemaList(value);
+    if (normalizedValue.length) return normalizedValue;
+    return normalizeSchemaList(legacyValue);
+  };
+  return {
+    schema_version: normalizeText(payload.schema_version || payload.schemaVersion || '1.0'),
+    Entities: getSchemaItems(
+      payload.Entities ?? payload.entities,
+      payload.entity_types,
+    ),
+    Attributes: getSchemaItems(
+      payload.Attributes ?? payload.attributes ?? payload.attrs,
+      payload.properties,
+    ),
+    Relations: getSchemaItems(
+      payload.Relations ?? payload.relations,
+      payload.relation_types ?? payload.connection_modes,
+    ),
+  };
+}
+
+function getDefaultKnowledgeGraphSchema() {
+  return {
+    schema_version: '1.0',
+    Entities: ['保险产品', '保险公司', '保障责任', '疾病', '受益人'],
+    Attributes: ['保障期限', '产品类型', '年龄范围', '等待期', '保费', '免赔额'],
+    Relations: ['承保', '适用人群', '覆盖', '排除'],
+  };
+}
+
+function isKnowledgeGraphSchemaEmpty(schema) {
+  if (!schema || typeof schema !== 'object') return true;
+  return !schema.schema_version && schema.Entities.length === 0 && schema.Attributes.length === 0 && schema.Relations.length === 0;
 }
 
 function normalizeIterationVariableValue(value) {
@@ -4293,18 +4413,73 @@ function hydrateStoredPlanNodes(nodes = []) {
   const catalog = readWorkbenchCatalog();
   const catalogById = new Map(catalog.map((tool) => [tool.id, tool]));
   const catalogByName = new Map(catalog.map((tool) => [tool.name, tool]));
+  const catalogBySourceName = new Map(catalog.map((tool) => [tool.sourceToolName, tool]).filter(([sourceToolName]) => sourceToolName));
+  const legacyKnowledgeGraphIds = new Set(['knowledge-graph', 'knowledge-graph-extractor', 'extract-document-knowledge-graph']);
+  const resolveTool = (node) => {
+    if (legacyKnowledgeGraphIds.has(node.toolId) && catalogById.get('ke-idp-extract_document_knowledge_graph')) return catalogById.get('ke-idp-extract_document_knowledge_graph');
+    const matched = catalogById.get(node.toolId)
+      || catalogByName.get(node.toolName)
+      || catalogBySourceName.get(node.sourceToolName)
+      || catalogBySourceName.get(node.toolName)
+      || catalogByName.get('单文档图谱抽取')
+      || catalogByName.get('知识图谱抽取')
+      || catalogByName.get('文档知识图谱抽取');
+    if (matched) return matched;
+    return null;
+  };
+  const createFallbackNode = (node, inputSource) => {
+    const nodeName = node.toolName || node.name || '未知节点';
+    const fallbackToolId = node.toolId || `legacy-${nodeName}`;
+    const fallbackOutputs = (node.outputs && node.outputs.length ? node.outputs : [{ id: 'result', name: 'result', displayName: '结果', type: 'object', path: 'result' }]).map((output) => ({
+      id: output.id || output.path || output.name || 'result',
+      name: output.name || output.id || 'result',
+      displayName: output.displayName || output.label || output.name || output.id || '结果',
+      type: output.type || 'object',
+      path: output.path || output.id || output.name || 'result',
+      description: output.description || output.desc || '',
+    }));
+    const fallbackTool = {
+      id: fallbackToolId,
+      name: nodeName,
+      description: '历史方案节点：当前目录中未匹配到对应节点，保留原始配置供手动修正。',
+      category: node.category || '未分类',
+      params: Array.isArray(node.params) ? node.params : [],
+      outputs: fallbackOutputs,
+      inputArtifacts: Array.isArray(node.inputArtifacts) ? node.inputArtifacts : [],
+      status: '可用',
+      enabled: true,
+      sourceToolName: node.sourceToolName,
+      summary: node.summary || node.description || '',
+    };
+    const fallbackNode = createWorkbenchNode(fallbackTool, inputSource);
+    return {
+      ...fallbackNode,
+      toolId: node.toolId || fallbackToolId,
+      toolName: nodeName,
+      nodeId: node.nodeId || fallbackNode.nodeId,
+      flowNodeId: node.flowNodeId || fallbackNode.flowNodeId,
+      category: fallbackNode.category,
+      description: node.description || fallbackNode.description,
+      adjusted: true,
+      outputs: fallbackOutputs,
+    };
+  };
   const hydrated = [];
   nodes.forEach((node) => {
-    const tool = catalogById.get(node.toolId) || catalogByName.get(node.toolName);
-    if (!tool) return;
+    const tool = resolveTool(node);
     const previous = hydrated.at(-1);
     const inputSource = previous ? { type: 'upstream', sourceNodeId: previous.nodeId, outputPath: previous.outputs?.[0]?.path || 'data.result' } : { type: 'fixed' };
-    if (tool.id === 'system-iteration' && previous) {
-      const hasKnowledgeNode = nodes.some((item) => item.toolId === 'summary' || item.toolName === '知识点提取');
-      const preferredIterationPath = hasKnowledgeNode ? 'summaryResult' : 'textChunkResult';
+    if (tool?.id === 'system-iteration' && previous) {
+      const hasKnowledgeGraph = nodes.some((item) => isKnowledgeGraphExtractionNode(item));
+      const hasKnowledgePoint = nodes.some((item) => item.toolId === 'summary' || item.toolName === '知识点提取');
+      const preferredIterationPath = hasKnowledgeGraph ? 'graph_fragment' : hasKnowledgePoint ? 'summaryResult' : 'textChunkResult';
       const iterationInputSource = { type: 'upstream', sourceNodeId: previous.nodeId, outputPath: getIterationInputOutputPath(previous, preferredIterationPath) };
       const taggingTool = catalogById.get('knowledge-tagging') || catalogByName.get('知识点打标');
       hydrated.push(createConfiguredIterationNode(tool, iterationInputSource, taggingTool));
+      return;
+    }
+    if (!tool) {
+      hydrated.push(createFallbackNode(node, inputSource));
       return;
     }
     const workbenchNode = createWorkbenchNode(tool, inputSource);
@@ -4313,7 +4488,9 @@ function hydrateStoredPlanNodes(nodes = []) {
       category: workbenchNode.category,
       semanticCategory: workbenchNode.semanticCategory,
       description: node.description || workbenchNode.description,
+      adjusted: node.adjusted ?? false,
     });
+    return;
   });
   return cloneWorkbenchNodes(hydrated);
 }
@@ -4554,6 +4731,15 @@ const agentFormPlans = {
     iterationReason: '迭代处理知识点数组，逐条完成知识点打标。',
     runSummary: '试跑结果：所有节点执行成功，已生成知识点打标结果。',
   },
+  知识图谱: {
+    objective: '抽取结构化知识图谱结果',
+    extractionTitle: '单文档图谱抽取节点',
+    extractionReason: '需要基于单份文档的分片和 Schema 构建可追溯图谱片段。',
+    flowSteps: ['文件解析', '内容切分', '单文档图谱抽取'],
+    iterationInputPath: 'graph_fragment',
+    iterationReason: '',
+    runSummary: '试跑结果：已生成知识图谱片段。',
+  },
 };
 
 function getAgentFormatPlan(fileFormat = 'pdf') {
@@ -4605,7 +4791,22 @@ function findWorkbenchToolByName(catalog, name) {
   return catalog.find((tool) => tool.name === name || tool.sourceToolName === name);
 }
 
-function findKnowledgeExtractionTool(catalog, byId) {
+function findKnowledgeExtractionTool(catalog, byId, formType = '知识点') {
+  if (formType === '知识图谱') {
+    return byId.get('extract_document_knowledge_graph')
+      || byId.get('ke-idp-extract_document_knowledge_graph')
+      || byId.get('extract-document-knowledge-graph')
+      || byId.get('knowledge-graph')
+      || byId.get('knowledge-graph-extractor')
+      || findWorkbenchToolByName(catalog, '单文档图谱抽取')
+      || findWorkbenchToolByName(catalog, '知识图谱抽取')
+      || findWorkbenchToolByName(catalog, '文档知识图谱抽取')
+      || catalog.find((tool) => tool.name === '单文档图谱抽取'
+        || tool.name === '知识图谱抽取'
+        || tool.name === '文档知识图谱抽取'
+        || tool.sourceToolName === 'extract_document_knowledge_graph'
+        || tool.slug === 'extract_document_knowledge_graph');
+  }
   return byId.get('summary')
     || findWorkbenchToolByName(catalog, '知识点提取')
     || catalog.find((tool) => getSemanticCategory(tool) === '知识提取' && tool.name.includes('知识点'));
@@ -4629,15 +4830,25 @@ function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf'
   const parserTool = findWorkbenchToolByName(catalog, formatPlan.parserName) || catalog.find((tool) => getSemanticCategory(tool) === '文档解析');
   const splitterTool = findWorkbenchToolByName(catalog, formatPlan.splitterName) || catalog.find((tool) => getSemanticCategory(tool) === '文本分片');
   const qaTool = findWorkbenchToolByName(catalog, 'QA提取');
-  const knowledgeTool = findKnowledgeExtractionTool(catalog, byId);
+  const knowledgeTool = findKnowledgeExtractionTool(catalog, byId, target.formType);
   const iterationTool = byId.get('system-iteration');
   const taggingTool = findKnowledgeTaggingTool(catalog, byId);
   const parser = parserTool ? createWorkbenchNode(parserTool, { type: 'fixed' }) : null;
   const adapter = null;
   const splitter = splitterTool && parser ? createWorkbenchNode(splitterTool, { type: 'upstream', sourceNodeId: parser.nodeId, outputPath: getBestOutputPathForTarget(parser, splitterTool) }) : null;
-  const extractionTool = target.formType === 'QA库' ? qaTool : target.formType === '知识点' ? knowledgeTool : null;
+  const extractionTool = target.formType === 'QA库'
+    ? qaTool
+    : target.formType === '知识点' || target.formType === '知识图谱'
+      ? knowledgeTool
+      : null;
   const extraction = extractionTool && splitter ? createWorkbenchNode(extractionTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }) : null;
-  const extractionOutputPath = target.formType === 'QA库' ? 'qaResult' : target.formType === '知识点' ? 'summaryResult' : 'textChunkResult';
+  const extractionOutputPath = target.formType === 'QA库'
+    ? 'qaResult'
+    : target.formType === '知识点'
+      ? 'summaryResult'
+      : target.formType === '知识图谱'
+        ? 'graph_fragment'
+        : 'textChunkResult';
   const iterationSource = extraction || splitter;
   const iterationInputSource = iterationSource ? { type: 'upstream', sourceNodeId: iterationSource.nodeId, outputPath: extractionOutputPath } : { type: 'fixed' };
   const iteration = target.formType === '知识点' && iterationTool && iterationSource
@@ -4700,13 +4911,13 @@ function createOptimizedNodes(currentNodes, catalog = readWorkbenchCatalog()) {
   const knowledge = next.find(isKnowledgeExtractionNode);
   const iterationIndex = next.findIndex(isIterationNode);
   if (iterationIndex >= 0 && knowledge) {
-    next[iterationIndex] = applyInputSource(next[iterationIndex], { type: 'upstream', sourceNodeId: knowledge.nodeId, outputPath: 'summaryResult' });
+    next[iterationIndex] = applyInputSource(next[iterationIndex], { type: 'upstream', sourceNodeId: knowledge.nodeId, outputPath: getKnowledgeExtractionOutputPath(knowledge) });
   }
   const iteration = iterationIndex >= 0 ? next[iterationIndex] : null;
   next.forEach((node, index) => {
     if (node.toolId !== 'system-storage') return;
     const source = iteration || knowledge || splitter;
-    if (source) next[index] = applyInputSource(node, { type: 'upstream', sourceNodeId: source.nodeId, outputPath: isIterationNode(source) ? 'iterationResult' : isKnowledgeExtractionNode(source) ? 'summaryResult' : 'textChunkResult' });
+    if (source) next[index] = applyInputSource(node, { type: 'upstream', sourceNodeId: source.nodeId, outputPath: isIterationNode(source) ? 'iterationResult' : isKnowledgeExtractionNode(source) ? getKnowledgeExtractionOutputPath(source) : 'textChunkResult' });
   });
   return next;
 }
@@ -5079,6 +5290,14 @@ function getSmartPromptValue(param, node, instruction) {
     if (lowerId.includes('system')) return '你是知识库问答抽取专家。请基于输入片段生成可用于客服问答的高质量 QA，问题表达自然，答案必须来自原文，并保留来源片段引用。';
     if (lowerId.includes('guide')) return '请围绕用户可能咨询的问题生成问答对。每个答案需完整、可独立理解，并返回 question、answer、sourceChunkId 字段。';
   }
+  if (isKnowledgeGraphExtractionNode(node)) {
+    if (lowerId.includes('system')) return '你是单文档图谱抽取专家。请严格依据当前 Schema 抽取实体、关系和属性；每条结果必须保留来源分片与原文证据，超出 Schema 的候选进入待审核。';
+    if (lowerId.includes('guide')) return '仅处理当前文档分片，输出可追溯的 graph_fragment；不要进行跨文档实体归一化或全局图谱合并。';
+  }
+  if (isEntityRelationExtractionNode(node)) {
+    if (lowerId.includes('system')) return '你是单文档实体关系抽取专家。请识别实体、关系与来源证据，保留候选结果，不进行跨文档实体归一化。';
+    if (lowerId.includes('guide')) return '输出 entity_relation_candidates；每条候选需带来源分片与原文证据，孤立实体按配置保留。';
+  }
   if (isKnowledgeExtractionNode(node)) {
     if (lowerId.includes('system')) return '你是知识工程知识点提取专家。请基于输入片段提炼关键知识点，保持事实准确，避免引入原文没有的信息，并输出结构化知识点。';
     if (lowerId.includes('guide')) return '请按主题生成知识点条目，每条包含 title、content、sourceChunkIds，优先覆盖适用范围、办理条件和材料要求。';
@@ -5145,6 +5364,8 @@ function getSmartConfigureInstruction(node) {
   if (node.toolId === 'medical-policy-parser') return '使用当前上传的医保政策样例文件，按政策条款模式解析正文、章节和段落。';
   if (node.toolId === 'medical-policy-splitter') return '承接上游标准文本块，按章节边界生成 800 字左右的知识片段。';
   if (node.toolId === 'qa-extractor') return '承接分片结果，生成可用于客服问答的政策问答对。';
+  if (isKnowledgeGraphExtractionNode(node)) return '承接单份文档分片并按 Schema 抽取可追溯图谱片段；跨文档归一化在图谱管理侧完成。';
+  if (isEntityRelationExtractionNode(node)) return '承接单份文档分片，识别实体、关系与来源证据候选，不进行跨文档归一化。';
   if (isKnowledgeExtractionNode(node)) return '承接分片结果，生成政策知识点、适用对象和关键规则。';
   if (node.toolId === 'system-iteration') return '承接知识点提取结果，对每个知识点逐项执行知识点打标，并聚合打标结果。';
   if (isKnowledgeTaggingNode(node)) return '承接迭代执行的当前元素，对单个知识点完成结构感知打标。';
@@ -5184,6 +5405,39 @@ function createSmartConfiguredNode(node, nodes, instruction) {
 }
 
 function createSampleResult(file, options = {}) {
+  const graphFragmentEvidence = {
+    document: { id: file.id || 'doc-policy-001', title: `${file.name} 的证据来源` },
+    chunkId: 'chunk-002',
+    quote: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。',
+    mention_type: 'policy_chunk',
+    offset: { start: 12, end: 92 },
+  };
+  const graphFragmentData = {
+    status: 'success',
+    metadata: {
+      fileName: file.name,
+      language: 'zh-CN',
+      documentMetadata: { document_id: file.id || 'doc-policy-001', document_type: 'policy_pdf' },
+    },
+    entities: [
+      { id: 'ent-001', name: '王晓', type: '人物', properties: { 身份: '投保人', 所属部门: '医保中心' }, evidences: [graphFragmentEvidence] },
+      { id: 'ent-002', name: '异地就医备案', type: '办理事项', properties: { 阶段: '申报', 适用场景: '转诊转院' }, evidences: [graphFragmentEvidence] },
+      { id: 'ent-003', name: '结算审核', type: '办理事项', properties: { 业务范围: '医保报销', 要求: '人工复核' }, evidences: [graphFragmentEvidence] },
+      { id: 'ent-004', name: '长期居住人员', type: '人物', properties: { 标签: '长期居住', 来源渠道: '政策条款' }, evidences: [graphFragmentEvidence] },
+    ],
+    relations: [
+      { id: 'rel-001', sourceEntityId: 'ent-001', sourceEntityType: '人物', relationType: '可办理', targetEntityId: 'ent-002', targetEntityType: '办理事项', confidence: 0.97, properties: { 规则来源: '第2条', 证据等级: '高' }, evidences: [graphFragmentEvidence] },
+      { id: 'rel-002', sourceEntityId: 'ent-002', sourceEntityType: '办理事项', relationType: '需要', targetEntityId: 'ent-003', targetEntityType: '办理事项', confidence: 0.94, properties: { 办理要求: '结算前置动作' }, evidences: [graphFragmentEvidence] },
+      { id: 'rel-003', sourceEntityId: 'ent-004', sourceEntityType: '人物', relationType: '可触发', targetEntityId: 'ent-001', targetEntityType: '人物', confidence: 0.9, properties: { 说明: '办理条件成立时可触发备案' }, evidences: [graphFragmentEvidence] },
+    ],
+    isolatedEntities: [{ id: 'ent-005', name: '审核系统', type: '系统', reason: '仅出现一次，未命中关系上下文。', evidences: [graphFragmentEvidence] }],
+    schemaSuggestions: [
+      { id: 'suggest-001', type: '新增关系类型', suggestedValue: 'TRIGGERS', reason: '文本出现“触发”条件表达，可补充到方案关系词表。', sample: { source: 'Person', relation: 'TRIGGERS', target: 'Person' }, confidence: 0.81 },
+    ],
+    stats: { entityCount: 5, relationCount: 3, chunkCount: 6, coveredChunkCount: 5, coverageRatio: 0.83 },
+    failedChunks: [{ chunkId: 'chunk-004', reason: 'OCR 识别噪声较高，未提取到实体边界。', status: 'failed', retryAvailable: true }],
+    warnings: [{ code: 'PARTIAL_COVERAGE', message: '部分段落未参与图谱抽取，建议补充清晰扫描版本后重试。', severity: 'warn', sourceChunkId: 'chunk-004' }],
+  };
   const baseRuns = [
     {
       toolName: '文件解析',
@@ -5205,6 +5459,14 @@ function createSampleResult(file, options = {}) {
       status: '成功',
       outputFull: JSON.stringify({ textChunkResult: [{ chunkId: 'chunk-001', title: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 }, { chunkId: 'chunk-002', title: '办理条件', text: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 }], stats: { chunkCount: 2, chunkSize: 800, overlap: 80 } }, null, 2),
     },
+    ...(options.includeKnowledgeGraph ? [{
+      toolName: '单文档图谱抽取',
+      category: '知识提取',
+      outputPath: 'graph_fragment',
+      parameters: [{ name: 'chunks', value: 'textChunkResult' }, { name: 'extraction_schema', value: '系统默认schema' }, { name: 'extraction_instruction', value: '请输出康护无忧医疗保险政策中关键实体关系及关键属性。' }],
+      status: '成功',
+      outputFull: JSON.stringify({ graph_fragment: graphFragmentData }, null, 2),
+    }] : []),
     ...(options.includeKnowledge ? [{
       toolName: 'QA提取',
       category: '知识提取',
@@ -5245,7 +5507,8 @@ function createSampleResult(file, options = {}) {
 }
 
 function createSampleResultForPlan(file, nodes) {
-  const defaultRuns = createSampleResult(file, { includeKnowledge: true }).toolRuns;
+  const hasKnowledgeGraph = nodes.some((node) => isKnowledgeGraphExtractionNode(node));
+  const defaultRuns = createSampleResult(file, { includeKnowledge: true, includeKnowledgeGraph: hasKnowledgeGraph }).toolRuns;
   return {
     fileId: file.id,
     fileName: file.name,
@@ -5366,7 +5629,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     categoryId: category ? category.id : null,
     formType: target.formType,
     fileFormat: target.fileFormat,
-    name: `${category ? category.name : project.name}${target.formType}${target.fileFormat}处理方案`,
+    name: `${category ? category.name : project.name}${getKnowledgeFormTypeLabel(target.formType)}${target.fileFormat}处理方案`,
   });
   const getRunLabel = (version, versionStatus, runAt) => `${version}${versionStatus === 'draft' ? '草稿' : ''}-${compactRunTime(runAt)}`;
   const normalizeExecutionRecord = (execution) => {
@@ -5688,8 +5951,8 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       return next;
     });
   };
-  const workbenchContextText = category ? `${project.name} / ${category.name} / ${decodeURIComponent(formType || '切片库')}` : `${project.name} / 临时方案`;
-  const workbenchPlanTitle = category ? `${category.name} · ${activePlanTarget.formType} · ${activePlanTarget.fileFormat}` : `兜底方案 · ${activePlanTarget.formType} · ${activePlanTarget.fileFormat}`;
+  const workbenchContextText = category ? `${project.name} / ${category.name} / ${getKnowledgeFormTypeLabel(decodeURIComponent(formType || '切片库'))}` : `${project.name} / 临时方案`;
+  const workbenchPlanTitle = category ? `${category.name} · ${getKnowledgeFormTypeLabel(activePlanTarget.formType)} · ${activePlanTarget.fileFormat}` : `兜底方案 · ${getKnowledgeFormTypeLabel(activePlanTarget.formType)} · ${activePlanTarget.fileFormat}`;
   const knowledgePreviewTab = getKnowledgePreviewTabName(activePlanTarget.formType);
   const rightTabs = ['处理方案', '执行结果', knowledgePreviewTab];
   const { Icon: ActiveFormatIcon, color: activeFormatColor } = workbenchFileFormatMeta[activePlanTarget.fileFormat] || { Icon: FileOutlined, color: '#64748b' };
@@ -5767,7 +6030,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     categoryId: target.planScope === 'category' ? target.categoryId : null,
     formType: target.formType,
     fileFormat: targetFormat,
-    name: `${target.planScope === 'category' ? copyTargetCategory?.name || '知识类目' : dataStore.getProject(target.projectId)?.name || '兜底'}${target.formType}${targetFormat}处理方案`,
+    name: `${target.planScope === 'category' ? copyTargetCategory?.name || '知识类目' : dataStore.getProject(target.projectId)?.name || '兜底'}${getKnowledgeFormTypeLabel(target.formType)}${targetFormat}处理方案`,
   });
   const copyTargets = copyPlanForm?.fileFormat ? [copyPlanForm.fileFormat].map((targetFormat) => {
     const route = buildCopyPlanRoute(copyPlanForm, targetFormat);
@@ -6018,7 +6281,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     };
     setIssuePopoverOpen(false);
     clearAgentTimers(runContextKey);
-    const agentPlan = createAgentDemoPlan(activePlanTarget, catalog);
+    const latestCatalog = readWorkbenchCatalog();
+    setCatalog(latestCatalog);
+    const agentPlan = createAgentDemoPlan(activePlanTarget, latestCatalog);
     const { parser, splitter, extraction, iteration } = agentPlan;
     const runFileFormat = activePlanTarget.fileFormat;
     const preFixNodes = [parser, splitter].filter(Boolean);
@@ -6039,7 +6304,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       const merged = [...filesSnapshot.filter((file) => !currentIds.has(file.id)), ...current];
       return merged.map((file) => (sendingIds.has(file.id) ? { ...file, status: '试跑中' } : file));
     });
-    pushRunEvent({ role: 'user', title: '发送样例文件', content: `已发送 ${filesSnapshot.map((file) => file.name).join('、')}，请生成${activePlanTarget.formType} ${activePlanTarget.fileFormat}的正式知识处理方案。`, status: 'done' });
+    pushRunEvent({ role: 'user', title: '发送样例文件', content: `已发送 ${filesSnapshot.map((file) => file.name).join('、')}，请生成${getKnowledgeFormTypeLabel(activePlanTarget.formType)} ${activePlanTarget.fileFormat}的正式知识处理方案。`, status: 'done' });
 
     let cursor = 0;
     const isFastOpeningKnowledgePdfDemo = category?.id === 'cat-open-account'
@@ -6149,7 +6414,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     let executeEventId = '';
 
     step(800, () => {
-      analyzeEventId = pushRunEvent({ role: 'thought', title: '分析样例文件', content: `我先判断样例文件的类型、内容结构和${activePlanTarget.formType}处理目标，避免直接套用固定流程。`, status: 'running' });
+      analyzeEventId = pushRunEvent({ role: 'thought', title: '分析样例文件', content: `我先判断样例文件的类型、内容结构和${getKnowledgeFormTypeLabel(activePlanTarget.formType)}处理目标，避免直接套用固定流程。`, status: 'running' });
     });
     step(2800, () => {
       updateRunEvent(analyzeEventId, { status: 'done', content: `样例识别为${agentPlan.formatLabel}。${agentPlan.concern}` });
@@ -6160,7 +6425,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
         status: 'done',
         content: agentPlan.directParserToSplitter
           ? `结构识别完成：${parser?.toolName || '解析节点'}已输出可直接用于${splitter?.toolName || '文本分片节点'}的结构化结果。`
-          : `结构识别完成：将直接基于解析结果完成内容切分与${activePlanTarget.formType}加工。`,
+          : `结构识别完成：将直接基于解析结果完成内容切分与${getKnowledgeFormTypeLabel(activePlanTarget.formType)}加工。`,
       });
       setRunSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '试跑中' } : file)));
       queryEventId = pushRunEvent({ role: 'thought', title: '节点目录查询', content: '输入：节点状态=可用，分类=文档解析/文本分片/知识提取/系统节点；输出：候选节点清单。', status: 'running', kind: 'toolCall' });
@@ -6284,7 +6549,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       setRunSampleFiles((current) => current.map((file) => (sendingIds.has(file.id) ? { ...file, status: '已完成' } : file)));
       setRunResults(nextResults);
       setRunExecutionRecords((current) => ({ ...current, ...nextExecutionRecords }));
-      pushRunEvent({ role: 'agent', title: '方案生成与样例执行完成', content: `已完成${activePlanTarget.formType} ${activePlanTarget.fileFormat}方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。`, status: 'done' });
+      pushRunEvent({ role: 'agent', title: '方案生成与样例执行完成', content: `已完成${getKnowledgeFormTypeLabel(activePlanTarget.formType)} ${activePlanTarget.fileFormat}方案搭建、链路检查、适配修复和样例试跑，可以保存为正式处理方案。`, status: 'done' });
       setRunRunning(false);
       persistRunChat();
       if (activePlanTargetKeyRef.current === runContextKey) notify('Agent 已完成方案生成和样例执行', 'success');
@@ -6772,6 +7037,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   };
 
   const openAddNode = (parentId = null) => {
+    const snapshot = readUnifiedFlowNodeCatalog();
+    setCatalog(readWorkbenchCatalog());
+    setToolCategories(snapshot.categories || defaultCategories);
     setAddParentId(parentId);
     setAddOpen(true);
   };
@@ -6918,7 +7186,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
               {planFormTypes.map((item) => (
                 <div className="scheme-format-group" key={item}>
                   <button type="button" className="scheme-format-title" onClick={() => togglePlanGroup(item)}>
-                    <span>{item}</span>
+                    <span>{getKnowledgeFormTypeLabel(item)}</span>
                     <em>{getFormTypeDoneCount(item)}/{workbenchFileFormats.length}</em>
                     <span className={`scheme-format-arrow ${expandedPlanGroups.has(item) ? 'expanded' : 'collapsed'}`}>
                       <AntDownOutlined />
@@ -6960,7 +7228,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
               {category ? <span className="workbench-strip-separator">·</span> : null}
               {category ? <span className="workbench-strip-text">{categoryPath}</span> : null}
               <span className="workbench-strip-separator">·</span>
-              <span className="workbench-strip-tag">{activePlanTarget.formType}</span>
+              <span className="workbench-strip-tag">{getKnowledgeFormTypeLabel(activePlanTarget.formType)}</span>
               <span className="workbench-strip-separator">·</span>
               <span className="workbench-strip-tag format" style={{ '--format-color': activeFormatColor }}><ActiveFormatIcon />{activePlanTarget.fileFormat}</span>
             </div>
@@ -7257,7 +7525,7 @@ function PlanCopyCategoryTree({ categories, selectedCategoryId, disabled, onSele
         >
           <span className="plan-copy-tree-indent" />
           <span className="plan-copy-tree-name">{item.name}</span>
-          {selectable ? <span className="plan-copy-tree-meta">{item.formTypes.join('、')}</span> : null}
+          {selectable ? <span className="plan-copy-tree-meta">{item.formTypes.map(getKnowledgeFormTypeLabel).join('、')}</span> : null}
         </button>
         {children.map((child) => renderNode(child, depth + 1))}
       </div>
@@ -7340,7 +7608,7 @@ function PlanCopyDialog({
           ) : null}
           <Field label="选择知识形态" required>
             <SelectField value={form.formType} onChange={onFormTypeChange} disabled={copying || !formTypes.length} missingLabel="请先选择末级类目">
-              {formTypes.map((item) => <option key={item} value={item}>{item}</option>)}
+              {formTypes.map((item) => <option key={item} value={item}>{getKnowledgeFormTypeLabel(item)}</option>)}
             </SelectField>
           </Field>
           <div className="form-field plan-copy-full-width">
@@ -7377,7 +7645,7 @@ function PlanCopyResultDialog({ results, onClose, onView }) {
     item.planScope === 'category' ? '类目方案' : '兜底方案',
     item.projectName,
     item.planScope === 'category' ? (item.categoryPath || item.categoryName || '知识类目') : '兜底方案',
-    item.formType,
+    getKnowledgeFormTypeLabel(item.formType),
     `${item.fileFormat} V${item.version || '-'}`,
   ].join(' · ');
   return (
@@ -7775,6 +8043,41 @@ function SimpleNodeConfigParam({ param, onChange }) {
   );
 }
 
+function GraphSchemaTagInput({ label, required = false, value, onChange, placeholder }) {
+  const [draftValue, setDraftValue] = useState('');
+  const tags = Array.isArray(value) ? value : [];
+  const addTag = () => {
+    const nextTag = draftValue.trim();
+    if (!nextTag) return;
+    if (!tags.includes(nextTag)) onChange([...tags, nextTag]);
+    setDraftValue('');
+  };
+  return (
+    <label className="simple-node-param-row graph-schema-tag-row">
+      <span>{label}{required ? <em>*</em> : null}</span>
+      <div className="graph-schema-tag-input">
+        {tags.map((tag) => (
+          <span className="graph-schema-tag" key={tag}>
+            {tag}
+            <button type="button" aria-label={`删除${tag}`} onClick={() => onChange(tags.filter((item) => item !== tag))}>×</button>
+          </span>
+        ))}
+        <input
+          value={draftValue}
+          placeholder={tags.length ? '继续输入后按回车' : placeholder}
+          onChange={(event) => setDraftValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              addTag();
+            }
+          }}
+        />
+      </div>
+    </label>
+  );
+}
+
 function NodeOutputReadonlyTable({ outputs }) {
   return (
     <div className="output-schema">
@@ -7974,6 +8277,7 @@ function inputArtifactToParam(artifact) {
 function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
   const [draft, setDraft] = useState(cloneWorkbenchNode(node));
   const parentNode = parentId ? nodes.find((item) => item.nodeId === parentId) : null;
+  const isKnowledgeGraphNode = isKnowledgeGraphExtractionNode(draft);
   const priorNodes = parentNode
     ? [...getPriorNodes(nodes, parentNode.nodeId), ...getPriorNodes(parentNode.innerNodes || [], node.nodeId)]
     : getPriorNodes(nodes, node.nodeId);
@@ -8032,6 +8336,19 @@ function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
   });
   const addCodeOutput = () => setDraft((current) => syncCodeOutputs(current, [...(current.codeOutputs || []), { id: makeId('code-output'), name: `output${(current.codeOutputs || []).length + 1}`, type: 'json', value: 'data.output' }]));
   const removeCodeOutput = (idValue) => setDraft((current) => syncCodeOutputs(current, (current.codeOutputs || []).filter((output) => output.id !== idValue)));
+  const graphInputArtifacts = (draft.inputArtifacts || []).filter((artifact) => artifact.id === 'chunks');
+  const knowledgeGraphInputParams = graphInputArtifacts.map(inputArtifactToParam);
+  const entityTypesParam = draft.params.find((param) => param.id === 'entity_types');
+  const attributeTypesParam = draft.params.find((param) => param.id === 'attribute_types');
+  const relationTypesParam = draft.params.find((param) => param.id === 'relation_types');
+  const extractionInstructionParam = draft.params.find((param) => param.id === 'extraction_instruction');
+  const includeIsolatedEntitiesParam = draft.params.find((param) => param.id === 'include_isolated_entities');
+
+  const updateDraftParamValue = (paramId, value) => setDraft((current) => ({
+    ...current,
+    params: current.params.map((param) => (param.id === paramId ? { ...param, source: { type: 'manual' }, value } : param)),
+  }));
+
   return (
     <Modal
       title={(
@@ -8181,21 +8498,50 @@ function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
           <section className="config-section">
             <div className="config-section-head"><h3>节点输入</h3></div>
             <div className="param-list">
-              {nodeInputParams.length ? nodeInputParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} iterationContext={iterationContext} onChange={artifactInputs.length ? updateNodeInputParam : updateParam} singleLine={index === 0} inlineSource showHeader={index === 0} />) : <div className="empty-mini">暂无节点输入</div>}
+              {isKnowledgeGraphNode && knowledgeGraphInputParams.length ? knowledgeGraphInputParams.map((param, index) => (
+                <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} iterationContext={iterationContext} onChange={updateNodeInputParam} singleLine={index === 0} inlineSource showHeader={index === 0} />
+              )) : nodeInputParams.length ? nodeInputParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} iterationContext={iterationContext} onChange={artifactInputs.length ? updateNodeInputParam : updateParam} singleLine={index === 0} inlineSource showHeader={index === 0} />) : <div className="empty-mini">暂无节点输入</div>}
             </div>
           </section>
-          <section className="config-section">
-            <div className="config-section-head"><h3>配置参数</h3></div>
-            <div className="simple-node-param-list">
-              {configParams.length ? configParams.map((param) => <SimpleNodeConfigParam key={param.id} param={param} onChange={updateParam} />) : <div className="empty-mini">暂无配置参数</div>}
-            </div>
-          </section>
+          {isKnowledgeGraphNode ? (
+            <>
+              <section className="config-section">
+                <div className="config-section-head"><h3>配置参数</h3></div>
+                <div className="simple-node-param-list">
+                  <GraphSchemaTagInput label="实体类型" value={entityTypesParam?.value} onChange={(value) => updateDraftParamValue('entity_types', value)} placeholder="输入实体类型后按回车" />
+                  <GraphSchemaTagInput label="属性类型" value={attributeTypesParam?.value} onChange={(value) => updateDraftParamValue('attribute_types', value)} placeholder="输入属性类型后按回车" />
+                  <GraphSchemaTagInput label="关系类型" value={relationTypesParam?.value} onChange={(value) => updateDraftParamValue('relation_types', value)} placeholder="输入关系类型后按回车" />
+                  <label className="simple-node-param-row graph-isolated-entity-row">
+                    <span>保留孤立实体</span>
+                    <button
+                      type="button"
+                      className={`switch-control ${includeIsolatedEntitiesParam?.value ? 'active' : ''}`}
+                      onClick={() => updateDraftParamValue('include_isolated_entities', !includeIsolatedEntitiesParam?.value)}
+                      aria-label="是否保留孤立实体"
+                      aria-pressed={Boolean(includeIsolatedEntitiesParam?.value)}
+                    ><span /></button>
+                  </label>
+                  <label className="simple-node-param-row">
+                    <span>补充抽取说明</span>
+                    <input value={extractionInstructionParam?.value || ''} onChange={(event) => updateDraftParamValue('extraction_instruction', event.target.value)} placeholder="可选：补充本次单文档图谱抽取要求" />
+                  </label>
+                </div>
+              </section>
+            </>
+          ) : (
+            <section className="config-section">
+              <div className="config-section-head"><h3>配置参数</h3></div>
+              <div className="simple-node-param-list">
+                {configParams.length ? configParams.map((param) => <SimpleNodeConfigParam key={param.id} param={param} onChange={updateParam} />) : <div className="empty-mini">暂无配置参数</div>}
+              </div>
+            </section>
+          )}
         </>
       )}
       {draft.toolId !== 'system-iteration' ? (
         <section className="config-section">
           <div className="config-section-head"><h3>节点输出</h3></div>
-          <NodeOutputReadonlyTable outputs={draft.outputs || []} />
+          <NodeOutputReadonlyTable outputs={(isKnowledgeGraphNode ? draft.outputs : draft.outputs).filter((output) => !isKnowledgeGraphNode || output.path === 'graph_fragment' || output.id === 'graph_fragment' || output.name === 'graph_fragment')} />
         </section>
       ) : null}
     </Modal>
@@ -8242,7 +8588,191 @@ function isUsefulKnowledgePayload(value) {
 function getKnowledgeResultPaths(formType) {
   if (formType === '切片库') return ['textChunkResult', 'data.textChunkResult', 'sliceItem', 'data.sliceItem'];
   if (formType === 'QA库') return ['qaResult', 'data.qaResult', 'qaItem', 'data.qaItem', 'iterationResult', 'data.iterationResult'];
+  if (formType === '知识图谱') return ['graph_fragment', 'data.graph_fragment', 'graph', 'data.graph', 'knowledgeGraph', 'data.knowledgeGraph'];
   return ['iterationResult', 'data.iterationResult', 'summaryResult', 'data.summaryResult'];
+}
+
+function toArray(value) {
+  if (value == null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function toNumber(value, fallback = 0) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function formatPercent(value) {
+  const parsed = toNumber(value, 0);
+  return `${Math.round(Math.min(1, Math.max(0, parsed)) * 100)}%`;
+}
+
+function formatCoverageText(stats = {}) {
+  const covered = toNumber(stats.coveredChunkCount);
+  const total = toNumber(stats.chunkCount);
+  if (!total) return `${covered}/0`;
+  return `${covered}/${total}`;
+}
+
+function normalizeGraphStatus(raw = '') {
+  const value = String(raw || '').toLowerCase();
+  if (value.includes('partial')) return 'partial_success';
+  if (value === 'empty' || value.includes('no_graph_facts_found')) return 'empty';
+  if (value === 'failed' || value === 'error') return 'failed';
+  if (value === 'running') return 'running';
+  if (value) return 'success';
+  return 'empty';
+}
+
+function normalizeEvidenceField(value) {
+  if (!value) return [];
+  const arr = toArray(value);
+  return arr.map((item, index) => {
+    const source = item?.document || item?.source || item?.chunkMeta || null;
+    const offsets = item?.offset || {};
+    const start = toNumber(offsets.start, toNumber(item?.offsetStart, toNumber(item?.start, toNumber(item?.startOffset))));
+    const end = toNumber(offsets.end, toNumber(item?.offsetEnd, toNumber(item?.end, toNumber(item?.endOffset))));
+    const quote = item?.quote || item?.mention_text || item?.text || item?.fragment || item?.content || item?.segment || '';
+    const chunkId = item?.chunkId || item?.chunk_id || item?.chunk || item?.sourceChunkId || '';
+    const mentionType = item?.mention_type || item?.mentionType || item?.type || '';
+    return {
+      id: item?.id || item?.evidence_id || `${chunkId || 'evidence'}-${index + 1}`,
+      chunkId,
+      quote,
+      mention_type: mentionType,
+      offset: { start: Number.isFinite(start) ? start : null, end: Number.isFinite(end) ? end : null },
+      source: source ? (typeof source === 'string' ? source : JSON.stringify(source)) : '',
+      sourceObject: source || null,
+    };
+  });
+}
+
+function normalizeGraphNode(rawNode = {}, index = 0) {
+  const evidences = normalizeEvidenceField(rawNode?.evidences || rawNode?.evidence || rawNode?.supports);
+  return {
+    id: rawNode.id || rawNode.entityId || rawNode.nodeId || `node-${index + 1}`,
+    name: rawNode.name || rawNode.label || rawNode.title || rawNode.text || `实体${index + 1}`,
+    type: rawNode.type || rawNode.entityType || rawNode.category || 'Entity',
+    properties: rawNode.properties || rawNode.attrs || {},
+    evidences,
+    reason: rawNode.reason || '',
+    source: rawNode.source || null,
+  };
+}
+
+function normalizeGraphRelation(raw = {}, index = 0) {
+  const evidences = normalizeEvidenceField(raw?.evidences || raw?.evidence || raw?.supports);
+  const sourceEntityId = raw.sourceEntityId || raw.sourceId || raw.src || raw.from || raw.subjectId || raw.source_node_id || '';
+  const targetEntityId = raw.targetEntityId || raw.targetId || raw.to || raw.target || raw.objectId || raw.target_node_id || '';
+  return {
+    id: raw.id || raw.relationId || `rel-${index + 1}`,
+    sourceEntityId,
+    sourceEntityType: raw.sourceEntityType || raw.sourceType || '',
+    relationType: raw.relationType || raw.relation || raw.predicate || raw.type || raw.edgeType || '',
+    targetEntityId,
+    targetEntityType: raw.targetEntityType || raw.targetType || '',
+    confidence: toNumber(raw.confidence, 1),
+    properties: raw.properties || raw.attributes || {},
+    evidences,
+  };
+}
+
+function normalizeSchemaSuggestion(raw = {}, index = 0) {
+  return {
+    id: raw.id || raw.suggestionId || `suggest-${index + 1}`,
+    type: raw.type || raw.suggestType || 'Schema建议',
+    suggestedValue: raw.suggestedValue || raw.value || raw.suggestion || raw.label || '',
+    sample: raw.sample || raw.example || null,
+    reason: raw.reason || raw.message || '',
+    confidence: raw.confidence != null ? toNumber(raw.confidence, 1) : null,
+  };
+}
+
+function createKnowledgeGraphFallback(fileName = '样例文件') {
+  return {
+    status: 'empty',
+    metadata: {
+      fileName,
+      language: 'zh-CN',
+      extractedAt: new Date().toISOString(),
+    },
+    entities: [],
+    relations: [],
+    isolatedEntities: [],
+    schemaSuggestions: [],
+    stats: {
+      entityCount: 0,
+      relationCount: 0,
+      chunkCount: 0,
+      coveredChunkCount: 0,
+      coverageRatio: 0,
+    },
+    failedChunks: [],
+    warnings: [{ code: 'NO_GRAPH_FACTS_FOUND', message: '当前文档未检测到可入图实体或关系表达。', severity: 'info' }],
+    outputLimit: 0,
+  };
+}
+
+function normalizeKnowledgeGraphPayload(payload, fileName = '样例文件') {
+  if (!payload || typeof payload !== 'object') return createKnowledgeGraphFallback(fileName);
+  const candidates = toArray(payload.graph_fragment || payload.graph || payload.knowledgeGraph || payload.data?.graph_fragment || payload.data?.graph || payload.data?.knowledgeGraph).filter(Boolean);
+  const source = candidates[0] || (payload.entities || payload.relations || payload.isolatedEntities ? payload : null) || {};
+  if (!source || typeof source !== 'object') return createKnowledgeGraphFallback(fileName);
+  const rawEntities = toArray(source.entities || source.nodes || []);
+  const rawRelations = toArray(source.relations || source.edges || []);
+  const rawIsolated = toArray(source.isolatedEntities || source.isolated_nodes || source.loneEntities || []);
+  const rawSuggestions = toArray(source.schemaSuggestions || source.schema_suggestions || source.suggestions || []);
+  const rawFailedChunks = toArray(source.failedChunks || source.failed_chunks || []);
+  const rawWarnings = toArray(source.warnings || source.warning || []);
+  const stats = source.stats && typeof source.stats === 'object' ? source.stats : {
+    entityCount: rawEntities.length,
+    relationCount: rawRelations.length,
+    chunkCount: 0,
+    coveredChunkCount: 0,
+    coverageRatio: rawEntities.length + rawRelations.length > 0 ? 0.6 : 0,
+  };
+  const normalized = {
+    status: normalizeGraphStatus(source.status || source.state || source.result || payload.status),
+    metadata: source.metadata || source.meta || {},
+    entities: rawEntities.map((item, index) => normalizeGraphNode(item, index)),
+    relations: rawRelations.map((item, index) => normalizeGraphRelation(item, index)),
+    isolatedEntities: rawIsolated.map((item, index) => normalizeGraphNode(item, index)),
+    schemaSuggestions: rawSuggestions.map((item, index) => normalizeSchemaSuggestion(item, index)),
+    stats: {
+      entityCount: toNumber(stats.entityCount, rawEntities.length),
+      relationCount: toNumber(stats.relationCount, rawRelations.length),
+      chunkCount: toNumber(stats.chunkCount, 0),
+      coveredChunkCount: toNumber(stats.coveredChunkCount, 0),
+      coverageRatio: typeof stats.coverageRatio === 'number' ? stats.coverageRatio : (stats.chunkCount ? toNumber(stats.coveredChunkCount, 0) / Math.max(1, toNumber(stats.chunkCount, 0)) : 0),
+    },
+    failedChunks: rawFailedChunks,
+    warnings: rawWarnings,
+    outputLimit: toNumber(source.outputLimit, 0),
+  };
+  const allEntityCount = rawEntities.length + rawIsolated.length;
+  normalized.stats.entityCount = normalized.stats.entityCount || allEntityCount;
+  normalized.stats.relationCount = normalized.stats.relationCount || rawRelations.length;
+  return normalized;
+}
+
+function extractKnowledgeResultPayload(formType, record) {
+  const paths = getKnowledgeResultPaths(formType);
+  const runs = [...(record?.result?.toolRuns || [])].reverse();
+  for (const path of paths) {
+    const run = runs.find((item) => item.outputPath === path || item.outputPath === path.replace('data.', '') || item.outputPath === `data.${path}`);
+    const parsed = parseRunOutput(run);
+    const value = readPathValue(parsed, path);
+    if (isUsefulKnowledgePayload(value)) return value;
+  }
+  for (const run of runs) {
+    const parsed = parseRunOutput(run);
+    for (const path of paths) {
+      const value = readPathValue(parsed, path);
+      if (isUsefulKnowledgePayload(value)) return value;
+    }
+  }
+  return null;
 }
 
 function createFallbackKnowledgeResult(formType, fileName) {
@@ -8258,6 +8788,9 @@ function createFallbackKnowledgeResult(formType, fileName) {
       { question: '异地就医费用结算是否需要人工复核？', answer: '结算结果需支持人工复核，以确保费用结算准确。', sourceChunkId: 'chunk-001', sourceFile: fileName },
     ];
   }
+  if (formType === '知识图谱') {
+    return createKnowledgeGraphFallback(fileName);
+  }
   return [
     { knowledgePointId: 'kp-001', title: '适用对象', content: '本政策面向本市医保参保人员。', tags: ['适用对象'], sourceChunkIds: ['chunk-001'], sourceFile: fileName },
     { knowledgePointId: 'kp-002', title: '备案条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', tags: ['办理条件', '备案流程'], sourceChunkIds: ['chunk-002'], sourceFile: fileName },
@@ -8265,6 +8798,10 @@ function createFallbackKnowledgeResult(formType, fileName) {
 }
 
 function getKnowledgeResultPayload(formType, record) {
+  if (formType === '知识图谱') {
+    const result = extractKnowledgeResultPayload(formType, record);
+    return normalizeKnowledgeGraphPayload(result, record?.file?.name || record?.result?.fileName || '样例文件');
+  }
   const paths = getKnowledgeResultPaths(formType);
   const runs = [...(record?.result?.toolRuns || [])].reverse();
   for (const path of paths) {
@@ -8300,6 +8837,509 @@ function getSourceText(item) {
   if (item.sourceChunkId) return `来源：${item.sourceChunkId}`;
   if (item.page) return `第${item.page}页`;
   return '';
+}
+
+function copyTextToClipboard(text, fallbackSetter) {
+  if (!navigator?.clipboard) return;
+  navigator.clipboard.writeText(text).then(() => {
+    if (typeof fallbackSetter === 'function') fallbackSetter('复制成功');
+  }).catch(() => {
+    if (typeof fallbackSetter === 'function') fallbackSetter('复制失败');
+  });
+}
+
+function getRelationLabel(record) {
+  return record.relationType || record.type || record.predicate || '关系';
+}
+
+function getGraphStatusBadge(status) {
+  if (status === 'success') return { label: '成功', tone: 'success' };
+  if (status === 'partial_success') return { label: '部分成功', tone: 'warning' };
+  if (status === 'failed') return { label: '失败', tone: 'danger' };
+  if (status === 'running') return { label: '运行中', tone: 'neutral' };
+  return { label: '无结果', tone: 'neutral' };
+}
+
+function getColorByText(type, seedMap = new Map()) {
+  if (seedMap.has(type)) return seedMap.get(type);
+  const palette = ['#1D4ED8', '#0891B2', '#16A34A', '#EA580C', '#9333EA', '#DC2626', '#0F766E', '#0F766E', '#0EA5E9'];
+  const seed = String(type || 'default')
+    .split('')
+    .reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const color = palette[seed % palette.length];
+  seedMap.set(type, color);
+  return color;
+}
+
+function KnowledgeGraphEvidenceDrawer({ evidence, onClose }) {
+  if (!evidence) return null;
+  return (
+    <Drawer title={`证据详情 · ${evidence.chunkId || 'unknown'}`} onClose={onClose} wide className="kg-evidence-drawer">
+      <section className="kg-evidence-box">
+        <h4>位置</h4>
+        <div>chunk_id：{evidence.chunkId || '-'}</div>
+        <div>偏移：{evidence.offset?.start ?? '-'} ~ {evidence.offset?.end ?? '-'}</div>
+        <div>mention_type：{evidence.mention_type || '-'}</div>
+      </section>
+      <section className="kg-evidence-box">
+        <h4>证据文本</h4>
+        <pre>{evidence.quote || '-'}</pre>
+      </section>
+      {evidence.source ? (
+        <section className="kg-evidence-box">
+          <h4>来源对象</h4>
+          <pre>{evidence.source}</pre>
+        </section>
+      ) : null}
+      {evidence.sourceObject ? (
+        <section className="kg-evidence-box">
+          <h4>源对象</h4>
+          <pre>{JSON.stringify(evidence.sourceObject, null, 2)}</pre>
+        </section>
+      ) : null}
+      <div className="kg-evidence-actions">
+        <button type="button" className="secondary" onClick={() => copyTextToClipboard(evidence.quote || JSON.stringify(evidence))}>复制证据</button>
+        <button type="button" className="primary" onClick={onClose}>关闭</button>
+      </div>
+    </Drawer>
+  );
+}
+
+function KnowledgeGraphResultPreview({ payload }) {
+  const graphData = payload || createKnowledgeGraphFallback('样例文件');
+  const entities = graphData.entities || [];
+  const relations = graphData.relations || [];
+  const isolatedEntities = graphData.isolatedEntities || [];
+  const schemaSuggestions = graphData.schemaSuggestions || [];
+  const allNodes = useMemo(() => [...entities, ...isolatedEntities], [entities, isolatedEntities]);
+  const [selectedTab, setSelectedTab] = useState('图谱');
+  const [entityTypeFilter, setEntityTypeFilter] = useState('全部');
+  const [relationTypeFilter, setRelationTypeFilter] = useState('全部');
+  const [searchText, setSearchText] = useState('');
+  const [focusEntityId, setFocusEntityId] = useState('');
+  const [selectedEvidence, setSelectedEvidence] = useState(null);
+  const [copyTip, setCopyTip] = useState('');
+  const [typeColorMap, setTypeColorMap] = useState(new Map());
+  const status = getGraphStatusBadge(graphData.status || 'empty');
+
+  const allEntityTypes = useMemo(() => {
+    const set = new Set(['全部']);
+    allNodes.forEach((node) => set.add(node.type || '未知'));
+    return Array.from(set);
+  }, [allNodes]);
+
+  const allRelationTypes = useMemo(() => {
+    const set = new Set(['全部']);
+    relations.forEach((item) => set.add(getRelationLabel(item)));
+    return Array.from(set);
+  }, [relations]);
+
+  const allNodeMap = useMemo(() => {
+    const map = new Map();
+    allNodes.forEach((item) => map.set(item.id, item));
+    return map;
+  }, [allNodes]);
+
+  const searchMatchedNodeIds = useMemo(() => {
+    if (!searchText.trim()) return null;
+    const key = searchText.trim().toLowerCase();
+    const set = new Set();
+    allNodes.forEach((node) => {
+      const name = String(node.name || '').toLowerCase();
+      const type = String(node.type || '').toLowerCase();
+      const id = String(node.id || '').toLowerCase();
+      if (name.includes(key) || type.includes(key) || id.includes(key)) set.add(node.id);
+    });
+    return set;
+  }, [allNodes, searchText]);
+
+  useEffect(() => {
+    const next = new Map();
+    allNodes.forEach((item) => {
+      const key = item.type || '实体';
+      if (!next.has(key)) {
+        next.set(key, getColorByText(key, next));
+      }
+    });
+    setTypeColorMap(next);
+  }, [allNodes]);
+
+  const nodeColorMap = (type) => getColorByText(type || '实体', typeColorMap);
+  const baseNodes = useMemo(() => {
+    const list = entityTypeFilter === '全部' ? allNodes : allNodes.filter((node) => node.type === entityTypeFilter);
+    if (!searchMatchedNodeIds) return list;
+    const filtered = list.filter((node) => searchMatchedNodeIds.has(node.id));
+    return filtered.length ? filtered : allNodes;
+  }, [allNodes, entityTypeFilter, searchMatchedNodeIds]);
+  const filteredRelations = useMemo(() => (
+    relationTypeFilter === '全部' ? relations : relations.filter((item) => getRelationLabel(item) === relationTypeFilter)
+  ), [relations, relationTypeFilter]);
+
+  const visibleNodes = useMemo(() => {
+    const ids = new Set(baseNodes.map((node) => node.id));
+    if (focusEntityId) {
+      ids.add(focusEntityId);
+      filteredRelations.forEach((rel) => {
+        if (rel.sourceEntityId === focusEntityId) {
+          ids.add(rel.targetEntityId);
+        }
+        if (rel.targetEntityId === focusEntityId) {
+          ids.add(rel.sourceEntityId);
+        }
+      });
+    }
+    return allNodes.filter((node) => ids.has(node.id));
+  }, [allNodes, filteredRelations, baseNodes, focusEntityId]);
+
+  const visibleRelations = useMemo(() => {
+    const nodeIds = new Set(visibleNodes.map((node) => node.id));
+    let list = filteredRelations.filter((item) => nodeIds.has(item.sourceEntityId) && nodeIds.has(item.targetEntityId));
+    if (focusEntityId) {
+      list = list.filter((item) => item.sourceEntityId === focusEntityId || item.targetEntityId === focusEntityId);
+    }
+    return list;
+  }, [filteredRelations, visibleNodes, focusEntityId]);
+
+  const positions = useMemo(() => {
+    if (!visibleNodes.length) return [];
+    const radius = Math.max(90, Math.min(170, 80 + visibleNodes.length * 6));
+    return visibleNodes.map((node, index) => {
+      const angle = (Math.PI * 2 * index) / visibleNodes.length;
+      return {
+        ...node,
+        x: 460 + Math.cos(angle) * radius,
+        y: 195 + Math.sin(angle) * Math.min(130, radius - 40),
+      };
+    });
+  }, [visibleNodes]);
+  const positionMap = useMemo(() => {
+    const map = new Map();
+    positions.forEach((item) => map.set(item.id, item));
+    return map;
+  }, [positions]);
+
+  const isolatedNodes = useMemo(() => new Set(isolatedEntities.map((node) => node.id)), [isolatedEntities]);
+  const matchedNodesCount = useMemo(() => {
+    if (!searchMatchedNodeIds) return null;
+    const list = entityTypeFilter === '全部' ? allNodes : allNodes.filter((node) => node.type === entityTypeFilter);
+    return list.filter((node) => searchMatchedNodeIds.has(node.id)).length;
+  }, [allNodes, entityTypeFilter, searchMatchedNodeIds]);
+  const searchMismatch = Boolean(searchMatchedNodeIds && !matchedNodesCount);
+
+  const renderEvidenceButtons = (item) => {
+    const list = toArray(item.evidences);
+    if (!list.length) return <div className="kg-empty-mini">暂无证据</div>;
+    return (
+      <div className="kg-evidence-list">
+        {list.map((evidence, evidenceIndex) => (
+          <button type="button" key={evidence.id || `${evidence.chunkId || item.id}-${evidenceIndex + 1}`} onClick={() => setSelectedEvidence(evidence)}>
+            {evidence.chunkId ? `chunk: ${evidence.chunkId}` : '查看证据'}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const relationTriples = useMemo(() => relations.map((relation) => {
+    const source = allNodeMap.get(relation.sourceEntityId);
+    const target = allNodeMap.get(relation.targetEntityId);
+    return {
+      id: relation.id || `${relation.sourceEntityId}-${relation.relationType}-${relation.targetEntityId}`,
+      sourceLabel: source ? `${source.name} (${source.type || '实体'})` : relation.sourceEntityId,
+      targetLabel: target ? `${target.name} (${target.type || '实体'})` : relation.targetEntityId,
+      relationType: getRelationLabel(relation),
+      sourceId: relation.sourceEntityId,
+      targetId: relation.targetEntityId,
+      confidence: relation.confidence,
+      properties: relation.properties || {},
+      relation,
+    };
+  }), [relations, allNodeMap]);
+
+  const relationTripleGroups = useMemo(() => {
+    const groupMap = new Map();
+    relationTriples.forEach((item) => {
+      const key = item.relationType || '未分类关系';
+      const list = groupMap.get(key) || [];
+      list.push(item);
+      groupMap.set(key, list);
+    });
+    return [...groupMap.entries()];
+  }, [relationTriples]);
+
+  const propertyRows = useMemo(() => {
+    const rows = [];
+    allNodes.forEach((node) => {
+      const properties = toObject(node.properties);
+      const entries = Object.entries(properties);
+      if (!entries.length) return;
+      rows.push({
+        kind: '实体',
+        ownerId: node.id || `entity-${node.name || entries.length}`,
+        ownerLabel: node.name || node.id || '实体',
+        ownerType: node.type || '未知',
+        triples: entries.map(([key, value], index) => ({
+          id: `${node.id || 'entity'}-${key}-${index}`,
+          subject: `${node.name || node.id || '实体'}（${node.type || '实体'}）`,
+          predicate: key,
+          object: toStringValue(value),
+        })),
+      });
+    });
+    relations.forEach((relation) => {
+      const source = allNodeMap.get(relation.sourceEntityId);
+      const target = allNodeMap.get(relation.targetEntityId);
+      const subject = `${source ? source.name : relation.sourceEntityId} → ${target ? target.name : relation.targetEntityId}`;
+      const properties = toObject(relation.properties);
+      const entries = Object.entries(properties);
+      if (!entries.length) return;
+      rows.push({
+        kind: '关系',
+        ownerId: relation.id || `${relation.sourceEntityId}-${relation.relationType}-${relation.targetEntityId}`,
+        ownerLabel: `${getRelationLabel(relation)}（${subject}）`,
+        ownerType: `${relation.sourceEntityType || '实体'}→${relation.targetEntityType || '实体'}`,
+        triples: entries.map(([key, value], index) => ({
+          id: `${relation.id || 'relation'}-${key}-${index}`,
+          subject,
+          predicate: key,
+          object: toStringValue(value),
+        })),
+      });
+    });
+    return rows;
+  }, [allNodes, relations, allNodeMap]);
+
+  const relationPropertyTriples = useMemo(() => {
+    const triples = [];
+    propertyRows.forEach((item) => {
+      if (item.kind !== '关系' || !item.triples.length) return;
+      item.triples.forEach((triple) => {
+        triples.push({ ...triple, ownerId: item.ownerId, ownerLabel: item.ownerLabel });
+      });
+    });
+    return triples;
+  }, [propertyRows]);
+
+  const attributeGroups = useMemo(() => {
+    const groups = new Map();
+    propertyRows.forEach((item) => {
+      const list = groups.get(item.kind) || [];
+      list.push(item);
+      groups.set(item.kind, list);
+    });
+    return [...groups.entries()];
+  }, [propertyRows]);
+
+  return (
+    <div className="knowledge-graph-result">
+      <div className="knowledge-graph-toolbar">
+        <div className="knowledge-graph-status">
+          <span className={`badge ${status.tone}`}>{status.label}</span>
+          <span className="muted">覆盖率：{formatPercent(graphData.stats?.coverageRatio || 0)}（{formatCoverageText(graphData.stats || {})}）</span>
+          {graphData.outputLimit ? <span className="muted">输出限制：{graphData.outputLimit}</span> : null}
+        </div>
+        {copyTip ? <span className="muted">{copyTip}</span> : null}
+      </div>
+      <div className="knowledge-graph-stats">
+        <span>实体：{graphData.stats?.entityCount || visibleNodes.length}</span>
+        <span>关系：{graphData.stats?.relationCount || visibleRelations.length}</span>
+        <span>孤立实体：{isolatedEntities.length}</span>
+        {graphData.failedChunks?.length ? <span>失败片段：{graphData.failedChunks.length}</span> : null}
+        {graphData.warnings?.length ? <span>警告：{graphData.warnings.length}</span> : null}
+      </div>
+      {schemaSuggestions.length ? (
+        <section className="knowledge-graph-suggestions">
+          <div className="knowledge-graph-suggestions-head">
+            <h4>Schema 建议（仅建议）</h4>
+            <span>仅展示建议，不变更正式 Schema</span>
+          </div>
+          {schemaSuggestions.map((item) => (
+            <article className="knowledge-graph-suggestion-item" key={item.id}>
+              <p><strong>{item.type}</strong>：{item.suggestedValue || '-'}</p>
+              <span>{item.reason || '未提供原因'}</span>
+              <div className="knowledge-graph-suggestion-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    copyTextToClipboard(JSON.stringify(item, null, 2), setCopyTip);
+                  }}
+                >
+                  <SendOutlined /> 发送给 Agent 调整方案
+              </button>
+              </div>
+            </article>
+          ))}
+        </section>
+      ) : null}
+      <div className="knowledge-graph-tabs">
+        {['图谱', '实体', '属性', '关系三元组', '属性三元组'].map((tab) => (
+          <button key={tab} type="button" className={selectedTab === tab ? 'active' : ''} onClick={() => setSelectedTab(tab)}>{tab}</button>
+        ))}
+      </div>
+      <div className="knowledge-graph-content">
+        {selectedTab === '图谱' ? (
+          <>
+            <div className="knowledge-graph-filterbar">
+              <SearchBox value={searchText} onChange={setSearchText} placeholder="搜索实体名称/类型" />
+              <label className="knowledge-graph-filter-item">
+                <span>实体类型</span>
+                <select
+                  value={entityTypeFilter}
+                  onChange={(event) => {
+                    setEntityTypeFilter(event.target.value);
+                    setFocusEntityId('');
+                  }}
+                >
+                  {allEntityTypes.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </label>
+              <label className="knowledge-graph-filter-item">
+                <span>关系类型</span>
+                <select value={relationTypeFilter} onChange={(event) => setRelationTypeFilter(event.target.value)}>
+                  {allRelationTypes.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </label>
+            </div>
+            {searchMismatch ? <div className="kg-empty-match">搜索无匹配实体，已显示完整图谱</div> : null}
+            <div className="knowledge-graph-stage">
+              <svg className="knowledge-graph-canvas" viewBox="0 0 920 380">
+                <defs>
+                  <marker id="kg-arrow" markerWidth="10" markerHeight="8" refX="10" refY="4" orient="auto">
+                    <path d="M0,0 L10,4 L0,8 Z" fill="#64748b" />
+                  </marker>
+                </defs>
+                {visibleRelations.map((rel) => {
+                  const from = positionMap.get(rel.sourceEntityId);
+                  const to = positionMap.get(rel.targetEntityId);
+                  if (!from || !to) return null;
+                  return (
+                    <g key={`edge-${rel.id}`}>
+                      <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="#64748b" strokeWidth="1.5" markerEnd="url(#kg-arrow)" />
+                      <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 6} textAnchor="middle" className="kg-edge-label">
+                        {getRelationLabel(rel)}
+                      </text>
+                    </g>
+                  );
+                })}
+                {positions.map((node) => (
+                  <g key={node.id} className={`kg-node ${focusEntityId === node.id ? 'focused' : ''} ${isolatedNodes.has(node.id) ? 'isolated' : ''}`} onClick={() => setFocusEntityId((current) => (current === node.id ? '' : node.id))}>
+                    <circle cx={node.x} cy={node.y} r="16" fill={nodeColorMap(node.type)} />
+                    <text x={node.x} y={node.y - 23} textAnchor="middle" className="kg-node-name">{node.name}</text>
+                    <text x={node.x} y={node.y + 28} textAnchor="middle" className="kg-node-type">{node.type}</text>
+                  </g>
+                ))}
+              </svg>
+            </div>
+            {focusEntityId ? (
+              <div className="knowledge-graph-focus">
+                <h4>节点摘要</h4>
+                {(() => {
+                  const target = allNodeMap.get(focusEntityId);
+                  if (!target) return <div className="empty-mini">未找到节点</div>;
+                  return (
+                    <>
+                      <p>名称：{target.name}</p>
+                      <p>类型：{target.type}</p>
+                      <p>属性：{target.properties && Object.keys(target.properties).length ? JSON.stringify(target.properties) : '无'}</p>
+                      {renderEvidenceButtons(target)}
+                    </>
+                  );
+                })()}
+              </div>
+            ) : null}
+          </>
+        ) : null}
+        {selectedTab === '实体' ? (
+          <div className="knowledge-graph-list">
+            {entities.length ? entities.map((item, index) => (
+              <article key={item.id || `entity-${index}`} className="knowledge-graph-row">
+                <div className="knowledge-graph-row-head"><strong>{item.name}</strong><span>{item.type}</span></div>
+                <p>属性：{item.properties && Object.keys(item.properties).length ? JSON.stringify(item.properties) : '无'}</p>
+                {renderEvidenceButtons(item)}
+              </article>
+            )) : <div className="empty-mini">暂无实体结果</div>}
+          </div>
+        ) : null}
+        {selectedTab === '属性' ? (
+          <div className="knowledge-graph-list">
+            {attributeGroups.length ? attributeGroups.map(([kind, groups]) => (
+              <details key={kind} className="knowledge-graph-tree-group" open>
+                <summary className="knowledge-graph-tree-summary">
+                  <span>{kind}</span>
+                  <span className="knowledge-graph-tree-count">{groups.length}</span>
+                </summary>
+                <div className="knowledge-graph-tree-body">
+                  {groups.map((item) => (
+                    <details key={item.ownerId} className="knowledge-graph-tree-item">
+                      <summary className="knowledge-graph-tree-subsummary">
+                        <span>{item.ownerLabel}</span>
+                        <span className="knowledge-graph-tree-type">{item.ownerType}</span>
+                      </summary>
+                      <div className="knowledge-graph-tree-content">
+                        {item.triples.map((triple) => (
+                          <article className="knowledge-graph-triple-row" key={triple.id}>
+                            <p>属性名：{triple.predicate}</p>
+                            <p>值：{triple.object}</p>
+                          </article>
+                        ))}
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              </details>
+            )) : <div className="empty-mini">暂无属性</div>}
+          </div>
+        ) : null}
+        {selectedTab === '关系三元组' ? (
+          <div className="knowledge-graph-list">
+            {relationTripleGroups.length ? relationTripleGroups.map(([type, triples]) => (
+              <details key={type} className="knowledge-graph-tree-group" open>
+                <summary className="knowledge-graph-tree-summary">
+                  <span>{type}</span>
+                  <span className="knowledge-graph-tree-count">{triples.length}</span>
+                </summary>
+                <div className="knowledge-graph-tree-body">
+                  {triples.map((item) => (
+                    <article className="knowledge-graph-triple-row" key={item.id}>
+                      <div className="knowledge-graph-row-head">
+                        <strong>{item.sourceLabel}</strong>
+                        <span>→ {item.targetLabel}</span>
+                      </div>
+                      <p>置信度：{typeof item.confidence === 'number' ? item.confidence.toFixed(2) : '-'}</p>
+                      {renderEvidenceButtons(item.relation)}
+                    </article>
+                  ))}
+                </div>
+              </details>
+            )) : <div className="empty-mini">暂无关系三元组</div>}
+          </div>
+        ) : null}
+        {selectedTab === '属性三元组' ? (
+          <div className="knowledge-graph-list">
+            {relationPropertyTriples.length ? (
+              <details className="knowledge-graph-tree-group" open>
+                <summary className="knowledge-graph-tree-summary">
+                  <span>关系属性</span>
+                  <span className="knowledge-graph-tree-count">{relationPropertyTriples.length}</span>
+                </summary>
+                <div className="knowledge-graph-tree-body">
+                  {relationPropertyTriples.map((triple) => (
+                    <article className="knowledge-graph-triple-row" key={triple.id}>
+                      <p>主体：{triple.subject}</p>
+                      <p>谓词：{triple.predicate}</p>
+                      <p>客体：{triple.object}</p>
+                    </article>
+                  ))}
+                </div>
+              </details>
+            ) : <div className="empty-mini">暂无属性三元组</div>}
+          </div>
+        ) : null}
+      </div>
+      <KnowledgeGraphEvidenceDrawer evidence={selectedEvidence} onClose={() => setSelectedEvidence(null)} />
+    </div>
+  );
 }
 
 function KnowledgeResultItems({ formType, payload }) {
@@ -8371,6 +9411,216 @@ function getExecutionRecordId(record) {
   return record.runId || `${record.file?.id || record.result?.fileId || 'file'}__${record.version || 'version'}__${record.runAt || record.createdAt || 'latest'}`;
 }
 
+function KnowledgeGraphPreviewTabs({ payload }) {
+  const tabs = ['实体', '属性', '实体关系', '属性关系', '图谱'];
+  const [activeTab, setActiveTab] = useState(tabs[0]);
+  const [expandedGroups, setExpandedGroups] = useState(new Set());
+  const allEntities = useMemo(() => [...toArray(payload?.entities), ...toArray(payload?.isolatedEntities)], [payload]);
+  const extractedRelations = useMemo(() => toArray(payload?.relations), [payload]);
+  const entityGroups = useMemo(() => {
+    const groups = new Map();
+    allEntities.forEach((entity) => {
+      const type = entity.type || '未分类实体';
+      const list = groups.get(type) || [];
+      list.push(entity);
+      groups.set(type, list);
+    });
+    return Array.from(groups.entries());
+  }, [allEntities]);
+  const attributeGroups = useMemo(() => {
+    const groups = new Map();
+    allEntities.forEach((entity) => {
+      Object.entries(toObject(entity.properties)).forEach(([type, value]) => {
+        const list = groups.get(type) || [];
+        list.push({ id: `${entity.id || entity.name}-${type}`, label: toStringValue(value) });
+        groups.set(type, list);
+      });
+    });
+    return Array.from(groups.entries());
+  }, [allEntities]);
+  const relationGroups = useMemo(() => {
+    const entityMap = new Map(allEntities.map((entity) => [entity.id, entity]));
+    const groups = new Map();
+    extractedRelations.forEach((relation, index) => {
+      const type = getRelationLabel(relation) || '未分类关系';
+      const source = entityMap.get(relation.sourceEntityId);
+      const target = entityMap.get(relation.targetEntityId);
+      const list = groups.get(type) || [];
+      list.push({
+        id: relation.id || `${relation.sourceEntityId}-${type}-${relation.targetEntityId}-${index}`,
+        label: `${source?.name || relation.sourceEntityId || '未知实体'} → ${target?.name || relation.targetEntityId || '未知实体'}`,
+      });
+      groups.set(type, list);
+    });
+    return Array.from(groups.entries());
+  }, [allEntities, extractedRelations]);
+  const attributeRelations = useMemo(() => {
+    const rows = [];
+    allEntities.forEach((entity) => {
+      Object.entries(toObject(entity.properties)).forEach(([attributeType, value]) => {
+        rows.push({
+          id: `${entity.id || entity.name}-${attributeType}`,
+          entityName: entity.name || '未命名实体',
+          entityType: entity.type || '未分类实体',
+          attributeType,
+          attributeValue: toStringValue(value),
+        });
+      });
+    });
+    return rows;
+  }, [allEntities]);
+  const graphPositions = useMemo(() => {
+    const centerX = 320;
+    const centerY = 175;
+    const radiusX = allEntities.length > 4 ? 225 : 165;
+    const radiusY = allEntities.length > 4 ? 105 : 80;
+    return allEntities.map((entity, index) => {
+      const angle = (-Math.PI / 2) + (Math.PI * 2 * index) / Math.max(allEntities.length, 1);
+      return {
+        ...entity,
+        x: centerX + Math.cos(angle) * radiusX,
+        y: centerY + Math.sin(angle) * radiusY,
+      };
+    });
+  }, [allEntities]);
+  const graphPositionMap = useMemo(() => new Map(graphPositions.map((entity) => [entity.id, entity])), [graphPositions]);
+  const graphEntityTypes = useMemo(() => Array.from(new Set(allEntities.map((entity) => entity.type || '未分类实体'))), [allEntities]);
+  const graphAttributeTypes = useMemo(() => attributeGroups.map(([type]) => type), [attributeGroups]);
+  const graphRelationTypes = useMemo(() => relationGroups.map(([type]) => type), [relationGroups]);
+
+  const toggleGroup = (groupId) => {
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  };
+  const renderExtractionTree = (prefix, groups, emptyText, getItemLabel) => (
+    <div className="knowledge-graph-entity-tree">
+      {groups.length ? groups.map(([type, items]) => {
+        const groupId = `${prefix}:${type}`;
+        const expanded = expandedGroups.has(groupId);
+        return (
+          <section className="knowledge-graph-entity-type" key={groupId}>
+            <button
+              type="button"
+              className="knowledge-graph-entity-type-trigger"
+              aria-expanded={expanded}
+              onClick={() => toggleGroup(groupId)}
+            >
+              <span className="knowledge-graph-tree-caret">{expanded ? '▾' : '▸'}</span>
+              <span className="knowledge-graph-entity-type-name">{type}</span>
+              <span className="knowledge-graph-entity-type-count">{items.length}</span>
+            </button>
+            {expanded ? (
+              <div className="knowledge-graph-entity-results">
+                {items.map((item, index) => (
+                  <div className="knowledge-graph-entity-result" key={item.id || `${groupId}-${index}`}>
+                    {getItemLabel(item)}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        );
+      }) : <div className="knowledge-graph-preview-empty-state">{emptyText}</div>}
+    </div>
+  );
+
+  return (
+    <section className="knowledge-preview-card knowledge-graph-preview-empty" aria-label="知识图谱结果预览">
+      <div className="knowledge-graph-preview-tabs" role="tablist" aria-label="知识图谱结果类型">
+        {tabs.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab}
+            className={activeTab === tab ? 'active' : ''}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+      {activeTab === '实体' ? (
+        <div aria-label="实体抽取结果">
+          {renderExtractionTree('entity', entityGroups, '暂无实体抽取结果', (entity) => entity.name || '未命名实体')}
+        </div>
+      ) : null}
+      {activeTab === '属性' ? renderExtractionTree('attribute', attributeGroups, '暂无属性抽取结果', (attribute) => attribute.label) : null}
+      {activeTab === '实体关系' ? renderExtractionTree('relation', relationGroups, '暂无实体关系抽取结果', (relation) => relation.label) : null}
+      {activeTab === '属性关系' ? (
+        <div className="knowledge-graph-attribute-relations" aria-label="属性与实体的归属关系">
+          {attributeRelations.length ? attributeRelations.map((relation) => (
+            <article className="knowledge-graph-attribute-relation" key={relation.id}>
+              <strong>{relation.attributeType}：{relation.attributeValue}</strong>
+              <span className="knowledge-graph-attribute-relation-arrow">→</span>
+              <span>{relation.entityType}：{relation.entityName}</span>
+            </article>
+          )) : <div className="knowledge-graph-preview-empty-state">暂无属性关系</div>}
+        </div>
+      ) : null}
+      {activeTab === '图谱' ? (
+        <div className="knowledge-graph-preview-stage" aria-label="知识图谱关系图">
+          {graphPositions.length ? (
+            <>
+              <svg className="knowledge-graph-canvas knowledge-graph-preview-canvas" viewBox="0 0 640 350" role="img" aria-label="实体关系可视化图谱">
+                <defs>
+                  <marker id="knowledge-preview-arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto">
+                    <path d="M0,0 L8,4 L0,8 Z" fill="#94a3b8" />
+                  </marker>
+                </defs>
+                {extractedRelations.map((relation, index) => {
+                  const source = graphPositionMap.get(relation.sourceEntityId);
+                  const target = graphPositionMap.get(relation.targetEntityId);
+                  if (!source || !target) return null;
+                  return (
+                    <g key={relation.id || `${relation.sourceEntityId}-${relation.targetEntityId}-${index}`}>
+                      <line x1={source.x} y1={source.y} x2={target.x} y2={target.y} stroke="#cbd5e1" strokeWidth="1.5" markerEnd="url(#knowledge-preview-arrow)" />
+                      <text x={(source.x + target.x) / 2} y={(source.y + target.y) / 2 - 7} textAnchor="middle" className="kg-edge-label">
+                        {getRelationLabel(relation)}
+                      </text>
+                    </g>
+                  );
+                })}
+                {graphPositions.map((entity) => (
+                  <g className="kg-node" key={entity.id || `${entity.type}-${entity.name}`}>
+                    <circle cx={entity.x} cy={entity.y} r="18" fill={getColorByText(entity.type || '未分类实体')} />
+                    <text x={entity.x} y={entity.y - 27} textAnchor="middle" className="kg-node-name">{entity.name || '未命名实体'}</text>
+                    <text x={entity.x} y={entity.y + 31} textAnchor="middle" className="kg-node-type">{entity.type || '未分类实体'}</text>
+                  </g>
+                ))}
+              </svg>
+              <div className="knowledge-graph-preview-legends">
+                <section className="knowledge-graph-preview-legend" aria-label="实体类型图例">
+                  <strong>实体类型</strong>
+                  <div>{graphEntityTypes.map((type) => (
+                    <span key={type}><i style={{ background: getColorByText(type) }} />{type}</span>
+                  ))}</div>
+                </section>
+                <section className="knowledge-graph-preview-legend" aria-label="属性类型图例">
+                  <strong>属性类型</strong>
+                  <div>{graphAttributeTypes.map((type) => (
+                    <span key={type}><i style={{ background: getColorByText(`attribute:${type}`) }} />{type}</span>
+                  ))}</div>
+                </section>
+                <section className="knowledge-graph-preview-legend" aria-label="关系类型图例">
+                  <strong>关系类型</strong>
+                  <div>{graphRelationTypes.map((type) => (
+                    <span key={type}><i style={{ background: getColorByText(`relation:${type}`) }} />{type}</span>
+                  ))}</div>
+                </section>
+              </div>
+            </>
+          ) : <div className="knowledge-graph-preview-empty-state">暂无可视化图谱结果</div>}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function KnowledgeResultPreview({ formType, executionRecords = {} }) {
   const records = useMemo(() => sortExecutionRecordsDesc(Object.values(executionRecords)), [executionRecords]);
   const fileOptions = useMemo(() => {
@@ -8389,7 +9639,13 @@ function KnowledgeResultPreview({ formType, executionRecords = {} }) {
     records.filter((record) => record.file.id === selectedFileId && record.version === selectedVersion)
   ), [records, selectedFileId, selectedVersion]);
   const [selectedRunId, setSelectedRunId] = useState('');
-  const resultName = formType === 'QA库' ? 'QA结果' : formType === '知识点' ? '知识点结果' : '切片结果';
+  const resultName = formType === 'QA库'
+    ? '问答结果'
+    : formType === '知识点'
+      ? '知识点结果'
+      : formType === '知识图谱'
+        ? '知识图谱结果'
+        : '文本切片结果';
 
   useEffect(() => {
     if (!fileOptions.length) {
@@ -8442,12 +9698,14 @@ function KnowledgeResultPreview({ formType, executionRecords = {} }) {
         </label>
       </div>
       {selectedRecord ? (
-        <section className="knowledge-preview-card">
-          <div className="knowledge-preview-head">
-            <strong>{resultName}</strong>
-          </div>
-          <KnowledgeResultItems formType={formType} payload={payload} />
-        </section>
+        formType === '知识图谱' ? <KnowledgeGraphPreviewTabs payload={payload} /> : (
+          <section className="knowledge-preview-card">
+            <div className="knowledge-preview-head">
+              <strong>{resultName}</strong>
+            </div>
+            <KnowledgeResultItems formType={formType} payload={payload} />
+          </section>
+        )
       ) : <div className="plan-empty result-empty"><ThunderboltOutlined /><strong>暂无{resultName}</strong><span>请先配置处理方案，并上传样例文件试跑。</span></div>}
     </div>
   );
@@ -8633,8 +9891,8 @@ export function App() {
   else if (active === 'ops-category') content = <ProjectSolutionPage projectId={projectId} notify={notify} onBack={() => setActive('ops-projects')} onWorkbench={openWorkbench} />;
   else if (active === 'ops-workbench') content = <WorkbenchPage key={workbenchTarget.entryNonce} {...workbenchTarget} notify={notify} onBack={() => setActive('ops-category')} onOpenWorkbench={openWorkbench} />;
   else if (active === 'ops-result' || active === 'ops-knowledge-points') content = <KnowledgePointsPage />;
-  else if (active === 'ops-slice-library') content = <EmptyPage title="切片库" />;
-  else if (active === 'ops-qa-library') content = <EmptyPage title="QA库" />;
+  else if (active === 'ops-slice-library') content = <EmptyPage title="文本切片" />;
+  else if (active === 'ops-qa-library') content = <EmptyPage title="问答库" />;
   else content = <EmptyPage title={active} />;
 
   return (

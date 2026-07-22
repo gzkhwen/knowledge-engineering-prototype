@@ -2,6 +2,86 @@ const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v23';
 const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v23';
 const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v23';
 const CATALOG_EVENT = 'knowledge-engineering-managed-tool-catalog-changed';
+const GRAPH_TOOL_CANONICAL_ID = 'ke-idp-extract_document_knowledge_graph';
+const GRAPH_TOOL_CANONICAL_NAME = '单文档图谱抽取';
+const GRAPH_TOOL_LEGACY_NAME = '知识图谱抽取';
+const GRAPH_TOOL_SOURCE_TOOL_NAME = '文档知识图谱抽取';
+const GRAPH_TOOL_CANONICAL_SLUG = 'extract_document_knowledge_graph';
+const GRAPH_TOOL_LEGACY_IDS = new Set([
+  'knowledge-graph',
+  'knowledge-graph-extractor',
+  'extract-document-knowledge-graph',
+]);
+const GRAPH_TOOL_ALIAS_NAMES = new Set([GRAPH_TOOL_CANONICAL_NAME, GRAPH_TOOL_LEGACY_NAME, GRAPH_TOOL_SOURCE_TOOL_NAME]);
+
+function isKnowledgeGraphServiceTool(tool) {
+  return tool?.slug === GRAPH_TOOL_CANONICAL_SLUG
+    || GRAPH_TOOL_LEGACY_IDS.has(tool?.id)
+    || GRAPH_TOOL_ALIAS_NAMES.has(tool?.name)
+    || GRAPH_TOOL_ALIAS_NAMES.has(tool?.sourceToolName);
+}
+
+function mergeSeedToolsWithStoredTools(storedTools, seedTools = []) {
+  const normalizedStoredTools = (storedTools || []).map((tool) => {
+    const status = tool.status || (tool.enabled === false ? '不可用' : '可用');
+    return {
+      ...tool,
+      status,
+      enabled: tool.enabled ?? status !== '不可用',
+    };
+  });
+
+  const merged = [...normalizedStoredTools];
+  const bySlugOrName = new Map();
+  const addKeys = (tool) => {
+    if (tool?.slug) bySlugOrName.set(`slug:${tool.slug}`, true);
+    if (tool?.name) bySlugOrName.set(`name:${tool.name}`, true);
+    if (tool?.sourceToolName) bySlugOrName.set(`name:${tool.sourceToolName}`, true);
+    if (isKnowledgeGraphServiceTool(tool)) {
+      GRAPH_TOOL_ALIAS_NAMES.forEach((name) => bySlugOrName.set(`name:${name}`, true));
+    }
+  };
+  normalizedStoredTools.forEach(addKeys);
+
+  seedTools.forEach((seedTool) => {
+    if (!seedTool || typeof seedTool !== 'object') return;
+    const fallbackStatus = seedTool.status || (seedTool.enabled === false ? '不可用' : '可用');
+    const shouldSkip = isKnowledgeGraphServiceTool(seedTool) ? isKnowledgeGraphServiceToolExists(merged)
+      : (seedTool.slug && bySlugOrName.has(`slug:${seedTool.slug}`)) || bySlugOrName.has(`name:${seedTool.name}`);
+    if (shouldSkip) return;
+
+    const mergedSeed = {
+      ...seedTool,
+      status: fallbackStatus,
+      enabled: seedTool.enabled ?? fallbackStatus !== '不可用',
+    };
+    merged.push(mergedSeed);
+    addKeys(mergedSeed);
+  });
+
+  const knowledgeGraphSeedTool = seedTools.find(isKnowledgeGraphServiceTool);
+  const knowledgeGraphToolIndex = merged.findIndex(isKnowledgeGraphServiceTool);
+  if (knowledgeGraphSeedTool && knowledgeGraphToolIndex >= 0) {
+    const storedGraphTool = merged[knowledgeGraphToolIndex];
+    merged[knowledgeGraphToolIndex] = {
+      ...knowledgeGraphSeedTool,
+      status: storedGraphTool.status || knowledgeGraphSeedTool.status || '可用',
+      enabled: storedGraphTool.enabled ?? knowledgeGraphSeedTool.enabled ?? true,
+    };
+  }
+
+  const toolCount = merged.length;
+  return {
+    tools: merged,
+    toolNames: merged.map((tool) => tool.name),
+    toolCategories: Object.fromEntries(merged.map((tool) => [tool.name, tool.category || '未分类'])),
+    toolCount,
+  };
+}
+
+function isKnowledgeGraphServiceToolExists(tools) {
+  return tools.some(isKnowledgeGraphServiceTool);
+}
 const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-mcp-services-v4',
   'knowledge-engineering-demo-higress-managed-tools-v4',
@@ -62,7 +142,7 @@ const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-managed-tool-categories-v22',
 ];
 
-export const defaultCategories = ['文档转换', '文档解析', '文档分块', '内容抽取', '知识打标'];
+export const defaultCategories = ['文档转换', '文档解析', '文档分块', '内容抽取', '知识打标', '知识提取'];
 
 function nowText() {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -152,6 +232,14 @@ const demoFieldDisplayNames = {
   user_id: '用户ID',
   payload: '请求载荷',
   target_format: '目标格式',
+  extraction_schema: '图谱抽取 Schema',
+  entity_types: '实体类型',
+  attribute_types: '属性类型',
+  relation_types: '关系类型',
+  extraction_instruction: '抽取补充说明',
+  include_isolated_entities: '保留孤立实体',
+  entity_relation_candidates: '实体关系候选集',
+  graph_fragment: '知识图谱片段',
 };
 
 function createInput(name, type, required = true, description = '', defaultValue = '', schema = null) {
@@ -332,6 +420,160 @@ const processingOptionsSchema = {
   },
 };
 
+const knowledgeGraphChunkSchema = {
+  type: 'object',
+  description: '有序文本分片项。',
+  properties: {
+    chunk_id: { type: 'string', description: '分片唯一 ID。' },
+    page: { type: 'integer', description: '来源页码。' },
+    order: { type: 'integer', description: '顺序索引。' },
+    title: { type: 'string', description: '分片标题。' },
+    content: { type: 'string', description: '分片文本内容。' },
+    sourceDocument: { type: 'string', description: '来源文档标识。' },
+  },
+  required: ['chunk_id', 'content'],
+};
+
+const knowledgeGraphEvidenceSchema = {
+  type: 'object',
+  description: '图谱元素证据。',
+  properties: {
+    document: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '文档ID。' },
+        title: { type: 'string', description: '文档标题。' },
+      },
+    },
+    chunk_id: { type: 'string', description: '分片ID。' },
+    quote: { type: 'string', description: '分片原文。' },
+    offset: {
+      type: 'object',
+      properties: {
+        start: { type: 'integer', description: '开始偏移。' },
+        end: { type: 'integer', description: '结束偏移。' },
+      },
+    },
+  },
+  required: ['document', 'chunk_id', 'quote'],
+};
+
+const knowledgeGraphEntitySchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', description: '实体ID。' },
+    name: { type: 'string', description: '实体名称。' },
+    type: { type: 'string', description: '实体类型。' },
+    properties: { type: 'object', description: '实体属性。' },
+    evidences: { type: 'array', items: knowledgeGraphEvidenceSchema },
+  },
+  required: ['id', 'name', 'type', 'evidences'],
+};
+
+const knowledgeGraphRelationSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', description: '关系ID。' },
+    sourceEntityId: { type: 'string', description: '起点实体ID。' },
+    sourceEntityType: { type: 'string', description: '起点实体类型。' },
+    relationType: { type: 'string', description: '关系类型。' },
+    targetEntityId: { type: 'string', description: '终点实体ID。' },
+    targetEntityType: { type: 'string', description: '终点实体类型。' },
+    confidence: { type: 'number', description: '置信度。' },
+    properties: { type: 'object', description: '关系属性。' },
+    evidences: { type: 'array', items: knowledgeGraphEvidenceSchema },
+  },
+  required: ['id', 'sourceEntityId', 'targetEntityId', 'relationType', 'evidences'],
+};
+
+const knowledgeGraphFailedChunkSchema = {
+  type: 'object',
+  properties: {
+    chunkId: { type: 'string', description: '失败分片ID。' },
+    reason: { type: 'string', description: '失败原因。' },
+    status: { type: 'string', description: '分片状态。' },
+  },
+  required: ['chunkId', 'reason'],
+};
+
+const knowledgeGraphSchemaSuggestionSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', description: '建议ID。' },
+    type: { type: 'string', description: '建议类型。' },
+    suggestedValue: { type: 'string', description: '建议值。' },
+    sample: { type: 'object', description: '建议映射样例。' },
+    reason: { type: 'string', description: '建议说明。' },
+  },
+  required: ['id', 'type', 'reason'],
+};
+
+const graphFragmentSchema = {
+  type: 'object',
+  properties: {
+    status: { type: 'string', description: '图谱抽取状态。' },
+    metadata: { type: 'object', description: '图谱片段元信息。' },
+    entities: { type: 'array', items: knowledgeGraphEntitySchema },
+    relations: { type: 'array', items: knowledgeGraphRelationSchema },
+    isolatedEntities: { type: 'array', items: knowledgeGraphEntitySchema },
+    schemaSuggestions: { type: 'array', items: knowledgeGraphSchemaSuggestionSchema },
+    stats: {
+      type: 'object',
+      properties: {
+        entityCount: { type: 'integer', description: '实体计数。' },
+        relationCount: { type: 'integer', description: '关系计数。' },
+        chunkCount: { type: 'integer', description: '分片总数。' },
+        coveredChunkCount: { type: 'integer', description: '已覆盖分片。' },
+        coverageRatio: { type: 'number', description: '覆盖率。' },
+      },
+      required: ['entityCount', 'relationCount', 'chunkCount', 'coveredChunkCount', 'coverageRatio'],
+    },
+    failedChunks: { type: 'array', items: knowledgeGraphFailedChunkSchema },
+    schemaValidation: {
+      type: 'object',
+      description: '当前单文档抽取结果的 Schema 严格校验结果。',
+      properties: {
+        mode: { type: 'string', description: 'Schema 执行方式。' },
+        validEntityCount: { type: 'integer', description: '通过 Schema 校验的实体数。' },
+        validRelationCount: { type: 'integer', description: '通过 Schema 校验的关系数。' },
+        outOfSchemaCandidates: { type: 'array', description: '未写入图谱片段、等待人工审核的超出 Schema 候选。', items: { type: 'object' } },
+      },
+    },
+    warnings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', description: '告警代码。' },
+          message: { type: 'string', description: '告警信息。' },
+          severity: { type: 'string', description: '告警级别。' },
+          sourceChunkId: { type: 'string', description: '相关分片ID。' },
+        },
+      },
+    },
+  },
+  required: ['status', 'entities', 'relations', 'schemaSuggestions', 'stats'],
+};
+
+const entityRelationCandidatesSchema = {
+  type: 'object',
+  description: '从单份文档抽取的实体、关系与来源证据候选，不进行跨文档归一化。',
+  properties: {
+    entities: { type: 'array', items: knowledgeGraphEntitySchema },
+    relations: { type: 'array', items: knowledgeGraphRelationSchema },
+    isolatedEntities: { type: 'array', items: knowledgeGraphEntitySchema },
+    stats: {
+      type: 'object',
+      properties: {
+        entityCount: { type: 'integer', description: '候选实体数。' },
+        relationCount: { type: 'integer', description: '候选关系数。' },
+        coveredChunkCount: { type: 'integer', description: '已覆盖分片数。' },
+      },
+    },
+  },
+  required: ['entities', 'relations'],
+};
+
 function resultFileItemSchema(dataFileType = 'md') {
   return {
     type: 'object',
@@ -413,6 +655,22 @@ function createDocumentRequestInput(description = '文档处理请求对象。')
 }
 
 const idpDocumentTools = [
+  {
+    slug: 'extract_document_knowledge_graph',
+    name: '文档知识图谱抽取',
+    description: '基于文本分片抽取实体/关系图谱片段，返回带证据与覆盖统计。',
+    category: '知识提取',
+    enabled: true,
+    endpoint: 'api/knowledge_graph/extract_document_knowledge_graph',
+    method: 'POST',
+    inputs: [
+      createInput('chunks', 'array<object>', true, '有序文本分片列表。', '', { type: 'array', items: knowledgeGraphChunkSchema }),
+      createInput('extraction_schema', 'object', true, '当前单文档图谱抽取使用的实体、关系和属性 Schema。'),
+      createInput('extraction_instruction', 'string', false, '可选的抽取补充说明。'),
+      createInput('include_isolated_entities', 'boolean', false, '是否保留孤立实体。', true),
+    ],
+    outputs: [createOutput('graph_fragment', 'object', '唯一业务输出：知识图谱片段。', 'graph_fragment', graphFragmentSchema)],
+  },
   {
     slug: 'document-to-pdf',
     name: '转pdf接口',
@@ -606,6 +864,9 @@ const idpDocumentTools = [
   },
 ];
 
+const knowledgeGraphExtractionTools = idpDocumentTools.filter(isKnowledgeGraphServiceTool);
+const documentProcessingTools = idpDocumentTools.filter((tool) => !isKnowledgeGraphServiceTool(tool));
+
 const knowledgeTaggingTools = [
   {
     slug: 'knowledge-point-tagging',
@@ -730,12 +991,28 @@ export const initialServices = [
     authType: 'Bearer Token',
     version: 'V1.0.0',
     status: '连接正常',
-    toolCount: idpDocumentTools.length,
-    toolNames: idpDocumentTools.map((tool) => tool.name),
+    toolCount: documentProcessingTools.length,
+    toolNames: documentProcessingTools.map((tool) => tool.name),
     lastSyncedAt: '2026-07-06 16:20',
     description: '基于飞书工具配置整理的 IDP 文档转换、OCR 解析和内容处理 MCP 工具样例。',
-    toolCategories: Object.fromEntries(idpDocumentTools.map((tool) => [tool.name, tool.category || '未分类'])),
-    tools: idpDocumentTools,
+    toolCategories: Object.fromEntries(documentProcessingTools.map((tool) => [tool.name, tool.category || '未分类'])),
+    tools: documentProcessingTools,
+  },
+  {
+    id: 'svc-knowledge-graph-extraction',
+    name: '知识图谱抽取 MCP',
+    serviceType: '标准 MCP Server',
+    endpoint: 'https://mcp.internal.com/knowledge-graph/sse',
+    transport: 'SSE',
+    authType: 'Bearer Token',
+    version: 'V1.0.0',
+    status: '连接正常',
+    toolCount: knowledgeGraphExtractionTools.length,
+    toolNames: knowledgeGraphExtractionTools.map((tool) => tool.name),
+    lastSyncedAt: '2026-07-21 15:20',
+    description: '面向文档分片的知识图谱抽取 MCP 服务，仅提供知识图谱抽取工具。',
+    toolCategories: Object.fromEntries(knowledgeGraphExtractionTools.map((tool) => [tool.name, tool.category || '未分类'])),
+    tools: knowledgeGraphExtractionTools,
   },
   {
     id: 'svc-knowledge-tagging',
@@ -809,11 +1086,11 @@ function makeManagedTool({
 
 function getRawSource(services, toolName) {
   const service = services.find((item) => !item.locked && item.tools?.some((tool) => tool.name === toolName));
-  const fallbackTools = idpDocumentTools;
+  const fallbackTools = [...idpDocumentTools, ...knowledgeGraphExtractionTools];
   const rawTool = service?.tools?.find((tool) => tool.name === toolName) || fallbackTools.find((tool) => tool.name === toolName);
   return {
-    serviceId: service?.id || 'svc-idp-document-processing',
-    serviceName: service?.name || 'IDP 文档处理 MCP',
+    serviceId: service?.id || (isKnowledgeGraphServiceTool(rawTool) ? 'svc-knowledge-graph-extraction' : 'svc-idp-document-processing'),
+    serviceName: service?.name || (isKnowledgeGraphServiceTool(rawTool) ? '知识图谱抽取 MCP' : 'IDP 文档处理 MCP'),
     sourceToolName: rawTool?.name || toolName,
     lastSyncedAt: service?.lastSyncedAt || '2026-07-06 16:20',
     rawTool,
@@ -821,6 +1098,7 @@ function getRawSource(services, toolName) {
 }
 
 const managedToolDefinitions = {
+  'extract_document_knowledge_graph': { name: '单文档图谱抽取', category: '知识提取', description: '基于单份文档的分片和 Schema 抽取可追溯图谱片段。' },
   'document-to-pdf': { name: '文档转PDF', category: '文档转换', description: '将常见办公文档、图片等材料转换为 PDF 文件，便于后续解析、归档和人工核验。' },
   'mx-ocr': { name: '通用OCR解析', category: '文档解析', description: '对扫描件、图片型 PDF 等文件进行通用 OCR 识别，输出可用于后续加工的 Markdown 文本。' },
   'dots-ocr': { name: '多模态OCR解析', category: '文档解析', description: '面向图文混排、版面复杂的文件进行多模态 OCR 解析，输出结构化 Markdown 文本。' },
@@ -857,6 +1135,18 @@ function getPrimaryStorageOutputName(rawTool) {
 
 function managedToolStorageFor(rawTool, index) {
   const isConverter = rawTool.category === '文档转换';
+  if (rawTool.slug === 'extract_document_knowledge_graph') {
+    return createStorageContract({
+      enabled: false,
+      outputName: 'graph_fragment',
+      artifactType: '单文档图谱片段',
+      storageTargetType: 'Elasticsearch',
+      esAddress: 'http://es.internal:9200',
+      esIndex: '',
+      writeMode: 'upsert',
+      note: '保留单文档来源证据；跨文档实体归一化由知识图谱管理侧在文档处理完成后执行。',
+    });
+  }
   if (isConverter) return createStorageContract({ enabled: false, rules: [] });
   const outputName = getPrimaryStorageOutputName(rawTool);
   const artifactType = rawTool.name.includes('知识点') || rawTool.name.includes('脚注') ? '知识点' : '文本切片';
@@ -903,6 +1193,11 @@ function createManagedNodeInputArtifacts(rawTool, definition) {
   if (definition.category === '文档转换') {
     return [createManagedNodeArtifact('source_files', '待转换文件', 'array<object>', 'file_object', '待转换的原始文件，可来自人工上传或上游节点输出。')];
   }
+  if (definition.category === '知识提取' && rawTool.slug === 'extract_document_knowledge_graph') {
+    return [
+      createManagedNodeArtifact('chunks', '文本分片', 'array<object>', 'text_chunks', '有序文本分片，用于图谱抽取。'),
+    ];
+  }
   if (definition.category === '文档分块') {
     return [createManagedNodeArtifact('markdown_documents', 'Markdown文档', 'array<object>', 'text_blocks', '待分块的 Markdown 文档或解析后的结构化文本。')];
   }
@@ -926,6 +1221,15 @@ function createManagedNodeConfigParams(rawTool, definition) {
       createManagedNodeParam('target_format', '目标格式', 'string', true, '转换后的目标文件格式。', 'pdf'),
       createManagedNodeParam('retain_layout', '保留版式', 'boolean', false, '是否尽量保留原文件版式。', true),
       createManagedNodeParam('output_naming_rule', '输出命名规则', 'string', false, '转换结果文件的命名规则。', '{original_name}.pdf'),
+    ];
+  }
+  if (definition.category === '知识提取' && rawTool.slug === 'extract_document_knowledge_graph') {
+    return [
+      createManagedNodeParam('entity_types', '实体类型', 'array<string>', false, '输入实体类型后按回车创建标签。', []),
+      createManagedNodeParam('attribute_types', '属性类型', 'array<string>', false, '输入属性类型后按回车创建标签。', []),
+      createManagedNodeParam('relation_types', '关系类型', 'array<string>', false, '输入关系类型后按回车创建标签。', []),
+      createManagedNodeParam('include_isolated_entities', '保留孤立实体', 'boolean', false, '是否保留无关系实体。', true),
+      createManagedNodeParam('extraction_instruction', '补充抽取说明', 'string', false, '可选的抽取提示词。', ''),
     ];
   }
   if (definition.category === '文档分块') {
@@ -963,11 +1267,26 @@ function createManagedNodeConfigParams(rawTool, definition) {
 }
 
 function createManagedNodeParameterMappingCode(rawTool, definition, artifacts, params) {
+  if (definition.category === '知识提取' && rawTool.slug === 'extract_document_knowledge_graph') {
+    return `function mapParams(context) {
+  return {
+    chunks: context.nodeInput.chunks,
+    extraction_schema: {
+      Entities: context.config.entity_types,
+      Attributes: context.config.attribute_types,
+      Relations: context.config.relation_types,
+    },
+    include_isolated_entities: context.config.include_isolated_entities,
+    extraction_instruction: context.config.extraction_instruction,
+  };
+}`;
+  }
   const rawInputs = normalizeToolInputs(rawTool);
   const artifactName = artifacts[0]?.name || 'input';
   const configNames = new Set(params.map((param) => param.name));
   const lines = rawInputs.map((input) => {
     if (input.name === 'user_id') return `    ${input.name}: context.system.userId`;
+    if (input.name === 'chunks') return `    ${input.name}: context.nodeInput.chunks`;
     if (configNames.has(input.name)) return `    ${input.name}: context.config.${input.name}`;
     if (['files', 'file', 'input', 'content', 'markdown', 'md_file', 'chunk', 'knowledge'].some((key) => input.name.toLowerCase().includes(key))) {
       return `    ${input.name}: context.nodeInput.${artifactName}`;
@@ -986,13 +1305,53 @@ ${lines.join(',\n')}
 }`;
 }
 
+function createEntityRelationExtractionManagedTool() {
+  const inputArtifacts = [
+    createManagedNodeArtifact('chunks', '文本分片', 'array<object>', 'text_chunks', '单份文档的有序文本分片，用于识别实体、关系和来源证据。'),
+  ];
+  const inputs = [
+    createManagedNodeParam('extraction_instruction', '抽取补充说明', 'string', false, '可选的实体、关系抽取提示词。', ''),
+    createManagedNodeParam('require_evidence', '来源证据必填', 'boolean', true, '每个候选实体和关系必须保留来源证据。', true),
+    createManagedNodeParam('include_isolated_entities', '保留孤立实体', 'boolean', false, '是否保留无关系的实体候选。', true),
+  ];
+  return makeManagedTool({
+    id: 'ke-platform-entity-relation-extraction',
+    name: '实体关系抽取',
+    description: '从单份文档中识别实体、关系与来源证据，输出待建图候选；不进行跨文档归一化。',
+    category: '知识提取',
+    kind: '内置工具',
+    sourceType: '平台内置',
+    sourceServiceId: 'knowledge-engineering-platform',
+    sourceServiceName: '知识工程平台',
+    sourceToolName: '实体关系抽取',
+    inputArtifacts,
+    inputs,
+    outputs: [createOutput('entity_relation_candidates', 'object', '单文档实体、关系及来源证据候选。', 'entity_relation_candidates', entityRelationCandidatesSchema)],
+    parameterMappingCode: `function mapParams(context) {
+  return {
+    chunks: context.nodeInput.chunks,
+    extraction_instruction: context.config.extraction_instruction,
+    require_evidence: context.config.require_evidence,
+    include_isolated_entities: context.config.include_isolated_entities,
+  };
+}`,
+    storageContract: createStorageContract({
+      enabled: false,
+      outputName: 'entity_relation_candidates',
+      artifactType: '实体关系候选',
+      note: '候选结果仅服务于当前单文档的后续建图，不写入跨文档全局图谱。',
+    }),
+    lastSyncedAt: '平台内置',
+  });
+}
+
 function initialManagedTools(services = initialServices) {
   const rawTools = services
     .filter((service) => !service.locked && service.status !== '停用')
     .flatMap((service) => (service.tools || []).map((tool) => ({ service, tool })))
     .filter(({ tool }) => tool.enabled !== false && tool.status !== '不可用');
 
-  return rawTools.map(({ service, tool }, index) => {
+  const mcpTools = rawTools.map(({ service, tool }, index) => {
     const definition = getManagedToolDefinition(tool);
     const inputArtifacts = createManagedNodeInputArtifacts(tool, definition);
     const inputs = createManagedNodeConfigParams(tool, definition);
@@ -1012,27 +1371,52 @@ function initialManagedTools(services = initialServices) {
       lastSyncedAt: service.lastSyncedAt,
     });
   });
+  return [...mcpTools, createEntityRelationExtractionManagedTool()];
 }
 
 function normalizeStoredTools(tools) {
-  return tools.map((tool) => ({
-    ...tool,
-    id: tool.id || `${tool.serviceId || 'svc'}-${tool.name}`,
-    category: tool.category || '未分类',
-    status: tool.status || (tool.enabled === false ? '不可用' : '可用'),
-    lifecycleStatus: tool.lifecycleStatus || '已发布',
-    kind: tool.kind || (tool.sourceType === '平台内置' ? '内置工具' : '外部工具'),
-    sourceType: tool.sourceType || 'MCP工具创建',
-    sourceServiceId: tool.sourceServiceId || tool.serviceId || '',
-    sourceServiceName: tool.sourceServiceName || tool.serviceName || '',
-    sourceToolName: tool.sourceToolName || tool.name,
-    version: tool.version || 'v1',
-    enabled: tool.enabled ?? tool.status !== '不可用',
-    lastSyncedAt: tool.lastSyncedAt || '-',
-    inputs: normalizeToolInputs(tool),
-    outputs: normalizeToolOutputs(tool),
-    storageContract: normalizeStorageContract(tool.storageContract),
-  }));
+  const graphToolNameOrSource = GRAPH_TOOL_ALIAS_NAMES;
+  const byId = new Map();
+
+  tools.forEach((rawTool) => {
+    const isLegacyKnowledgeGraph = rawTool?.id === GRAPH_TOOL_CANONICAL_ID
+      || GRAPH_TOOL_LEGACY_IDS.has(rawTool?.id)
+      || rawTool?.slug === 'extract_document_knowledge_graph'
+      || graphToolNameOrSource.has(rawTool?.name)
+      || graphToolNameOrSource.has(rawTool?.sourceToolName);
+    const normalizedSourceName = isLegacyKnowledgeGraph
+      ? GRAPH_TOOL_SOURCE_TOOL_NAME
+      : rawTool?.sourceToolName || rawTool?.name;
+    const normalizedName = isLegacyKnowledgeGraph
+      ? GRAPH_TOOL_CANONICAL_NAME
+      : rawTool?.name || '未命名节点';
+    const normalizedId = isLegacyKnowledgeGraph
+      ? GRAPH_TOOL_CANONICAL_ID
+      : rawTool?.id || `${rawTool?.serviceId || 'svc'}-${rawTool?.name || rawTool?.sourceToolName || 'tool'}`;
+    const tool = {
+      ...rawTool,
+      id: normalizedId,
+      name: normalizedName,
+      category: rawTool.category || (isLegacyKnowledgeGraph ? '知识提取' : '未分类'),
+      status: isLegacyKnowledgeGraph ? '可用' : rawTool.status || (rawTool.enabled === false ? '不可用' : '可用'),
+      lifecycleStatus: isLegacyKnowledgeGraph ? '已发布' : rawTool.lifecycleStatus || '已发布',
+      kind: rawTool.kind || (rawTool.sourceType === '平台内置' ? '内置工具' : '外部工具'),
+      sourceType: rawTool.sourceType || 'MCP工具创建',
+      sourceServiceId: rawTool.sourceServiceId || rawTool.serviceId || '',
+      sourceServiceName: rawTool.sourceServiceName || rawTool.serviceName || '',
+      sourceToolName: normalizedSourceName,
+      version: rawTool.version || 'v1',
+      enabled: isLegacyKnowledgeGraph ? true : (rawTool.enabled ?? rawTool.status !== '不可用'),
+      lastSyncedAt: rawTool.lastSyncedAt || '-',
+      inputs: normalizeToolInputs(rawTool),
+      outputs: normalizeToolOutputs(rawTool),
+      storageContract: normalizeStorageContract(rawTool.storageContract),
+    };
+    const previous = byId.get(tool.id);
+    byId.set(tool.id, previous ? { ...previous, ...tool } : tool);
+  });
+
+  return [...byId.values()];
 }
 
 function mergeStoredToolsWithSeed(storedTools, seedTools) {
@@ -1062,29 +1446,50 @@ export function loadServices() {
   purgeLegacyDemoStorage();
   try {
     const saved = localStorage.getItem(SERVICES_KEY);
-    return saved ? JSON.parse(saved).map(normalizeService) : initialServices;
+    return saved ? mergeStoredServicesWithSeed(JSON.parse(saved)) : initialServices;
   } catch {
     return initialServices;
   }
 }
 
+function mergeStoredServicesWithSeed(services) {
+  const normalizedServices = (services || []).map(normalizeService);
+  const storedIds = new Set(normalizedServices.map((service) => service.id));
+  return [
+    ...normalizedServices,
+    ...initialServices.filter((service) => !storedIds.has(service.id)),
+  ];
+}
+
 function normalizeService(service) {
   const seed = initialServices.find((item) => item.id === service.id);
+  const seedTools = seed?.tools || [];
+  const storedTools = service?.id === 'svc-idp-document-processing'
+    ? (service?.tools || []).filter((tool) => !isKnowledgeGraphServiceTool(tool))
+    : service?.tools;
+  const mergedTools = mergeSeedToolsWithStoredTools(storedTools, seedTools);
   if (seed && (!service.serviceType || service.type || service.endpoint !== seed.endpoint)) {
-    return { ...seed, status: service.status === '已停用' ? '停用' : service.status || seed.status };
+    return {
+      ...seed,
+      ...service,
+      status: service.status === '已停用' ? '停用' : service.status || seed.status,
+      toolCount: mergedTools.toolCount,
+      toolNames: mergedTools.toolNames,
+      toolCategories: mergedTools.toolCategories,
+      tools: mergedTools.tools.map((tool) => ({ ...tool, enabled: tool.enabled ?? tool.status !== '不可用' })),
+    };
   }
   const serviceType = service.serviceType || service.type || '标准 MCP Server';
-  const tools = service.tools || [];
   const status = service.enabled === false ? '停用' : service.status === '已停用' ? '停用' : service.status || '连接中';
   return {
     ...service,
     serviceType,
     version: service.version || 'V1.0.0',
     status,
-    toolCount: service.toolCount ?? tools.length,
-    toolNames: service.toolNames || tools.map((tool) => tool.name),
-    toolCategories: service.toolCategories || Object.fromEntries(tools.map((tool) => [tool.name, tool.category || '未分类'])),
-    tools: tools.map((tool) => ({ ...tool, enabled: tool.enabled ?? tool.status !== '不可用' })),
+    toolCount: mergedTools.toolCount,
+    toolNames: mergedTools.toolNames,
+    toolCategories: mergedTools.toolCategories,
+    tools: mergedTools.tools.map((tool) => ({ ...tool, enabled: tool.enabled ?? tool.status !== '不可用' })),
   };
 }
 

@@ -16,11 +16,20 @@ const keys = {
   demoPlanSeedVersion: 'ke-demo-plan-seed-version',
 };
 
-const formTypes = ['切片库', 'QA库', '知识点'];
+const formTypes = ['切片库', 'QA库', '知识点', '知识图谱'];
+const formTypeDisplayNames = {
+  切片库: '文本切片',
+  QA库: '问答库',
+};
 const legacyFormTypeMap = {
   非结构化切片: '切片库',
+  文本切片: '切片库',
   问答库: 'QA库',
 };
+
+export function getKnowledgeFormTypeLabel(formType = '') {
+  return formTypeDisplayNames[formType] || formType;
+}
 
 function read(key, fallback) {
   try {
@@ -107,7 +116,7 @@ const seed = {
       categoryId: 'cat-wealth-fund',
       formType: 'QA库',
       status: 'active',
-      name: '理财产品QA库处理方案',
+      name: '理财产品问答库处理方案',
       nodes: [
         { toolId: 'ke-standard-file-parse', toolName: '通用解析' },
         { toolId: 'ke-standard-parent-child-chunk', toolName: '父子切片' },
@@ -297,6 +306,7 @@ function demoNodeSets(formType, fileFormat, categoryId = '') {
   if (categoryId === 'cat-wealth-fund' && formType === '知识点' && fileFormat === 'pdf') {
     return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration];
   }
+  if (formType === '知识图谱') return [parser, splitter, { toolId: 'ke-idp-extract_document_knowledge_graph', toolName: '单文档图谱抽取', category: '知识提取' }];
   if (formType === '切片库') return [parser, splitter];
   if (formType === 'QA库') return [parser, splitter, { toolId: 'qa-extractor', toolName: 'QA提取', category: '知识提取' }];
   return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration];
@@ -316,6 +326,7 @@ function demoSampleFile(fileFormat, seedName) {
 
 function demoResult(file, nodes, formType, categoryName, version, categoryId = '') {
   const isFundKnowledgePdf = categoryId === 'cat-wealth-fund' && formType === '知识点' && file.type === 'PDF';
+  const isKnowledgeGraph = formType === '知识图谱' && file.type === 'PDF';
   const sliceItems = isFundKnowledgePdf ? [
     { chunkId: 'fund-chunk-001', title: '基金概况与投资目标', content: '本基金主要投资于符合基金合同约定的资产，投资者应结合自身风险承受能力审慎决策。', page: 2 },
     { chunkId: 'fund-chunk-002', title: '风险收益特征', content: '基金净值可能波动，过往业绩不代表未来表现，投资者需关注产品风险等级和投资范围。', page: 6 },
@@ -324,6 +335,102 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
     { chunkId: 'chunk-001', title: '适用范围', content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 },
     { chunkId: 'chunk-002', title: '办理条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 },
   ];
+
+  const graphVariant = isKnowledgeGraph ? (
+    version === '1.0' ? 'partial_success' : 'success'
+  ) : 'success';
+
+  const graphEvidence = {
+    document: { id: file.fileId || 'doc-insurance-001', title: `${file.name} 段落来源证据` },
+    chunkId: 'chunk-001',
+    quote: '本市基本医疗保险参保人员因长期居住、转诊转院或急诊抢救需要异地就医时，可申请备案。',
+    offset: { start: 40, end: 112 },
+  };
+
+  const graphSuccess = {
+    status: 'success',
+    metadata: {
+      fileName: file.name,
+      language: 'zh-CN',
+      documentMetadata: {
+        document_id: file.fileId || 'doc-insurance-001',
+        document_type: 'pdf',
+      },
+    },
+    entities: [
+      { id: 'ent-person-001', name: '李芳', type: '人物', properties: { 职务: '政策管理员', 标签: ['异地就医', '政策发布'] }, evidences: [graphEvidence] },
+      { id: 'ent-org-001', name: '市医保局', type: '组织', properties: { 机构类型: '医保管理机构', 所在国家: '中国' }, evidences: [graphEvidence] },
+      { id: 'ent-policy-001', name: '异地就医备案指引', type: '政策文件', properties: { 适用范围: '异地就医备案', 版本: '2026' }, evidences: [graphEvidence] },
+      { id: 'ent-person-002', name: '赵磊', type: '人物', properties: { 职务: '报销审查', 标签: ['费用结算', '审核员'] }, evidences: [graphEvidence] },
+    ],
+    relations: [
+      { id: 'rel-001', sourceEntityId: 'ent-person-001', sourceEntityType: '人物', relationType: '任职于', targetEntityId: 'ent-org-001', targetEntityType: '组织', confidence: 0.97, properties: { 开始时间: '2024-01-01', 职责范围: '政策管理' }, evidences: [graphEvidence] },
+      { id: 'rel-002', sourceEntityId: 'ent-org-001', sourceEntityType: '组织', relationType: '制定', targetEntityId: 'ent-policy-001', targetEntityType: '政策文件', confidence: 0.93, properties: { 政策范围: '异地就医备案', 证据等级: '高' }, evidences: [graphEvidence] },
+      { id: 'rel-003', sourceEntityId: 'ent-policy-001', sourceEntityType: '政策文件', relationType: '支持', targetEntityId: 'ent-person-002', targetEntityType: '人物', confidence: 0.9, properties: { 流程类型: '备案与费用结算', 触发周期: '按就医场景触发' }, evidences: [graphEvidence] },
+    ],
+    isolatedEntities: [{ id: 'ent-person-003', name: '外部报销顾问', type: '人物', reason: '仅出现一次，缺少关系支撑', evidences: [graphEvidence] }],
+    schemaSuggestions: [],
+    schemaValidation: { mode: '严格校验', validEntityCount: 4, validRelationCount: 3, outOfSchemaCandidates: [{ type: '属性', value: '报销材料', action: '进入待审核' }] },
+    stats: { entityCount: 4, relationCount: 3, chunkCount: 18, coveredChunkCount: 18, coverageRatio: 1 },
+    failedChunks: [],
+    warnings: [{ code: 'MISSING_OPTIONAL_FIELD', message: '存在“报销材料”与“结算标准”未落入实体/关系结构化抽取。', severity: 'warn' }],
+  };
+
+  const graphPartial = {
+    status: 'partial_success',
+    metadata: {
+      fileName: file.name,
+      language: 'zh-CN',
+      documentMetadata: {
+        document_id: file.fileId || 'doc-insurance-001',
+        document_type: 'pdf',
+      },
+    },
+    entities: [
+      { id: 'ent-person-001', name: '李芳', type: '人物', properties: { 职务: '政策管理员' }, evidences: [graphEvidence] },
+      { id: 'ent-org-001', name: '市医保局', type: '组织', properties: { 机构类型: '医保管理机构' }, evidences: [graphEvidence] },
+      { id: 'ent-policy-001', name: '异地就医备案指引', type: '政策文件', properties: { 适用范围: '异地就医备案' }, evidences: [graphEvidence] },
+    ],
+    relations: [
+      { id: 'rel-001', sourceEntityId: 'ent-person-001', sourceEntityType: '人物', relationType: '任职于', targetEntityId: 'ent-org-001', targetEntityType: '组织', confidence: 0.9, properties: { 开始时间: '2024-01-01' }, evidences: [graphEvidence] },
+    ],
+    isolatedEntities: [{ id: 'ent-person-002', name: '赵磊', type: '人物', reason: '仅出现“费用核验”段，缺少关系上下文。', evidences: [graphEvidence] }],
+    schemaSuggestions: [
+      { id: 'suggest-001', type: '新增关系', suggestedValue: 'POLICY_CONDITION', sample: { source: 'PolicyDocument', relation: 'POLICY_CONDITION', target: 'Organization' }, reason: '文本中存在“备案条件/材料范围”表达，可兼容新增关系类型。' },
+    ],
+    schemaValidation: { mode: '严格校验', validEntityCount: 3, validRelationCount: 1, outOfSchemaCandidates: [{ type: '关系', value: 'POLICY_CONDITION', action: '进入待审核' }] },
+    stats: { entityCount: 3, relationCount: 1, chunkCount: 18, coveredChunkCount: 14, coverageRatio: 0.78 },
+    failedChunks: [{ chunkId: 'chunk-017', reason: 'OCR 质量异常，无法稳定识别关键政策边界。', status: 'failed', retryAvailable: true }],
+    warnings: [{ code: 'INCOMPLETE_DOCUMENT_COVERAGE', message: '部分文档章节未覆盖到图谱抽取，建议补充 OCR 结果后重试。', severity: 'warn', sourceChunkId: 'chunk-017' }],
+  };
+
+  const graphEmpty = {
+    status: 'success',
+    metadata: {
+      fileName: file.name,
+      language: 'zh-CN',
+      documentMetadata: {
+        document_id: file.fileId || 'doc-insurance-001',
+        document_type: 'pdf',
+      },
+    },
+    entities: [],
+    relations: [],
+    isolatedEntities: [],
+    schemaSuggestions: [],
+    schemaValidation: { mode: '严格校验', validEntityCount: 0, validRelationCount: 0, outOfSchemaCandidates: [] },
+    stats: { entityCount: 0, relationCount: 0, chunkCount: 18, coveredChunkCount: 0, coverageRatio: 0 },
+    failedChunks: [],
+    warnings: [{ code: 'NO_GRAPH_FACTS_FOUND', message: '当前文档未检测到可入图实体或关系表达。', severity: 'info' }],
+  };
+
+  const graphOutputMap = {
+    success: graphSuccess,
+    partial_success: graphPartial,
+    empty: graphEmpty,
+  };
+  const graphResult = graphOutputMap[graphVariant];
+
   const qaItems = [
     { qaId: 'qa-001', question: '哪些人员可以办理异地就医备案？', answer: '本市基本医疗保险参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。', sourceChunkId: 'chunk-002' },
     { qaId: 'qa-002', question: '异地就医政策适用于哪些对象？', answer: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', sourceChunkId: 'chunk-001' },
@@ -341,6 +448,18 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
     if (node.toolName === 'Markdown结构化分块') return { outputPath: 'textChunkResult', outputFull: { textChunkResult: sliceItems, stats: { chunkCount: isFundKnowledgePdf ? 18 : sliceItems.length } } };
     if (node.toolName === 'QA提取') return { outputPath: 'qaResult', outputFull: { qaResult: qaItems, stats: { qaCount: qaItems.length } } };
     if (node.toolName === '知识点提取') return { outputPath: 'summaryResult', outputFull: { summary: isFundKnowledgePdf ? '已识别基金适当性、申购赎回、费用与风险提示等知识点。' : '该政策说明医保参保人员异地就医备案与费用结算要求。', summaryResult: knowledgeItems } };
+    if (node.toolName === '实体关系抽取') return {
+      outputPath: 'entity_relation_candidates',
+      outputFull: {
+        entity_relation_candidates: {
+          entities: graphResult.entities,
+          relations: graphResult.relations,
+          isolatedEntities: graphResult.isolatedEntities,
+          stats: graphResult.stats,
+        },
+      },
+    };
+    if (node.toolName === '单文档图谱抽取' || node.toolName === '知识图谱抽取') return { outputPath: 'graph_fragment', outputFull: { graph_fragment: graphResult } };
     if (node.toolName === '迭代执行') {
       if (formType === 'QA库') return { outputPath: 'iterationResult', outputFull: { iterationResult: qaItems.map((item) => ({ ...item, verified: true })) } };
       if (formType === '知识点') return { outputPath: 'iterationResult', outputFull: { iterationResult: knowledgeItems } };
@@ -358,7 +477,7 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
       status: '成功',
       outputFull: JSON.stringify({
         version,
-        target: `${categoryName || '兜底方案'} / ${formType}`,
+        target: `${categoryName || '兜底方案'} / ${getKnowledgeFormTypeLabel(formType)}`,
         node: node.toolName,
         fileName: file.name,
         ...payload.outputFull,
@@ -380,14 +499,16 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
     md: 'Markdown文档',
   };
   const targetNames = {
-    切片库: '生成稳定切片结果',
+    切片库: '生成稳定文本切片结果',
     QA库: '抽取标准问答结果',
     知识点: '提取并打标知识点结果',
+    知识图谱: '抽取结构化知识图谱结果',
   };
   const finalNodeNames = {
-    切片库: '切片结果',
-    QA库: 'QA结果',
+    切片库: '文本切片结果',
+    QA库: '问答结果',
     知识点: '知识点结果',
+    知识图谱: '知识图谱结果',
   };
   const fileConcerns = {
     pdf: '需要保留页码、标题层级和跨页段落，避免把页眉页脚写入正文。',
@@ -414,17 +535,20 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
     return messages.map((message, index) => ({ id: `${baseId}-${index + 1}`, status: 'done', ...message }));
   }
   const messages = [
-    { role: 'agent', title: '处理方案生成助手', content: `当前配置对象为${scopeName}的${formType} ${fileFormat}处理方案。你可以发送样例文件，我会先分析文件结构，再生成可保存的处理方案。` },
-    { role: 'user', title: '发送样例文件', content: `已发送${fileName}，这类文件后续会批量进入${scopeName}，请生成可复用的${formType}处理方案。` },
+    { role: 'agent', title: '处理方案生成助手', content: `当前配置对象为${scopeName}的${getKnowledgeFormTypeLabel(formType)} ${fileFormat}处理方案。你可以发送样例文件，我会先分析文件结构，再生成可保存的处理方案。` },
+    { role: 'user', title: '发送样例文件', content: `已发送${fileName}，这类文件后续会批量进入${scopeName}，请生成可复用的${getKnowledgeFormTypeLabel(formType)}处理方案。` },
     { role: 'thought', title: '分析样例文件', content: `样例类型识别为${formatNames[fileFormat] || fileFormat}。${fileConcerns[fileFormat] || '需要先判断文件结构和正文边界。'}` },
     { role: 'thought', title: '识别处理目标', content: `目标是${targetNames[formType]}，因此方案不能只完成解析，还需要保证后续节点输出能被${finalNodeNames[formType]}稳定消费。` },
-    { role: 'thought', title: '查询可用节点', content: `已按${fileFormat}文件解析、文本分片、知识提取和系统节点进行匹配，准备生成第一版流程。`, kind: 'toolCall' },
-    { role: 'agent', title: '初步方案建议', content: `我建议先建立“解析 -> 分片 -> ${formType === '切片库' ? '切片结果' : formType === 'QA库' ? '问答抽取' : '知识点提取 -> 知识点打标'}”的主链路。` },
+    { role: 'thought', title: '查询可用节点', content: `已按${fileFormat}文件解析、文本分片${formType === '知识图谱' ? '、单文档图谱抽取' : '、知识提取和系统节点'}进行匹配，准备生成第一版流程。`, kind: 'toolCall' },
+    { role: 'agent', title: '初步方案建议', content: `我建议先建立“解析 -> 分片 -> ${formType === '切片库' ? '文本切片结果' : formType === 'QA库' ? '问答抽取' : formType === '知识图谱' ? '单文档图谱抽取' : '知识点提取 -> 知识点打标'}”的主链路。` },
     { role: 'user', title: '补充处理要求', content: `不要直接套固定流程。${fileFormat === 'xlsx' ? '表格里有些字段为空，需要先做字段标准化。' : fileFormat === 'pptx' ? '课件里有很多页标题，页面顺序要保留。' : fileFormat === 'md' ? '标题层级要保留，代码块不要拆散。' : '需要保留来源位置，后续方便追溯。'}` },
     { role: 'thought', title: '调整流程设计', content: '已根据补充要求调整解析与分片参数，后续节点可直接承接结构化结果。', kind: 'toolCall' },
-    { role: 'thought', title: '配置节点参数', content: `已补齐关键参数：样例文件输入、上游输出路径、分片策略、${formType === 'QA库' ? '问答抽取规则' : formType === '知识点' ? '知识点提取和打标策略' : '切片规则'}。`, kind: 'toolCall' },
+    { role: 'thought', title: '配置节点参数', content: formType === '知识图谱'
+      ? '已补齐关键参数：样例文件输入、图谱抽取 Schema、抽取规则与关系约束，确保可复用图谱抽取输出。'
+      : `已补齐关键参数：样例文件输入、上游输出路径、分片策略、${formType === 'QA库' ? '问答抽取规则' : formType === '知识点' ? '知识点提取和打标策略' : '切片规则'}。`,
+      kind: 'toolCall' },
     { role: 'thought', title: '检查节点承接', content: `已检查每个节点的输入输出承接关系，当前链路可以从${fileName}执行到${finalNodeNames[formType]}。` },
-    { role: 'user', title: '试跑样例', content: `用这个样例先试跑一次，重点看是否能稳定生成${formType === '切片库' ? '切片结果' : formType === 'QA库' ? '问答结果' : '知识点和标签结果'}。` },
+    { role: 'user', title: '试跑样例', content: `用这个样例先试跑一次，重点看是否能稳定生成${formType === '切片库' ? '文本切片结果' : formType === 'QA库' ? '问答结果' : formType === '知识图谱' ? '知识图谱结果' : '知识点和标签结果'}。` },
     { role: 'thought', title: '样例试跑', content: `已执行样例试跑：解析、分片和后置节点均执行成功，已生成${finalNodeNames[formType]}。`, kind: 'toolCall' },
     { role: 'agent', title: '方案生成完成', content: `已完成方案搭建、参数配置、链路检查和样例试跑。${versionCount > 1 ? `当前已有${versionCount}个历史版本，最新版本可继续编辑后保存为新版本。` : '当前已有1个可保存版本，后续修改会保存为新版本。'}` },
   ];
@@ -436,7 +560,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v13';
+  const demoVersion = 'workbench-plan-demo-v18';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
@@ -455,11 +579,13 @@ function ensureDemoPlanData() {
     { planScope: 'fallback', formType: 'QA库', fileFormat: 'txt', versions: ['1.0'] },
     { planScope: 'fallback', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
     { planScope: 'fallback', formType: '知识点', fileFormat: 'md', versions: ['1.0'] },
+    { planScope: 'fallback', formType: '知识图谱', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'] },
     { categoryId: 'cat-wealth-fund', formType: '切片库', fileFormat: 'pdf', versions: ['1.0'] },
     { categoryId: 'cat-wealth-fund', formType: '切片库', fileFormat: 'docx', versions: ['1.0'] },
     { categoryId: 'cat-wealth-fund', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'] },
     { categoryId: 'cat-wealth-fund', formType: 'QA库', fileFormat: 'xlsx', versions: ['1.0'] },
     { categoryId: 'cat-wealth-fund', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
+    { categoryId: 'cat-wealth-fund', formType: '知识图谱', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'] },
     { categoryId: 'cat-wealth-fund-risk', formType: '切片库', fileFormat: 'pdf', versions: ['1.0'] },
     { categoryId: 'cat-wealth-fund-risk', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0'] },
     { categoryId: 'cat-wealth-fund-risk', formType: '知识点', fileFormat: 'md', versions: ['1.0'] },
@@ -505,7 +631,7 @@ function ensureDemoPlanData() {
       formType: definition.formType,
       fileFormat: definition.fileFormat,
       status: 'active',
-      name: `${categoryName || project.name}${definition.formType}${definition.fileFormat}处理方案`,
+      name: `${categoryName || project.name}${getKnowledgeFormTypeLabel(definition.formType)}${definition.fileFormat}处理方案`,
       createdAt: '2026-07-01 09:00',
       updatedAt: '2026-07-09 09:30',
     };
@@ -524,6 +650,12 @@ function ensureDemoPlanData() {
           ['问题表达', '部分问题表达与用户常见提问方式不一致。', 'unresolved'],
           ['来源引用', '已补充问答结果中的原文来源定位。', 'resolved'],
         ]
+        : definition.formType === '知识图谱'
+          ? [
+            ['覆盖完整性', '文档部分章节抽取后图谱关系覆盖率不足。', 'unresolved'],
+            ['关系粒度', '关系类型与标准 Schema 对齐建议加强边类型治理。', 'unresolved'],
+            ['实体补全', '孤立实体建议返回到 Schema 建议流程复核。', 'resolved'],
+          ]
         : [
           ['适用对象', '部分知识点未保留适用对象与适用范围。', 'unresolved'],
           ['内容去重', '相近知识点在结果中重复出现，需要合并。', 'unresolved'],
