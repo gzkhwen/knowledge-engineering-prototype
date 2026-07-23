@@ -292,7 +292,7 @@ function AgentCodeGenerateButton({ generating = false, disabled = false, onClick
       onClick={onClick}
     >
       {generating ? <SyncOutlined spin /> : <StarOutlined />}
-      <span>{generating ? '生成中...' : 'Agent生成'}</span>
+      <span>{generating ? '生成中...' : 'AI生成'}</span>
     </button>
   );
 }
