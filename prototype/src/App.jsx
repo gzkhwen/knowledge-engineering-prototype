@@ -1425,6 +1425,7 @@ function ToolManagementPage({ notify }) {
           <NodeDetailBasicInfo tool={detailTool} rawSource={detailRawSource} />
           <NodeInputMappingDetail tool={detailTool} rawSource={detailRawSource} />
           <NodeOutputMappingDetail tool={detailTool} rawSource={detailRawSource} />
+          <NodeDemoSampleDetail sample={detailTool.demoSample} />
         </Drawer>
       ) : null}
     </>
@@ -1641,6 +1642,7 @@ const knowledgeShapeStorageSchemas = {
     chunkId: 'string',
     content: 'string',
     sequence: 'number',
+    keywords: ['string'],
     metadata: { documentId: 'string', sourceFileId: 'string', page: 'number' },
   },
   '父子切片': {
@@ -1650,6 +1652,8 @@ const knowledgeShapeStorageSchemas = {
   'QA对': {
     question: 'string',
     answer: 'string',
+    expanded_questions: ['string'],
+    source_evidence: ['string'],
     sourceChunkIds: ['string'],
     metadata: { documentId: 'string', sourceFileId: 'string' },
   },
@@ -2858,6 +2862,7 @@ function NodeDetailBasicInfo({ tool, rawSource }) {
     ['节点描述', tool.description || '-'],
     ['MCP服务', tool.sourceServiceName || rawSource?.serviceName || tool.serviceName || '-'],
     ['原始MCP工具', tool.sourceToolName || rawTool.name || '-'],
+    ...(rawTool.capability ? [['能力标识', rawTool.capability]] : []),
     ['原始MCP工具描述', rawTool.description || '-'],
   ];
   return (
@@ -3060,6 +3065,29 @@ function NodeOutputMappingDetail({ tool, rawSource }) {
           columns={['字段名称', '显示名称', '类型', '代码返回', '说明']}
           rows={outputRows}
         />
+      </div>
+    </section>
+  );
+}
+
+function NodeDemoSampleDetail({ sample }) {
+  if (!sample) return null;
+  const stringify = (value) => (typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+  return (
+    <section className="node-detail-section">
+      <h3>演示样例</h3>
+      <div className="node-detail-linear">
+        <NodeDetailCodeBlock title="节点输入与配置" tip={sample.inputTip || '展示节点接收的业务输入及本次运行配置。'} code={stringify(sample.input)} />
+        {sample.mcpInput ? <NodeDetailCodeBlock title="组装后的 MCP 工具入参" tip="节点将业务配置组装为通用抽取工具所需的提示词和知识 Schema。" code={stringify(sample.mcpInput)} /> : null}
+        <NodeDetailCodeBlock title="原始 MCP 工具返回" code={stringify(sample.mcpResult)} />
+        <NodeDetailCodeBlock title="节点输出" code={stringify(sample.nodeOutput)} />
+        {sample.persistenceResult !== undefined ? (
+          <NodeDetailCodeBlock
+            title="持久化结果"
+            tip={sample.persistenceTip || '展示节点对原始工具结果进行标准化后形成的持久化数据。'}
+            code={stringify(sample.persistenceResult)}
+          />
+        ) : null}
       </div>
     </section>
   );
@@ -4318,6 +4346,7 @@ const higressWorkbenchToolIds = {
   知识点提取: 'summary',
   知识点打标: 'knowledge-tagging',
   QA提取: 'qa-extractor',
+  'QA提取-支持问法扩写': 'ke-idp-knowledge_extract_text-qa-expansion',
 };
 
 const higressWorkbenchToolFlow = {
@@ -4325,6 +4354,7 @@ const higressWorkbenchToolFlow = {
   文本分片: { input: 'rawText', output: 'cleanText' },
   知识点提取: { input: 'cleanText', output: 'rawText' },
   QA提取: { input: 'cleanText', output: 'qaPairs' },
+  'QA提取-支持问法扩写': { input: 'cleanText', output: 'qa_pairs' },
 };
 
 function toolInputToParam(input, index) {
@@ -4341,6 +4371,8 @@ function toolInputToParam(input, index) {
     required: input.required ?? true,
     desc: input.description || '',
     options: selectOptions || [],
+    min: input.min,
+    max: input.max,
   });
 }
 
@@ -4456,16 +4488,19 @@ function isIterationNode(node) {
 
 function isKnowledgeExtractionNode(node) {
   return node?.toolId === 'summary'
+    || node?.toolId === 'ke-idp-knowledge_extract_text-qa-expansion'
     || node?.toolId === 'ke-idp-extract_document_knowledge_graph'
     || node?.toolId === 'ke-platform-entity-relation-extraction'
     || node?.toolId === 'knowledge-graph'
     || node?.sourceToolName === 'extract_document_knowledge_graph'
     || node?.slug === 'extract_document_knowledge_graph'
     || node?.toolName === '知识点提取'
+    || node?.toolName === 'QA提取-支持问法扩写'
     || node?.toolName === '知识图谱抽取'
     || node?.toolName === '单文档图谱抽取'
     || node?.toolName === '实体关系抽取'
     || node?.name === '知识点提取'
+    || node?.name === 'QA提取-支持问法扩写'
     || node?.name === '知识图谱抽取'
     || node?.name === '单文档图谱抽取'
     || node?.name === '实体关系抽取';
@@ -4505,6 +4540,7 @@ function getIterationVariables() {
 
 function getKnowledgeExtractionOutputPath(node) {
   if (!node) return '';
+  if (node.toolId === 'ke-idp-knowledge_extract_text-qa-expansion' || node.toolName === 'QA提取-支持问法扩写') return 'qa_pairs';
   if (isKnowledgeGraphExtractionNode(node)) return 'graph_fragment';
   if (isEntityRelationExtractionNode(node)) return 'entity_relation_candidates';
   return 'summaryResult';
@@ -4667,6 +4703,22 @@ function applyKnowledgeGraphDemoConfig(node, config = knowledgeGraphDemoConfig) 
     params: node.params.map((param) => (
       Object.prototype.hasOwnProperty.call(config, param.id)
         ? { ...param, value: Array.isArray(config[param.id]) ? [...config[param.id]] : config[param.id] }
+        : param
+    )),
+  };
+}
+
+function applyQaExpansionDemoConfig(node) {
+  if (!node || node.toolName !== 'QA提取-支持问法扩写') return node;
+  const config = {
+    expansion_count: 3,
+    additional_requirement: '使用医保客服常用表达，答案严格基于原文。',
+  };
+  return {
+    ...node,
+    params: node.params.map((param) => (
+      Object.prototype.hasOwnProperty.call(config, param.id)
+        ? { ...param, value: config[param.id] }
         : param
     )),
   };
@@ -4983,18 +5035,18 @@ const agentFormPlans = {
     runSummary: '试跑结果：所有节点执行成功，已生成结构化切片结果。',
   },
   QA库: {
-    objective: '抽取标准问答结果',
-    extractionTitle: 'QA提取节点',
-    extractionReason: '需要先从分片结果中抽取候选问答对。',
-    flowSteps: ['文件解析', '内容切分', 'QA提取'],
-    iterationInputPath: 'qaResult',
+    objective: '抽取标准问答并生成相似问',
+    extractionTitle: 'QA提取-支持问法扩写节点',
+    extractionReason: '从分片结果中一次提取标准问答对、相似问和原文依据。',
+    flowSteps: ['文件解析', '内容切分', 'QA提取-支持问法扩写'],
+    iterationInputPath: 'qa_pairs',
     iterationReason: '',
     iterationBody: [
       { name: '问题标准化', inputName: 'qaPair', outputId: 'normalizedQa', outputName: '标准问答', outputPath: 'data.normalizedQa', script: 'def main(qaPair: dict) -> dict:\n    return {"normalizedQa": {**qaPair, "questionNormalized": True}}' },
       { name: '答案校验', inputName: 'normalizedQa', outputId: 'verifiedQa', outputName: '校验问答', outputPath: 'data.verifiedQa', script: 'def main(normalizedQa: dict) -> dict:\n    return {"verifiedQa": {**normalizedQa, "answerVerified": True}}' },
       { name: '来源片段绑定', inputName: 'verifiedQa', outputId: 'qaItem', outputName: 'QA结果', outputPath: 'data.qaItem', script: 'def main(verifiedQa: dict) -> dict:\n    return {"qaItem": verifiedQa}' },
     ],
-    runSummary: '试跑结果：所有节点执行成功，已生成标准问答结果。',
+    runSummary: '试跑结果：所有节点执行成功，已生成2组标准问答和6条相似问。',
   },
   知识点: {
     objective: '提取并打标知识点结果',
@@ -5103,7 +5155,8 @@ function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf'
   const directParserToSplitter = true;
   const parserTool = findWorkbenchToolByName(catalog, formatPlan.parserName) || catalog.find((tool) => getSemanticCategory(tool) === '文档解析');
   const splitterTool = findWorkbenchToolByName(catalog, formatPlan.splitterName) || catalog.find((tool) => getSemanticCategory(tool) === '文本分片');
-  const qaTool = findWorkbenchToolByName(catalog, 'QA提取');
+  const qaTool = findWorkbenchToolByName(catalog, 'QA提取-支持问法扩写')
+    || findWorkbenchToolByName(catalog, 'QA提取');
   const knowledgeTool = findKnowledgeExtractionTool(catalog, byId, target.formType);
   const iterationTool = byId.get('system-iteration');
   const taggingTool = findKnowledgeTaggingTool(catalog, byId);
@@ -5120,9 +5173,11 @@ function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf'
     : null;
   const extraction = target.formType === '知识图谱' && extractionBase
     ? applyKnowledgeGraphDemoConfig(extractionBase)
-    : extractionBase;
+    : target.formType === 'QA库' && extractionBase
+      ? applyQaExpansionDemoConfig(extractionBase)
+      : extractionBase;
   const extractionOutputPath = target.formType === 'QA库'
-    ? 'qaResult'
+    ? 'qa_pairs'
     : target.formType === '知识点'
       ? 'summaryResult'
       : target.formType === '知识图谱'
@@ -5606,6 +5661,8 @@ function getSmartParamValue(param, instruction, node) {
   if (param.id === 'sourceChunkIds') return '';
   if (param.id === 'tagStrategy' || param.id === 'tag_strategy') return '结构感知打标';
   if (param.id === 'labelPool' || param.id === 'label_pool') return ['适用对象', '办理条件', '材料要求'];
+  if (param.id === 'expansion_count') return 3;
+  if (param.id === 'additional_requirement') return '使用医保客服常用表达，答案严格基于原文。';
   if (param.id === 'codeInput') return '${upstream.data.documentParseResult}';
   if (param.id === 'script') return 'function transform(input) {\n  return {\n    cleanBlocks: input.map(item => ({\n      title: item.title || item.heading,\n      text: item.text || item.content,\n      page: item.page,\n      source: item.source || item.fileName\n    })).filter(item => item.text)\n  };\n}';
   if (param.id === 'outputVariables') return '[{ "name": "cleanBlocks", "type": "Array<json>", "path": "data.cleanBlocks" }]';
@@ -5643,6 +5700,7 @@ function getSmartConfigureInstruction(node) {
   if (node.toolId === 'medical-policy-parser') return '使用当前上传的医保政策样例文件，按政策条款模式解析正文、章节和段落。';
   if (node.toolId === 'medical-policy-splitter') return '承接上游标准文本块，按章节边界生成 800 字左右的知识片段。';
   if (node.toolId === 'qa-extractor') return '承接分片结果，生成可用于客服问答的政策问答对。';
+  if (node.toolId === 'ke-idp-knowledge_extract_text-qa-expansion') return '承接分片结果，生成标准问答、3条医保客服常用相似问和原文依据。';
   if (isKnowledgeGraphExtractionNode(node)) return '承接单份文档分片并按 Schema 抽取可追溯图谱片段；跨文档归一化在图谱管理侧完成。';
   if (isEntityRelationExtractionNode(node)) return '承接单份文档分片，识别实体、关系与来源证据候选，不进行跨文档归一化。';
   if (isKnowledgeExtractionNode(node)) return '承接分片结果，生成政策知识点、适用对象和关键规则。';
@@ -5682,6 +5740,33 @@ function createSmartConfiguredNode(node, nodes, instruction) {
       : node.codeOutputs,
   };
 }
+
+const qaExpansionSamplePairs = [
+  {
+    qaId: 'qa-001',
+    question: '哪些情况可以办理异地就医备案？',
+    answer: '参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。',
+    expanded_questions: [
+      '什么情况下可以申请异地就医备案？',
+      '异地就医备案适用于哪些情形？',
+      '长期居住、转诊或急诊人员能办理异地就医备案吗？',
+    ],
+    source_evidence: ['参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。'],
+    sourceChunkId: 'chunk-002',
+  },
+  {
+    qaId: 'qa-002',
+    question: '异地就医政策适用于哪些人员？',
+    answer: '本政策适用于本市基本医疗保险参保人员。',
+    expanded_questions: [
+      '哪些人适用异地就医政策？',
+      '异地就医备案面向哪些参保人员？',
+      '本市医保参保人员是否适用异地就医政策？',
+    ],
+    source_evidence: ['本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。'],
+    sourceChunkId: 'chunk-001',
+  },
+];
 
 function createSampleResult(file, options = {}) {
   const graphFragmentEvidence = {
@@ -5747,12 +5832,19 @@ function createSampleResult(file, options = {}) {
       outputFull: JSON.stringify({ graph_fragment: graphFragmentData }, null, 2),
     }] : []),
     ...(options.includeKnowledge ? [{
-      toolName: 'QA提取',
+      toolName: 'QA提取-支持问法扩写',
       category: '知识提取',
-      outputPath: 'qaResult',
-      parameters: [{ name: 'input', value: 'textChunkResult' }, { name: 'qa_type', value: '政策问答' }, { name: 'model', value: 'qwen3-8b' }],
+      outputPath: 'qa_pairs',
+      parameters: [
+        { name: 'content', value: 'textChunkResult' },
+        { name: 'expansion_count', value: '3' },
+        { name: 'additional_requirement', value: '使用医保客服常用表达，答案严格基于原文。' },
+      ],
       status: '成功',
-      outputFull: JSON.stringify({ qaResult: [{ qaId: 'qa-001', question: '哪些人员可以办理异地就医备案？', answer: '本市基本医疗保险参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。', sourceChunkId: 'chunk-002' }, { qaId: 'qa-002', question: '异地就医政策适用于哪些对象？', answer: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', sourceChunkId: 'chunk-001' }], stats: { qaCount: 2, sourceChunkCount: 2 } }, null, 2),
+      outputFull: JSON.stringify({
+        qa_pairs: qaExpansionSamplePairs,
+        stats: { qaCount: 2, expandedQuestionCount: 6, sourceChunkCount: 2 },
+      }, null, 2),
     }, {
       toolName: '知识点提取',
       category: '知识提取',
@@ -8335,7 +8427,7 @@ function SimpleNodeConfigParam({ param, onChange }) {
       ) : param.type === 'textarea' ? (
         <textarea value={value ?? ''} onChange={(event) => updateValue(event.target.value)} />
       ) : (
-        <input type={param.type === 'number' ? 'number' : 'text'} value={value ?? ''} onChange={(event) => updateValue(param.type === 'number' ? Number(event.target.value) : event.target.value)} />
+        <input type={param.type === 'number' ? 'number' : 'text'} min={param.min} max={param.max} value={value ?? ''} onChange={(event) => updateValue(param.type === 'number' ? Number(event.target.value) : event.target.value)} />
       )}
     </label>
   );
@@ -8885,7 +8977,7 @@ function isUsefulKnowledgePayload(value) {
 
 function getKnowledgeResultPaths(formType) {
   if (formType === '切片库') return ['textChunkResult', 'data.textChunkResult', 'sliceItem', 'data.sliceItem'];
-  if (formType === 'QA库') return ['qaResult', 'data.qaResult', 'qaItem', 'data.qaItem', 'iterationResult', 'data.iterationResult'];
+  if (formType === 'QA库') return ['qa_pairs', 'data.qa_pairs', 'qaResult', 'data.qaResult', 'qaItem', 'data.qaItem', 'iterationResult', 'data.iterationResult'];
   if (formType === '知识图谱') return ['graph_fragment', 'data.graph_fragment', 'graph', 'data.graph', 'knowledgeGraph', 'data.knowledgeGraph'];
   return ['iterationResult', 'data.iterationResult', 'summaryResult', 'data.summaryResult'];
 }
@@ -9081,10 +9173,7 @@ function createFallbackKnowledgeResult(formType, fileName) {
     ];
   }
   if (formType === 'QA库') {
-    return [
-      { question: '哪些人员可以办理异地就医备案？', answer: '本市基本医疗保险参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。', sourceChunkId: 'chunk-002', sourceFile: fileName },
-      { question: '异地就医费用结算是否需要人工复核？', answer: '结算结果需支持人工复核，以确保费用结算准确。', sourceChunkId: 'chunk-001', sourceFile: fileName },
-    ];
+    return qaExpansionSamplePairs.map((item) => ({ ...item, sourceFile: fileName }));
   }
   if (formType === '知识图谱') {
     return createKnowledgeGraphFallback(fileName);
@@ -9648,14 +9737,40 @@ function KnowledgeResultItems({ formType, payload }) {
       {items.map((item, index) => {
         if (formType === 'QA库') {
           const sourceText = getSourceText(item);
+          const expandedQuestions = Array.isArray(item.expanded_questions)
+            ? item.expanded_questions
+            : Array.isArray(item.expandedQuestions)
+              ? item.expandedQuestions
+              : [];
+          const sourceEvidence = Array.isArray(item.source_evidence)
+            ? item.source_evidence
+            : Array.isArray(item.sourceEvidence)
+              ? item.sourceEvidence
+              : [];
           return (
             <article className="knowledge-result-item qa" key={`qa-${index}`}>
               <div className="knowledge-result-item-head">
                 <strong>问答{index + 1}</strong>
-                {sourceText ? <span>{sourceText}</span> : null}
+                <span>{expandedQuestions.length}条相似问{sourceText ? ` · ${sourceText}` : ''}</span>
               </div>
               <p><b>Q：</b>{item.question || item.title || '-'}</p>
               <p><b>A：</b>{item.answer || item.content || '-'}</p>
+              {expandedQuestions.length ? (
+                <div className="qa-expansion-list">
+                  <strong>相似问 / 问法扩写</strong>
+                  <ul>
+                    {expandedQuestions.map((question, questionIndex) => (
+                      <li key={`qa-${index}-expanded-${questionIndex}`}>{question}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {sourceEvidence.length ? (
+                <div className="qa-source-evidence">
+                  <strong>来源依据</strong>
+                  <p>{sourceEvidence.join('；')}</p>
+                </div>
+              ) : null}
             </article>
           );
         }

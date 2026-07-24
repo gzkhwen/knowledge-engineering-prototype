@@ -315,7 +315,21 @@ function demoNodeSets(formType, fileFormat, categoryId = '') {
   }
   if (formType === '知识图谱') return [parser, splitter, { toolId: 'ke-idp-extract_document_knowledge_graph', toolName: '单文档图谱抽取', category: '知识提取', demoConfig: knowledgeGraphConfig }];
   if (formType === '切片库') return [parser, splitter];
-  if (formType === 'QA库') return [parser, splitter, { toolId: 'qa-extractor', toolName: 'QA提取', category: '知识提取' }];
+  if (formType === 'QA库') {
+    return [
+      parser,
+      splitter,
+      {
+        toolId: 'ke-idp-knowledge_extract_text-qa-expansion',
+        toolName: 'QA提取-支持问法扩写',
+        category: '知识提取',
+        demoConfig: {
+          expansion_count: 3,
+          additional_requirement: '使用医保客服常用表达，答案严格基于原文。',
+        },
+      },
+    ];
+  }
   return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration];
 }
 
@@ -439,8 +453,22 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
   const graphResult = graphOutputMap[graphVariant];
 
   const qaItems = [
-    { qaId: 'qa-001', question: '哪些人员可以办理异地就医备案？', answer: '本市基本医疗保险参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。', sourceChunkId: 'chunk-002' },
-    { qaId: 'qa-002', question: '异地就医政策适用于哪些对象？', answer: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', sourceChunkId: 'chunk-001' },
+    {
+      qaId: 'qa-001',
+      question: '哪些情况可以办理异地就医备案？',
+      answer: '参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。',
+      expanded_questions: ['什么情况下可以申请异地就医备案？', '异地就医备案适用于哪些情形？', '长期居住、转诊或急诊人员能办理异地就医备案吗？'],
+      source_evidence: ['参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可以申请备案。'],
+      sourceChunkId: 'chunk-002',
+    },
+    {
+      qaId: 'qa-002',
+      question: '异地就医政策适用于哪些人员？',
+      answer: '本政策适用于本市基本医疗保险参保人员。',
+      expanded_questions: ['哪些人适用异地就医政策？', '异地就医备案面向哪些参保人员？', '本市医保参保人员是否适用异地就医政策？'],
+      source_evidence: ['本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。'],
+      sourceChunkId: 'chunk-001',
+    },
   ];
   const knowledgeItems = isFundKnowledgePdf ? [
     { knowledgePointId: 'fund-kp-001', title: '基金适当性要求', content: '投资者应根据自身风险承受能力选择与产品风险等级相匹配的基金产品。', tags: ['适当性', '风险等级'], sourceChunkIds: ['fund-chunk-001'] },
@@ -453,7 +481,15 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
   const getRunPayload = (node, index) => {
     if (isFundKnowledgePdf && node.toolName === 'MinerU版面解析') return { outputPath: 'documentParseResult', outputFull: { documentParseResult: { pageCount: 26, titleCount: 38, tableCount: 6, markdownReady: true } } };
     if (node.toolName === 'Markdown结构化分块') return { outputPath: 'textChunkResult', outputFull: { textChunkResult: sliceItems, stats: { chunkCount: isFundKnowledgePdf ? 18 : sliceItems.length } } };
-    if (node.toolName === 'QA提取') return { outputPath: 'qaResult', outputFull: { qaResult: qaItems, stats: { qaCount: qaItems.length } } };
+    if (node.toolName === 'QA提取-支持问法扩写' || node.toolName === 'QA提取') {
+      return {
+        outputPath: 'qa_pairs',
+        outputFull: {
+          qa_pairs: qaItems,
+          stats: { qaCount: qaItems.length, expandedQuestionCount: qaItems.reduce((total, item) => total + item.expanded_questions.length, 0) },
+        },
+      };
+    }
     if (node.toolName === '知识点提取') return { outputPath: 'summaryResult', outputFull: { summary: isFundKnowledgePdf ? '已识别基金适当性、申购赎回、费用与风险提示等知识点。' : '该政策说明医保参保人员异地就医备案与费用结算要求。', summaryResult: knowledgeItems } };
     if (node.toolName === '实体关系抽取') return {
       outputPath: 'entity_relation_candidates',
@@ -476,7 +512,11 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
   };
   const runs = nodes.map((node, index) => {
     const payload = getRunPayload(node, index);
-    const parameters = node.demoConfig ? [
+    const parameters = node.toolName === 'QA提取-支持问法扩写' ? [
+      { name: '待提取文本', value: 'textChunkResult' },
+      { name: '问法扩写数量', value: String(node.demoConfig?.expansion_count || 3) },
+      { name: '补充抽取要求', value: node.demoConfig?.additional_requirement || '使用医保客服常用表达，答案严格基于原文。' },
+    ] : node.demoConfig ? [
       { name: '文本分片', value: 'textChunkResult' },
       { name: '实体类型', value: node.demoConfig.entity_types.join('、') },
       { name: '属性类型', value: node.demoConfig.attribute_types.join('、') },
