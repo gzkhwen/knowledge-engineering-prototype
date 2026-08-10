@@ -8745,7 +8745,7 @@ function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
         <span className="config-modal-title">
           <span className="config-modal-icon"><ToolOutlined /></span>
           <span className="config-modal-title-copy">
-            <strong>编辑节点配置</strong>
+            <strong>{draft.toolName || draft.name}</strong>
           </span>
         </span>
       )}
