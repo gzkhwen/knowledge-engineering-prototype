@@ -1,3 +1,5 @@
+import { readStoredJson, writeStoredJson } from './storage.js';
+
 const keys = {
   industries: 'ke-industries',
   domains: 'ke-domains',
@@ -13,10 +15,17 @@ const keys = {
   planExecutions: 'ke-plan-executions-v1',
   planChats: 'ke-plan-chats-v1',
   planIssues: 'ke-plan-issues-v1',
+  knowledgePlans: 'ke-knowledge-plans-v1',
+  knowledgeGraphSchemas: 'ke-knowledge-graph-schemas-v1',
   demoPlanSeedVersion: 'ke-demo-plan-seed-version',
 };
 
+const arrayStorageKeys = new Set(Object.entries(keys)
+  .filter(([name]) => name !== 'demoPlanSeedVersion')
+  .map(([, key]) => key));
+
 const formTypes = ['切片库', 'QA库', '知识点', '知识图谱'];
+const supportedKnowledgePlanFormats = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md'];
 const formTypeDisplayNames = {
   切片库: '文本切片',
   QA库: '问答库',
@@ -32,16 +41,28 @@ export function getKnowledgeFormTypeLabel(formType = '') {
 }
 
 function read(key, fallback) {
-  try {
-    const value = localStorage.getItem(key);
-    return value ? JSON.parse(value) : fallback;
-  } catch {
-    return fallback;
-  }
+  const validate = arrayStorageKeys.has(key)
+    ? (value) => (fallback === null && value === null)
+      || (Array.isArray(value) && value.every((item) => item && typeof item === 'object' && !Array.isArray(item)))
+    : undefined;
+  return readStoredJson(key, fallback, validate);
 }
 
 function write(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+  return writeStoredJson(key, value);
+}
+
+function compactScopeCategoryIds(ids = []) {
+  const selected = new Set(ids.filter(Boolean));
+  const categoryById = new Map(read(keys.projectCategories, []).map((item) => [item.id, item]));
+  return Array.from(selected).filter((categoryId) => {
+    let current = categoryById.get(categoryId);
+    while (current?.parentId) {
+      if (selected.has(current.parentId)) return false;
+      current = categoryById.get(current.parentId);
+    }
+    return true;
+  });
 }
 
 function id(prefix) {
@@ -291,6 +312,21 @@ function demoPlanId({ planScope, categoryId, formType, fileFormat }) {
   return `demo-plan-${planScope}-${categoryId || 'space'}-${slugText(formType)}-${fileFormat}`;
 }
 
+function demoGraphSchemaRef(projectId, schemaName) {
+  const schema = read(keys.knowledgeGraphSchemas, []).find((item) => item.projectId === projectId && item.name === schemaName);
+  if (!schema) return '';
+  return {
+    schemaId: schema.id,
+    schemaName: schema.name,
+    structure: {
+      entityTypes: [...(schema.structure?.entityTypes || [])],
+      attributeTypes: [...(schema.structure?.attributeTypes || [])],
+      relationTypes: [...(schema.structure?.relationTypes || [])],
+      constraints: (schema.structure?.constraints || []).map((row) => ({ ...row })),
+    },
+  };
+}
+
 function demoNodeSets(formType, fileFormat, categoryId = '') {
   const parserNodes = {
     pdf: { toolId: 'ke-idp-mineru-ocr', toolName: 'MinerU版面解析', category: '文档解析' },
@@ -303,17 +339,30 @@ function demoNodeSets(formType, fileFormat, categoryId = '') {
   const parser = parserNodes[fileFormat] || parserNodes.pdf;
   const splitter = { toolId: 'ke-idp-markdown-chunk', toolName: 'Markdown结构化分块', category: '文本分片' };
   const iteration = { toolId: 'system-iteration', toolName: '迭代执行', category: '系统节点' };
-  const knowledgeGraphConfig = {
-    entity_types: ['人物', '组织', '政策文件'],
-    attribute_types: ['职务', '标签', '机构类型', '所在国家', '适用范围', '版本'],
-    relation_types: ['任职于', '制定', '支持'],
-    include_isolated_entities: true,
-    extraction_instruction: '抽取政策文件中的责任主体、发布机构和政策文件；保留来源分片与原文证据，仅输出当前文档的图谱片段。',
-  };
   if (categoryId === 'cat-wealth-fund' && formType === '知识点' && fileFormat === 'pdf') {
     return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration];
   }
-  if (formType === '知识图谱') return [parser, splitter, { toolId: 'ke-idp-extract_document_knowledge_graph', toolName: '单文档图谱抽取', category: '知识提取', demoConfig: knowledgeGraphConfig }];
+  if (formType === '知识图谱') {
+    const demoProject = read(keys.projects, []).find((item) => item.id === 'proj-main') || read(keys.projects, [])[0];
+    const demoProjectId = demoProject?.id || '';
+    const graphNode = (schemaName, extractionInstruction) => ({
+      toolId: 'ke-idp-extract_document_knowledge_graph',
+      toolName: '单文档图谱抽取',
+      category: '知识提取',
+      demoConfig: {
+        graph_schema: demoGraphSchemaRef(demoProjectId, schemaName),
+        include_isolated_entities: true,
+        extraction_instruction: extractionInstruction,
+      },
+    });
+    return [
+      parser,
+      splitter,
+      graphNode('保险业务图谱 Schema', '抽取保险合同中的保险产品、保险公司、保险条款、保障责任与疾病等对象；保留来源分片与原文证据，仅输出当前文档的图谱片段。'),
+      graphNode('政策文件图谱 Schema', '抽取政策文件中的责任主体、发布机构和政策文件；保留来源分片与原文证据，仅输出当前文档的图谱片段。'),
+      graphNode('', '按所选 Schema 抽取实体、属性与关系，保留来源分片与原文证据，仅输出当前文档的图谱片段。'),
+    ];
+  }
   if (formType === '切片库') return [parser, splitter];
   if (formType === 'QA库') {
     return [
@@ -518,13 +567,12 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
       { name: '补充抽取要求', value: node.demoConfig?.additional_requirement || '使用医保客服常用表达，答案严格基于原文。' },
     ] : node.demoConfig ? [
       { name: '文本分片', value: 'textChunkResult' },
-      { name: '实体类型', value: node.demoConfig.entity_types.join('、') },
-      { name: '属性类型', value: node.demoConfig.attribute_types.join('、') },
-      { name: '关系类型', value: node.demoConfig.relation_types.join('、') },
+      { name: '图谱结构定义', value: node.demoConfig.graph_schema && typeof node.demoConfig.graph_schema === 'object' ? node.demoConfig.graph_schema.schemaName : '未选择' },
       { name: '保留孤立实体', value: node.demoConfig.include_isolated_entities ? '是' : '否' },
       { name: '补充抽取说明', value: node.demoConfig.extraction_instruction },
     ] : [{ name: index === 0 ? '样例文件' : '输入来源', value: index === 0 ? file.name : `data.step${index}` }];
     return {
+      nodeId: node.nodeId,
       toolName: node.toolName,
       category: node.category,
       outputPath: payload.outputPath,
@@ -539,7 +587,24 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
       }, null, 2),
     };
   });
-  return { fileId: file.id, fileName: file.name, toolRuns: runs };
+  const nodeExecutions = runs.map((run, index) => {
+    const previousRun = index > 0 ? runs[index - 1] : null;
+    const previousOutput = previousRun ? JSON.parse(previousRun.outputFull) : null;
+    const effectiveParameters = run.parameters
+      .filter((param) => !['样例文件', '输入来源', '待提取文本', '文本分片'].includes(param.name))
+      .map((param) => ({ name: param.name, value: param.value }));
+    return {
+      ...run,
+      inputConfiguration: [{
+        name: index === 0 ? '样例文件' : '节点输入',
+        source: index === 0 ? '引用原始文件' : `上游节点 · ${nodes[index - 1]?.toolName || '来源节点'} · ${previousRun?.outputPath || '节点输出'}`,
+      }],
+      actualInput: index === 0 ? { fileName: file.name, fileType: file.type, fileSize: file.size } : previousOutput,
+      effectiveParameters,
+      nodeOutput: JSON.parse(run.outputFull),
+    };
+  });
+  return { fileId: file.id, fileName: file.name, toolRuns: nodeExecutions, nodeExecutions };
 }
 
 function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sampleName, categoryId }) {
@@ -632,7 +697,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v19';
+  const demoVersion = 'workbench-plan-demo-v20';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
@@ -755,6 +820,8 @@ function ensureDemoPlanData() {
         runId: `demo-run-${plan.id}-${version.replace('.', '-')}-${statusSlug}-${sample.id}`,
         runLabel: `${version}${isDraft ? '草稿' : ''}-2026070${runDay}${compactRunTime}`,
         runAt: `2026-07-0${runDay} ${runTime}`,
+        startedAt: `2026-07-0${runDay} ${isDraft ? '09:29:32' : '15:29:12'}`,
+        endedAt: `2026-07-0${runDay} ${runTime}`,
         versionStatus,
         planId: plan.id,
         planVersionId: isDraft ? null : `demo-version-${plan.id}-${version.replace('.', '-')}`,
@@ -818,12 +885,105 @@ function ensureSeeded() {
   Object.entries(seed).forEach(([name, value]) => write(keys[name], value));
 }
 
+function ensureKnowledgePlans() {
+  const legacyPlans = read(keys.plans, []);
+  const legacyById = new Map(legacyPlans.map((plan) => [plan.id, plan]));
+  const existing = read(keys.knowledgePlans, null);
+  if (existing !== null) {
+    const normalized = existing.filter((plan) => {
+      if (!String(plan.id || '').startsWith('kplan-')) return true;
+      const legacy = legacyById.get(String(plan.id).replace(/^kplan-/, ''));
+      return !legacy || legacy.planScope !== 'fallback';
+    }).map((plan) => ({ ...plan, scopeCategories: compactScopeCategoryIds(plan.scopeCategories) }));
+    if (JSON.stringify(normalized) !== JSON.stringify(existing)) write(keys.knowledgePlans, normalized);
+    return;
+  }
+  const next = legacyPlans.filter((plan) => plan.planScope !== 'fallback').map((plan) => ({
+    id: `kplan-${plan.id}`,
+    projectId: plan.projectId,
+    formType: plan.formType,
+    name: plan.name,
+    scopeCategories: plan.planScope === 'category' ? [plan.categoryId].filter(Boolean) : [],
+    scopeFormats: [plan.fileFormat].filter(Boolean),
+    status: plan.status === 'active' ? 'active' : 'disabled',
+    workflowPlanId: plan.id,
+    updatedAt: plan.updatedAt || '',
+  }));
+  write(keys.knowledgePlans, next);
+}
+
+const demoKnowledgeGraphSchemaStructures = {
+  insurance: {
+    description: '面向保险产品的实体、属性与关系抽取结构，覆盖产品、公司、条款、保障责任等核心对象。',
+    structure: {
+      entityTypes: ['保险产品', '保险公司', '保险条款', '保障责任', '适用人群', '疾病', '医疗机构'],
+      attributeTypes: ['投保年龄', '保险期间', '等待期', '保额', '保费', '免赔额', '赔付比例', '生效日期'],
+      relationTypes: ['承保', '包含', '保障', '适用于', '约定', '除外', '就诊于'],
+      constraints: [
+        { source: '保险公司', relation: '承保', target: '保险产品' },
+        { source: '保险产品', relation: '包含', target: '保险条款' },
+        { source: '保险条款', relation: '包含', target: '保障责任' },
+        { source: '保险产品', relation: '适用于', target: '适用人群' },
+        { source: '保险产品', relation: '保障', target: '疾病' },
+        { source: '保险条款', relation: '约定', target: '保障责任' },
+        { source: '保险条款', relation: '除外', target: '疾病' },
+        { source: '被保险人', relation: '就诊于', target: '医疗机构' },
+      ],
+    },
+  },
+  policy: {
+    description: '面向政策文件的实体、属性与关系抽取结构，覆盖文件、发布机构、适用地区等对象。',
+    structure: {
+      entityTypes: ['政策文件', '发布机构', '适用地区', '关联文件'],
+      attributeTypes: ['文号', '发布日期', '生效日期', '主题分类'],
+      relationTypes: ['发布', '适用于', '关联'],
+      constraints: [
+        { source: '发布机构', relation: '发布', target: '政策文件' },
+        { source: '政策文件', relation: '适用于', target: '适用地区' },
+        { source: '政策文件', relation: '关联', target: '关联文件' },
+      ],
+    },
+  },
+};
+
+function makeDemoKnowledgeGraphSchema(projectId, name, description, structure, now) {
+  return {
+    id: id('kschema'),
+    projectId,
+    name,
+    description,
+    structure: {
+      entityTypes: [...structure.entityTypes],
+      attributeTypes: [...structure.attributeTypes],
+      relationTypes: [...structure.relationTypes],
+      constraints: structure.constraints.map((item) => ({ ...item })),
+    },
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function ensureKnowledgeGraphSchemas() {
+  const existing = read(keys.knowledgeGraphSchemas, null);
+  if (existing !== null) return;
+  const projects = read(keys.projects, []);
+  const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+  const next = [];
+  projects.forEach((project) => {
+    next.push(makeDemoKnowledgeGraphSchema(project.id, '保险业务图谱 Schema', demoKnowledgeGraphSchemaStructures.insurance.description, demoKnowledgeGraphSchemaStructures.insurance.structure, now));
+    next.push(makeDemoKnowledgeGraphSchema(project.id, '政策文件图谱 Schema', demoKnowledgeGraphSchemaStructures.policy.description, demoKnowledgeGraphSchemaStructures.policy.structure, now));
+  });
+  write(keys.knowledgeGraphSchemas, next);
+}
+
 ensureSeeded();
 ensureProjectCategories();
 normalizeProjectCategories();
 normalizeCategoryPlans();
 migrateLegacyCategoryPlans();
+ensureKnowledgeGraphSchemas();
 ensureDemoPlanData();
+ensureKnowledgePlans();
 
 export const knowledgeFormTypes = formTypes;
 
@@ -938,6 +1098,16 @@ export const dataStore = {
   },
   getPlanByRoute(route) {
     const planScope = route.planScope || (route.categoryId ? 'category' : 'fallback');
+    if (planScope === 'knowledge' && route.knowledgePlanId) {
+      const direct = this.list('plans').find((item) => item.planScope === 'knowledge' && item.knowledgePlanId === route.knowledgePlanId);
+      if (direct) return direct;
+      // 兼容存量绑定：knowledgePlan 的 workflowPlanId 可能指向旧版直接创建的 category/fallback 工作流 plan，
+      // 此时工作台实际加载的是该绑定 plan 的版本数据。
+      const knowledgePlan = this.getKnowledgePlan(route.knowledgePlanId);
+      const workflowPlanId = knowledgePlan?.workflowPlanId;
+      if (workflowPlanId) return this.list('plans').find((item) => item.id === workflowPlanId) || null;
+      return null;
+    }
     const categoryId = planScope === 'category' ? route.categoryId : null;
     return this.list('plans').find((item) => (
       item.projectId === route.projectId
@@ -958,6 +1128,7 @@ export const dataStore = {
       solutionId: route.solutionId,
       planScope,
       categoryId: planScope === 'category' ? route.categoryId : null,
+      knowledgePlanId: planScope === 'knowledge' ? route.knowledgePlanId : null,
       formType: route.formType,
       fileFormat: route.fileFormat,
       status: 'active',
@@ -1018,6 +1189,16 @@ export const dataStore = {
     const next = { id: id('plan-exec'), status: 'completed', createdAt: now, ...payload };
     this.save('planExecutions', [...this.list('planExecutions'), next]);
     return next;
+  },
+  updatePlanExecution(executionId, patch) {
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const next = this.list('planExecutions').map((item) => (
+      item.id === executionId || item.runId === executionId
+        ? { ...item, ...patch, updatedAt: now }
+        : item
+    ));
+    this.save('planExecutions', next);
+    return next.find((item) => item.id === executionId || item.runId === executionId) || null;
   },
   getPlanChat(planId) {
     return this.list('planChats').find((item) => item.planId === planId)?.messages || null;
@@ -1105,5 +1286,181 @@ export const dataStore = {
     };
     walk(categoryId);
     this.save('projectCategories', all.filter((item) => item.id !== categoryId && !children.has(item.id)));
+  },
+  getKnowledgePlans(projectId, formType) {
+    return this.list('knowledgePlans')
+      .filter((item) => item.projectId === projectId && (!formType || item.formType === formType))
+      .sort((a, b) => String(a.updatedAt).localeCompare(String(b.updatedAt)) || a.name.localeCompare(b.name, 'zh-CN'));
+  },
+  getKnowledgePlan(planId) {
+    return this.list('knowledgePlans').find((item) => item.id === planId) || null;
+  },
+  saveKnowledgePlan(payload) {
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const next = {
+      id: id('kplan'),
+      projectId: payload.projectId,
+      formType: payload.formType,
+      name: payload.name,
+      scopeCategories: compactScopeCategoryIds(payload.scopeCategories),
+      scopeFormats: payload.scopeFormats || [],
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.save('knowledgePlans', [...this.list('knowledgePlans'), next]);
+    return next;
+  },
+  updateKnowledgePlan(planId, patch) {
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const normalizedPatch = Object.prototype.hasOwnProperty.call(patch, 'scopeCategories')
+      ? { ...patch, scopeCategories: compactScopeCategoryIds(patch.scopeCategories) }
+      : patch;
+    const next = this.list('knowledgePlans').map((item) => (item.id === planId ? { ...item, ...normalizedPatch, updatedAt: now } : item));
+    this.save('knowledgePlans', next);
+    const updated = next.find((item) => item.id === planId);
+    if (updated?.workflowPlanId && normalizedPatch.name) {
+      this.save('plans', this.list('plans').map((item) => (item.id === updated.workflowPlanId ? { ...item, name: normalizedPatch.name, updatedAt: now } : item)));
+    }
+    return updated;
+  },
+  deleteKnowledgePlan(planId) {
+    const knowledgePlan = this.getKnowledgePlan(planId);
+    const workflowPlanId = knowledgePlan?.workflowPlanId || String(planId).replace(/^kplan-/, '');
+    this.save('knowledgePlans', this.list('knowledgePlans').filter((item) => item.id !== planId));
+    this.save('plans', this.list('plans').filter((item) => item.id !== workflowPlanId));
+    this.save('planVersions', this.list('planVersions').filter((item) => item.planId !== workflowPlanId));
+    this.save('planExecutions', this.list('planExecutions').filter((item) => item.planId !== workflowPlanId));
+    this.save('planChats', this.list('planChats').filter((item) => item.planId !== workflowPlanId));
+    this.save('planIssues', this.list('planIssues').filter((item) => item.planId !== workflowPlanId));
+  },
+  toggleKnowledgePlan(planId) {
+    const next = this.list('knowledgePlans').map((item) => (item.id === planId ? { ...item, status: item.status === 'active' ? 'disabled' : 'active', updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' ') } : item));
+    this.save('knowledgePlans', next);
+    return next.find((item) => item.id === planId);
+  },
+  getKnowledgeGraphSchemas(projectId) {
+    return this.list('knowledgeGraphSchemas')
+      .filter((item) => item.projectId === projectId)
+      .sort((a, b) => String(a.updatedAt).localeCompare(String(b.updatedAt)) || a.name.localeCompare(b.name, 'zh-CN'));
+  },
+  getKnowledgeGraphSchema(schemaId) {
+    return this.list('knowledgeGraphSchemas').find((item) => item.id === schemaId) || null;
+  },
+  saveKnowledgeGraphSchema(payload) {
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const next = {
+      id: id('kschema'),
+      projectId: payload.projectId,
+      name: payload.name.trim(),
+      description: String(payload.description || '').trim(),
+      structure: {
+        entityTypes: [...(payload.entityTypes || [])],
+        attributeTypes: [...(payload.attributeTypes || [])],
+        relationTypes: [...(payload.relationTypes || [])],
+        constraints: (payload.constraints || []).map((item) => ({ source: item.source, relation: item.relation, target: item.target })),
+      },
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.save('knowledgeGraphSchemas', [...this.list('knowledgeGraphSchemas'), next]);
+    return next;
+  },
+  updateKnowledgeGraphSchema(schemaId, patch) {
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const next = this.list('knowledgeGraphSchemas').map((item) => {
+      if (item.id !== schemaId) return item;
+      const updated = { ...item, updatedAt: now };
+      if (Object.prototype.hasOwnProperty.call(patch, 'name')) updated.name = patch.name.trim();
+      if (Object.prototype.hasOwnProperty.call(patch, 'description')) updated.description = String(patch.description || '').trim();
+      if (Object.prototype.hasOwnProperty.call(patch, 'structure')) {
+        updated.structure = {
+          entityTypes: [...(patch.structure.entityTypes || [])],
+          attributeTypes: [...(patch.structure.attributeTypes || [])],
+          relationTypes: [...(patch.structure.relationTypes || [])],
+          constraints: (patch.structure.constraints || []).map((row) => ({ source: row.source, relation: row.relation, target: row.target })),
+        };
+      }
+      return updated;
+    });
+    this.save('knowledgeGraphSchemas', next);
+    return next.find((item) => item.id === schemaId) || null;
+  },
+  deleteKnowledgeGraphSchema(schemaId) {
+    this.save('knowledgeGraphSchemas', this.list('knowledgeGraphSchemas').filter((item) => item.id !== schemaId));
+  },
+  ensureKnowledgePlanWorkflow(planId, solutionId) {
+    const knowledgePlan = this.getKnowledgePlan(planId);
+    if (!knowledgePlan) return null;
+    const linkedPlan = knowledgePlan.workflowPlanId
+      ? this.list('plans').find((item) => item.id === knowledgePlan.workflowPlanId)
+      : null;
+    if (linkedPlan) return linkedPlan;
+    const legacyPlanId = String(planId).replace(/^kplan-/, '');
+    const legacyPlan = this.list('plans').find((item) => item.id === legacyPlanId && item.planScope !== 'fallback');
+    if (legacyPlan) {
+      this.updateKnowledgePlan(planId, { workflowPlanId: legacyPlan.id });
+      return legacyPlan;
+    }
+    const workflow = this.ensurePlan({
+      projectId: knowledgePlan.projectId,
+      solutionId,
+      planScope: 'knowledge',
+      knowledgePlanId: planId,
+      formType: knowledgePlan.formType,
+      fileFormat: knowledgePlan.scopeFormats?.[0] || 'pdf',
+      name: knowledgePlan.name,
+    });
+    this.updateKnowledgePlan(planId, { workflowPlanId: workflow.id });
+    return workflow;
+  },
+  matchKnowledgePlans({ projectId, categoryId, fileFormat }) {
+    const solution = this.getProjectSolution(projectId);
+    const categories = solution ? this.getProjectCategories(solution.id) : [];
+    const categoryById = new Map(categories.map((item) => [item.id, item]));
+    const ancestorIds = new Set();
+    let current = categoryById.get(categoryId);
+    while (current) {
+      ancestorIds.add(current.id);
+      current = current.parentId ? categoryById.get(current.parentId) : null;
+    }
+    const candidates = this.getKnowledgePlans(projectId)
+      .filter((plan) => plan.status === 'active')
+      .map((plan) => {
+        const matchedCategories = plan.scopeCategories?.length
+          ? plan.scopeCategories.filter((id) => ancestorIds.has(id))
+          : [null];
+        if (!matchedCategories.length) return null;
+        const formatMatched = plan.scopeFormats?.length ? plan.scopeFormats.includes(fileFormat) : true;
+        if (!formatMatched) return null;
+        const categoryDepth = matchedCategories.reduce((depth, id) => Math.max(depth, id ? categoryById.get(id)?.level || 0 : 0), 0);
+        return {
+          ...plan,
+          matchCategoryDepth: categoryDepth,
+          matchFormatSpecificity: plan.scopeFormats?.length && plan.scopeFormats.length < supportedKnowledgePlanFormats.length ? 1 : 0,
+        };
+      })
+      .filter(Boolean);
+    if (!candidates.length) return [];
+    const byFormType = new Map();
+    candidates.forEach((plan) => {
+      const list = byFormType.get(plan.formType) || [];
+      list.push(plan);
+      byFormType.set(plan.formType, list);
+    });
+    return Array.from(byFormType.values()).flatMap((plans) => {
+      const deepest = Math.max(...plans.map((item) => item.matchCategoryDepth));
+      const depthMatched = plans.filter((item) => item.matchCategoryDepth === deepest);
+      const mostSpecificFormat = Math.max(...depthMatched.map((item) => item.matchFormatSpecificity));
+      return depthMatched.filter((item) => item.matchFormatSpecificity === mostSpecificFormat);
+    });
+  },
+  getKnowledgePlanStats(planId) {
+    const knowledgePlan = this.getKnowledgePlan(planId);
+    const workflowPlanId = knowledgePlan?.workflowPlanId || String(planId || '').replace(/^kplan-/, '');
+    const executions = this.getPlanExecutions(workflowPlanId);
+    const fileCount = new Set(executions.map((item) => item.sampleFileId || item.sampleFileName || '')).size;
+    const lastRunAt = executions.reduce((latest, item) => (item.runAt > latest ? item.runAt : latest), '');
+    return { fileCount, lastRunAt };
   },
 };
