@@ -12965,6 +12965,62 @@ function SamplePreview({ files, results = [] }) {
   ))}</div>;
 }
 
+// 导航状态与 URL 同步：刷新后停留在当前页面（含方案配置工作台等深层位置）
+const NAVIGABLE_SCREENS = new Set(['ops-projects', 'ops-category', 'ops-plans', 'ops-access', 'ops-workbench', 'ops-knowledge-points', 'admin-mcp', 'admin-tools', 'ops-slice-library', 'ops-qa-library']);
+
+function serializeNavigation(active, projectId, workbenchTarget) {
+  const query = new URLSearchParams(window.location.search);
+  ['screen', 'projectId', 'categoryId', 'formType', 'fileFormat', 'focusVersion', 'knowledgePlanId', 'returnScreen'].forEach((key) => query.delete(key));
+  query.set('screen', active);
+  if (projectId) query.set('projectId', projectId);
+  if (active === 'ops-workbench' && workbenchTarget) {
+    const { categoryId, formType, fileFormat, focusVersion, knowledgePlanId, returnScreen } = workbenchTarget;
+    if (categoryId) query.set('categoryId', categoryId);
+    if (formType) query.set('formType', formType);
+    if (fileFormat) query.set('fileFormat', fileFormat);
+    if (focusVersion) query.set('focusVersion', focusVersion);
+    if (knowledgePlanId) query.set('knowledgePlanId', knowledgePlanId);
+    if (returnScreen) query.set('returnScreen', returnScreen);
+  }
+  const queryString = query.toString();
+  window.history.replaceState(null, '', queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname);
+}
+
+function parseNavigationParams() {
+  const params = new URLSearchParams(window.location.search);
+  const projects = dataStore.getProjects();
+  const firstProjectId = projects[0]?.id;
+  const projectId = projects.some((item) => item.id === params.get('projectId')) ? params.get('projectId') : firstProjectId;
+  const rawScreen = params.get('screen');
+  const active = NAVIGABLE_SCREENS.has(rawScreen) ? rawScreen : 'ops-projects';
+  const fallbackTarget = getDefaultWorkbenchTarget(projectId);
+  if (active !== 'ops-workbench') {
+    return { active, projectId, workbenchTarget: fallbackTarget };
+  }
+  const solution = dataStore.getProjectSolution(projectId);
+  const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
+  const categoryId = categories.some((item) => item.id === params.get('categoryId')) ? params.get('categoryId') : null;
+  const knowledgePlanId = params.get('knowledgePlanId') && dataStore.getKnowledgePlan(params.get('knowledgePlanId')) ? params.get('knowledgePlanId') : null;
+  const formType = knowledgeFormTypes.includes(params.get('formType')) ? params.get('formType') : fallbackTarget.formType;
+  const fileFormat = workbenchFileFormats.includes(params.get('fileFormat')) ? params.get('fileFormat') : fallbackTarget.fileFormat;
+  const focusVersion = params.get('focusVersion') || null;
+  const returnScreen = NAVIGABLE_SCREENS.has(params.get('returnScreen')) ? params.get('returnScreen') : 'ops-plans';
+  return {
+    active,
+    projectId,
+    workbenchTarget: {
+      projectId,
+      categoryId: knowledgePlanId ? null : categoryId,
+      formType,
+      fileFormat,
+      focusVersion,
+      knowledgePlanId,
+      returnScreen,
+      entryNonce: Date.now(),
+    },
+  };
+}
+
 function getDefaultWorkbenchTarget(projectId = dataStore.getProjects()[0]?.id) {
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
   const solution = dataStore.getProjectSolution(project?.id);
@@ -12983,12 +13039,15 @@ function getDefaultWorkbenchTarget(projectId = dataStore.getProjects()[0]?.id) {
 }
 
 export function App() {
-  const params = new URLSearchParams(window.location.search);
-  const [active, setActive] = useState(params.get('screen') || 'ops-projects');
-  const [projectId, setProjectId] = useState(dataStore.getProjects()[0]?.id);
-  const [workbenchTarget, setWorkbenchTarget] = useState(() => getDefaultWorkbenchTarget(dataStore.getProjects()[0]?.id));
+  const initialNavigation = useMemo(() => parseNavigationParams(), []);
+  const [active, setActive] = useState(initialNavigation.active);
+  const [projectId, setProjectId] = useState(initialNavigation.projectId);
+  const [workbenchTarget, setWorkbenchTarget] = useState(initialNavigation.workbenchTarget);
   const [toast, setToast] = useState(null);
   const notify = (message, type = 'info') => setToast({ message, type });
+  useEffect(() => {
+    serializeNavigation(active, projectId, workbenchTarget);
+  }, [active, projectId, workbenchTarget]);
   const openSolution = (id) => { setProjectId(id); setActive('ops-category'); };
   const openWorkbench = (id, categoryId = null, formType = '切片库', fileFormat = workbenchFileFormats[0], focusVersion = null, knowledgePlanId = null, returnScreen = 'ops-category') => {
     setWorkbenchTarget({ projectId: id, categoryId, formType, fileFormat, focusVersion, knowledgePlanId, returnScreen, entryNonce: Date.now() });
