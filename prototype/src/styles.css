@@ -1079,6 +1079,36 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   min-height: 36px;
   margin-bottom: 0;
 }
+.workbench-panel-titlebar {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 10px;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-bottom: 1px solid #edf0f5;
+}
+.workbench-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  color: #0f63f6;
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+.workbench-back-link:hover { background: #eef5ff; }
+.workbench-top-separator { flex: 0 0 auto; width: 1px; height: 16px; background: #e5e9f0; }
+.workbench-panel-titlebar .workbench-plan-title { flex: 0 1 auto; max-width: 360px; }
+.workbench-panel-titlebar .workbench-strip-tag { flex: 0 0 auto; }
+.workbench-panel-titlebar .workbench-scope-control { flex: 0 0 auto; }
 .workbench-page .primary { background: #0f63f6; box-shadow: none; }
 .workbench-page .primary:hover { background: #0b55d8; }
 .workbench-page .primary:disabled { color: #77a8f5; background: #dbeafe; box-shadow: none; cursor: not-allowed; }
@@ -2963,7 +2993,9 @@ select.select-field,
 /* 统一方案工作台（R031） */
 .workbench-page.unified-plan-page { display: flex; flex-direction: column; gap: 12px; }
 .workbench-grid.unified-plan-workbench { grid-template-columns: minmax(0, 1fr); }
-.unified-plan-workbench .workbench-main-panel { grid-column: 1 / -1; min-width: 0; }
+.unified-plan-workbench .workbench-main-panel { grid-column: 1 / -1; min-width: 0; display: flex; flex-direction: column; }
+.unified-plan-workbench .agent-column { flex: 1 1 auto; height: auto; min-height: 0; }
+/* 右侧处理方案面板保持独立浮层，可覆盖标题栏（z-index 高于标题栏内容） */
 
 /* 知识接入上传前匹配（R031） */
 .knowledge-access-page { display: flex; flex-direction: column; gap: 12px; }

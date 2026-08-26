@@ -9620,12 +9620,6 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
 
   return (
     <div className={`workbench-page ${knowledgePlan ? 'unified-plan-page' : ''}`}>
-      {knowledgePlan ? (
-        <PageHeader
-          title="配置知识加工方案"
-          actions={<button type="button" className="secondary" onClick={onBack}><LeftOutlined /> 返回方案列表</button>}
-        />
-      ) : null}
       <div className={`workbench-grid ${knowledgePlan ? 'unified-plan-workbench' : ''}`}>
         {!knowledgePlan ? <aside className="panel sample-column">
           <div className="scheme-overview">
@@ -9672,44 +9666,51 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
           </div>
         </aside> : null}
         <div className="panel workbench-main-panel">
-          <section className="agent-column">
-            <div className="panel-title workbench-context-title">
-              <strong className="workbench-plan-title">{workbenchPlanTitle}</strong>
-              <span className="workbench-strip-tag">{getKnowledgeFormTypeLabel(activePlanTarget.formType)}</span>
-              {knowledgePlan ? (
-                <div className="workbench-scope-control">
-                  <button ref={scopeTriggerRef} type="button" className="workbench-scope-trigger" onClick={() => setScopePopoverOpen((open) => !open)}>
-                    查看适用范围
-                  </button>
-                  {scopePopoverOpen ? (
-                    <div ref={scopePopoverRef} className="workbench-scope-popover">
-                      <section className="workbench-scope-section">
-                        <strong>适用类目</strong>
-                        <div className="workbench-scope-category-list">
-                          {knowledgePlan.scopeCategories?.length ? knowledgePlan.scopeCategories.map((categoryId) => (
-                            <div className="workbench-scope-category" key={categoryId}>
-                              <FolderOpenOutlined />
-                              <span>{categoryPathMap.get(categoryId) || categoryId}</span>
-                            </div>
-                          )) : <div className="workbench-scope-category"><FolderOpenOutlined /><span>全部类目</span></div>}
-                        </div>
-                      </section>
-                      <section className="workbench-scope-section">
-                        <strong>适用格式</strong>
-                        <div className="workbench-scope-format-list">
-                          {unifiedPlanFormats.map((format) => {
-                            const { Icon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
-                            return <span className="workbench-scope-format" key={format} style={{ '--format-color': color }}><Icon />{formatLabel(format)}</span>;
-                          })}
-                        </div>
-                      </section>
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <span className="workbench-strip-tag format" style={{ '--format-color': activeFormatColor }}><ActiveFormatIcon />{activePlanTarget.fileFormat}</span>
-              )}
+          {knowledgePlan ? (
+            <div className="workbench-panel-titlebar">
+              <button type="button" className="workbench-back-link" onClick={onBack}><LeftOutlined /> 返回方案列表</button>
+              <span className="workbench-top-separator" />
+              <strong className="workbench-plan-title">{knowledgePlan.name}</strong>
+              <span className="workbench-strip-tag">{getKnowledgeFormTypeLabel(knowledgePlan.formType)}</span>
+              <div className="workbench-scope-control">
+                <button ref={scopeTriggerRef} type="button" className="workbench-scope-trigger" onClick={() => setScopePopoverOpen((open) => !open)}>
+                  查看适用范围
+                </button>
+                {scopePopoverOpen ? (
+                  <div ref={scopePopoverRef} className="workbench-scope-popover">
+                    <section className="workbench-scope-section">
+                      <strong>适用类目</strong>
+                      <div className="workbench-scope-category-list">
+                        {knowledgePlan.scopeCategories?.length ? knowledgePlan.scopeCategories.map((categoryId) => (
+                          <div className="workbench-scope-category" key={categoryId}>
+                            <FolderOpenOutlined />
+                            <span>{categoryPathMap.get(categoryId) || categoryId}</span>
+                          </div>
+                        )) : <div className="workbench-scope-category"><FolderOpenOutlined /><span>全部类目</span></div>}
+                      </div>
+                    </section>
+                    <section className="workbench-scope-section">
+                      <strong>适用格式</strong>
+                      <div className="workbench-scope-format-list">
+                        {unifiedPlanFormats.map((format) => {
+                          const { Icon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+                          return <span className="workbench-scope-format" key={format} style={{ '--format-color': color }}><Icon />{formatLabel(format)}</span>;
+                        })}
+                      </div>
+                    </section>
+                  </div>
+                ) : null}
+              </div>
             </div>
+          ) : null}
+          <section className="agent-column">
+            {!knowledgePlan ? (
+              <div className="panel-title workbench-context-title">
+                <strong className="workbench-plan-title">{workbenchPlanTitle}</strong>
+                <span className="workbench-strip-tag">{getKnowledgeFormTypeLabel(activePlanTarget.formType)}</span>
+                <span className="workbench-strip-tag format" style={{ '--format-color': activeFormatColor }}><ActiveFormatIcon />{activePlanTarget.fileFormat}</span>
+              </div>
+            ) : null}
             <div className="agent-stream" ref={streamRef}>{events.map((event) => <AgentEvent key={event.id} event={event} />)}</div>
             <div className="agent-input">
               <div className="agent-input-box">
