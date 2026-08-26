@@ -1,3 +1,5 @@
+import { readStoredJson, removeStoredItem, writeStoredJson } from './storage.js';
+
 const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v23';
 const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v23';
 const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v23';
@@ -21,8 +23,16 @@ function isKnowledgeGraphServiceTool(tool) {
     || GRAPH_TOOL_ALIAS_NAMES.has(tool?.sourceToolName);
 }
 
+function isRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isRecordArray(value) {
+  return Array.isArray(value) && value.every(isRecord);
+}
+
 function mergeSeedToolsWithStoredTools(storedTools, seedTools = []) {
-  const normalizedStoredTools = (storedTools || []).map((tool) => {
+  const normalizedStoredTools = (Array.isArray(storedTools) ? storedTools : []).filter(isRecord).map((tool) => {
     const status = tool.status || (tool.enabled === false ? '不可用' : '可用');
     return {
       ...tool,
@@ -149,11 +159,7 @@ function nowText() {
 }
 
 function purgeLegacyDemoStorage() {
-  try {
-    LEGACY_KEYS.forEach((key) => localStorage.removeItem(key));
-  } catch {
-    // ignore
-  }
+  LEGACY_KEYS.forEach((key) => removeStoredItem(key));
 }
 
 purgeLegacyDemoStorage();
@@ -1000,6 +1006,7 @@ function normalizeToolInputs(tool) {
       required: input.required ?? fallback.required ?? true,
       description: input.description || fallback.description || '',
       defaultValue: input.defaultValue ?? fallback.defaultValue ?? '',
+      uiSchema: normalizeManagedNodeUiSchema(input.name, input.uiSchema || fallback.uiSchema),
     };
   });
 }
@@ -1308,8 +1315,82 @@ function createManagedNodeInputArtifacts(rawTool, definition) {
   return [createManagedNodeArtifact(isFootnote ? 'policy_documents' : 'document_files', isFootnote ? '条款文档' : '待解析文件', 'array<object>', 'file_object', isFootnote ? '待提取脚注的保险条款或政策文档。' : '待 OCR 或版面解析的文件列表。')];
 }
 
+const managedNodeUiSchemaPresets = {
+  keyword_count: { widget: 'number' },
+  target_format: { widget: 'select', options: [['pdf', 'PDF'], ['markdown', 'Markdown'], ['txt', '纯文本']] },
+  retain_layout: { widget: 'switch' },
+  output_naming_rule: { widget: 'text' },
+  entity_types: { widget: 'checkboxGroup', options: [['人物', '人物'], ['组织', '组织'], ['政策文件', '政策文件'], ['产品', '产品']] },
+  attribute_types: { widget: 'checkboxGroup', options: [['名称', '名称'], ['时间', '时间'], ['地点', '地点'], ['编号', '编号']] },
+  relation_types: { widget: 'checkboxGroup', options: [['任职于', '任职于'], ['制定', '制定'], ['适用于', '适用于'], ['包含', '包含']] },
+  graph_schema: { widget: 'select', optionSource: 'dynamic', dynamicSource: { type: 'knowledgeGraphSchema', displayField: 'name', valueField: 'content' } },
+  include_isolated_entities: { widget: 'switch' },
+  extraction_instruction: { widget: 'textarea' },
+  chunk_strategy: { widget: 'select', options: [['heading', '按标题'], ['paragraph', '按段落'], ['semantic', '按语义']] },
+  max_chunk_size: { widget: 'number' },
+  overlap_size: { widget: 'number' },
+  summary_type: { widget: 'select', options: [['政策摘要', '政策摘要'], ['办理条件', '办理条件'], ['材料清单', '材料清单'], ['风险提示', '风险提示']] },
+  model: { widget: 'select', options: [['qwen3-8b', 'Qwen3 8B'], ['qwen3-32b', 'Qwen3 32B'], ['deepseek-v3', 'DeepSeek V3']] },
+  extract_scope: { widget: 'select', options: [['full', '全文'], ['title_section', '标题章节'], ['footnote', '脚注']] },
+  title_match_mode: { widget: 'radio', options: [['exact', '精确匹配'], ['contains', '包含匹配'], ['regex', '正则匹配']] },
+  include_context: { widget: 'switch' },
+  tag_strategy: { widget: 'radio', options: [['规则标签优先', '规则标签优先'], ['结构感知打标', '结构感知打标'], ['模型自动打标', '模型自动打标']] },
+  label_pool: { widget: 'checkboxGroup', options: [['适用对象', '适用对象'], ['办理条件', '办理条件'], ['材料要求', '材料要求'], ['费用结算', '费用结算'], ['风险提示', '风险提示']] },
+  parse_mode: { widget: 'select', options: [['general', '通用解析'], ['layout_ocr', '版面解析'], ['ocr', 'OCR 解析'], ['clause', '条款解析']] },
+  language: { widget: 'select', options: [['zh-CN', '简体中文'], ['en-US', '英文'], ['ja-JP', '日文']] },
+  table_mode: { widget: 'radio', options: [['structured', '结构化表格'], ['image', '保留图片'], ['ignore', '忽略表格']] },
+  enable_image_caption: { widget: 'switch' },
+  require_evidence: { widget: 'switch' },
+  expansion_count: { widget: 'number' },
+  additional_requirement: { widget: 'textarea' },
+};
+
+function createManagedNodeUiSchema(name) {
+  const preset = managedNodeUiSchemaPresets[name] || { widget: 'auto', options: [] };
+  return {
+    widget: preset.widget,
+    placeholder: '',
+    helpText: '',
+    options: (preset.options || []).map(([value, label], index) => ({
+      id: `ui-option-${name}-${index + 1}`,
+      value,
+      label,
+    })),
+    optionSource: preset.optionSource || 'static',
+    dynamicSource: preset.dynamicSource || null,
+  };
+}
+
+function normalizeManagedNodeUiSchema(name, uiSchema) {
+  const preset = createManagedNodeUiSchema(name);
+  const source = uiSchema && typeof uiSchema === 'object' ? uiSchema : preset;
+  const dynamicSource = source.dynamicSource && source.dynamicSource.type === 'knowledgeGraphSchema'
+    ? { type: 'knowledgeGraphSchema', displayField: 'name', valueField: 'content' }
+    : source.dynamicSource;
+  return {
+    widget: source.widget || preset.widget || 'auto',
+    placeholder: String(source.placeholder || ''),
+    helpText: String(source.helpText || ''),
+    options: Array.isArray(source.options) ? source.options.map((option, index) => (
+      option && typeof option === 'object'
+        ? {
+            id: option.id || `ui-option-${name}-${index + 1}`,
+            value: String(option.value ?? ''),
+            label: String(option.label ?? option.value ?? ''),
+          }
+        : {
+            id: `ui-option-${name}-${index + 1}`,
+            value: String(option ?? ''),
+            label: String(option ?? ''),
+          }
+    )) : [],
+    optionSource: source.optionSource || 'static',
+    dynamicSource,
+  };
+}
+
 function createManagedNodeParam(name, displayName, type, required, description, defaultValue = '', options = {}) {
-  return { name, displayName, type, required, description, defaultValue, ...options };
+  return { name, displayName, type, required, description, defaultValue, uiSchema: createManagedNodeUiSchema(name), ...options };
 }
 
 function createManagedNodeConfigParams(rawTool, definition) {
@@ -1327,9 +1408,7 @@ function createManagedNodeConfigParams(rawTool, definition) {
   }
   if (definition.category === '知识提取' && rawTool.slug === 'extract_document_knowledge_graph') {
     return [
-      createManagedNodeParam('entity_types', '实体类型', 'array<string>', false, '输入实体类型后按回车创建标签。', []),
-      createManagedNodeParam('attribute_types', '属性类型', 'array<string>', false, '输入属性类型后按回车创建标签。', []),
-      createManagedNodeParam('relation_types', '关系类型', 'array<string>', false, '输入关系类型后按回车创建标签。', []),
+      createManagedNodeParam('graph_schema', '图谱结构定义', 'string', true, '选择当前知识空间下已创建的三元组管理 Schema；抽取时按该 Schema 定义实体、属性与关系类型。', ''),
       createManagedNodeParam('include_isolated_entities', '保留孤立实体', 'boolean', false, '是否保留无关系实体。', true),
       createManagedNodeParam('extraction_instruction', '补充抽取说明', 'string', false, '可选的抽取提示词。', ''),
     ];
@@ -1396,12 +1475,20 @@ function createManagedNodeParameterMappingCode(rawTool, definition, artifacts, p
   }
   if (definition.category === '知识提取' && rawTool.slug === 'extract_document_knowledge_graph') {
     return `function mapParams(context) {
+  const graphSchema = context.config.graph_schema || {};
+  const schemaStructure = graphSchema && typeof graphSchema === 'object' && graphSchema.structure
+    ? graphSchema.structure
+    : {
+        entityTypes: context.config.entity_types || [],
+        attributeTypes: context.config.attribute_types || [],
+        relationTypes: context.config.relation_types || [],
+      };
   return {
     chunks: context.nodeInput.chunks,
     extraction_schema: {
-      Entities: context.config.entity_types,
-      Attributes: context.config.attribute_types,
-      Relations: context.config.relation_types,
+      Entities: schemaStructure.entityTypes,
+      Attributes: schemaStructure.attributeTypes,
+      Relations: schemaStructure.relationTypes,
     },
     include_isolated_entities: context.config.include_isolated_entities,
     extraction_instruction: context.config.extraction_instruction,
@@ -1470,6 +1557,183 @@ function createEntityRelationExtractionManagedTool() {
     }),
     lastSyncedAt: '平台内置',
   });
+}
+
+const selfDevGraphExtractionDemoChunks = [
+  {
+    chunk_id: 'chunk-001',
+    title: '保险责任',
+    content: '示例保险公司承保本保险产品，对被保险人提供重大疾病保障、住院医疗费用补偿等保障责任。',
+  },
+  {
+    chunk_id: 'chunk-002',
+    title: '保障范围',
+    content: '本保险产品的保障责任适用于符合投保年龄要求的适用人群，等待期后按约定赔付比例给付。',
+  },
+];
+
+const selfDevGraphExtractionDemoSchema = {
+  schemaId: 'kschema-demo-insurance-001',
+  schemaName: '保险业务图谱 Schema',
+  structure: {
+    entityTypes: ['保险产品', '保险公司', '保险条款', '保障责任', '适用人群', '疾病', '医疗机构'],
+    attributeTypes: ['投保年龄', '保险期间', '等待期', '保额', '保费', '免赔额', '赔付比例', '生效日期'],
+    relationTypes: ['承保', '包含', '保障', '适用于', '约定', '除外', '就诊于'],
+    constraints: [
+      { source: '保险公司', relation: '承保', target: '保险产品' },
+      { source: '保险产品', relation: '包含', target: '保险条款' },
+      { source: '保险条款', relation: '包含', target: '保障责任' },
+      { source: '保险产品', relation: '适用于', target: '适用人群' },
+      { source: '保险产品', relation: '保障', target: '疾病' },
+      { source: '保险条款', relation: '约定', target: '保障责任' },
+      { source: '保险条款', relation: '除外', target: '疾病' },
+      { source: '被保险人', relation: '就诊于', target: '医疗机构' },
+    ],
+  },
+};
+
+const selfDevGraphExtractionDemoConfig = {
+  include_isolated_entities: true,
+  require_evidence: true,
+  extraction_instruction: '抽取保险合同中的保险产品、保险公司、保险条款、保障责任与疾病等对象；保留来源分片与原文证据，仅输出当前文档的图谱片段。',
+};
+
+const selfDevGraphExtractionDemoGraphFragment = {
+  status: 'success',
+  metadata: {
+    fileName: '示例保险条款.pdf',
+    language: 'zh-CN',
+    documentMetadata: { document_id: 'doc-insurance-001', document_type: 'pdf' },
+  },
+  entities: [
+    {
+      id: 'ent-ins-001',
+      name: '示例保险公司',
+      type: '保险公司',
+      properties: { 机构类型: '保险机构' },
+      evidences: [{ document: { id: 'doc-insurance-001', title: '示例保险条款' }, chunk_id: 'chunk-001', quote: '示例保险公司承保本保险产品' }],
+    },
+    {
+      id: 'ent-prod-001',
+      name: '示例重疾保险产品',
+      type: '保险产品',
+      properties: { 保额: '50万', 等待期: '90天' },
+      evidences: [{ document: { id: 'doc-insurance-001', title: '示例保险条款' }, chunk_id: 'chunk-001', quote: '示例保险公司承保本保险产品' }],
+    },
+    {
+      id: 'ent-benefit-001',
+      name: '重大疾病保障',
+      type: '保障责任',
+      properties: { 赔付比例: '100%' },
+      evidences: [{ document: { id: 'doc-insurance-001', title: '示例保险条款' }, chunk_id: 'chunk-001', quote: '重大疾病保障' }],
+    },
+  ],
+  relations: [
+    {
+      id: 'rel-001',
+      sourceEntityId: 'ent-ins-001',
+      sourceEntityType: '保险公司',
+      relationType: '承保',
+      targetEntityId: 'ent-prod-001',
+      targetEntityType: '保险产品',
+      confidence: 0.98,
+      properties: { 承保范围: '示例重疾保险产品' },
+      evidences: [{ document: { id: 'doc-insurance-001', title: '示例保险条款' }, chunk_id: 'chunk-001', quote: '示例保险公司承保本保险产品' }],
+    },
+    {
+      id: 'rel-002',
+      sourceEntityId: 'ent-prod-001',
+      sourceEntityType: '保险产品',
+      relationType: '包含',
+      targetEntityId: 'ent-benefit-001',
+      targetEntityType: '保障责任',
+      confidence: 0.96,
+      properties: { 保障范围: '重大疾病' },
+      evidences: [{ document: { id: 'doc-insurance-001', title: '示例保险条款' }, chunk_id: 'chunk-001', quote: '重大疾病保障' }],
+    },
+  ],
+  isolatedEntities: [],
+  schemaSuggestions: [],
+  schemaValidation: { mode: '严格校验', validEntityCount: 3, validRelationCount: 2, outOfSchemaCandidates: [] },
+  stats: { entityCount: 3, relationCount: 2, chunkCount: 2, coveredChunkCount: 2, coverageRatio: 1 },
+  failedChunks: [],
+  warnings: [],
+};
+
+const selfDevelopedGraphExtractionDemoSample = {
+  inputTip: '节点接收上游文本分片与配置参数；「图谱结构定义」通过动态引用选择知识空间下已创建的 Schema，配置值回填完整结构，抽取时按该 Schema 约束实体、属性与关系类型。',
+  input: {
+    chunks: selfDevGraphExtractionDemoChunks,
+    graph_schema: selfDevGraphExtractionDemoSchema,
+    ...selfDevGraphExtractionDemoConfig,
+  },
+  mcpInput: {
+    chunks: selfDevGraphExtractionDemoChunks,
+    extraction_schema: {
+      entities: selfDevGraphExtractionDemoSchema.structure.entityTypes,
+      attributes: selfDevGraphExtractionDemoSchema.structure.attributeTypes,
+      relations: selfDevGraphExtractionDemoSchema.structure.relationTypes,
+      constraints: selfDevGraphExtractionDemoSchema.structure.constraints,
+    },
+    include_isolated_entities: selfDevGraphExtractionDemoConfig.include_isolated_entities,
+    require_evidence: selfDevGraphExtractionDemoConfig.require_evidence,
+    extraction_instruction: selfDevGraphExtractionDemoConfig.extraction_instruction,
+  },
+  mcpResult: selfDevGraphExtractionDemoGraphFragment,
+  nodeOutput: { graph_fragment: selfDevGraphExtractionDemoGraphFragment },
+};
+
+function createSelfDevelopedGraphExtractionManagedTool() {
+  const inputArtifacts = [
+    createManagedNodeArtifact('chunks', '文本分片', 'array<object>', 'text_chunks', '单份文档的有序文本分片，用于抽取实体、属性、关系与来源证据。'),
+  ];
+  const inputs = [
+    createManagedNodeParam('graph_schema', '图谱结构定义', 'string', true, '选择当前知识空间下已创建的三元组管理 Schema；抽取时按该 Schema 定义实体、属性与关系类型，配置值回填完整结构。', ''),
+    createManagedNodeParam('include_isolated_entities', '保留孤立实体', 'boolean', false, '是否保留无关系的实体候选。', true),
+    createManagedNodeParam('require_evidence', '来源证据必填', 'boolean', true, '每个抽取到的实体和关系必须保留来源证据。', true),
+    createManagedNodeParam('extraction_instruction', '补充抽取说明', 'string', false, '可选的抽取提示词。', ''),
+  ];
+  return {
+    ...makeManagedTool({
+      id: 'ke-platform-self-dev-graph-extraction',
+      name: '自研图谱抽取',
+      description: '自研的单文档图谱抽取节点：按所选 Schema 抽取实体、属性与关系，输出可建图的图谱片段。当前为停用状态的示例节点，仅用于讲解节点注册与 Schema 动态引用逻辑。',
+      category: '知识提取',
+      kind: '内置工具',
+      sourceType: '平台内置',
+      sourceServiceId: 'knowledge-engineering-platform',
+      sourceServiceName: '知识工程平台',
+      sourceToolName: '自研图谱抽取',
+      inputArtifacts,
+      inputs,
+      outputs: [createOutput('graph_fragment', 'object', '唯一业务输出：当前文档的知识图谱片段。', 'graph_fragment', graphFragmentSchema)],
+      parameterMappingCode: `function mapParams(context) {
+  const schema = context.config.graph_schema;
+  return {
+    chunks: context.nodeInput.chunks,
+    extraction_schema: schema && schema.structure ? {
+      entities: schema.structure.entityTypes,
+      attributes: schema.structure.attributeTypes,
+      relations: schema.structure.relationTypes,
+      constraints: schema.structure.constraints,
+    } : null,
+    include_isolated_entities: context.config.include_isolated_entities,
+    require_evidence: context.config.require_evidence,
+    extraction_instruction: context.config.extraction_instruction,
+  };
+}`,
+      storageContract: createStorageContract({
+        enabled: false,
+        outputName: 'graph_fragment',
+        artifactType: '知识图谱片段',
+        note: '图谱片段仅作为节点输出供下游建图使用，不直接写入知识库。',
+      }),
+      demoSample: selfDevelopedGraphExtractionDemoSample,
+      lastSyncedAt: '平台内置',
+    }),
+    enabled: false,
+    status: '不可用',
+  };
 }
 
 function createKeywordExtractionManagedOutputs() {
@@ -1721,7 +1985,19 @@ function initialManagedTools(services = initialServices) {
   const qaExpansionTools = rawTools
     .filter(({ tool }) => tool.slug === 'knowledge_extract_text')
     .map(({ service, tool }) => createQaExpansionManagedTool(service, tool));
-  return [...mcpTools, ...qaExpansionTools, createEntityRelationExtractionManagedTool()];
+  return [...mcpTools, ...qaExpansionTools, createEntityRelationExtractionManagedTool(), createSelfDevelopedGraphExtractionManagedTool()];
+}
+
+function migrateManagedGraphToolInputs(tool) {
+  const inputs = Array.isArray(tool?.inputs) ? tool.inputs : [];
+  const hasLegacyTypeParams = inputs.some((input) => ['entity_types', 'attribute_types', 'relation_types'].includes(input.name));
+  if (!hasLegacyTypeParams) return tool;
+  const legacyParams = new Set(['entity_types', 'attribute_types', 'relation_types']);
+  const graphSchemaInput = createManagedNodeParam('graph_schema', '图谱结构定义', 'string', true, '选择当前知识空间下已创建的三元组管理 Schema；抽取时按该 Schema 定义实体、属性与关系类型。', '');
+  return {
+    ...tool,
+    inputs: [graphSchemaInput, ...inputs.filter((input) => !legacyParams.has(input.name))],
+  };
 }
 
 function normalizeStoredTools(tools) {
@@ -1743,6 +2019,7 @@ function normalizeStoredTools(tools) {
     const normalizedId = isLegacyKnowledgeGraph
       ? GRAPH_TOOL_CANONICAL_ID
       : rawTool?.id || `${rawTool?.serviceId || 'svc'}-${rawTool?.name || rawTool?.sourceToolName || 'tool'}`;
+    const migratedRaw = isLegacyKnowledgeGraph ? migrateManagedGraphToolInputs(rawTool) : rawTool;
     const tool = {
       ...rawTool,
       id: normalizedId,
@@ -1758,9 +2035,9 @@ function normalizeStoredTools(tools) {
       version: rawTool.version || 'v1',
       enabled: isLegacyKnowledgeGraph ? true : (rawTool.enabled ?? rawTool.status !== '不可用'),
       lastSyncedAt: rawTool.lastSyncedAt || '-',
-      inputs: normalizeToolInputs(rawTool),
-      outputs: normalizeToolOutputs(rawTool),
-      storageContract: normalizeStorageContract(rawTool.storageContract),
+      inputs: normalizeToolInputs(migratedRaw),
+      outputs: normalizeToolOutputs(migratedRaw),
+      storageContract: normalizeStorageContract(migratedRaw.storageContract),
     };
     const previous = byId.get(tool.id);
     byId.set(tool.id, previous ? { ...previous, ...tool } : tool);
@@ -1775,14 +2052,31 @@ function mergeStoredToolsWithSeed(storedTools, seedTools) {
   const refreshedTools = storedTools.map((tool) => {
     const seed = seedByName.get(tool.name);
     if (!seed) return tool;
+    const seedInputsByName = new Map((seed.inputs || []).map((input) => [input.name, input]));
+    const inputs = (tool.inputs || []).map((input) => {
+      const seedInput = seedInputsByName.get(input.name);
+      const uiSchema = input.uiSchema;
+      const hasConfiguredUiSchema = Boolean(
+        uiSchema
+        && (
+          (uiSchema.widget && uiSchema.widget !== 'auto')
+          || String(uiSchema.placeholder || '').trim()
+          || String(uiSchema.helpText || '').trim()
+          || (Array.isArray(uiSchema.options) && uiSchema.options.length)
+        )
+      );
+      return hasConfiguredUiSchema || !seedInput?.uiSchema ? input : { ...input, uiSchema: seedInput.uiSchema };
+    });
     return {
       ...seed,
+      ...tool,
+      inputs,
       id: tool.id || seed.id,
       status: tool.status || seed.status,
       enabled: tool.enabled ?? seed.enabled,
       lifecycleStatus: tool.lifecycleStatus || seed.lifecycleStatus,
       version: tool.version || seed.version,
-      lastSyncedAt: seed.lastSyncedAt || tool.lastSyncedAt,
+      lastSyncedAt: tool.lastSyncedAt || seed.lastSyncedAt,
     };
   });
   const missingSeedTools = seedTools.filter((tool) => !storedNames.has(tool.name));
@@ -1794,16 +2088,11 @@ function mergeStoredToolsWithSeed(storedTools, seedTools) {
 
 export function loadServices() {
   purgeLegacyDemoStorage();
-  try {
-    const saved = localStorage.getItem(SERVICES_KEY);
-    return saved ? mergeStoredServicesWithSeed(JSON.parse(saved)) : initialServices;
-  } catch {
-    return initialServices;
-  }
+  return mergeStoredServicesWithSeed(readStoredJson(SERVICES_KEY, initialServices, isRecordArray));
 }
 
 function mergeStoredServicesWithSeed(services) {
-  const normalizedServices = (services || []).map(normalizeService);
+  const normalizedServices = (Array.isArray(services) ? services : []).filter(isRecord).map(normalizeService);
   const storedIds = new Set(normalizedServices.map((service) => service.id));
   return [
     ...normalizedServices,
@@ -1814,9 +2103,10 @@ function mergeStoredServicesWithSeed(services) {
 function normalizeService(service) {
   const seed = initialServices.find((item) => item.id === service.id);
   const seedTools = seed?.tools || [];
+  const serviceTools = Array.isArray(service?.tools) ? service.tools : [];
   const storedTools = service?.id === 'svc-idp-document-processing'
-    ? (service?.tools || []).filter((tool) => !isKnowledgeGraphServiceTool(tool))
-    : service?.tools;
+    ? serviceTools.filter((tool) => !isKnowledgeGraphServiceTool(tool))
+    : serviceTools;
   const mergedTools = mergeSeedToolsWithStoredTools(storedTools, seedTools);
   if (seed && (!service.serviceType || service.type || service.endpoint !== seed.endpoint)) {
     return {
@@ -1844,19 +2134,14 @@ function normalizeService(service) {
 }
 
 export function saveServices(services) {
-  localStorage.setItem(SERVICES_KEY, JSON.stringify(services));
+  writeStoredJson(SERVICES_KEY, services);
   const existing = readCatalog();
   const customCategories = readCategories();
   saveCatalog(existing.tools, mergeCategories(defaultCategories, customCategories));
 }
 
 function readCategories() {
-  try {
-    const value = localStorage.getItem(CATEGORY_KEY);
-    return value ? JSON.parse(value) : defaultCategories;
-  } catch {
-    return defaultCategories;
-  }
+  return readStoredJson(CATEGORY_KEY, defaultCategories, (value) => Array.isArray(value) && value.every((item) => typeof item === 'string'));
 }
 
 function mergeCategories(...categoryGroups) {
@@ -1865,7 +2150,7 @@ function mergeCategories(...categoryGroups) {
 
 export function readCatalog() {
   try {
-    const tools = JSON.parse(localStorage.getItem(CATALOG_KEY) || 'null');
+    const tools = readStoredJson(CATALOG_KEY, null, (value) => value === null || isRecordArray(value));
     const categories = readCategories();
     if (tools) {
       const storedTools = normalizeStoredTools(tools);
@@ -1886,8 +2171,8 @@ export function readCatalog() {
 }
 
 export function saveCatalog(tools, categories) {
-  localStorage.setItem(CATALOG_KEY, JSON.stringify(tools));
-  localStorage.setItem(CATEGORY_KEY, JSON.stringify(categories));
+  writeStoredJson(CATALOG_KEY, tools);
+  writeStoredJson(CATEGORY_KEY, categories);
   window.dispatchEvent(new CustomEvent(CATALOG_EVENT, { detail: { updatedAt: nowText() } }));
 }
 

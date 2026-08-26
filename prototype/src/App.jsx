@@ -36,6 +36,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import { dataStore, getKnowledgeFormTypeLabel, knowledgeFormTypes } from './dataStore.js';
+import { McpServicePage } from './pages/McpServicePage.jsx';
 import {
   createKnowledgeToolFromRaw,
   createEmptyServiceDraft,
@@ -57,6 +58,11 @@ function makeId(prefix) {
 
 function nowText() {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
+}
+
+function localDateTimeText(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function toObject(value) {
@@ -220,7 +226,7 @@ function PrefixedInput({ label, value, onChange, readOnly = false }) {
 
 function Modal({ title, children, footer, onClose, wide = false, className = '' }) {
   return (
-    <div className="modal-layer">
+    <div className={`modal-layer ${className}`.trim()}>
       <div className={`modal-card ${wide ? 'wide' : ''} ${className}`.trim()}>
         <div className="modal-head">
           <h2>{title}</h2>
@@ -274,12 +280,13 @@ function HelpTip({ text }) {
   );
 }
 
-function Field({ label, children, required, help }) {
+function Field({ label, children, required, help, group = false }) {
+  const Container = group ? 'div' : 'label';
   return (
-    <label className="form-field">
+    <Container className="form-field">
       <span className="field-label-text">{required ? <em>*</em> : null}{label}<HelpTip text={help} /></span>
       {children}
-    </label>
+    </Container>
   );
 }
 
@@ -316,15 +323,14 @@ function AgentCodeEditorField({ label, value, onChange, onGenerate, generating =
   );
 }
 
-function Shell({ active, onNavigate, children }) {
+function Shell({ active, menuActive = active, onNavigate, children }) {
   const navGroups = [
     {
       title: '运营端',
       items: [
         ['ops-projects', '知识空间管理'],
-        ['ops-category', '查看知识空间类目'],
-        ['ops-workbench', '方案工作台'],
         ['ops-access', '知识接入'],
+        ['ops-plans', '知识加工方案'],
         ['ops-result', '知识加工结果', [
           ['ops-slice-library', '文本切片'],
           ['ops-qa-library', '问答库'],
@@ -362,10 +368,10 @@ function Shell({ active, onNavigate, children }) {
           <section className="nav-group" key={group.title}>
             <div className="nav-title">{group.title}</div>
             {group.items.map(([key, label, children]) => {
-              const childActive = children?.some(([childKey]) => active === childKey);
+              const childActive = children?.some(([childKey]) => menuActive === childKey);
               return (
                 <div className={`nav-block ${childActive ? 'active' : ''}`} key={key}>
-                  <button type="button" className={`nav-item ${active === key || childActive ? 'active' : ''}`} onClick={() => onNavigate(key)}>
+                  <button type="button" className={`nav-item ${menuActive === key || childActive ? 'active' : ''}`} onClick={() => onNavigate(key)}>
                     <span>{label}</span>
                   </button>
                   {children?.length ? (
@@ -374,7 +380,7 @@ function Shell({ active, onNavigate, children }) {
                         <button
                           type="button"
                           key={childKey}
-                          className={`nav-subitem ${active === childKey ? 'active' : ''}`}
+                          className={`nav-subitem ${menuActive === childKey ? 'active' : ''}`}
                           onClick={() => onNavigate(childKey)}
                         >
                           {childLabel}
@@ -394,12 +400,11 @@ function Shell({ active, onNavigate, children }) {
   );
 }
 
-function PageHeader({ title, subtitle, actions }) {
+function PageHeader({ title, actions }) {
   return (
     <div className="page-header">
       <div>
         <h1>{title}</h1>
-        {subtitle ? <p>{subtitle}</p> : null}
       </div>
       {actions ? <div className="page-actions">{actions}</div> : null}
     </div>
@@ -797,7 +802,7 @@ function KnowledgeTaggingCompletedModal({ config, stats, completedAt, onClose, o
   );
 }
 
-function McpServicePage({ notify }) {
+function LegacyMcpServicePage({ notify }) {
   const [services, setServices] = useState(loadServices);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [detailService, setDetailService] = useState(null);
@@ -946,7 +951,6 @@ function McpServicePage({ notify }) {
     <>
       <PageHeader
         title="MCP服务管理"
-        subtitle="接入 Nacos 或客户自建 MCP Server，只要符合标准MCP协议，就支持接入和使用。"
         actions={<button type="button" className="primary" onClick={openCreate}><PlusOutlined /> 接入MCP服务</button>}
       />
       <section className="panel table-panel">
@@ -1242,35 +1246,35 @@ function ToolManagementPage({ notify }) {
     notify('流程节点已停用', 'success');
   };
 
-  const saveKnowledgeTool = () => {
+  const saveKnowledgeTool = (draftToSave = createDraft) => {
     for (let step = 0; step < 3; step += 1) {
-      const errorMessage = getKnowledgeToolDraftStepError(createDraft, step);
+      const errorMessage = getKnowledgeToolDraftStepError(draftToSave, step);
       if (errorMessage) {
         notify(errorMessage, 'error');
         return;
       }
     }
     const overrides = {
-      name: createDraft.name,
-      description: createDraft.description,
-      category: createDraft.category,
-      inputArtifacts: createDraft.inputArtifacts,
-      inputs: createDraft.inputs,
-      outputs: buildDraftOutputs(createDraft),
-      parameterMappingCode: createDraft.parameterMappingCode,
-      storageRules: buildPersistenceStorageRules(createDraft),
-      persistenceEnabled: createDraft.persistenceEnabled,
-      persistenceArtifactType: createDraft.persistenceArtifactType,
-      persistenceParseCode: createDraft.persistenceParseCode,
-      nodeOutputParseCode: createDraft.nodeOutputParseCode,
-      indexConfig: createDraft.indexConfig,
-      exceptionRules: createDraft.exceptionRules,
+      name: draftToSave.name,
+      description: draftToSave.description,
+      category: draftToSave.category,
+      inputArtifacts: draftToSave.inputArtifacts,
+      inputs: draftToSave.inputs,
+      outputs: buildDraftOutputs(draftToSave),
+      parameterMappingCode: draftToSave.parameterMappingCode,
+      storageRules: buildPersistenceStorageRules(draftToSave),
+      persistenceEnabled: draftToSave.persistenceEnabled,
+      persistenceArtifactType: draftToSave.persistenceArtifactType,
+      persistenceParseCode: draftToSave.persistenceParseCode,
+      nodeOutputParseCode: draftToSave.nodeOutputParseCode,
+      indexConfig: draftToSave.indexConfig,
+      exceptionRules: draftToSave.exceptionRules,
     };
-    if (createDraft.id) {
-      persist(snapshot.tools.map((tool) => (tool.id === createDraft.id ? applyKnowledgeToolDraft(tool, overrides) : tool)));
+    if (draftToSave.id) {
+      persist(snapshot.tools.map((tool) => (tool.id === draftToSave.id ? applyKnowledgeToolDraft(tool, overrides) : tool)));
       notify('流程节点已更新', 'success');
     } else {
-      const source = rawSources.find((item) => item.id === createDraft.sourceId);
+      const source = rawSources.find((item) => item.id === draftToSave.sourceId);
       if (!source) {
         notify('来源 MCP 工具不存在，请重新同步后再试', 'error');
         return;
@@ -1294,7 +1298,7 @@ function ToolManagementPage({ notify }) {
 
   return (
     <>
-      <PageHeader title="流程节点管理" subtitle="把原始 MCP 工具标准化为知识处理流程节点，用于 Pipeline 编排和 Agent 选用。" />
+      <PageHeader title="流程节点管理" />
       <div className="split-layout">
         <aside className="category-sidebar panel">
           <div className="side-head"><strong>节点类型</strong><button type="button" title="新增节点类型" onClick={openCreateCategory}><PlusOutlined /></button></div>
@@ -1327,7 +1331,7 @@ function ToolManagementPage({ notify }) {
               <col className="standard-tool-col-action" />
             </colgroup>
             <thead>
-              <tr>
+              <tr className="config-param-base-row">
                 <th>节点名称</th>
                 <th>来源工具</th>
                 <th>状态</th>
@@ -1538,8 +1542,116 @@ function createEmptyInputArtifact() {
   };
 }
 
+const configUiWidgetCatalog = {
+  auto: '自动选择',
+  text: '单行文本框',
+  textarea: '多行文本框',
+  select: '下拉单选',
+  radio: '单选按钮',
+  number: '数字输入框',
+  switch: '开关',
+  json: 'JSON 编辑器',
+  multiSelect: '下拉多选',
+  checkboxGroup: '多选按钮',
+  fileUpload: '文件上传',
+  urlInput: 'URL 输入框',
+};
+
+const configUiWidgetsByType = {
+  string: ['auto', 'text', 'textarea', 'select', 'radio'],
+  number: ['auto', 'number'],
+  integer: ['auto', 'number'],
+  boolean: ['auto', 'switch', 'radio'],
+  object: ['auto', 'json'],
+  'array<object>': ['auto', 'json'],
+  'array<string>': ['auto', 'json', 'multiSelect', 'checkboxGroup'],
+  file: ['auto', 'fileUpload'],
+  url: ['auto', 'urlInput'],
+};
+
+function createDefaultConfigUiSchema() {
+  return { widget: 'auto', placeholder: '', helpText: '', options: [], optionSource: 'static', dynamicSource: null };
+}
+
+const dynamicOptionSourceCatalog = {
+  knowledgeGraphSchema: { label: '知识工程图谱 Schema', scope: '按方案所在知识空间' },
+};
+
+function isDynamicOptionUiSchema(uiSchema) {
+  const normalized = normalizeConfigUiSchema(uiSchema);
+  return normalized.optionSource === 'dynamic'
+    && normalized.dynamicSource
+    && Object.prototype.hasOwnProperty.call(dynamicOptionSourceCatalog, normalized.dynamicSource.type);
+}
+
+function getDynamicOptionSourceMeta(uiSchema) {
+  const normalized = normalizeConfigUiSchema(uiSchema);
+  const meta = dynamicOptionSourceCatalog[normalized.dynamicSource?.type] || null;
+  return meta ? { ...meta, displayField: normalized.dynamicSource?.displayField || 'name', valueField: normalized.dynamicSource?.valueField || 'content' } : null;
+}
+
+function normalizeConfigUiSchema(uiSchema) {
+  const source = uiSchema && typeof uiSchema === 'object' ? uiSchema : {};
+  const dynamicSource = source.dynamicSource && source.dynamicSource.type === 'knowledgeGraphSchema'
+    ? { type: 'knowledgeGraphSchema', displayField: 'name', valueField: 'content' }
+    : source.dynamicSource;
+  return {
+    ...createDefaultConfigUiSchema(),
+    ...source,
+    dynamicSource,
+    options: Array.isArray(source.options) ? source.options.map((option) => (
+      option && typeof option === 'object'
+        ? { id: option.id || makeId('ui-option'), value: String(option.value ?? ''), label: String(option.label ?? '') }
+        : { id: makeId('ui-option'), value: String(option ?? ''), label: String(option ?? '') }
+    )) : [],
+  };
+}
+
+function getConfigUiWidgetOptions(type) {
+  return configUiWidgetsByType[type] || ['auto'];
+}
+
+function isConfigUiWidgetAllowed(type, widget) {
+  return getConfigUiWidgetOptions(type).includes(widget || 'auto');
+}
+
+function getAutoConfigUiWidget(type = 'string') {
+  const normalizedType = String(type || 'string').toLowerCase();
+  if (['number', 'integer'].includes(normalizedType)) return 'number';
+  if (normalizedType === 'boolean') return 'switch';
+  if (normalizedType === 'file') return 'fileUpload';
+  if (normalizedType === 'url') return 'urlInput';
+  if (normalizedType === 'object' || normalizedType.includes('array')) return 'json';
+  return 'text';
+}
+
+function getEffectiveConfigUiWidget(type, uiSchema) {
+  const normalized = normalizeConfigUiSchema(uiSchema);
+  if (!isConfigUiWidgetAllowed(type || 'string', normalized.widget)) return getAutoConfigUiWidget(type);
+  return normalized.widget === 'auto' ? getAutoConfigUiWidget(type) : normalized.widget;
+}
+
+function needsManualUiOptions(type, widget) {
+  return ['select', 'multiSelect', 'checkboxGroup'].includes(widget) || (widget === 'radio' && type !== 'boolean');
+}
+
+function parseMultiConfigValue(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
+  if (value == null || value === '') return [];
+  return String(value).split(/[、,，]/).map((item) => item.trim()).filter(Boolean);
+}
+
 function createEmptyConfigParam() {
-  return { name: '', displayName: '', type: 'string', required: false, defaultValue: '', description: '', exposed: true };
+  return {
+    name: '',
+    displayName: '',
+    type: 'string',
+    required: false,
+    defaultValue: '',
+    description: '',
+    exposed: true,
+    uiSchema: createDefaultConfigUiSchema(),
+  };
 }
 
 function inferInputArtifactType(type = 'object') {
@@ -1584,6 +1696,7 @@ function normalizeDraftInputs(inputs = []) {
     displayName: input.displayName || input.label || input.name || '',
     sourceName: input.sourceName || input.source || input.name || '',
     exposed: input.exposed ?? true,
+    uiSchema: normalizeConfigUiSchema(input.uiSchema),
   }));
 }
 
@@ -1988,6 +2101,34 @@ function hasCodeDependencyChanged(draft, target) {
   return baseline != null && baseline !== createCodeDependencySnapshot(draft, target);
 }
 
+function getConfigUiSchemaError(row) {
+  if (!row.uiSchema) return '';
+  const uiSchema = normalizeConfigUiSchema(row.uiSchema);
+  const paramLabel = row.displayName || row.name || '当前参数';
+  if (!isConfigUiWidgetAllowed(row.type || 'string', uiSchema.widget)) {
+    return `「${paramLabel}」的交互形式与字段类型不匹配`;
+  }
+  if (!needsManualUiOptions(row.type || 'string', uiSchema.widget)) return '';
+  if (uiSchema.optionSource === 'dynamic' && isDynamicOptionUiSchema(uiSchema)) return '';
+  if (uiSchema.options.length < 2) return `「${paramLabel}」的选项至少需要 2 项`;
+  const optionValues = [];
+  for (const option of uiSchema.options) {
+    const optionValue = String(option.value ?? '').trim();
+    if (!optionValue) return `「${paramLabel}」的选项值不能为空`;
+    if (!String(option.label ?? '').trim()) return `「${paramLabel}」的选项显示名称不能为空`;
+    if (optionValues.includes(optionValue)) return `「${paramLabel}」存在重复的选项值`;
+    optionValues.push(optionValue);
+  }
+  const isMulti = ['multiSelect', 'checkboxGroup'].includes(uiSchema.widget);
+  if (isMulti) {
+    const invalidDefault = parseMultiConfigValue(row.defaultValue).find((value) => !optionValues.includes(value));
+    if (invalidDefault) return `「${paramLabel}」的默认值「${invalidDefault}」不在可选项中`;
+  } else if (row.defaultValue !== '' && row.defaultValue != null && !optionValues.includes(String(row.defaultValue))) {
+    return `「${paramLabel}」的默认值不在可选项中`;
+  }
+  return '';
+}
+
 function getKnowledgeToolDraftStepError(draft, step) {
   if (!draft) return '请选择MCP工具';
   if (step === 0) {
@@ -2012,6 +2153,8 @@ function getKnowledgeToolDraftStepError(draft, step) {
       if (!hasText(row.name)) return '参数名称不能为空';
       if (!hasText(row.displayName)) return '参数显示名称不能为空';
       if (!hasText(row.description)) return '参数说明不能为空';
+      const uiSchemaError = getConfigUiSchemaError(row);
+      if (uiSchemaError) return uiSchemaError;
     }
     if (!hasText(draft.parameterMappingCode)) return '参数映射代码不能为空';
     return '';
@@ -2074,7 +2217,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   };
   const submit = () => {
     if (!validateStepsBefore(steps.length)) return;
-    onSave();
+    onSave(draft);
   };
   const selectSource = (sourceId) => {
     const source = sources.find((item) => item.id === sourceId);
@@ -2086,9 +2229,10 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
     setDraft({ ...makeKnowledgeToolDraft(source, draft.category || categories[0] || '未分类'), selectedMcpId: serviceId, step: 0 });
   };
   const updateParam = (kind, index, key, value) => {
+    const patch = key && typeof key === 'object' ? key : { [key]: value };
     setDraft((current) => ({
       ...current,
-      [kind]: current[kind].map((item, itemIndex) => (itemIndex === index ? { ...item, [key]: value } : item)),
+      [kind]: current[kind].map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)),
     }));
   };
   const updateInputArtifact = (artifactId, patch) => {
@@ -2227,6 +2371,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
             onParamChange={updateParam}
             onParamAdd={addConfigParam}
             onParamRemove={removeConfigParam}
+            notify={notify}
             onGenerateCode={() => generateCode('parameterMapping')}
             codeGenerating={generatingCode === 'parameterMapping'}
             generationDisabled={Boolean(generatingCode)}
@@ -2355,7 +2500,7 @@ function NodeInputArtifactTable({ artifacts, onAdd, onRemove, onChange }) {
   );
 }
 
-function InputMappingPanel({ source, code, artifacts, configRows, onCodeChange, onArtifactAdd, onArtifactRemove, onArtifactChange, onParamChange, onParamAdd, onParamRemove, onGenerateCode, codeGenerating, generationDisabled, codeDependencyWarning }) {
+function InputMappingPanel({ source, code, artifacts, configRows, onCodeChange, onArtifactAdd, onArtifactRemove, onArtifactChange, onParamChange, onParamAdd, onParamRemove, notify, onGenerateCode, codeGenerating, generationDisabled, codeDependencyWarning }) {
   const inputSchema = buildRawInputJsonSchema(source?.tool?.inputs || []);
   return (
     <section className="standardization-grid mapping-grid">
@@ -2372,6 +2517,7 @@ function InputMappingPanel({ source, code, artifacts, configRows, onCodeChange, 
             onChange={onParamChange}
             onAdd={onParamAdd}
             onRemove={onParamRemove}
+            notify={notify}
           />
         </div>
         <div className="schema-card standardization-panel code-editor-panel">
@@ -2395,7 +2541,158 @@ function InputMappingPanel({ source, code, artifacts, configRows, onCodeChange, 
   );
 }
 
-function ConfigParamTable({ rows, onChange, onAdd, onRemove }) {
+function ConfigDefaultValueEditor({ row, rowIndex, onChange }) {
+  const uiSchema = normalizeConfigUiSchema(row.uiSchema);
+  const options = uiSchema.options;
+  if (row.type === 'file') {
+    return <input value="" disabled placeholder="文件类型不可设置默认值" />;
+  }
+  if (isDynamicOptionUiSchema(uiSchema)) {
+    return <input value={row.defaultValue == null ? '' : String(row.defaultValue)} placeholder="填写 Schema ID，或留空不设置" onChange={(event) => onChange('inputs', rowIndex, 'defaultValue', event.target.value)} />;
+  }
+  if (needsManualUiOptions(row.type || 'string', uiSchema.widget) && !['multiSelect', 'checkboxGroup'].includes(uiSchema.widget)) {
+    return (
+      <SelectField value={row.defaultValue == null ? '' : String(row.defaultValue)} onChange={(defaultValue) => onChange('inputs', rowIndex, 'defaultValue', defaultValue)}>
+        <option value="">不设置</option>
+        {options.map((option) => <option key={option.id || option.value} value={option.value}>{option.label || option.value}</option>)}
+      </SelectField>
+    );
+  }
+  if (['multiSelect', 'checkboxGroup'].includes(uiSchema.widget)) {
+    return <input value={parseMultiConfigValue(row.defaultValue).join('、')} placeholder="多项用、分隔" onChange={(event) => onChange('inputs', rowIndex, 'defaultValue', parseMultiConfigValue(event.target.value))} />;
+  }
+  if (row.type === 'boolean') {
+    return (
+      <SelectField value={row.defaultValue === true || row.defaultValue === 'true' ? 'true' : row.defaultValue === false || row.defaultValue === 'false' ? 'false' : ''} onChange={(value) => onChange('inputs', rowIndex, 'defaultValue', value === '' ? '' : value === 'true')}>
+        <option value="">不设置</option>
+        <option value="true">是</option>
+        <option value="false">否</option>
+      </SelectField>
+    );
+  }
+  return (
+    <input
+      type={['number', 'integer'].includes(row.type) ? 'number' : row.type === 'url' ? 'url' : 'text'}
+      inputMode={row.type === 'url' ? 'url' : undefined}
+      value={row.defaultValue ?? ''}
+      onChange={(event) => onChange('inputs', rowIndex, 'defaultValue', ['number', 'integer'].includes(row.type) && event.target.value !== '' ? Number(event.target.value) : event.target.value)}
+    />
+  );
+}
+
+function ConfigParamUiSchemaPanel({ row, rowIndex, onChange, notify }) {
+  const uiSchema = normalizeConfigUiSchema(row.uiSchema);
+  const widgetOptions = getConfigUiWidgetOptions(row.type || 'string');
+  const isDynamic = isDynamicOptionUiSchema(uiSchema);
+  const dynamicMeta = getDynamicOptionSourceMeta(uiSchema);
+  const canUseDynamicSource = needsManualUiOptions(row.type || 'string', uiSchema.widget) && !(uiSchema.widget === 'radio' && row.type === 'boolean');
+  const showOptions = needsManualUiOptions(row.type || 'string', uiSchema.widget) && !isDynamic;
+  const updateUiSchema = (patch) => {
+    const nextUiSchema = { ...uiSchema, ...patch };
+    onChange('inputs', rowIndex, {
+      uiSchema: nextUiSchema,
+      ...(Object.prototype.hasOwnProperty.call(patch, 'options')
+        ? { enumValues: patch.options.map((option) => String(option.value ?? '').trim()).filter(Boolean) }
+        : {}),
+    });
+  };
+  const setOptionSource = (optionSource) => {
+    if (optionSource === 'dynamic') {
+      updateUiSchema({
+        optionSource: 'dynamic',
+        dynamicSource: { type: 'knowledgeGraphSchema', displayField: 'name', valueField: 'content' },
+        options: [],
+      });
+      return;
+    }
+    updateUiSchema({ optionSource: 'static' });
+  };
+  const addOption = () => updateUiSchema({
+    options: [...uiSchema.options, { id: makeId('ui-option'), value: '', label: '' }],
+  });
+  const updateOption = (optionId, patch) => updateUiSchema({
+    options: uiSchema.options.map((option) => (option.id === optionId ? { ...option, ...patch } : option)),
+  });
+  const removeOption = (option) => {
+    const nextOptions = uiSchema.options.filter((item) => item.id !== option.id);
+    const isMulti = ['multiSelect', 'checkboxGroup'].includes(uiSchema.widget);
+    const currentDefaults = parseMultiConfigValue(row.defaultValue);
+    const defaultAffected = isMulti ? currentDefaults.includes(option.value) : String(row.defaultValue ?? '') === String(option.value);
+    const nextDefaultValue = defaultAffected
+      ? isMulti ? currentDefaults.filter((value) => value !== option.value) : ''
+      : row.defaultValue;
+    onChange('inputs', rowIndex, {
+      uiSchema: { ...uiSchema, options: nextOptions },
+      enumValues: nextOptions.map((item) => String(item.value ?? '').trim()).filter(Boolean),
+      defaultValue: nextDefaultValue,
+    });
+    if (defaultAffected) notify?.('已删除被默认值引用的选项，并同步调整默认值。', 'warning');
+  };
+
+  return (
+    <div className="config-ui-schema-panel">
+      <div className={`config-ui-schema-grid ${canUseDynamicSource ? 'has-option-source' : ''}`}>
+        <label>
+          <span>交互形式</span>
+          <SelectField value={uiSchema.widget} onChange={(widget) => updateUiSchema({
+            widget,
+            options: needsManualUiOptions(row.type || 'string', widget) ? uiSchema.options : [],
+            ...(needsManualUiOptions(row.type || 'string', widget) ? {} : { optionSource: 'static' }),
+          })}>
+            {widgetOptions.map((widget) => <option key={widget} value={widget}>{configUiWidgetCatalog[widget]}</option>)}
+          </SelectField>
+        </label>
+        <label>
+          <span>占位提示</span>
+          <input value={uiSchema.placeholder} onChange={(event) => updateUiSchema({ placeholder: event.target.value })} />
+        </label>
+        <label className="config-ui-help-field">
+          <span>帮助提示</span>
+          <input value={uiSchema.helpText} onChange={(event) => updateUiSchema({ helpText: event.target.value })} />
+        </label>
+        {canUseDynamicSource ? (
+          <label className="config-ui-option-source-field">
+            <span>选项来源</span>
+            <SelectField value={isDynamic ? 'dynamic' : 'static'} onChange={(source) => setOptionSource(source)}>
+              <option value="static">静态来源</option>
+              <option value="dynamic">动态数据源</option>
+            </SelectField>
+          </label>
+        ) : null}
+      </div>
+      {isDynamic ? (
+        <div className="config-ui-dynamic-source-meta">
+          <div><span>数据源</span><strong>{dynamicMeta.label}</strong></div>
+          <div><span>过滤范围</span><strong>{dynamicMeta.scope}</strong></div>
+          <div><span>展示字段</span><strong>{dynamicMeta.displayField === 'name' ? 'Schema 名称' : dynamicMeta.displayField}</strong></div>
+          <div><span>回填字段</span><strong>{dynamicMeta.valueField === 'content' ? '完整 Schema 内容' : dynamicMeta.valueField}</strong></div>
+        </div>
+      ) : null}
+      {showOptions ? (
+        <div className="config-ui-options">
+          <div className="config-ui-options-head">
+            <div><strong>选项配置</strong></div>
+            <button type="button" className="text-link" onClick={addOption}><PlusOutlined /> 添加选项</button>
+          </div>
+          {uiSchema.options.length ? (
+            <div className="config-ui-option-list">
+              <div className="config-ui-option-labels"><span>选项值</span><span>显示名称</span><span>操作</span></div>
+              {uiSchema.options.map((option) => (
+                <div className="config-ui-option-row" key={option.id}>
+                  <input value={option.value} placeholder="例：structured" onChange={(event) => updateOption(option.id, { value: event.target.value })} />
+                  <input value={option.label} placeholder="例：结构化处理" onChange={(event) => updateOption(option.id, { label: event.target.value })} />
+                  <button type="button" className="table-delete-button" title="删除选项" aria-label="删除选项" onClick={() => removeOption(option)}><DeleteOutlined /></button>
+                </div>
+              ))}
+            </div>
+          ) : <p className="config-ui-options-empty">暂无选项，请至少添加 2 项。</p>}
+        </div>
+      ) : uiSchema.widget === 'radio' && row.type === 'boolean' ? <p className="config-ui-boolean-tip">布尔类型的单选按钮由系统固定提供「是 / 否」选项。</p> : null}
+    </div>
+  );
+}
+
+function ConfigParamTable({ rows, onChange, onAdd, onRemove, notify }) {
   return (
     <section className="schema-card editable-schema-card">
       <div className="schema-head">
@@ -2403,44 +2700,49 @@ function ConfigParamTable({ rows, onChange, onAdd, onRemove }) {
         <button type="button" className="text-link" onClick={onAdd}><PlusOutlined /> 添加配置参数</button>
       </div>
       <p className="plain-step-tip">定义当前流程节点对Agent和人暴露的配置项。</p>
-      <table className="data-table compact-table editable-schema-table input-schema-table">
-        <thead>
-          <tr>
-            <th>参数名称</th>
-            <th>显示名称</th>
-            <th>类型</th>
-            <th>必填</th>
-            <th>默认值</th>
-            <th>说明</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
+      <div className="editable-schema-table input-schema-table config-param-table">
+        <div className="config-param-grid config-param-header" role="row">
+          <span>参数名称</span>
+          <span>显示名称</span>
+          <span>类型</span>
+          <span>必填</span>
+          <span>默认值</span>
+          <span>说明</span>
+          <span>操作</span>
+        </div>
+        <div className="config-param-list">
           {rows.map((row, index) => {
             const rowIndex = row.__draftIndex ?? index;
             return (
-              <tr key={`config-${rowIndex}`}>
-                <td><input value={row.name || ''} onChange={(event) => onChange('inputs', rowIndex, 'name', event.target.value)} /></td>
-                <td><input value={row.displayName || ''} onChange={(event) => onChange('inputs', rowIndex, 'displayName', event.target.value)} /></td>
-                <td>
-                  <SelectField value={row.type || 'string'} onChange={(type) => onChange('inputs', rowIndex, 'type', type)}>
-                    {outputFieldTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
-                  </SelectField>
-                </td>
-                <td>
-                  <button type="button" className={`switch-control ${row.required ? 'active' : ''}`} onClick={() => onChange('inputs', rowIndex, 'required', !row.required)} aria-pressed={Boolean(row.required)}>
-                    <span />
-                  </button>
-                </td>
-                <td><input value={row.defaultValue || ''} onChange={(event) => onChange('inputs', rowIndex, 'defaultValue', event.target.value)} /></td>
-                <td><input value={row.description || ''} onChange={(event) => onChange('inputs', rowIndex, 'description', event.target.value)} /></td>
-                <td><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(rowIndex)}><DeleteOutlined /></button></td>
-              </tr>
+              <section className="config-param-card" key={`config-${rowIndex}`}>
+                <div className="config-param-grid config-param-fields">
+                  <div className="config-param-cell"><input value={row.name || ''} onChange={(event) => onChange('inputs', rowIndex, 'name', event.target.value)} /></div>
+                  <div className="config-param-cell"><input value={row.displayName || ''} onChange={(event) => onChange('inputs', rowIndex, 'displayName', event.target.value)} /></div>
+                  <div className="config-param-cell">
+                    <SelectField value={row.type || 'string'} onChange={(type) => {
+                      onChange('inputs', rowIndex, { type, uiSchema: createDefaultConfigUiSchema(), enumValues: [], defaultValue: '' });
+                      notify?.('字段类型已变化，交互形式已重置，请重新确认。', 'warning');
+                    }}>
+                      {outputFieldTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
+                    </SelectField>
+                  </div>
+                  <div className="config-param-cell config-param-required">
+                    <button type="button" className={`switch-control ${row.required ? 'active' : ''}`} onClick={() => onChange('inputs', rowIndex, 'required', !row.required)} aria-pressed={Boolean(row.required)}><span /></button>
+                  </div>
+                  <div className="config-param-cell"><ConfigDefaultValueEditor row={row} rowIndex={rowIndex} onChange={onChange} /></div>
+                  <div className="config-param-cell"><input value={row.description || ''} onChange={(event) => onChange('inputs', rowIndex, 'description', event.target.value)} /></div>
+                  <div className="config-param-cell"><button type="button" className="table-delete-button" title="删除" aria-label="删除" onClick={() => onRemove(rowIndex)}><DeleteOutlined /></button></div>
+                </div>
+                <details className="config-ui-schema-details">
+                  <summary><strong>交互配置</strong><span>设置工作台手动配置节点时的输入控件</span><AntDownOutlined className="config-ui-details-arrow" /></summary>
+                  <ConfigParamUiSchemaPanel row={row} rowIndex={rowIndex} onChange={onChange} notify={notify} />
+                </details>
+              </section>
             );
           })}
-          {rows.length === 0 ? <tr><td colSpan={7} className="empty-table-cell">暂无配置参数</td></tr> : null}
-        </tbody>
-      </table>
+          {rows.length === 0 ? <div className="empty-table-cell config-param-empty">暂无配置参数</div> : null}
+        </div>
+      </div>
     </section>
   );
 }
@@ -2636,10 +2938,16 @@ function buildRawInputJsonSchema(inputs = []) {
   inputs.forEach((input) => {
     if (!input.name) return;
     const schema = input.schema || toJsonSchemaType(input.type);
+    const enumValues = Array.isArray(input.enumValues) ? input.enumValues.filter((value) => value !== '') : [];
+    const constrainedSchema = enumValues.length
+      ? String(input.type || '').toLowerCase() === 'array<string>'
+        ? { ...schema, items: { ...(schema.items || { type: 'string' }), enum: enumValues } }
+        : { ...schema, enum: enumValues }
+      : schema;
     properties[input.name] = {
-      ...schema,
+      ...constrainedSchema,
       ...(input.description ? { description: input.description } : {}),
-      ...(input.defaultValue ? { default: input.defaultValue } : {}),
+      ...(Object.prototype.hasOwnProperty.call(input, 'defaultValue') && input.defaultValue !== '' ? { default: input.defaultValue } : {}),
     };
     if (input.required) required.push(input.name);
   });
@@ -2958,7 +3266,7 @@ function NodeMappingDetailTable({ tool }) {
       input.type || '-',
       input.sourceName || input.name || '-',
       input.required ? '是' : '否',
-      input.defaultValue || '-',
+      formatNodeConfigDisplayValue(input),
       input.description || '-',
     ]);
   const outputRows = (tool.outputs || []).map((output) => [
@@ -2993,9 +3301,10 @@ function NodeInputMappingDetail({ tool, rawSource }) {
       input.displayName || '-',
       input.type || '-',
       input.required ? '是' : '否',
-      input.defaultValue || '-',
+      formatNodeConfigDisplayValue(input),
       input.description || '-',
     ]);
+  const configInputs = (tool.inputs || []).filter((input) => !artifactPaths.has(input.name));
   const inputSchema = buildRawInputJsonSchema(rawSource?.tool?.inputs || tool.inputs || []);
   return (
     <section className="node-detail-section">
@@ -3012,7 +3321,9 @@ function NodeInputMappingDetail({ tool, rawSource }) {
           tip="定义当前流程节点对Agent和人暴露的配置项。"
           columns={['参数名称', '显示名称', '类型', '必填', '默认值', '说明']}
           rows={configRows}
+          className="node-config-parameter-table"
         />
+        <NodeConfigUiSchemaDetail inputs={configInputs} />
         <NodeDetailCodeBlock
           title="参数映射代码"
           tip="通过代码将流程节点的输入和配置参数映射到MCP工具的Input Schema。"
@@ -3021,6 +3332,49 @@ function NodeInputMappingDetail({ tool, rawSource }) {
         <NodeDetailSchemaBlock title="原始MCP工具 Input Schema" schema={inputSchema} structured />
       </div>
     </section>
+  );
+}
+
+function formatNodeConfigValue(value) {
+  if (value === '' || value == null) return '-';
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (Array.isArray(value)) return value.length ? value.join('、') : '-';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function formatNodeConfigDisplayValue(input) {
+  const value = input?.defaultValue;
+  if (value === '' || value == null) return '-';
+  const uiSchema = normalizeConfigUiSchema(input?.uiSchema);
+  const optionLabel = (item) => uiSchema.options.find((option) => String(option.value) === String(item))?.label || formatNodeConfigValue(item);
+  if (Array.isArray(value)) return value.length ? value.map(optionLabel).join('、') : '-';
+  return optionLabel(value);
+}
+
+function NodeConfigUiSchemaDetail({ inputs = [] }) {
+  const rows = inputs.map((input) => {
+    const uiSchema = normalizeConfigUiSchema(input.uiSchema);
+    const effectiveWidget = getEffectiveConfigUiWidget(input.type, uiSchema);
+    const configuredLabel = uiSchema.widget === 'auto'
+      ? `自动选择（${configUiWidgetCatalog[effectiveWidget]}）`
+      : configUiWidgetCatalog[effectiveWidget] || effectiveWidget;
+    const optionLabels = uiSchema.options.map((option) => option.label || option.value).filter(Boolean);
+    return [
+      `${input.displayName || input.name || '-'}（${input.type || 'string'}）`,
+      optionLabels.length ? `${configuredLabel}：${optionLabels.join('、')}` : configuredLabel,
+      uiSchema.placeholder || '-',
+      uiSchema.helpText || '-',
+    ];
+  });
+  return (
+    <NodeMappingSubTable
+      title="交互配置"
+      tip="工作台手动配置节点时，将按以下 UI Schema 渲染输入控件。"
+      columns={['配置参数', '交互形式', '占位提示', '帮助提示']}
+      rows={rows}
+      className="node-ui-schema-table"
+    />
   );
 }
 
@@ -3247,12 +3601,12 @@ function NodeDetailSchemaBlock({ title, schema, structured = false }) {
   );
 }
 
-function NodeMappingSubTable({ title, tip, columns, rows }) {
+function NodeMappingSubTable({ title, tip, columns, rows, className = '' }) {
   return (
     <div className="node-mapping-group">
       <h4>{title}</h4>
       {tip ? <p className="plain-step-tip node-detail-tip">{tip}</p> : null}
-      <table className="data-table compact-table node-detail-table node-mapping-table">
+      <table className={`data-table compact-table node-detail-table node-mapping-table ${className}`.trim()}>
         <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
         <tbody>
           {rows.length ? rows.map((row, index) => (
@@ -3293,7 +3647,7 @@ function ToolParamTable({ title, columns, rows }) {
   );
 }
 
-function ProjectManagementPage({ notify, onOpenSolution, onOpenWorkbench }) {
+function ProjectManagementPage({ notify, onOpenSolution }) {
   const [version, setVersion] = useState(0);
   const [query, setQuery] = useState('');
   const [sceneFilter, setSceneFilter] = useState('');
@@ -3365,7 +3719,6 @@ function ProjectManagementPage({ notify, onOpenSolution, onOpenWorkbench }) {
         relationshipId: dialog.relationshipId,
         templateId: dialog.templateId || undefined,
         vectorModel: 'maip_bge-m3-v1',
-        completion: dialog.templateId ? '0/1' : '0/0',
         projectStatus: '草稿',
         enabled: true,
       });
@@ -3447,12 +3800,11 @@ function ProjectManagementPage({ notify, onOpenSolution, onOpenWorkbench }) {
                 <col className="project-col-relationship" />
                 <col className="project-col-template" />
                 <col className="project-col-vector" />
-                <col className="project-col-solution" />
                 <col className="project-col-status" />
                 <col className="project-col-created" />
                 <col className="project-col-action" />
               </colgroup>
-              <thead><tr><th>项目名称</th><th>项目描述</th><th>场景组合</th><th>初始模板</th><th>向量模型</th><th>方案状态</th><th>项目状态</th><th>创建时间</th><th>操作</th></tr></thead>
+              <thead><tr><th>项目名称</th><th>项目描述</th><th>场景组合</th><th>初始模板</th><th>向量模型</th><th>项目状态</th><th>创建时间</th><th>操作</th></tr></thead>
               <tbody>
                 {filteredProjects.map((project) => {
                   const status = project.projectStatus || (project.hasSolution ? '已完成' : '草稿');
@@ -3464,7 +3816,6 @@ function ProjectManagementPage({ notify, onOpenSolution, onOpenWorkbench }) {
                       <td>{dataStore.relationshipText(project.relationshipId)}</td>
                       <td>{dataStore.templateText(project.templateId)}</td>
                       <td>{project.vectorModel || 'maip_bge-m3-v1'}</td>
-                      <td className="completion-cell"><span>完成总数:</span><strong>{project.completion || '0/0'}</strong></td>
                       <td><Badge tone={status === '已完成' ? 'success' : 'warning'}>{status}</Badge></td>
                       <td>{new Date(project.createdAt).toLocaleDateString('zh-CN')}</td>
                       <td className="actions project-actions menu-cell">
@@ -3490,7 +3841,7 @@ function ProjectManagementPage({ notify, onOpenSolution, onOpenWorkbench }) {
                   );
                 })}
                 {filteredProjects.length === 0 ? (
-                  <tr><td colSpan={9} className="empty-table-cell">暂无匹配项目</td></tr>
+                  <tr><td colSpan={8} className="empty-table-cell">暂无匹配项目</td></tr>
                 ) : null}
               </tbody>
             </table>
@@ -3537,7 +3888,7 @@ function ProjectManagementPage({ notify, onOpenSolution, onOpenWorkbench }) {
   );
 }
 
-function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
+function ProjectSolutionPage({ projectId, notify, onBack }) {
   const [version, setVersion] = useState(0);
   const [expanded, setExpanded] = useState(new Set());
   const [selectedTemplate, setSelectedTemplate] = useState(dataStore.getProject(projectId)?.templateId || '');
@@ -3547,20 +3898,16 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
   const solution = dataStore.getProjectSolution(project.id);
   const categories = solution ? dataStore.getProjectCategories(solution.id).sort((a, b) => (a.level - b.level) || a.name.localeCompare(b.name, 'zh-CN')) : [];
-  const categoryPlans = solution ? dataStore.getCategoryPlans(solution.id) : [];
   const refresh = () => setVersion((item) => item + 1);
   const childrenOf = (parentId) => categories.filter((item) => item.parentId === parentId).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
   const isLeaf = (cat) => childrenOf(cat.id).length === 0;
   const leafCategories = categories.filter((cat) => isLeaf(cat));
-  const hasActiveCategoryPlan = (categoryId, formType) => categoryPlans.some((plan) => plan.categoryId === categoryId && plan.formType === formType && plan.status === 'active');
-  const unconfirmedPlanCount = leafCategories.reduce((sum, cat) => sum + cat.formTypes.filter((formType) => !hasActiveCategoryPlan(cat.id, formType)).length, 0);
   const rootCategories = childrenOf(null);
   const availableParents = categories.filter((cat) => cat.level < 5);
   const stats = {
     total: categories.length,
     leaves: leafCategories.length,
     maxLevel: Math.max(...categories.map((item) => item.level), 0),
-    incomplete: unconfirmedPlanCount,
   };
 
   useEffect(() => {
@@ -3575,16 +3922,10 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
   };
 
   const publishSolution = () => {
-    if (unconfirmedPlanCount > 0) {
-      notify(`有 ${unconfirmedPlanCount} 个处理方案尚未确认`, 'error');
-      return;
-    }
     dataStore.updateProjectSolution(solution.id, { status: 'active', enabled: true });
     refresh();
     notify('项目空间已发布', 'success');
   };
-
-  const openFallbackPlan = () => onWorkbench(project.id, null, '切片库');
 
   const openCreateCategory = () => {
     setCategoryForm({ name: '', parentId: '', formTypes: ['切片库'] });
@@ -3675,16 +4016,11 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
               {leaf ? (
                 <span className="viewer-form-tags">
                   {cat.formTypes.map((form) => (
-                    <Badge key={form} tone={hasActiveCategoryPlan(cat.id, form) ? 'success' : form === '切片库' ? 'warning' : 'blue'}>{getKnowledgeFormTypeLabel(form)}</Badge>
+                    <Badge key={form} tone={form === '切片库' ? 'warning' : 'blue'}>{getKnowledgeFormTypeLabel(form)}</Badge>
                   ))}
                 </span>
               ) : null}
             </div>
-          </div>
-          <div className="category-actions viewer-category-actions">
-            {leaf ? (
-              <button type="button" className="secondary category-config-button" onClick={() => onWorkbench(project.id, cat.id, cat.formTypes[0] || '切片库')}>配置方案</button>
-            ) : null}
           </div>
         </div>
         {children.length && open ? children.map(renderNode) : null}
@@ -3695,7 +4031,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
   if (!solution) {
     return (
       <>
-        <PageHeader title={project.name} subtitle="尚未初始化项目方案" actions={<button type="button" className="secondary" onClick={onBack}><LeftOutlined /> 返回列表</button>} />
+        <PageHeader title={project.name} actions={<button type="button" className="secondary" onClick={onBack}><LeftOutlined /> 返回列表</button>} />
         <section className="panel empty-state">
           <FolderOpenOutlined />
           <h2>尚未配置项目方案</h2>
@@ -3714,8 +4050,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
     <>
       <PageHeader
         title={project.name}
-        subtitle="查看项目知识类目与处理方案确认状态"
-        actions={<><button type="button" className="secondary" onClick={openFallbackPlan}>兜底方案</button><button type="button" className="primary" disabled={unconfirmedPlanCount > 0} onClick={publishSolution}>发布项目空间</button></>}
+        actions={<button type="button" className="primary" onClick={publishSolution}>发布项目空间</button>}
       />
       <section className="panel solution-info-panel">
         <div className="section-head compact"><h2>基本信息</h2></div>
@@ -3736,7 +4071,7 @@ function ProjectSolutionPage({ projectId, notify, onBack, onWorkbench }) {
           <div className="empty-mini large category-empty-content">
             <FolderOpenOutlined />
             <strong>暂无知识类目</strong>
-            <span>创建末级类目并指定知识形态后，可从类目进入方案工作台。</span>
+            <span>创建末级类目并指定知识形态后，可在「知识加工方案」中配置适用范围。</span>
             <button type="button" className="primary" onClick={openCreateCategory}><PlusOutlined /> 新增根类目</button>
           </div>
         )}</div>
@@ -3888,7 +4223,7 @@ const isKnowledgePreviewTab = (tab = '') => Object.values(knowledgePreviewTabNam
 const createWorkbenchSampleFiles = (target, status = '未发送') => workbenchSampleNames.map((name, index) => ({
   id: `sample-${target.formType}-${target.fileFormat}-${index}`,
   name: `${name}.${target.fileFormat}`,
-  type: target.fileFormat.toUpperCase(),
+  type: formatLabel(target.fileFormat),
   size: `${(1.2 + index * 0.42).toFixed(2)} MB`,
   status,
 }));
@@ -3913,13 +4248,7 @@ const getLatestPlanVersionRecord = (versions = []) => {
   return versions.find((item) => item.version === latestVersion) || null;
 };
 const getPlanTargetKey = (target) => `${target.formType}__${target.fileFormat}`;
-const initialAgentEvents = [{
-  id: 'welcome',
-  role: 'agent',
-  title: '处理方案生成助手',
-  content: '请上传样例文件并发送给我。我会读取样例、匹配可用流程节点、试跑节点结果，并生成可落地为 Workflow DSL 的处理方案。',
-  status: 'done',
-}];
+const initialAgentEvents = [];
 const generatedAgentEvents = [
   { id: 'qa-parse', role: 'thought', title: '分析样例文件', content: '样例是 PDF 格式的医保政策文档，核心内容包含政策条款、办理条件、材料清单和问答说明。', status: 'done' },
   { id: 'qa-query', role: 'thought', title: '节点目录查询', content: '查询结果：命中可用流程节点，其中包含系统节点和外部接入节点。', status: 'done', kind: 'toolCall' },
@@ -3975,7 +4304,6 @@ const defaultParamDescriptions = {
   iterationInput: '选择上游节点输出的数组结果，作为迭代执行逐项处理的输入数组。',
   iterationOutput: '选择迭代体内子节点的输出字段，作为每轮结果并聚合为迭代结果数组。',
   concurrency: '同时处理的元素数量，默认 1，最大支持 5。',
-  iterationTimeout: '单次迭代体执行的超时时间，默认 60 秒，最大支持 180 秒。',
   errorResponseMethod: '单次执行发生错误时的处理方式。',
   taggingObject: '本轮需要打标的知识点内容。',
   knowledgeTitle: '当前知识点标题或唯一标识，用于保持打标结果可追踪。',
@@ -4024,7 +4352,6 @@ const workbenchParamLabels = {
   iterationInput: '迭代输入数组',
   iterationOutput: '迭代结果来源',
   concurrency: '并发数量',
-  iterationTimeout: '单次执行超时时间',
   errorResponseMethod: '单次执行错误响应方法',
   taggingObject: '打标对象',
   knowledgeTitle: '知识点标题',
@@ -4113,6 +4440,12 @@ function makeParam(idValue, label, value, options = {}) {
     editable: options.editable ?? true,
     source: options.source || { type: 'manual' },
     options: options.options || [],
+    placeholder: options.placeholder || '',
+    helpText: options.helpText || '',
+    uiSchema: options.uiSchema && typeof options.uiSchema === 'object' ? { ...options.uiSchema } : null,
+    uiWidget: options.uiWidget || options.type || 'text',
+    uiSchemaInvalid: Boolean(options.uiSchemaInvalid),
+    hasUiSchema: Boolean(options.hasUiSchema),
     min: options.min,
     max: options.max,
     unit: options.unit,
@@ -4263,7 +4596,6 @@ const baseTools = [
       makeParam('iterationInput', '迭代输入数组', '', { type: 'target', schemaType: 'Array', required: true }),
       makeParam('iterationOutput', '迭代结果来源', '', { type: 'target', schemaType: '', required: true }),
       makeParam('concurrency', '并发数量', 1, { type: 'number', required: true, min: 1, max: 5 }),
-      makeParam('iterationTimeout', '单次执行超时时间', 60, { type: 'number', required: true, min: 1, max: 180, unit: '秒' }),
       makeParam('errorResponseMethod', '单次执行错误响应方法', '错误时终止', { type: 'select', required: true, options: ['错误时终止', '忽略错误并继续'] }),
     ],
     outputs: [makeOutput('iterationResult', '迭代结果', 'Array，迭代体每轮单次输出聚合后的结果数组。', 'iterationResult', 'Array')],
@@ -4361,16 +4693,67 @@ function toolInputToParam(input, index) {
   const type = String(input.type || '').toLowerCase();
   const name = input.name || `input_${index + 1}`;
   const displayName = input.displayName || input.label || getWorkbenchParamLabel(name);
-  const selectOptions = getWorkbenchParamOptions(name);
-  const paramType = selectOptions ? 'select' : type.includes('number') || type.includes('int') ? 'number' : type.includes('array') || type.includes('object') ? 'textarea' : 'text';
+  const hasUiSchema = Boolean(input.uiSchema && typeof input.uiSchema === 'object');
+  const uiSchema = hasUiSchema ? normalizeConfigUiSchema(input.uiSchema) : null;
+  const uiSchemaValid = hasUiSchema && !getConfigUiSchemaError({ ...input, uiSchema });
+  const legacySelectOptions = !hasUiSchema ? getWorkbenchParamOptions(name) : null;
+  const autoWidget = getAutoConfigUiWidget(type);
+  const legacyWidget = type.includes('number') || type.includes('int') ? 'number' : type.includes('array') || type.includes('object') ? 'json' : 'text';
+  const resolvedWidget = uiSchemaValid
+    ? (uiSchema.widget === 'auto' ? autoWidget : uiSchema.widget)
+    : !hasUiSchema
+      ? legacySelectOptions ? 'select' : legacyWidget
+      : autoWidget;
+  const paramType = {
+    text: 'text',
+    textarea: 'textarea',
+    select: 'select',
+    radio: 'radio',
+    number: 'number',
+    switch: 'switch',
+    json: 'textarea',
+    multiSelect: 'multiSelect',
+    checkboxGroup: 'checkboxGroup',
+    fileUpload: 'fileUpload',
+    urlInput: 'urlInput',
+  }[resolvedWidget] || 'text';
+  const configuredOptions = uiSchemaValid
+    ? resolvedWidget === 'radio' && type === 'boolean'
+      ? [{ value: true, label: '是' }, { value: false, label: '否' }]
+      : uiSchema.options.map((option) => ({ value: option.value, label: option.label || option.value }))
+    : (legacySelectOptions || []).map((option) => ({ value: option, label: option }));
+  const workbenchUiSchema = {
+    widget: resolvedWidget,
+    displayName,
+    placeholder: uiSchemaValid ? uiSchema.placeholder : '',
+    helpText: uiSchemaValid ? uiSchema.helpText : '',
+    options: configuredOptions,
+    optionSource: uiSchemaValid ? uiSchema.optionSource || 'static' : 'static',
+    dynamicSource: uiSchemaValid ? uiSchema.dynamicSource || null : null,
+  };
   const hasDefaultValue = Object.prototype.hasOwnProperty.call(input, 'defaultValue');
-  const defaultValue = hasDefaultValue ? input.defaultValue : defaultToolParamValue(name, paramType);
+  const rawDefaultValue = hasDefaultValue ? input.defaultValue : defaultToolParamValue(name, paramType);
+  const defaultValue = ['multiSelect', 'checkboxGroup'].includes(paramType)
+    ? parseMultiConfigValue(rawDefaultValue)
+    : type === 'boolean'
+      ? rawDefaultValue === true || rawDefaultValue === 'true' ? true : rawDefaultValue === false || rawDefaultValue === 'false' ? false : rawDefaultValue
+      : paramType === 'number' && rawDefaultValue !== '' && rawDefaultValue != null
+        ? Number(rawDefaultValue)
+        : resolvedWidget === 'json' && rawDefaultValue && typeof rawDefaultValue === 'object'
+          ? JSON.stringify(rawDefaultValue, null, 2)
+          : rawDefaultValue;
   return makeParam(name, displayName, defaultValue, {
     type: paramType,
     schemaType: input.type || paramType,
     required: input.required ?? true,
     desc: input.description || '',
-    options: selectOptions || [],
+    options: configuredOptions,
+    placeholder: workbenchUiSchema.placeholder,
+    helpText: workbenchUiSchema.helpText,
+    uiSchema: workbenchUiSchema,
+    uiWidget: resolvedWidget,
+    uiSchemaInvalid: hasUiSchema && !uiSchemaValid,
+    hasUiSchema,
     min: input.min,
     max: input.max,
   });
@@ -4393,7 +4776,6 @@ function defaultToolParamValue(name, paramType) {
   if (name === 'system_prompt') return '请基于医保政策原文生成问答对，答案必须来自原文，并保留来源片段。';
   if (name === 'summary_type') return '政策摘要';
   if (name === 'concurrency') return 1;
-  if (name === 'iterationTimeout') return 60;
   if (name === 'errorResponseMethod') return '错误时终止';
   if (name === 'tagStrategy' || name === 'tag_strategy') return '结构感知打标';
   if (name === 'labelPool' || name === 'label_pool') return ['适用对象', '办理条件', '材料要求'];
@@ -4620,10 +5002,14 @@ function normalizeIterationVariableValue(value) {
 
 function getIterationItemOutputOptions(node) {
   return (node?.innerNodes || [])
-    .flatMap((innerNode) => (innerNode.outputs || []).map((output) => ({
-      value: `${innerNode.nodeId}:${output.path || output.id || output.name}`,
-      label: `${innerNode.toolName} / ${output.displayName || output.label || output.name || output.path}`,
-    })));
+    .flatMap((innerNode) => (innerNode.outputs || []).map((output) => {
+      const display = getOutputDisplay(output);
+      return {
+        value: `${innerNode.nodeId}:${output.path || output.id || output.name}`,
+        label: output.displayName || output.label || output.name || output.path,
+        type: output.type || display.type || '',
+      };
+    }));
 }
 
 function applyIterationSourceToNode(node) {
@@ -4641,7 +5027,15 @@ function applyIterationSourceToNode(node) {
 }
 
 function cloneWorkbenchParam(param) {
-  return { ...param, value: Array.isArray(param.value) ? [...param.value] : param.value, source: param.source ? { ...param.source } : { type: 'manual' } };
+  return {
+    ...param,
+    value: Array.isArray(param.value) ? [...param.value] : param.value,
+    source: param.source ? { ...param.source } : { type: 'manual' },
+    uiSchema: param.uiSchema ? {
+      ...param.uiSchema,
+      options: (param.uiSchema.options || []).map((option) => ({ ...option })),
+    } : null,
+  };
 }
 
 function ensureIterationNodeParams(node) {
@@ -4662,6 +5056,7 @@ function cloneWorkbenchNode(node) {
   const normalizedNode = ensureIterationNodeParams(node);
   return {
     ...normalizedNode,
+    definitionSource: normalizedNode.definitionSource ? { ...normalizedNode.definitionSource } : undefined,
     inputSource: normalizedNode.inputSource ? { ...normalizedNode.inputSource } : { type: 'fixed' },
     params: normalizedNode.params.map(cloneWorkbenchParam),
     inputArtifacts: normalizedNode.inputArtifacts?.map((artifact) => ({ ...artifact, source: artifact.source ? { ...artifact.source } : undefined })),
@@ -4689,12 +5084,22 @@ function collapseWorkbenchNodes(nodes) {
 }
 
 const knowledgeGraphDemoConfig = {
-  entity_types: ['人物', '组织', '政策文件'],
-  attribute_types: ['职务', '标签', '机构类型', '所在国家', '适用范围', '版本'],
-  relation_types: ['任职于', '制定', '支持'],
+  graph_schema: '',
   include_isolated_entities: true,
-  extraction_instruction: '抽取政策文件中的责任主体、发布机构和政策文件；保留来源分片与原文证据，仅输出当前文档的图谱片段。',
+  extraction_instruction: '按所选 Schema 抽取实体、属性与关系；保留来源分片与原文证据，仅输出当前文档的图谱片段。',
 };
+
+function buildRuntimeGraphSchemaDemoConfig(projectId, schemaName = '保险业务图谱 Schema') {
+  const projects = dataStore.getProjects();
+  const resolvedProjectId = projectId || projects[0]?.id || '';
+  const schemas = resolvedProjectId ? dataStore.getKnowledgeGraphSchemas(resolvedProjectId) : [];
+  const schema = schemas.find((item) => item.name === schemaName) || schemas[0] || null;
+  return {
+    graph_schema: schema ? buildGraphSchemaSnapshotValue(schema) : '',
+    include_isolated_entities: true,
+    extraction_instruction: '抽取保险合同中的保险产品、保险公司、保险条款、保障责任与疾病等对象；保留来源分片与原文证据，仅输出当前文档的图谱片段。',
+  };
+}
 
 function applyKnowledgeGraphDemoConfig(node, config = knowledgeGraphDemoConfig) {
   if (!isKnowledgeGraphExtractionNode(node)) return node;
@@ -4734,22 +5139,28 @@ function getIterationInputOutputPath(previous, preferredPath) {
 
 function hydrateStoredPlanNodes(nodes = []) {
   if (!nodes.length) return [];
-  if (nodes.some((node) => node.nodeId && node.params && node.outputs)) return cloneWorkbenchNodes(nodes);
+  if (nodes.every((node) => node.nodeId && Array.isArray(node.params) && Array.isArray(node.outputs))) {
+    return cloneWorkbenchNodes(nodes);
+  }
   const catalog = readWorkbenchCatalog();
   const catalogById = new Map(catalog.map((tool) => [tool.id, tool]));
   const catalogByName = new Map(catalog.map((tool) => [tool.name, tool]));
   const catalogBySourceName = new Map(catalog.map((tool) => [tool.sourceToolName, tool]).filter(([sourceToolName]) => sourceToolName));
   const legacyKnowledgeGraphIds = new Set(['knowledge-graph', 'knowledge-graph-extractor', 'extract-document-knowledge-graph']);
+  const legacyKnowledgeGraphNames = new Set(['单文档图谱抽取', '知识图谱抽取', '文档知识图谱抽取']);
   const resolveTool = (node) => {
     if (legacyKnowledgeGraphIds.has(node.toolId) && catalogById.get('ke-idp-extract_document_knowledge_graph')) return catalogById.get('ke-idp-extract_document_knowledge_graph');
     const matched = catalogById.get(node.toolId)
       || catalogByName.get(node.toolName)
       || catalogBySourceName.get(node.sourceToolName)
-      || catalogBySourceName.get(node.toolName)
-      || catalogByName.get('单文档图谱抽取')
-      || catalogByName.get('知识图谱抽取')
-      || catalogByName.get('文档知识图谱抽取');
+      || catalogBySourceName.get(node.toolName);
     if (matched) return matched;
+    if (legacyKnowledgeGraphNames.has(node.toolName) || legacyKnowledgeGraphNames.has(node.sourceToolName)) {
+      return catalogByName.get('单文档图谱抽取')
+        || catalogByName.get('知识图谱抽取')
+        || catalogByName.get('文档知识图谱抽取')
+        || null;
+    }
     return null;
   };
   const createFallbackNode = (node, inputSource) => {
@@ -4791,6 +5202,10 @@ function hydrateStoredPlanNodes(nodes = []) {
   };
   const hydrated = [];
   nodes.forEach((node) => {
+    if (node.nodeId && Array.isArray(node.params) && Array.isArray(node.outputs)) {
+      hydrated.push(cloneWorkbenchNode(node));
+      return;
+    }
     const tool = resolveTool(node);
     const previous = hydrated.at(-1);
     const inputSource = previous ? { type: 'upstream', sourceNodeId: previous.nodeId, outputPath: previous.outputs?.[0]?.path || 'data.result' } : { type: 'fixed' };
@@ -4821,6 +5236,45 @@ function hydrateStoredPlanNodes(nodes = []) {
   return cloneWorkbenchNodes(hydrated);
 }
 
+function preserveExecutionSnapshotNodes(nodes = []) {
+  if (!nodes.length) return [];
+  const hydrated = hydrateStoredPlanNodes(nodes);
+  const mergeNodes = (storedNodes = [], displayNodes = []) => storedNodes.map((storedNode, index) => {
+    const displayNode = displayNodes[index] || {};
+    const displayParams = new Map((displayNode.params || []).map((param) => [param.id || param.name, param]));
+    const storedParams = Array.isArray(storedNode.params) ? storedNode.params : [];
+    const displayArtifacts = new Map((displayNode.inputArtifacts || []).map((artifact) => [artifact.id || artifact.name, artifact]));
+    const storedArtifacts = Array.isArray(storedNode.inputArtifacts) ? storedNode.inputArtifacts : [];
+    const displayOutputs = new Map((displayNode.outputs || []).map((output) => [output.id || output.path || output.name, output]));
+    const storedOutputs = Array.isArray(storedNode.outputs) ? storedNode.outputs : [];
+    return {
+      ...displayNode,
+      ...storedNode,
+      nodeId: storedNode.nodeId || displayNode.nodeId || `history-node-${index + 1}`,
+      toolName: storedNode.toolName || storedNode.name || displayNode.toolName || '历史节点',
+      params: storedParams.length ? storedParams.map((param) => ({
+        ...(displayParams.get(param.id || param.name) || {}),
+        ...param,
+        value: param.value,
+        source: param.source ? { ...param.source } : undefined,
+      })) : (displayNode.params || []),
+      inputArtifacts: storedArtifacts.length ? storedArtifacts.map((artifact) => ({
+        ...(displayArtifacts.get(artifact.id || artifact.name) || {}),
+        ...artifact,
+        source: artifact.source ? { ...artifact.source } : undefined,
+      })) : (displayNode.inputArtifacts || []),
+      outputs: storedOutputs.length ? storedOutputs.map((output) => ({
+        ...(displayOutputs.get(output.id || output.path || output.name) || {}),
+        ...output,
+      })) : (displayNode.outputs || []),
+      innerNodes: storedNode.innerNodes?.length
+        ? mergeNodes(storedNode.innerNodes, displayNode.innerNodes || [])
+        : (displayNode.innerNodes || []),
+    };
+  });
+  return mergeNodes(nodes, hydrated);
+}
+
 function buildVersionSnapshotsFromRecords(versions = []) {
   return Object.fromEntries(versions.map((version) => [
     version.version,
@@ -4833,9 +5287,10 @@ function buildVersionSnapshotsFromRecords(versions = []) {
 }
 
 function emptyParamValue(param) {
-  if (param.type === 'multiSelect' || param.type === 'tags') return [];
-  if (param.type === 'switch') return false;
-  if (param.type === 'number') return '';
+  const widget = param.uiSchema?.widget || param.uiWidget || param.type;
+  if (widget === 'multiSelect' || widget === 'checkboxGroup' || widget === 'tags') return [];
+  if (widget === 'switch') return false;
+  if (widget === 'number') return '';
   return '';
 }
 
@@ -4846,8 +5301,7 @@ function clearManualNodeConfig(node) {
       inputSource: { type: 'fixed' },
       params: node.params.map((param) => (
         param.id === 'concurrency' ? { ...param, value: 1, source: { type: 'manual' } }
-          : param.id === 'iterationTimeout' ? { ...param, value: 60, source: { type: 'manual' } }
-            : param.id === 'errorResponseMethod' ? { ...param, value: '错误时终止', source: { type: 'manual' } }
+          : param.id === 'errorResponseMethod' ? { ...param, value: '错误时终止', source: { type: 'manual' } }
               : { ...param, value: emptyParamValue(param), source: { type: 'manual' } }
       )),
       innerNodes: [],
@@ -4856,7 +5310,11 @@ function clearManualNodeConfig(node) {
   return {
     ...node,
     inputSource: { type: 'fixed' },
-    params: node.params.map((param) => ({ ...param, value: emptyParamValue(param), source: { type: 'manual' } })),
+    params: node.params.map((param) => (
+      param.id === node.inputParamId || ['file', 'upstream'].includes(param.source?.type)
+        ? { ...param, value: emptyParamValue(param), source: { type: 'manual' } }
+        : { ...param, source: { type: 'manual' } }
+    )),
     codeInputs: node.toolId === 'system-code' ? [] : node.codeInputs,
     codeOutputs: node.toolId === 'system-code' ? [] : node.codeOutputs,
   };
@@ -4874,6 +5332,11 @@ function createWorkbenchNode(tool, inputSource = { type: 'fixed' }) {
     flowNodeId: nodeId,
     toolId: tool.id,
     toolName: tool.name,
+    definitionSnapshotVersion: 1,
+    definitionSource: {
+      toolId: tool.id,
+      sourceToolName: tool.sourceToolName || tool.name,
+    },
     category: tool.category || '未分类',
     semanticCategory: getSemanticCategory(tool),
     enabled: true,
@@ -4949,7 +5412,6 @@ function createConfiguredIterationNode(iterationTool, inputSource, taggingTool) 
       if (param.id === 'iterationInput') return { ...param, source, value: '' };
       if (param.id === 'iterationOutput' && outputSourceNode && outputSource) return { ...param, source: { type: 'upstream', sourceNodeId: outputSourceNode.nodeId, outputPath: outputSource.path || outputSource.id || outputSource.name }, value: '' };
       if (param.id === 'concurrency') return { ...param, value: 1 };
-      if (param.id === 'iterationTimeout') return { ...param, value: 60 };
       if (param.id === 'errorResponseMethod') return { ...param, value: '错误时终止' };
       return param;
     }),
@@ -5106,7 +5568,6 @@ function createConfiguredGenericIterationNode(iterationTool, inputSource, codeTo
       if (param.id === 'iterationInput') return { ...param, source, value: '' };
       if (param.id === 'iterationOutput' && outputSourceNode && outputSource) return { ...param, source: { type: 'upstream', sourceNodeId: outputSourceNode.nodeId, outputPath: outputSource.path || outputSource.id || outputSource.name }, value: '' };
       if (param.id === 'concurrency') return { ...param, value: 1 };
-      if (param.id === 'iterationTimeout') return { ...param, value: 60 };
       if (param.id === 'errorResponseMethod') return { ...param, value: '错误时终止' };
       return param;
     }),
@@ -5148,7 +5609,7 @@ function isDirectKnowledgePdfTarget(target) {
   return target.formType === '知识点' && target.fileFormat === 'pdf';
 }
 
-function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf' }, catalog = readWorkbenchCatalog()) {
+function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf' }, catalog = readWorkbenchCatalog(), projectId = '') {
   const byId = new Map(catalog.map((tool) => [tool.id, tool]));
   const formatPlan = getAgentFormatPlan(target.fileFormat);
   const formPlan = getAgentFormPlan(target.formType);
@@ -5172,10 +5633,16 @@ function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf'
     ? createWorkbenchNode(extractionTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' })
     : null;
   const extraction = target.formType === '知识图谱' && extractionBase
-    ? applyKnowledgeGraphDemoConfig(extractionBase)
+    ? applyKnowledgeGraphDemoConfig(extractionBase, buildRuntimeGraphSchemaDemoConfig(projectId, '保险业务图谱 Schema'))
     : target.formType === 'QA库' && extractionBase
       ? applyQaExpansionDemoConfig(extractionBase)
       : extractionBase;
+  const extraGraphExtractions = target.formType === '知识图谱' && extractionTool && splitter
+    ? [
+        applyKnowledgeGraphDemoConfig(createWorkbenchNode(extractionTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }), buildRuntimeGraphSchemaDemoConfig(projectId, '政策文件图谱 Schema')),
+        applyKnowledgeGraphDemoConfig(createWorkbenchNode(extractionTool, { type: 'upstream', sourceNodeId: splitter.nodeId, outputPath: 'textChunkResult' }), knowledgeGraphDemoConfig),
+      ]
+    : [];
   const extractionOutputPath = target.formType === 'QA库'
     ? 'qa_pairs'
     : target.formType === '知识点'
@@ -5189,7 +5656,7 @@ function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf'
     ? createConfiguredIterationNode(iterationTool, iterationInputSource, taggingTool)
     : null;
   const storage = null;
-  const nodes = [parser, splitter, extraction, iteration].filter(Boolean).map((node) => ({
+  const nodes = [...[parser, splitter, extraction].filter(Boolean), ...extraGraphExtractions, iteration].filter(Boolean).map((node) => ({
     ...node,
     expanded: isIterationNode(node),
     adjusted: true,
@@ -5211,8 +5678,8 @@ function createAgentDemoPlan(target = { formType: '知识点', fileFormat: 'pdf'
   };
 }
 
-function createAgentDemoNodes(catalog = readWorkbenchCatalog(), target) {
-  return createAgentDemoPlan(target, catalog).nodes;
+function createAgentDemoNodes(catalog = readWorkbenchCatalog(), target, projectId = '') {
+  return createAgentDemoPlan(target, catalog, projectId).nodes;
 }
 
 function createDraftNodesWithoutAdapter(catalog = readWorkbenchCatalog()) {
@@ -5654,7 +6121,6 @@ function getSmartParamValue(param, instruction, node) {
   if (param.id === 'iterationInput') return '${upstream.summaryResult}';
   if (param.id === 'iterationOutput') return '${迭代体.节点输出}';
   if (param.id === 'concurrency') return 1;
-  if (param.id === 'iterationTimeout') return 60;
   if (param.id === 'errorResponseMethod') return '错误时终止';
   if (param.id === 'taggingObject') return '${迭代执行.当前元素}';
   if (param.id === 'knowledgeTitle') return '';
@@ -5866,7 +6332,7 @@ function createSampleResult(file, options = {}) {
         iterationBodyRuns: [
           { node: '知识点打标', output: 'tagResult', description: '基于单个知识点生成标签、分类和置信度。' },
         ],
-        iterationStats: { total: 2, success: 2, failed: 0, concurrency: 1, timeoutSeconds: 60, errorResponseMethod: '错误时终止' },
+        iterationStats: { total: 2, success: 2, failed: 0, concurrency: 1, errorResponseMethod: '错误时终止' },
       }, null, 2),
     }] : []),
   ];
@@ -5877,26 +6343,249 @@ function createSampleResult(file, options = {}) {
   };
 }
 
+function getNodeInputConfigurationSnapshot(node, nodes = [], file = null) {
+  const allNodes = getAllWorkbenchNodes(nodes);
+  const getSourceText = (source = {}, fallbackValue = '') => {
+    if (source.type === 'file') return '引用原始文件';
+    if (source.type === 'upstream') {
+      const sourceNode = allNodes.find((item) => item.nodeId === source.sourceNodeId);
+      const sourceOutput = sourceNode?.outputs?.find((output) => [output.path, output.id, output.name].includes(source.outputPath));
+      const outputName = sourceOutput?.displayName || sourceOutput?.label || sourceOutput?.name || source.outputPath || '未选择输出';
+      return `上游节点 · ${sourceNode?.toolName || '来源节点'} · ${outputName}`;
+    }
+    if (source.type === 'iteration') return `迭代变量 · ${source.outputPath === 'currentIndex' ? '当前索引' : '当前元素'}`;
+    if (fallbackValue !== '' && fallbackValue != null) return `固定值 · ${formatNodeConfigValue(fallbackValue)}`;
+    return '固定输入';
+  };
+  const inputs = [];
+  (node?.inputArtifacts || []).forEach((artifact) => inputs.push({
+    name: artifact.displayName || artifact.label || artifact.name || '节点输入',
+    source: getSourceText(artifact.source || node?.inputSource, artifact.value),
+  }));
+  (node?.params || []).filter((param) => (
+    param.id === node?.inputParamId || ['file', 'upstream', 'iteration'].includes(param.source?.type)
+  )).forEach((param) => inputs.push({
+    name: param.displayName || param.label || param.name || param.id || '节点输入',
+    source: getSourceText(param.source || node?.inputSource, param.value),
+  }));
+  if (!inputs.length) inputs.push({ name: '节点输入', source: getSourceText(node?.inputSource || (file ? { type: 'file' } : {})) });
+  return inputs;
+}
+
+function getNodeEffectiveParameterSnapshot(node, nodes = []) {
+  if (!node) return [];
+  return getToolPreviewParams(node).map((param) => ({
+    name: param.displayName || param.label || param.name || param.id,
+    value: getParamPreview(param, nodes),
+    source: param.source?.type || 'manual',
+    sensitive: Boolean(param.sensitive || param.secret || param.writeOnly),
+  }));
+}
+
+function setSnapshotValueByPath(snapshot, path, value) {
+  const segments = String(path || '').split('.').filter(Boolean);
+  if (!segments.length) return snapshot;
+  let current = snapshot;
+  segments.forEach((segment, index) => {
+    if (index === segments.length - 1) {
+      current[segment] = value;
+      return;
+    }
+    if (!current[segment] || typeof current[segment] !== 'object' || Array.isArray(current[segment])) current[segment] = {};
+    current = current[segment];
+  });
+  return snapshot;
+}
+
+function createSampleValueForOutput(output, file, node, index) {
+  const type = String(output?.type || '').toLowerCase();
+  const key = String(output?.path || output?.id || output?.name || '').split('.').pop().toLowerCase();
+  if (['code', 'statuscode', 'status_code'].includes(key)) return 0;
+  if (['message', 'msg'].includes(key)) return '执行成功';
+  if (key.includes('stat')) return { count: 1, sourceFile: file.name };
+  if (type.includes('array<object>') || type.includes('array<json>')) {
+    return [{ id: `${node.nodeId}-result-${index + 1}`, sourceFile: file.name, status: 'completed' }];
+  }
+  if (type.includes('array<string>')) return [`${output.displayName || output.label || output.name || '输出'}示例`];
+  if (type === 'array') return [{ sourceFile: file.name, status: 'completed' }];
+  if (type.includes('integer') || type.includes('number')) return 1;
+  if (type.includes('boolean')) return true;
+  if (type.includes('string')) return `${output.displayName || output.label || output.name || '输出'}示例结果`;
+  return { sourceFile: file.name, nodeId: node.nodeId, status: 'completed' };
+}
+
+function completeNodeOutputSnapshot(node, nodeOutput, file) {
+  const source = nodeOutput && typeof nodeOutput === 'object' && !Array.isArray(nodeOutput) ? nodeOutput : {};
+  const snapshot = JSON.parse(JSON.stringify(source));
+  getEffectiveNodeOutputs(node).forEach((output, index) => {
+    const path = output.path || output.id || output.name || `output_${index + 1}`;
+    const currentValue = getSnapshotValueByPath(snapshot, path);
+    if (currentValue !== undefined) return;
+    const leafKey = String(path).split('.').pop();
+    const compatibleValue = findSnapshotValueByKey(snapshot, leafKey);
+    setSnapshotValueByPath(snapshot, path, compatibleValue !== undefined
+      ? compatibleValue
+      : createSampleValueForOutput(output, file, node, index));
+  });
+  return snapshot;
+}
+
+function createInnerNodeSampleOutput(innerNode, item, batchIndex) {
+  const safeItem = item && typeof item === 'object' ? item : { knowledgePointId: `kp-${batchIndex || 1}`, title: `知识点${batchIndex || 1}`, content: '示例内容。', sourceChunkIds: [] };
+  if (innerNode.toolId === 'knowledge-tagging' || isTaggingNode(innerNode)) {
+    return {
+      tagResult: {
+        knowledgePointId: safeItem.knowledgePointId || `kp-${batchIndex || 1}`,
+        chunkId: safeItem.chunkId || safeItem.sourceChunkIds?.[0] || `chunk-${String(batchIndex || 1).padStart(3, '0')}`,
+        title: safeItem.title || safeItem.content?.slice(0, 12) || `知识点${batchIndex || 1}`,
+        content: safeItem.content || '示例内容。',
+        tags: Array.isArray(safeItem.tags) && safeItem.tags.length ? safeItem.tags : ['知识标签'],
+        category: '政策适用范围',
+        confidence: Math.min(0.99, 0.9 + ((batchIndex || 1) % 5) * 0.02),
+        sourceChunkIds: safeItem.sourceChunkIds || [],
+      },
+      tagSummary: `已生成第 ${batchIndex || 1} 个知识点标签结果。`,
+    };
+  }
+  if (innerNode.toolId === 'system-code' || /代码/i.test(`${innerNode.toolName || ''}${innerNode.name || ''}`)) {
+    const sample = { scriptResult: { status: 'success', code: 0, message: '执行成功', output: `已完成第 ${batchIndex || 1} 轮当前步骤处理。` } };
+    (innerNode.outputs || []).forEach((output) => {
+      const path = output.path || output.id || output.name;
+      if (path && !(path in sample)) sample[path] = `第 ${batchIndex || 1} 轮已生成${output.displayName || output.label || output.name || path}结果。`;
+    });
+    return sample;
+  }
+  return {};
+}
+
+function getIterationItems(node, runByNodeId, file) {
+  const inputParam = (node.params || []).find((param) => param.id === 'iterationInput');
+  const sourceNodeId = inputParam?.source?.sourceNodeId || node.inputSource?.sourceNodeId;
+  const outputPath = inputParam?.source?.outputPath || node.inputSource?.outputPath || '';
+  const sourceRun = sourceNodeId ? runByNodeId[sourceNodeId] : null;
+  let output = sourceRun ? getSnapshotValueByPath(sourceRun.nodeOutput, outputPath) : undefined;
+  if (!Array.isArray(output) || !output.length) {
+    output = sourceRun ? Object.values(sourceRun.nodeOutput || {}).find((value) => Array.isArray(value) && value.length) : undefined;
+  }
+  if (Array.isArray(output) && output.length) return output;
+  return [
+    { knowledgePointId: 'kp-001', title: '适用对象', content: '本政策面向本市医保参保人员。', tags: ['适用对象'], sourceChunkIds: ['chunk-001'] },
+    { knowledgePointId: 'kp-002', title: '备案条件', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', tags: ['办理条件', '备案流程'], sourceChunkIds: ['chunk-002'] },
+  ];
+}
+
+function createInnerBatchForSnapshot(innerNode, innerNodes, file, item, batchIndex) {
+  const sampleOutput = createInnerNodeSampleOutput(innerNode, item, batchIndex);
+  const nodeOutput = completeNodeOutputSnapshot(innerNode, sampleOutput, file);
+  return {
+    batchIndex,
+    actualInput: item ?? null,
+    nodeOutput,
+    status: '成功',
+    outputFull: JSON.stringify(nodeOutput, null, 2),
+  };
+}
+
 function createSampleResultForPlan(file, nodes) {
   const hasKnowledgeGraph = nodes.some((node) => isKnowledgeGraphExtractionNode(node));
   const defaultRuns = createSampleResult(file, { includeKnowledge: true, includeKnowledgeGraph: hasKnowledgeGraph }).toolRuns;
+  const nodeRuns = nodes.filter((node) => node.enabled).map((node, index) => {
+    const matched = defaultRuns.find((run) => run.toolName === node.toolName);
+    const effectiveParameters = getNodeEffectiveParameterSnapshot(node, nodes);
+    const parameters = effectiveParameters.map((param) => ({
+      name: param.name,
+      displayName: param.name,
+      value: param.value,
+      source: param.source,
+      sensitive: param.sensitive,
+    }));
+    if (matched) {
+      const next = { ...matched, nodeId: node.nodeId, toolName: node.toolName, category: node.category, parameters };
+      const nodeOutput = completeNodeOutputSnapshot(node, parseRunOutput(next), file);
+      return {
+        ...next,
+        inputConfiguration: getNodeInputConfigurationSnapshot(node, nodes, file),
+        effectiveParameters,
+        nodeOutput,
+        outputFull: JSON.stringify(nodeOutput, null, 2),
+      };
+    }
+    const outputPath = node.outputs[0]?.path || `data.step${index + 1}Result`;
+    const nodeOutput = completeNodeOutputSnapshot(node, {}, file);
+    return {
+      nodeId: node.nodeId,
+      toolName: node.toolName,
+      category: node.category,
+      outputPath,
+      status: '成功',
+      parameters,
+      inputConfiguration: getNodeInputConfigurationSnapshot(node, nodes, file),
+      effectiveParameters,
+      nodeOutput,
+      outputFull: JSON.stringify(nodeOutput, null, 2),
+    };
+  });
+  const nodeRunsWithInner = nodeRuns.map((run, index) => {
+    const node = nodes.filter((item) => item.enabled)[index];
+    if (!node || !isIterationNode(node)) return run;
+    const innerNodes = node.innerNodes || [];
+    if (!innerNodes.length) return run;
+    const runByNodeId = Object.fromEntries(nodeRuns.map((item) => [item.nodeId, item]));
+    const items = getIterationItems(node, runByNodeId, file);
+    const batchCount = Math.max(items.length, 1);
+    const innerRuns = innerNodes.map((innerNode) => {
+      const effectiveParameters = getNodeEffectiveParameterSnapshot(innerNode, innerNodes);
+      const parameters = effectiveParameters.map((param) => ({
+        name: param.name,
+        displayName: param.name,
+        value: param.value,
+        source: param.source,
+        sensitive: param.sensitive,
+      }));
+      let prevOutput = null;
+      const batches = items.map((item, batchIndex) => {
+        const actualInput = batchIndex === 0 ? item : (prevOutput || item);
+        const batchRun = createInnerBatchForSnapshot(innerNode, innerNodes, file, item, batchIndex + 1);
+        prevOutput = batchRun.nodeOutput;
+        return batchRun;
+      });
+      return {
+        nodeId: innerNode.nodeId,
+        toolName: innerNode.toolName,
+        category: innerNode.category,
+        parameters,
+        inputConfiguration: getNodeInputConfigurationSnapshot(innerNode, innerNodes, file),
+        effectiveParameters,
+        batches,
+      };
+    });
+    const nextRun = { ...run, innerRuns, iterationBatchCount: batchCount };
+    const output = nextRun.nodeOutput && typeof nextRun.nodeOutput === 'object' ? { ...nextRun.nodeOutput } : nextRun.nodeOutput;
+    if (output && typeof output === 'object') {
+      output.iterationStats = {
+        total: batchCount,
+        success: batchCount,
+        failed: 0,
+        concurrency: Number(node.params.find((param) => param.id === 'concurrency')?.value) || 1,
+        errorResponseMethod: node.params.find((param) => param.id === 'errorResponseMethod')?.value || '错误时终止',
+      };
+      nextRun.nodeOutput = output;
+      nextRun.outputFull = JSON.stringify(output, null, 2);
+    }
+    return nextRun;
+  });
+  const runsWithActualInput = nodeRunsWithInner.map((run, index) => {
+    if (index === 0) return { ...run, actualInput: { fileName: file.name, fileType: file.type, fileSize: file.size } };
+    const node = nodes.find((item) => item.nodeId === run.nodeId) || nodes[index];
+    const sourceNodeId = node?.inputSource?.sourceNodeId || node?.params?.find((param) => param.source?.type === 'upstream')?.source?.sourceNodeId;
+    const sourceRun = sourceNodeId ? nodeRunsWithInner.find((item) => item.nodeId === sourceNodeId) : nodeRunsWithInner[index - 1];
+    return { ...run, actualInput: sourceRun?.nodeOutput ?? parseRunOutput(sourceRun) ?? null };
+  });
   return {
     fileId: file.id,
     fileName: file.name,
-    toolRuns: nodes.filter((node) => node.enabled).map((node, index) => {
-      const matched = defaultRuns.find((run) => run.toolName === node.toolName);
-      if (matched) return { ...matched, nodeId: node.nodeId, toolName: node.toolName, category: node.category };
-      const outputPath = node.outputs[0]?.path || `data.step${index + 1}Result`;
-      return {
-        nodeId: node.nodeId,
-        toolName: node.toolName,
-        category: node.category,
-        outputPath,
-        status: '成功',
-        parameters: node.params.slice(0, 5).map((param) => ({ name: param.id, value: getParamPreview(param, nodes) })),
-        outputFull: JSON.stringify({ data: { [outputPath.split('.').pop()]: { sourceFile: file.name, nodeId: node.nodeId, status: 'completed' } } }, null, 2),
-      };
-    }),
+    toolRuns: runsWithActualInput,
+    nodeExecutions: runsWithActualInput,
   };
 }
 
@@ -5910,15 +6599,106 @@ function getParamPreview(param, nodes = []) {
     const source = getAllWorkbenchNodes(nodes).find((node) => node.nodeId === param.source.sourceNodeId);
     return `上游节点 · ${source?.toolName || '来源已失效'} · ${param.source.outputPath || '未选择输出'}`;
   }
-  if (Array.isArray(param.value)) return param.value.length ? param.value.join('、') : '';
+  const widget = param.uiSchema?.widget || param.uiWidget || param.type;
+  const options = (param.uiSchema?.options || param.options || []).map((option) => (
+    option && typeof option === 'object' ? option : { value: option, label: option }
+  ));
+  const getOptionLabel = (value) => options.find((option) => String(option.value) === String(value))?.label || String(value);
+  if (widget === 'fileUpload' || param.schemaType === 'file') {
+    if (param.value && typeof param.value === 'object') return param.value.name || '已选择文件';
+    return String(param.value || '').trim();
+  }
+  if (Array.isArray(param.value)) return param.value.length ? param.value.map(getOptionLabel).join('、') : '';
+  if (['select', 'radio'].includes(widget) && param.value !== '' && param.value != null) return getOptionLabel(param.value);
   if (typeof param.value === 'boolean') return param.value ? '开启' : '关闭';
   if (typeof param.value === 'number') return `${param.value}${param.unit || ''}`;
+  if (param.value && typeof param.value === 'object') return JSON.stringify(param.value);
   return String(param.value || '').trim();
 }
 
+const nodeDefinitionSnapshotSchemaVersion = 1;
+const demoExecutionSnapshotSchemaVersion = 3;
+
+function markPlanNodeDefinitionSnapshot(node) {
+  return {
+    ...cloneWorkbenchNode(node),
+    definitionSnapshotVersion: nodeDefinitionSnapshotSchemaVersion,
+    definitionSource: {
+      toolId: node.toolId,
+      sourceToolName: node.sourceToolName || node.toolName,
+    },
+    innerNodes: node.innerNodes?.map(markPlanNodeDefinitionSnapshot),
+  };
+}
+
+function ensureDemoPlanDefinitionSnapshots() {
+  const demoPlanIds = new Set(dataStore.list('plans').filter((plan) => String(plan.id).startsWith('demo-plan-')).map((plan) => plan.id));
+  if (!demoPlanIds.size) return;
+  const versionNodesByKey = new Map();
+  let versionsChanged = false;
+  const versions = dataStore.list('planVersions').map((version) => {
+    if (!demoPlanIds.has(version.planId)) return version;
+    const nodesNeedUpgrade = !(version.nodes || []).length
+      || version.nodes.some((node) => node.definitionSnapshotVersion !== nodeDefinitionSnapshotSchemaVersion);
+    const resultsNeedUpgrade = (version.results || []).some((result) => result.snapshotSchemaVersion !== demoExecutionSnapshotSchemaVersion);
+    const nodes = nodesNeedUpgrade
+      ? hydrateStoredPlanNodes(version.nodes || []).map(markPlanNodeDefinitionSnapshot)
+      : cloneWorkbenchNodes(version.nodes || []);
+    versionNodesByKey.set(`${version.planId}|${version.version}`, nodes);
+    if (!nodesNeedUpgrade && !resultsNeedUpgrade) return version;
+    const results = (version.sampleFiles || []).map((file) => ({
+      ...createSampleResultForPlan(file, nodes),
+      snapshotSchemaVersion: demoExecutionSnapshotSchemaVersion,
+    }));
+    versionsChanged = true;
+    return {
+      ...version,
+      nodes,
+      results: results.length ? results : version.results,
+      definitionSnapshotVersion: nodeDefinitionSnapshotSchemaVersion,
+    };
+  });
+  if (versionsChanged) dataStore.save('planVersions', versions);
+
+  let executionsChanged = false;
+  const executions = dataStore.list('planExecutions').map((execution) => {
+    if (!demoPlanIds.has(execution.planId)) return execution;
+    const storedNodes = execution.planSnapshot || execution.planNodes || [];
+    const nodesNeedUpgrade = !storedNodes.length
+      || storedNodes.some((node) => node.definitionSnapshotVersion !== nodeDefinitionSnapshotSchemaVersion);
+    const resultNeedsUpgrade = execution.result?.snapshotSchemaVersion !== demoExecutionSnapshotSchemaVersion;
+    if (!nodesNeedUpgrade && !resultNeedsUpgrade) return execution;
+    const versionNodes = versionNodesByKey.get(`${execution.planId}|${execution.version}`);
+    const nodes = versionNodes?.length
+      ? cloneWorkbenchNodes(versionNodes)
+      : hydrateStoredPlanNodes(storedNodes).map(markPlanNodeDefinitionSnapshot);
+    const file = execution.sampleFile || {
+      id: execution.sampleFileId,
+      name: execution.sampleFileName,
+      type: formatLabel(execution.fileFormat || ''),
+      size: '-',
+    };
+    const result = {
+      ...createSampleResultForPlan(file, nodes),
+      snapshotSchemaVersion: demoExecutionSnapshotSchemaVersion,
+    };
+    executionsChanged = true;
+    return {
+      ...execution,
+      planSnapshot: cloneWorkbenchNodes(nodes),
+      planNodes: cloneWorkbenchNodes(nodes),
+      result,
+      definitionSnapshotVersion: nodeDefinitionSnapshotSchemaVersion,
+    };
+  });
+  if (executionsChanged) dataStore.save('planExecutions', executions);
+}
+
+ensureDemoPlanDefinitionSnapshots();
+
 function getToolPreviewParams(node) {
-  if (isIterationNode(node)) return node.params;
-  return node.params.filter((param) => param.id !== node.inputParamId);
+  const params = isIterationNode(node) ? node.params : node.params.filter((param) => param.id !== node.inputParamId);
+  return params.filter((param) => isParamVisible(node, param));
 }
 
 function getSelectableNodeOutputs(sourceNode) {
@@ -5969,7 +6749,1211 @@ function getRuntimeLabel(status) {
   }[status] || '';
 }
 
-function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersion, entryNonce, notify, onBack, onOpenWorkbench }) {
+const knowledgePlanFileFormats = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md'];
+
+function formatLabel(format) {
+  const compatMap = { docx: 'docx（兼容doc）', xlsx: 'xlsx（兼容xls）', pptx: 'pptx（兼容ppt）' };
+  return compatMap[format] || (format ? format.toUpperCase() : format);
+}
+
+function formatFileSize(size = 0) {
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(2)} MB`;
+  return `${Math.max(1, Math.round(size / 1024))} KB`;
+}
+
+function TreeCheckbox({ checked, indeterminate = false, disabled = false, onChange }) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return <input ref={ref} type="checkbox" checked={checked} disabled={disabled} onChange={onChange} />;
+}
+
+function expandCategorySelection(selectedIds = [], categories = []) {
+  const childrenMap = new Map();
+  categories.forEach((category) => {
+    const children = childrenMap.get(category.parentId) || [];
+    children.push(category);
+    childrenMap.set(category.parentId, children);
+  });
+  const collect = (id) => [id, ...(childrenMap.get(id) || []).flatMap((child) => collect(child.id))];
+  return Array.from(new Set(selectedIds.flatMap((id) => collect(id))));
+}
+
+function CategoryTreePicker({ categories, selectedIds, onChange, disabled = false, leafOnly = false }) {
+  const childrenMap = useMemo(() => {
+    const map = new Map();
+    categories.forEach((cat) => {
+      const list = map.get(cat.parentId) || [];
+      list.push(cat);
+      map.set(cat.parentId, list);
+    });
+    map.forEach((list) => list.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name, 'zh-CN')));
+    return map;
+  }, [categories]);
+  const parentMap = useMemo(() => new Map(categories.map((category) => [category.id, category.parentId])), [categories]);
+  const descendantIds = useMemo(() => {
+    const cache = new Map();
+    const collect = (id) => {
+      if (cache.has(id)) return cache.get(id);
+      const ids = [id, ...(childrenMap.get(id) || []).flatMap((child) => collect(child.id))];
+      cache.set(id, ids);
+      return ids;
+    };
+    return collect;
+  }, [childrenMap]);
+
+  const [collapsedIds, setCollapsedIds] = useState(() => new Set());
+
+  const toggleNode = (id) => {
+    if (leafOnly && (childrenMap.get(id) || []).length) return;
+    const next = new Set(selectedIds);
+    const subtreeIds = descendantIds(id);
+    const subtreeSelected = subtreeIds.every((item) => next.has(item));
+    if (subtreeSelected) {
+      subtreeIds.forEach((item) => next.delete(item));
+      let parentId = parentMap.get(id);
+      while (parentId) {
+        next.delete(parentId);
+        parentId = parentMap.get(parentId);
+      }
+    } else {
+      subtreeIds.forEach((item) => next.add(item));
+      let parentId = parentMap.get(id);
+      while (parentId) {
+        const parentSubtree = descendantIds(parentId);
+        if (parentSubtree.filter((item) => item !== parentId).every((item) => next.has(item))) next.add(parentId);
+        parentId = parentMap.get(parentId);
+      }
+    }
+    onChange(Array.from(next));
+  };
+
+  const toggleCollapse = (id) => {
+    setCollapsedIds((current) => {
+      const next = new Set(current);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const renderNode = (cat, depth) => {
+    const subtreeIds = descendantIds(cat.id);
+    const selectedCount = subtreeIds.filter((item) => selectedIds.includes(item)).length;
+    const checked = selectedCount === subtreeIds.length;
+    const indeterminate = selectedCount > 0 && selectedCount < subtreeIds.length;
+    const children = childrenMap.get(cat.id) || [];
+    const hasChildren = children.length > 0;
+    const collapsed = collapsedIds.has(cat.id);
+    return (
+      <div key={cat.id} className="plan-tree-node">
+        <div className="plan-tree-item" style={{ paddingLeft: 6 + depth * 20 }}>
+          {hasChildren ? (
+            <button type="button" className="plan-tree-toggle" title={collapsed ? '展开' : '收起'} onClick={(event) => { event.preventDefault(); event.stopPropagation(); toggleCollapse(cat.id); }}>
+              <AntDownOutlined className={collapsed ? 'collapsed' : ''} />
+            </button>
+          ) : <span className="plan-tree-toggle-placeholder" />}
+          <label className={`plan-tree-select-target ${leafOnly && hasChildren ? 'plan-tree-node-disabled' : ''}`} onClick={(event) => event.stopPropagation()}>
+            {leafOnly && hasChildren ? null : (
+              <TreeCheckbox checked={checked} indeterminate={indeterminate} disabled={disabled} onChange={() => toggleNode(cat.id)} />
+            )}
+            <span className="plan-tree-name">{cat.name}</span>
+          </label>
+        </div>
+        {hasChildren && !collapsed ? children.map((child) => renderNode(child, depth + 1)) : null}
+      </div>
+    );
+  };
+
+  const roots = childrenMap.get(null) || [];
+  return (
+    <div className="plan-tree-list">
+      {roots.length ? roots.map((root) => renderNode(root, 0)) : <p className="plan-tree-empty">暂无知识类目</p>}
+    </div>
+  );
+}
+
+function CategoryTreeMultiSelect({ categories, selectedIds, onChange, placeholder = '全部类目', buttonLabel, className = '', leafOnly = false }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnOutside = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+    return () => document.removeEventListener('mousedown', closeOnOutside);
+  }, [open]);
+  const text = buttonLabel || (selectedIds.length ? `已选 ${selectedIds.length} 个类目` : placeholder);
+  return (
+    <div ref={rootRef} className={`plan-filter-tree-wrap plan-tree-multiselect ${open ? 'open' : ''} ${className}`.trim()}>
+      <button type="button" className="plan-filter-trigger" onClick={() => setOpen((value) => !value)}>
+        <span>{text}</span>
+        <AntDownOutlined />
+      </button>
+      {open ? (
+        <div className="plan-filter-tree-panel" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+          <CategoryTreePicker categories={categories} selectedIds={selectedIds} onChange={onChange} leafOnly={leafOnly} />
+          <div className="plan-filter-tree-actions">
+            <button type="button" className="secondary" onClick={() => onChange([])}>清除</button>
+            <button type="button" className="primary" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpen(false); }}>完成</button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FormatMultiSelect({ selectedFormats, onChange }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnOutside = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+    return () => document.removeEventListener('mousedown', closeOnOutside);
+  }, [open]);
+  const toggleFormat = (format) => {
+    onChange(selectedFormats.includes(format)
+      ? selectedFormats.filter((item) => item !== format)
+      : [...selectedFormats, format]);
+  };
+  const removeFormat = (event, format) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onChange(selectedFormats.filter((item) => item !== format));
+  };
+  return (
+    <div ref={rootRef} className={`plan-format-multiselect ${open ? 'open' : ''}`}>
+      <div
+        className="plan-filter-trigger plan-format-trigger"
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setOpen((value) => !value);
+          }
+        }}
+      >
+        <span className="plan-format-selected">
+          {selectedFormats.length ? selectedFormats.map((format) => {
+            const { Icon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+            return (
+              <span className="plan-format-tag" key={format} style={{ '--format-color': color }}>
+                <Icon />
+                <span>{formatLabel(format)}</span>
+                <button type="button" aria-label={`移除 ${formatLabel(format)}`} onClick={(event) => removeFormat(event, format)}><CloseOutlined /></button>
+              </span>
+            );
+          }) : <span className="plan-format-placeholder">请选择文件格式</span>}
+        </span>
+        <AntDownOutlined className="plan-format-chevron" />
+      </div>
+      {open ? (
+        <div className="plan-format-panel" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+          <div className="plan-format-options">
+            {knowledgePlanFileFormats.map((format) => {
+              const { Icon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+              return (
+                <label className="plan-format-option" key={format} style={{ '--format-color': color }}>
+                  <TreeCheckbox checked={selectedFormats.includes(format)} onChange={() => toggleFormat(format)} />
+                  <span className="plan-format-option-icon"><Icon /></span>
+                  <span>{formatLabel(format)}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="plan-filter-tree-actions">
+            <button type="button" className="secondary" onClick={() => onChange([])}>清除</button>
+            <button type="button" className="primary" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpen(false); }}>完成</button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function KnowledgePlanDetailPage({ planId, onBack, onOpenWorkbench }) {
+  const plan = dataStore.getKnowledgePlan(planId);
+  const project = plan ? dataStore.getProject(plan.projectId) : null;
+  const solution = project ? dataStore.getProjectSolution(project.id) : null;
+  const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
+  const categoryPathMap = new Map(categories.map((category) => [category.id, category.name]));
+  const [activeTab, setActiveTab] = useState('basic');
+  const [selectedVersion, setSelectedVersion] = useState('latest');
+  if (!plan || !project) return <EmptyPage title="方案详情" />;
+  const workflowPlanId = plan.workflowPlanId || String(plan.id).replace(/^kplan-/, '');
+  const versions = dataStore.getPlanVersions(workflowPlanId);
+  const latestVersion = versions[versions.length - 1];
+  const currentVersion = selectedVersion === 'latest' ? latestVersion : versions.find((version) => version.id === selectedVersion) || latestVersion;
+  const executions = dataStore.getPlanExecutions(workflowPlanId).sort((a, b) => String(b.runAt || b.createdAt || '').localeCompare(String(a.runAt || a.createdAt || '')));
+  const scopeCategories = plan.scopeCategories?.length ? plan.scopeCategories.map((id) => categoryPathMap.get(id) || id) : ['全部目录'];
+  const formats = plan.scopeFormats?.length ? plan.scopeFormats : ['全部格式'];
+  const formatMeta = (format) => workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+  return (
+    <div className="knowledge-plan-detail-page">
+      <div className="knowledge-plan-detail-tabs">
+        {[
+          ['basic', '基本信息'],
+          ['config', '方案配置'],
+          ['executions', '执行记录'],
+          ['operations', '操作记录'],
+        ].map(([key, label]) => <button type="button" key={key} className={activeTab === key ? 'active' : ''} onClick={() => setActiveTab(key)}>{label}</button>)}
+      </div>
+      {activeTab === 'basic' ? (
+        <section className="panel detail-section-stack">
+          <div className="detail-section-head" />
+          <div className="detail-info-grid">
+            <div><label>知识形态</label><strong>{getKnowledgeFormTypeLabel(plan.formType)}</strong></div>
+            <div><label>最新版本</label><strong>{latestVersion?.version || latestVersion?.name || '暂无版本'}</strong></div>
+            <div><label>当前状态</label><Badge tone={plan.status === 'active' ? 'success' : 'neutral'}>{plan.status === 'active' ? '启用' : '停用'}</Badge></div>
+            <div><label>创建时间</label><strong>{plan.createdAt || '-'}</strong></div>
+            <div><label>创建人</label><strong>{plan.createdBy || '当前用户'}</strong></div>
+            <div><label>最近更新</label><strong>{plan.updatedAt || '-'}</strong></div>
+          </div>
+          <div className="detail-scope-grid">
+            <div><label>适用目录</label>{scopeCategories.map((item) => <div className="detail-scope-item" key={item}><FolderOpenOutlined />{item}</div>)}</div>
+            <div><label>适用格式</label><div className="detail-format-list">{formats.map((format) => { const { Icon, color } = formatMeta(format); return <span className="detail-format-tag" key={format} style={{ '--format-color': color }}><Icon />{formatLabel(format)}</span>; })}</div></div>
+          </div>
+        </section>
+      ) : null}
+      {activeTab === 'config' ? (
+        <section className="panel detail-section-stack">
+          <div className="detail-section-head"><h2>方案配置</h2><SelectField value={currentVersion?.id || ''} onChange={setSelectedVersion}>{versions.map((version) => <option key={version.id} value={version.id}>{version.version || version.name || version.id}</option>)}</SelectField></div>
+          {currentVersion ? <div className="detail-node-list">{(currentVersion.nodes || currentVersion.planNodes || []).map((node, index) => {
+            const inputConfig = getNodeInputConfigurationSnapshot(node, currentVersion.nodes || currentVersion.planNodes || [], null);
+            const params = getNodeEffectiveParameterSnapshot(node, currentVersion.nodes || currentVersion.planNodes || []);
+            const outputs = getEffectiveNodeOutputs(node);
+            return (
+              <details className="detail-node-card" key={node.id || `${node.toolName}-${index}`} open={index === 0}>
+                <summary><strong>{index + 1}. {node.toolName || node.name || '处理节点'}</strong><span>{node.category || node.type || '流程节点'}</span></summary>
+                <div className="detail-node-config-body">
+                  <div className="detail-node-config-block"><h4>节点输入</h4><div className="detail-config-list">{inputConfig.length ? inputConfig.map((item, itemIndex) => <div key={`${item.name || 'input'}-${itemIndex}`}><span>{item.name || item.displayName || `输入${itemIndex + 1}`}</span><b>{getRunInputConfigurationSource(item, node)}</b></div>) : <em>暂无节点输入配置</em>}</div></div>
+                  <div className="detail-node-config-block"><h4>配置参数</h4><div className="detail-config-list">{params.length ? params.map((param, paramIndex) => <div key={`${param.name || 'param'}-${paramIndex}`}><span>{param.name || param.displayName || `参数${paramIndex + 1}`}</span><b>{formatNodeConfigValue(param.value) || '-'}</b></div>) : <em>暂无配置参数</em>}</div></div>
+                  <div className="detail-node-config-block"><h4>节点输出</h4><div className="detail-output-list">{outputs.length ? outputs.map((output, outputIndex) => { const display = getOutputDisplay(output); return <div className="detail-output-item" key={`${output.name || 'output'}-${outputIndex}`}><strong>{output.displayName || output.label || output.name || `输出字段${outputIndex + 1}`}</strong><span>{display.type || output.type || '未定义类型'}</span>{output.path ? <code>{output.path}</code> : null}<small>{output.description || display.description || ''}</small></div>; }) : <em>暂无节点输出配置</em>}</div></div>
+                </div>
+              </details>
+            );
+          })}</div> : <div className="empty-state">暂无方案配置版本</div>}
+        </section>
+      ) : null}
+      {activeTab === 'executions' ? (
+        <section className="detail-record-card">
+          <div className="detail-record-title">执行记录</div>
+          <div className="detail-record-table-wrap">
+            <table className="detail-record-table execution-record-table"><colgroup><col /><col /><col /><col /></colgroup><thead><tr><th>执行时间</th><th>执行版本</th><th>处理文件</th><th>执行结果</th></tr></thead><tbody>{executions.length ? executions.map((item) => <tr key={item.id}><td>{item.runAt || item.createdAt || '-'}</td><td>{item.version || item.planVersion || '-'}</td><td title={item.sampleFileName || item.fileName}>{item.sampleFileName || item.fileName || '-'}</td><td><Badge tone={item.status === 'completed' ? 'success' : item.status === 'failed' ? 'danger' : 'warning'}>{item.status === 'completed' ? '成功' : item.status || '未知'}</Badge></td></tr>) : <tr><td colSpan={4} className="detail-record-empty">暂无执行记录</td></tr>}</tbody></table>
+          </div>
+        </section>
+      ) : null}
+      {activeTab === 'operations' ? (
+        <section className="detail-record-card">
+          <div className="detail-record-title">操作记录</div>
+          <div className="detail-record-table-wrap">
+            <table className="detail-record-table operation-record-table"><colgroup><col /><col /><col /><col /><col /></colgroup><thead><tr><th>操作时间</th><th>操作类型</th><th>操作人</th><th>操作对象</th><th>操作结果</th></tr></thead><tbody><tr><td>{plan.createdAt || '-'}</td><td>创建方案</td><td>{plan.createdBy || '当前用户'}</td><td>加工方案</td><td title={plan.name}>{plan.name}</td></tr></tbody></table>
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
+  const [version, setVersion] = useState(0);
+  const [selectedProjectId, setSelectedProjectId] = useState(projectId || dataStore.getProjects()[0]?.id || '');
+  const [activeFormType, setActiveFormType] = useState(knowledgeFormTypes[0]);
+  const [dialog, setDialog] = useState(null);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [formatFilter, setFormatFilter] = useState('');
+  const [categoryFilterIds, setCategoryFilterIds] = useState([]);
+  const [detailPlan, setDetailPlan] = useState(null);
+  const [savingCreate, setSavingCreate] = useState(false);
+  const [graphTab, setGraphTab] = useState('single');
+  const refresh = () => setVersion((item) => item + 1);
+
+  const projects = dataStore.getProjects();
+  const project = dataStore.getProject(selectedProjectId);
+  const solution = selectedProjectId ? dataStore.getProjectSolution(selectedProjectId) : null;
+  const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
+  const plans = selectedProjectId
+    ? [...dataStore.getKnowledgePlans(selectedProjectId, activeFormType)].sort((a, b) => {
+      const timeA = Date.parse(a.createdAt || '') || 0;
+      const timeB = Date.parse(b.createdAt || '') || 0;
+      return timeB - timeA;
+    })
+    : [];
+
+  const categoryPathMap = useMemo(() => {
+    const byId = new Map(categories.map((cat) => [cat.id, cat]));
+    const pathOf = (id) => {
+      const parts = [];
+      let current = byId.get(id);
+      while (current) {
+        parts.unshift(current.name);
+        current = current.parentId ? byId.get(current.parentId) : null;
+      }
+      return parts.join(' / ');
+    };
+    const map = new Map();
+    categories.forEach((cat) => map.set(cat.id, pathOf(cat.id)));
+    return map;
+  }, [categories]);
+
+  const planCountByFormType = useMemo(() => {
+    const map = new Map(knowledgeFormTypes.map((form) => [form, 0]));
+    if (selectedProjectId) {
+      dataStore.getKnowledgePlans(selectedProjectId).forEach((plan) => {
+        if (map.has(plan.formType)) map.set(plan.formType, map.get(plan.formType) + 1);
+      });
+    }
+    return map;
+  }, [selectedProjectId, version]);
+
+  const openCreate = () => setDialog({
+    mode: 'create',
+    name: '',
+    scopeCategories: [],
+    scopeFormats: [],
+    categoryScopeMode: 'all',
+    formatScopeMode: 'all',
+  });
+
+  const openEdit = (plan) => setDialog({
+    mode: 'edit',
+    id: plan.id,
+    name: plan.name,
+    scopeCategories: expandCategorySelection(plan.scopeCategories || [], categories).filter((id) => (
+      categories.some((item) => item.id === id) && !categories.some((item) => item.parentId === id)
+    )),
+    scopeFormats: plan.scopeFormats || [],
+    categoryScopeMode: plan.scopeCategories?.length ? 'custom' : 'all',
+    formatScopeMode: plan.scopeFormats?.length ? 'custom' : 'all',
+  });
+
+  const saveDialog = () => {
+    if (savingCreate) return;
+    if (!dialog.name.trim()) {
+      notify('方案名称不能为空', 'error');
+      return;
+    }
+    if (dialog.categoryScopeMode === 'custom' && !dialog.scopeCategories.length) {
+      notify('请选择至少一个知识类目', 'error');
+      return;
+    }
+    if (dialog.formatScopeMode === 'custom' && !dialog.scopeFormats.length) {
+      notify('请选择至少一种文件格式', 'error');
+      return;
+    }
+    const payload = {
+      projectId: selectedProjectId,
+      formType: activeFormType,
+      name: dialog.name.trim(),
+      scopeCategories: dialog.categoryScopeMode === 'all' ? [] : dialog.scopeCategories,
+      scopeFormats: dialog.formatScopeMode === 'all' ? [] : dialog.scopeFormats,
+    };
+    if (dialog.mode === 'edit') {
+      dataStore.updateKnowledgePlan(dialog.id, { name: payload.name, scopeCategories: payload.scopeCategories, scopeFormats: payload.scopeFormats });
+      notify('方案已更新', 'success');
+      setDialog(null);
+      refresh();
+      return;
+    }
+    setSavingCreate(true);
+    window.setTimeout(() => {
+      const createdPlan = dataStore.saveKnowledgePlan(payload);
+      setSavingCreate(false);
+      setDialog(null);
+      refresh();
+      notify('方案已创建，进入方案配置', 'success');
+      configurePlan(createdPlan);
+    }, 350);
+  };
+
+  const configurePlan = (plan) => {
+    const firstFormat = plan.scopeFormats?.[0] || 'pdf';
+    const solutionId = dataStore.getProjectSolution(selectedProjectId)?.id;
+    dataStore.ensureKnowledgePlanWorkflow(plan.id, solutionId);
+    onOpenWorkbench(selectedProjectId, null, activeFormType, firstFormat, null, plan.id, 'ops-plans');
+  };
+
+  const togglePlan = (plan) => {
+    dataStore.toggleKnowledgePlan(plan.id);
+    refresh();
+    notify(plan.status === 'active' ? '方案已停用' : '方案已启用', 'success');
+  };
+
+  const deletePlan = (plan) => {
+    if (plan.status === 'active') {
+      notify('请先停用方案后再删除', 'error');
+      return;
+    }
+    if (window.confirm(`确定要删除方案"${plan.name}"吗？删除后不可恢复。`)) {
+      dataStore.deleteKnowledgePlan(plan.id);
+      refresh();
+      notify('方案已删除', 'success');
+    }
+  };
+
+  const scopeText = (plan) => {
+    const categoryText = plan.scopeCategories?.length
+      ? plan.scopeCategories.map((id) => categoryPathMap.get(id) || '未知目录').join('、')
+      : '不限类目';
+    const formatText = plan.scopeFormats?.length
+      ? plan.scopeFormats.map((format) => formatLabel(format)).join('、')
+      : '不限格式';
+    return { categoryText, formatText };
+  };
+
+  const filteredPlans = plans.filter((plan) => {
+    if (statusFilter && plan.status !== statusFilter) return false;
+    if (formatFilter && plan.scopeFormats?.length && !plan.scopeFormats.includes(formatFilter)) return false;
+    if (categoryFilterIds.length && plan.scopeCategories?.length) {
+      const matched = plan.scopeCategories.some((id) => categoryFilterIds.includes(id));
+      if (!matched) return false;
+    }
+    if (query.trim()) {
+      const keyword = query.trim().toLowerCase();
+      const nameMatched = plan.name.toLowerCase().includes(keyword);
+      const legacyId = plan.id.replace(/^kplan-/, '');
+      const fileMatched = (dataStore.getPlanExecutions(legacyId) || [])
+        .map((item) => item.sampleFileName || '')
+        .some((name) => String(name).toLowerCase().includes(keyword));
+      if (!nameMatched && !fileMatched) return false;
+    }
+    return true;
+  });
+
+  if (!projects.length) {
+    return (
+      <>
+        <PageHeader title="知识加工方案" />
+        <section className="panel empty-state">
+          <FolderOpenOutlined />
+          <p>暂无知识空间，请先在「知识空间管理」中创建。</p>
+        </section>
+      </>
+    );
+  }
+
+  return (
+    <div className="plan-page">
+      <PageHeader
+        title="知识加工方案"
+        actions={(
+          <SelectField value={selectedProjectId} onChange={setSelectedProjectId}>
+            {projects.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+          </SelectField>
+        )}
+      />
+      <div className="plan-layout">
+        <aside className="panel plan-form-sidebar">
+          <div className="plan-form-title">知识形态</div>
+          <div className="plan-form-list">
+            {knowledgeFormTypes.map((form) => (
+              <button
+                type="button"
+                key={form}
+                className={`plan-form-item ${activeFormType === form ? 'active' : ''}`}
+                onClick={() => { setActiveFormType(form); setGraphTab('single'); }}
+              >
+                <span>{getKnowledgeFormTypeLabel(form)}</span>
+                <em className="plan-form-count">{planCountByFormType.get(form) || 0}</em>
+              </button>
+            ))}
+          </div>
+        </aside>
+        <section className="panel table-panel plan-table-panel">
+          {activeFormType === '知识图谱' ? (
+            <div className="plan-tabs">
+              <button type="button" className={graphTab === 'single' ? 'active' : ''} onClick={() => setGraphTab('single')}>单图谱抽取方案</button>
+              <button type="button" className={graphTab === 'triple' ? 'active' : ''} onClick={() => setGraphTab('triple')}>Schema管理（示例）</button>
+            </div>
+          ) : (
+            <div className="plan-table-head">
+              <h2>{getKnowledgeFormTypeLabel(activeFormType)}加工方案</h2>
+            </div>
+          )}
+          {activeFormType === '知识图谱' && graphTab === 'merge' ? (
+            <div className="plan-tab-placeholder">
+              <CloudServerOutlined />
+              <strong>「多图谱融合方案」建设中</strong>
+              <span>占位 Tab，后续版本补充。</span>
+            </div>
+          ) : activeFormType === '知识图谱' && graphTab === 'triple' ? (
+            <KnowledgeGraphSchemaManager projectId={selectedProjectId} notify={notify} />
+          ) : (
+            <>
+          <Toolbar className="plan-toolbar">
+            <SearchBox value={query} onChange={setQuery} placeholder="搜索文件名或方案名称" />
+            <SelectField value={statusFilter} onChange={setStatusFilter}>
+              <option value="">全部状态</option>
+              <option value="active">启用</option>
+              <option value="disabled">停用</option>
+            </SelectField>
+            <SelectField value={formatFilter} onChange={setFormatFilter}>
+              <option value="">全部格式</option>
+              {knowledgePlanFileFormats.map((format) => <option value={format} key={format}>{formatLabel(format)}</option>)}
+            </SelectField>
+            <CategoryTreeMultiSelect
+              categories={categories}
+              selectedIds={categoryFilterIds}
+              onChange={setCategoryFilterIds}
+              placeholder="全部类目"
+              buttonLabel={categoryFilterIds.length ? `类目（已选 ${categoryFilterIds.length} 个）` : '全部类目'}
+            />
+            <div className="plan-toolbar-actions">
+              <button type="button" className="primary" onClick={openCreate}><PlusOutlined /> 新建方案</button>
+            </div>
+          </Toolbar>
+          <div className="project-table-scroll">
+            <table className="data-table plan-table">
+              <colgroup>
+                <col className="plan-col-name" />
+                <col className="plan-col-scope" />
+                <col className="plan-col-status" />
+                <col className="plan-col-files" />
+                <col className="plan-col-run" />
+                <col className="plan-col-action" />
+              </colgroup>
+              <thead><tr><th>方案名称</th><th>适用范围</th><th>状态</th><th>加工文件</th><th>最近执行</th><th>操作</th></tr></thead>
+              <tbody>
+                {filteredPlans.map((plan) => {
+                  const { categoryText, formatText } = scopeText(plan);
+                  const stats = dataStore.getKnowledgePlanStats(plan.id);
+                  return (
+                    <tr key={plan.id}>
+                      <td className="strong">{plan.name}</td>
+                      <td>
+                        <div className="plan-scope-cell">
+                          <div className="plan-scope-line"><span className="plan-scope-label">目录</span><span className="plan-scope-value" title={categoryText}>{categoryText}</span></div>
+                          <div className="plan-scope-line"><span className="plan-scope-label">格式</span><span className="plan-scope-value" title={formatText}>{formatText}</span></div>
+                        </div>
+                      </td>
+                      <td><Badge tone={plan.status === 'active' ? 'success' : 'neutral'}>{plan.status === 'active' ? '启用' : '停用'}</Badge></td>
+                      <td>{stats.fileCount ? `${stats.fileCount} 个` : '-'}</td>
+                      <td>{stats.lastRunAt || '-'}</td>
+                      <td className="actions">
+                        <button type="button" onClick={() => configurePlan(plan)}>配置</button>
+                        <button type="button" onClick={() => openEdit(plan)}>编辑</button>
+                        <button type="button" onClick={() => togglePlan(plan)}>{plan.status === 'active' ? '停用' : '启用'}</button>
+                        <button type="button" className="danger-link" disabled={plan.status === 'active'} onClick={() => deletePlan(plan)}>删除</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!filteredPlans.length ? (
+                  <tr><td colSpan={6} className="empty-table-cell">暂无{getKnowledgeFormTypeLabel(activeFormType)}方案，点击「新建方案」创建</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+          <div className="project-pagination">
+            <span>共 {filteredPlans.length} 条</span>
+          </div>
+            </>
+          )}
+        </section>
+      </div>
+      {detailPlan ? (
+        <Drawer title={detailPlan.name} onClose={() => setDetailPlan(null)} wide className="knowledge-plan-detail-drawer">
+          <KnowledgePlanDetailPage planId={detailPlan.id} onBack={() => setDetailPlan(null)} onOpenWorkbench={onOpenWorkbench} />
+        </Drawer>
+      ) : null}
+      {dialog ? (
+        <Modal
+          title={dialog.mode === 'create' ? '新建方案' : '编辑方案'}
+          onClose={() => { if (!savingCreate) setDialog(null); }}
+          className="knowledge-plan-modal"
+          footer={(
+            <>
+              <button type="button" className="secondary" onClick={() => setDialog(null)}>取消</button>
+              <button type="button" className="primary" disabled={savingCreate} onClick={saveDialog}>{dialog.mode === 'create' ? (savingCreate ? '保存中' : '保存并配置') : '保存修改'}</button>
+            </>
+          )}
+        >
+          <div className="dialog-stack">
+            <Field label="方案名称" required>
+              <input
+                autoFocus
+                value={dialog.name}
+                onChange={(event) => setDialog({ ...dialog, name: event.target.value })}
+                placeholder={`请输入${getKnowledgeFormTypeLabel(activeFormType)}方案名称`}
+              />
+            </Field>
+            <Field label="适用知识类目" required>
+              <SelectField
+                value={dialog.categoryScopeMode}
+                onChange={(value) => setDialog((current) => ({
+                  ...current,
+                  categoryScopeMode: value,
+                  scopeCategories: value === 'all' ? [] : current.scopeCategories,
+                }))}
+              >
+                <option value="all">不限类目</option>
+                <option value="custom">自定义类目</option>
+              </SelectField>
+              <p className="plan-scope-help">{dialog.categoryScopeMode === 'all'
+                ? '不判断文件所属类目，当前和后续新增、编辑的类目均不影响方案匹配。'
+                : '选中父级类目后，其当前及未来新增的全部后代末级类目均可匹配该方案。'}</p>
+            </Field>
+            {dialog.categoryScopeMode === 'custom' ? (
+              <Field label="选择类目" required group>
+                <CategoryTreeMultiSelect
+                  categories={categories}
+                  selectedIds={dialog.scopeCategories}
+                  onChange={(ids) => setDialog((current) => ({ ...current, scopeCategories: ids }))}
+                  placeholder="请选择知识类目"
+                  leafOnly
+                />
+              </Field>
+            ) : null}
+            <Field label="适用文件格式" required>
+              <SelectField
+                value={dialog.formatScopeMode}
+                onChange={(value) => setDialog((current) => ({
+                  ...current,
+                  formatScopeMode: value,
+                  scopeFormats: value === 'all' ? [] : current.scopeFormats,
+                }))}
+              >
+                <option value="all">不限格式</option>
+                <option value="custom">自定义格式</option>
+              </SelectField>
+              <p className="plan-scope-help">{dialog.formatScopeMode === 'all'
+                ? '不判断文件格式，平台支持的所有文件格式均可匹配该方案。'
+                : '仅选择平台当前已支持的文件格式。'}</p>
+            </Field>
+            {dialog.formatScopeMode === 'custom' ? (
+              <Field label="选择文件格式" required group>
+                <FormatMultiSelect
+                  selectedFormats={dialog.scopeFormats}
+                  onChange={(formats) => setDialog((current) => ({ ...current, scopeFormats: formats }))}
+                />
+              </Field>
+            ) : null}
+            {dialog.mode === 'create' ? <p className="info-line">保存后将自动进入方案配置流程。</p> : null}
+          </div>
+        </Modal>
+      ) : null}
+    </div>
+  );
+}
+
+function SchemaTypeTags({ items, empty = '暂无' }) {
+  const list = Array.isArray(items) ? items : [];
+  return list.length ? (
+    <div className="schema-type-tags">
+      {list.map((item) => <span className="schema-type-tag" key={item}>{item}</span>)}
+    </div>
+  ) : <span className="empty-mini">{empty}</span>;
+}
+
+function SchemaConstraintEditor({ entityTypes, relationTypes, value, onChange }) {
+  const canAdd = entityTypes.length > 0 && relationTypes.length > 0;
+  const addRow = () => {
+    if (!canAdd) return;
+    onChange([...value, { source: entityTypes[0], relation: relationTypes[0], target: entityTypes[0] }]);
+  };
+  const updateRow = (index, patch) => onChange(value.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  const removeRow = (index) => onChange(value.filter((_, i) => i !== index));
+  return (
+    <div className="schema-constraint-editor">
+      {value.length ? (
+        <div className="schema-constraint-rows">
+          {value.map((row, index) => (
+            <div className="schema-constraint-row" key={index}>
+              <SelectField value={row.source} onChange={(v) => updateRow(index, { source: v })} missingLabel="请选择来源实体">
+                {entityTypes.map((item) => <option key={item} value={item}>{item}</option>)}
+              </SelectField>
+              <span className="schema-constraint-arrow">—</span>
+              <SelectField value={row.relation} onChange={(v) => updateRow(index, { relation: v })} missingLabel="请选择关系">
+                {relationTypes.map((item) => <option key={item} value={item}>{item}</option>)}
+              </SelectField>
+              <span className="schema-constraint-arrow">→</span>
+              <SelectField value={row.target} onChange={(v) => updateRow(index, { target: v })} missingLabel="请选择目标实体">
+                {entityTypes.map((item) => <option key={item} value={item}>{item}</option>)}
+              </SelectField>
+              <button type="button" className="icon-button schema-constraint-remove" onClick={() => removeRow(index)}><DeleteOutlined /></button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-mini">暂无类型约束。约束用于限定「哪些实体类型之间允许建立什么关系」。</div>
+      )}
+      <button type="button" className="secondary schema-constraint-add" onClick={addRow} disabled={!canAdd} title={canAdd ? '' : '请先添加实体类型和关系类型'}>
+        <PlusOutlined /> 添加约束
+      </button>
+    </div>
+  );
+}
+
+function serializeSchemaStructure(structure = {}) {
+  return JSON.stringify({
+    entityTypes: [...(structure.entityTypes || [])],
+    attributeTypes: [...(structure.attributeTypes || [])],
+    relationTypes: [...(structure.relationTypes || [])],
+    constraints: (structure.constraints || []).map((row) => ({ source: row.source, relation: row.relation, target: row.target })),
+  }, null, 2);
+}
+
+function parseSchemaStructureCode(codeText) {
+  let parsed;
+  try {
+    parsed = JSON.parse(codeText);
+  } catch (error) {
+    return { ok: false, error: `JSON 格式错误，请检查后重试（${error.message}）` };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, error: '结构定义必须是 JSON 对象，包含 entityTypes、attributeTypes、relationTypes、constraints 四个字段' };
+  }
+  const stringArray = (value) => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) return null;
+    return value;
+  };
+  const entityTypes = stringArray(parsed.entityTypes);
+  const attributeTypes = stringArray(parsed.attributeTypes);
+  const relationTypes = stringArray(parsed.relationTypes);
+  if (entityTypes === null || attributeTypes === null || relationTypes === null) {
+    return { ok: false, error: 'entityTypes、attributeTypes、relationTypes 必须为字符串数组' };
+  }
+  let constraints = [];
+  if (parsed.constraints !== undefined) {
+    if (!Array.isArray(parsed.constraints)) return { ok: false, error: 'constraints 必须为数组' };
+    for (const row of parsed.constraints) {
+      if (!row || typeof row !== 'object' || !row.source || !row.relation || !row.target) {
+        return { ok: false, error: '类型约束的每一项需包含非空的 source、relation、target 字段' };
+      }
+    }
+    constraints = parsed.constraints.map((row) => ({ source: row.source, relation: row.relation, target: row.target }));
+  }
+  return { ok: true, value: { entityTypes, attributeTypes, relationTypes, constraints } };
+}
+
+function KnowledgeGraphSchemaManager({ projectId, notify }) {
+  const [version, setVersion] = useState(0);
+  const [dialog, setDialog] = useState(null);
+  const [structMode, setStructMode] = useState('visual');
+  const [structCode, setStructCode] = useState('');
+  const [detailSchema, setDetailSchema] = useState(null);
+  const [detailViewMode, setDetailViewMode] = useState('visual');
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const refresh = () => setVersion((item) => item + 1);
+  const schemas = projectId ? dataStore.getKnowledgeGraphSchemas(projectId) : [];
+
+  const openCreate = () => {
+    setStructMode('visual');
+    setDialog({ mode: 'create', name: '', description: '', entityTypes: [], attributeTypes: [], relationTypes: [], constraints: [] });
+  };
+  const openEdit = (schema) => {
+    setStructMode('visual');
+    setDialog({
+      mode: 'edit',
+      id: schema.id,
+      name: schema.name,
+      description: schema.description || '',
+      entityTypes: [...schema.structure.entityTypes],
+      attributeTypes: [...schema.structure.attributeTypes],
+      relationTypes: [...schema.structure.relationTypes],
+      constraints: (schema.structure.constraints || []).map((row) => ({ ...row })),
+    });
+  };
+
+  const switchStructToCode = () => {
+    setStructCode(serializeSchemaStructure({ entityTypes: dialog.entityTypes, attributeTypes: dialog.attributeTypes, relationTypes: dialog.relationTypes, constraints: dialog.constraints }));
+    setStructMode('code');
+  };
+  const switchStructToVisual = () => {
+    const result = parseSchemaStructureCode(structCode);
+    if (!result.ok) {
+      notify(result.error, 'error');
+      return;
+    }
+    setDialog((current) => ({
+      ...current,
+      entityTypes: result.value.entityTypes,
+      attributeTypes: result.value.attributeTypes,
+      relationTypes: result.value.relationTypes,
+      constraints: result.value.constraints,
+    }));
+    setStructMode('visual');
+  };
+
+  const saveDialog = () => {
+    let effective = dialog;
+    if (structMode === 'code') {
+      const result = parseSchemaStructureCode(structCode);
+      if (!result.ok) {
+        notify(result.error, 'error');
+        return;
+      }
+      effective = { ...dialog, ...result.value };
+    }
+    if (!effective.name.trim()) { notify('Schema 名称不能为空', 'error'); return; }
+    if (!effective.entityTypes.length) { notify('请至少添加一个实体类型', 'error'); return; }
+    if (!effective.attributeTypes.length) { notify('请至少添加一个属性类型', 'error'); return; }
+    if (!effective.relationTypes.length) { notify('请至少添加一个关系类型', 'error'); return; }
+    if (effective.constraints.some((row) => !row.source || !row.relation || !row.target)) { notify('类型约束需完整选择来源实体、关系和目标实体', 'error'); return; }
+    if (effective.mode === 'create') {
+      dataStore.saveKnowledgeGraphSchema({
+        projectId,
+        name: effective.name,
+        description: effective.description,
+        entityTypes: effective.entityTypes,
+        attributeTypes: effective.attributeTypes,
+        relationTypes: effective.relationTypes,
+        constraints: effective.constraints,
+      });
+      notify('Schema 已创建', 'success');
+    } else {
+      dataStore.updateKnowledgeGraphSchema(effective.id, {
+        name: effective.name,
+        description: effective.description,
+        structure: {
+          entityTypes: effective.entityTypes,
+          attributeTypes: effective.attributeTypes,
+          relationTypes: effective.relationTypes,
+          constraints: effective.constraints,
+        },
+      });
+      notify('Schema 已更新', 'success');
+    }
+    setDialog(null);
+    refresh();
+  };
+
+  const doDelete = () => {
+    dataStore.deleteKnowledgeGraphSchema(confirmDelete.id);
+    setConfirmDelete(null);
+    refresh();
+    notify('Schema 已删除', 'success');
+  };
+
+  const structureSummary = (schema) => {
+    const structure = schema.structure || {};
+    return `实体 ${(structure.entityTypes || []).length} 类 · 属性 ${(structure.attributeTypes || []).length} 类 · 关系 ${(structure.relationTypes || []).length} 类`;
+  };
+
+  return (
+    <div className="schema-manager">
+      <div className="schema-manager-head">
+        <p className="schema-manager-intro">
+          Schema 定义知识图谱可识别的实体、属性、关系及类型约束；单文档抽取方案与多图谱融合方案均基于 Schema 运行。
+          保存方案时节点配置会生成快照，后续调整 Schema 不影响已保存方案。
+        </p>
+        <button type="button" className="primary" onClick={openCreate}><PlusOutlined /> 新建 Schema</button>
+      </div>
+      <div className="project-table-scroll">
+        <table className="data-table schema-table">
+          <colgroup>
+            <col className="schema-col-name" />
+            <col className="schema-col-structure" />
+            <col className="schema-col-updated" />
+            <col className="schema-col-action" />
+          </colgroup>
+          <thead><tr><th>Schema 名称</th><th>结构定义</th><th>更新时间</th><th>操作</th></tr></thead>
+          <tbody>
+            {schemas.map((schema) => (
+              <tr key={schema.id}>
+                <td>
+                  <div className="strong">{schema.name}</div>
+                  {schema.description ? <div className="schema-desc" title={schema.description}>{schema.description}</div> : null}
+                </td>
+                <td>{structureSummary(schema)}</td>
+                <td>{schema.updatedAt || '-'}</td>
+                <td className="actions">
+                  <button type="button" onClick={() => { setDetailViewMode('visual'); setDetailSchema(schema); }}>查看</button>
+                  <button type="button" onClick={() => openEdit(schema)}>编辑</button>
+                  <button type="button" className="danger-link" onClick={() => setConfirmDelete(schema)}>删除</button>
+                </td>
+              </tr>
+            ))}
+            {!schemas.length ? <tr><td colSpan={4} className="empty-table-cell">暂无 Schema，点击「新建 Schema」创建</td></tr> : null}
+          </tbody>
+        </table>
+      </div>
+      <div className="project-pagination"><span>共 {schemas.length} 条</span></div>
+
+      {dialog ? (
+        <Modal
+          title={dialog.mode === 'create' ? '新建 Schema' : '编辑 Schema'}
+          onClose={() => setDialog(null)}
+          wide
+          className="schema-form-modal"
+          footer={(
+            <>
+              <button type="button" className="secondary" onClick={() => setDialog(null)}>取消</button>
+              <button type="button" className="primary" onClick={saveDialog}>{dialog.mode === 'create' ? '创建' : '保存修改'}</button>
+            </>
+          )}
+        >
+          <div className="dialog-stack">
+            <Field label="Schema 名称" required help="用于标识图谱结构定义，供单文档抽取与多图谱融合方案选择。">
+              <input autoFocus value={dialog.name} onChange={(event) => setDialog({ ...dialog, name: event.target.value })} placeholder="如：保险业务图谱 Schema" />
+            </Field>
+            <Field label="说明" help="选填，说明该 Schema 覆盖的业务范围。">
+              <input value={dialog.description} onChange={(event) => setDialog({ ...dialog, description: event.target.value })} placeholder="如：面向保险产品的实体、属性与关系抽取结构" />
+            </Field>
+            <div className="schema-structure-field">
+              <div className="schema-mode-switch">
+                <button type="button" className={structMode === 'visual' ? 'active' : ''} onClick={switchStructToVisual}>可视化</button>
+                <button type="button" className={structMode === 'code' ? 'active' : ''} onClick={switchStructToCode}>代码化</button>
+              </div>
+              {structMode === 'visual' ? (
+                <div className="dialog-stack">
+                  <GraphSchemaTagInput label="实体类型" required value={dialog.entityTypes} onChange={(value) => setDialog({ ...dialog, entityTypes: value })} placeholder="输入实体类型后按回车，如：保险产品" />
+                  <GraphSchemaTagInput label="属性类型" required value={dialog.attributeTypes} onChange={(value) => setDialog({ ...dialog, attributeTypes: value })} placeholder="输入属性类型后按回车，如：投保年龄" />
+                  <GraphSchemaTagInput label="关系类型" required value={dialog.relationTypes} onChange={(value) => setDialog({ ...dialog, relationTypes: value })} placeholder="输入关系类型后按回车，如：承保" />
+                  <Field label="类型约束" help="限定实体类型之间允许建立的关系；仅需覆盖核心约束，抽取时以实际文档事实为准。">
+                    <SchemaConstraintEditor
+                      entityTypes={dialog.entityTypes}
+                      relationTypes={dialog.relationTypes}
+                      value={dialog.constraints}
+                      onChange={(constraints) => setDialog({ ...dialog, constraints })}
+                    />
+                  </Field>
+                </div>
+              ) : (
+                <textarea
+                  className="standardization-code-editor schema-structure-editor"
+                  value={structCode}
+                  onChange={(event) => setStructCode(event.target.value)}
+                  spellCheck={false}
+                  placeholder={'{\n  "entityTypes": ["保险产品", "保险公司"],\n  "attributeTypes": ["投保年龄", "保额"],\n  "relationTypes": ["承保", "包含"],\n  "constraints": [\n    { "source": "保险公司", "relation": "承保", "target": "保险产品" }\n  ]\n}'}
+                />
+              )}
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {detailSchema ? (
+        <Drawer title={detailSchema.name} onClose={() => setDetailSchema(null)} wide className="schema-detail-drawer">
+          <div className="dialog-stack">
+            <Field label="Schema 说明">{detailSchema.description || '—'}</Field>
+            <div className="schema-structure-field">
+              <div className="schema-mode-switch">
+                <button type="button" className={detailViewMode === 'visual' ? 'active' : ''} onClick={() => setDetailViewMode('visual')}>可视化</button>
+                <button type="button" className={detailViewMode === 'code' ? 'active' : ''} onClick={() => setDetailViewMode('code')}>代码化</button>
+              </div>
+              {detailViewMode === 'visual' ? (
+                <div className="dialog-stack">
+                  <Field label="实体类型" group><SchemaTypeTags items={detailSchema.structure.entityTypes} /></Field>
+                  <Field label="属性类型" group><SchemaTypeTags items={detailSchema.structure.attributeTypes} /></Field>
+                  <Field label="关系类型" group><SchemaTypeTags items={detailSchema.structure.relationTypes} /></Field>
+                  <Field label="类型约束" group>
+                    {detailSchema.structure.constraints?.length ? (
+                      <table className="data-table schema-constraint-table">
+                        <thead><tr><th>来源实体类型</th><th>关系类型</th><th>目标实体类型</th></tr></thead>
+                        <tbody>
+                          {detailSchema.structure.constraints.map((row, index) => (
+                            <tr key={index}><td>{row.source}</td><td>{row.relation}</td><td>{row.target}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : <span className="empty-mini">未配置类型约束</span>}
+                  </Field>
+                </div>
+              ) : (
+                <pre className="json-schema-preview schema-structure-code">{serializeSchemaStructure(detailSchema.structure)}</pre>
+              )}
+            </div>
+            <Field label="更新信息">{detailSchema.updatedAt ? `创建于 ${detailSchema.createdAt || '-'}，更新于 ${detailSchema.updatedAt}` : '-'}</Field>
+          </div>
+        </Drawer>
+      ) : null}
+
+      {confirmDelete ? (
+        <ConfirmDialog
+          title="删除 Schema"
+          message={`确定删除「${confirmDelete.name}」吗？删除后单文档抽取方案与多图谱融合方案将无法再选择该 Schema；已保存方案的配置快照不受影响。`}
+          danger
+          cancelText="取消"
+          confirmText="删除"
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={doDelete}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function KnowledgeAccessPage({ projectId, notify, onOpenPlans }) {
+  const [selectedProjectId, setSelectedProjectId] = useState(projectId || dataStore.getProjects()[0]?.id || '');
+  const [selectedCategoryId, setSelectedCategoryId] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const fileInputRef = useRef(null);
+  const projects = dataStore.getProjects();
+  const solution = selectedProjectId ? dataStore.getProjectSolution(selectedProjectId) : null;
+  const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
+
+  const categoryPathMap = useMemo(() => {
+    const byId = new Map(categories.map((item) => [item.id, item]));
+    const pathOf = (id) => {
+      const names = [];
+      let current = byId.get(id);
+      while (current) {
+        names.unshift(current.name);
+        current = current.parentId ? byId.get(current.parentId) : null;
+      }
+      return names.join(' / ');
+    };
+    return new Map(categories.map((item) => [item.id, pathOf(item.id)]));
+  }, [categories]);
+
+  useEffect(() => {
+    if (categories.some((item) => item.id === selectedCategoryId)) return;
+    const parentIds = new Set(categories.map((item) => item.parentId).filter(Boolean));
+    const firstLeaf = categories.find((item) => !parentIds.has(item.id));
+    setSelectedCategoryId(firstLeaf?.id || categories[0]?.id || '');
+    setSelectedFiles([]);
+  }, [selectedProjectId, categories.length]);
+
+  const fileRows = useMemo(() => selectedFiles.map((file) => {
+    const format = getFileExtension(file.name).toLowerCase();
+    const matches = selectedCategoryId && format
+      ? dataStore.matchKnowledgePlans({ projectId: selectedProjectId, categoryId: selectedCategoryId, fileFormat: format })
+      : [];
+    return { ...file, format, matches };
+  }), [selectedFiles, selectedProjectId, selectedCategoryId]);
+
+  const selectFiles = (fileList) => {
+    const next = Array.from(fileList || []).map((file, index) => ({
+      id: `${file.name}-${file.size}-${file.lastModified || index}`,
+      name: file.name,
+      size: formatFileSize(file.size),
+    }));
+    setSelectedFiles((current) => {
+      const merged = new Map([...current, ...next].map((item) => [item.id, item]));
+      return Array.from(merged.values());
+    });
+  };
+
+  const unmatchedCount = fileRows.filter((item) => !item.matches.length).length;
+  const confirmUpload = () => {
+    if (!fileRows.length || unmatchedCount) return;
+    notify(`已确认 ${fileRows.length} 个文件的加工方案，上传执行不在本期原型范围内`, 'success');
+  };
+
+  return (
+    <div className="knowledge-access-page">
+      <PageHeader title="知识接入" />
+      <section className="panel knowledge-access-placeholder" aria-label="知识接入占位页面" />
+      {/* 知识接入当前仅保留菜单入口，暂不展示实际功能内容。 */}
+      {/* <section className="panel knowledge-access-config">
+        <div className="knowledge-access-fields">
+          <Field label="知识空间" required>
+            <SelectField value={selectedProjectId} onChange={setSelectedProjectId}>
+              {projects.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+            </SelectField>
+          </Field>
+          <Field label="上传目录" required>
+            <SelectField value={selectedCategoryId} onChange={(value) => { setSelectedCategoryId(value); setSelectedFiles([]); }}>
+              <option value="">请选择知识类目</option>
+              {categories.map((item) => <option value={item.id} key={item.id}>{categoryPathMap.get(item.id) || item.name}</option>)}
+            </SelectField>
+          </Field>
+          <div className="knowledge-access-upload-action">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={knowledgePlanFileFormats.map((format) => `.${format}`).join(',')}
+              multiple
+              hidden
+              onChange={(event) => { selectFiles(event.target.files); event.target.value = ''; }}
+            />
+            <button type="button" className="primary" disabled={!selectedCategoryId} onClick={() => fileInputRef.current?.click()}><FileUploadIcon /> 选择文件</button>
+            <span>支持 PDF、DOCX、XLSX、PPTX、TXT、MD</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel table-panel knowledge-access-result">
+        <div className="section-head">
+          <div>
+            <h2>上传前方案匹配</h2>
+            <p>仅启用方案参与匹配；优先采用更深层目录与更具体格式，同优先级方案将并行加工。</p>
+          </div>
+          {fileRows.length ? <button type="button" className="secondary" onClick={() => setSelectedFiles([])}>清空文件</button> : null}
+        </div>
+        {fileRows.length ? (
+          <>
+            <div className="project-table-scroll">
+              <table className="data-table knowledge-access-table">
+                <thead><tr><th>文件</th><th>上传目录</th><th>格式</th><th>适配方案</th><th>匹配状态</th><th>操作</th></tr></thead>
+                <tbody>
+                  {fileRows.map((file) => (
+                    <tr key={file.id}>
+                      <td><div className="knowledge-access-file"><FileOutlined /><span><strong>{file.name}</strong><em>{file.size}</em></span></div></td>
+                      <td>{categoryPathMap.get(selectedCategoryId) || '-'}</td>
+                      <td>{file.format ? formatLabel(file.format) : '未知'}</td>
+                      <td>
+                        {file.matches.length ? (
+                          <div className="knowledge-access-matches">
+                            {file.matches.map((plan) => <span key={plan.id}><b>{getKnowledgeFormTypeLabel(plan.formType)}</b>{plan.name}</span>)}
+                          </div>
+                        ) : <span className="knowledge-access-no-match">该目录或格式没有启用的加工方案</span>}
+                      </td>
+                      <td>{file.matches.length ? <Badge tone="success"><CheckCircleOutlined /> 已匹配</Badge> : <Badge tone="warning"><ExclamationCircleOutlined /> 未匹配</Badge>}</td>
+                      <td><button type="button" className="danger-link" onClick={() => setSelectedFiles((current) => current.filter((item) => item.id !== file.id))}>移除</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="knowledge-access-footer">
+              <span>{unmatchedCount ? `有 ${unmatchedCount} 个文件没有适配方案，请先调整方案适用范围。` : `共 ${fileRows.length} 个文件，匹配结果已确认。`}</span>
+              {unmatchedCount ? <button type="button" className="secondary" onClick={() => onOpenPlans(selectedProjectId)}>前往知识加工方案</button> : null}
+              <button type="button" className="primary" disabled={Boolean(unmatchedCount)} onClick={confirmUpload}>确认上传</button>
+            </div>
+          </>
+        ) : (
+          <div className="empty-state knowledge-access-empty">
+            <FileUploadIcon />
+            <p>选择文件后，将在这里逐个展示适配方案。</p>
+          </div>
+        )}
+      </section> */}
+    </div>
+  );
+}
+
+function buildGraphSchemaSnapshotValue(schema) {
+  if (!schema) return '';
+  return {
+    schemaId: schema.id,
+    schemaName: schema.name,
+    structure: {
+      entityTypes: [...(schema.structure?.entityTypes || [])],
+      attributeTypes: [...(schema.structure?.attributeTypes || [])],
+      relationTypes: [...(schema.structure?.relationTypes || [])],
+      constraints: (schema.structure?.constraints || []).map((row) => ({ ...row })),
+    },
+  };
+}
+
+function expandGraphSchemaSnapshot(node) {
+  const params = (node.params || []).map((param) => {
+    if (param.id !== 'graph_schema' || typeof param.value !== 'string' || !param.value) return param;
+    const schema = dataStore.getKnowledgeGraphSchema(param.value);
+    if (!schema) return param;
+    return {
+      ...param,
+      value: buildGraphSchemaSnapshotValue(schema),
+    };
+  });
+  const nextNode = params === node.params ? node : { ...node, params };
+  if (Array.isArray(nextNode.innerNodes) && nextNode.innerNodes.length) {
+    nextNode.innerNodes = nextNode.innerNodes.map(expandGraphSchemaSnapshot);
+  }
+  return nextNode;
+}
+
+function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersion, knowledgePlanId, entryNonce, notify, onBack, onOpenWorkbench }) {
   const qaParams = new URLSearchParams(window.location.search);
   const qaMode = qaParams.get('qa') === '1';
   const qaGeneratedState = qaMode && qaParams.get('demoState') === 'generated';
@@ -5982,29 +7966,33 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
   const solution = dataStore.getProjectSolution(project.id);
   const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
+  const knowledgePlan = knowledgePlanId ? dataStore.getKnowledgePlan(knowledgePlanId) : null;
+  if (knowledgePlan) dataStore.ensureKnowledgePlanWorkflow(knowledgePlan.id, solution?.id);
   const category = categories.find((item) => item.id === categoryId) || null;
-  const initialFormType = decodeURIComponent(formType || category?.formTypes?.[0] || '切片库');
-  const initialFileFormat = workbenchFileFormats.includes(fileFormat) ? fileFormat : workbenchFileFormats[0];
+  const unifiedPlanFormats = knowledgePlan?.scopeFormats?.length ? knowledgePlan.scopeFormats : workbenchFileFormats;
+  const initialFormType = decodeURIComponent(knowledgePlan?.formType || formType || category?.formTypes?.[0] || '切片库');
+  const initialFileFormat = unifiedPlanFormats.includes(fileFormat) ? fileFormat : unifiedPlanFormats[0] || workbenchFileFormats[0];
   const initialPlanTarget = { formType: initialFormType, fileFormat: initialFileFormat };
   const createSampleForTarget = (target, status = '未发送') => ({
     ...createWorkbenchSampleFiles(target, status)[0],
     id: `demo-${target.formType}-${target.fileFormat}`,
     name: `医保政策样例.${target.fileFormat}`,
-    type: target.fileFormat.toUpperCase(),
+    type: formatLabel(target.fileFormat),
     status,
   });
   const buildPlanRoute = (target) => ({
     projectId: project.id,
     solutionId: solution?.id,
-    planScope: category ? 'category' : 'fallback',
-    categoryId: category ? category.id : null,
+    planScope: knowledgePlan ? 'knowledge' : category ? 'category' : 'fallback',
+    knowledgePlanId: knowledgePlan?.id || null,
+    categoryId: knowledgePlan ? null : category ? category.id : null,
     formType: target.formType,
     fileFormat: target.fileFormat,
-    name: `${category ? category.name : project.name}${getKnowledgeFormTypeLabel(target.formType)}${target.fileFormat}处理方案`,
+    name: knowledgePlan?.name || `${category ? category.name : project.name}${getKnowledgeFormTypeLabel(target.formType)}${target.fileFormat}处理方案`,
   });
   const getRunLabel = (version, versionStatus, runAt) => `${version}${versionStatus === 'draft' ? '草稿' : ''}-${compactRunTime(runAt)}`;
   const normalizeExecutionRecord = (execution) => {
-    const file = execution.sampleFile || { id: execution.sampleFileId, name: execution.sampleFileName, type: execution.fileFormat?.toUpperCase() || '' };
+    const file = execution.sampleFile || { id: execution.sampleFileId, name: execution.sampleFileName, type: formatLabel(execution.fileFormat) || '' };
     const versionStatus = execution.versionStatus || 'formal';
     const runAt = execution.runAt || execution.createdAt || '';
     const runId = execution.runId || execution.id || `${execution.sampleFileId}__${execution.version}__${compactRunTime(runAt)}`;
@@ -6013,13 +8001,17 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       id: execution.id,
       runId,
       runLabel: execution.runLabel || getRunLabel(execution.version, versionStatus, runAt),
+      runName: execution.runName || '',
       runAt,
+      startedAt: execution.startedAt || execution.startTime || runAt,
+      endedAt: execution.endedAt || execution.endTime || (['completed', 'success', 'failed', '成功', '失败'].includes(execution.status) ? execution.createdAt || runAt : ''),
+      status: execution.status || 'completed',
       file,
       version: execution.version,
       versionStatus,
       planVersionId: execution.planVersionId,
-      planNodes: hydrateStoredPlanNodes(planNodesSnapshot),
-      planSnapshot: hydrateStoredPlanNodes(planNodesSnapshot),
+      planNodes: preserveExecutionSnapshotNodes(planNodesSnapshot),
+      planSnapshot: preserveExecutionSnapshotNodes(planNodesSnapshot),
       result: execution.result,
     };
   };
@@ -6030,7 +8022,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   const createPlanContextState = (target) => {
     const route = buildPlanRoute(target);
     let { plan, versions } = dataStore.getPlanWithVersionsByRoute(route);
-    if (plan && versions.length === 0) {
+    if (plan && versions.length === 0 && !knowledgePlan) {
       dataStore.discardUnsavedPlan(plan.id);
       plan = null;
       versions = [];
@@ -6057,7 +8049,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       currentPlanId: plan?.id || null,
       sampleFiles: currentSampleFiles,
       events: storedChat || (generatedState ? generatedAgentEvents : runningState ? runningAgentEvents : initialAgentEvents),
-      planNodes: latestVersion ? latestNodes : runningState ? createAgentDemoNodes(readWorkbenchCatalog(), target).slice(0, 4) : qaGeneratedState && initialTarget ? collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(), target)) : [],
+      planNodes: latestVersion ? latestNodes : runningState ? createAgentDemoNodes(readWorkbenchCatalog(), target, projectId).slice(0, 4) : qaGeneratedState && initialTarget ? collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(), target, projectId)) : [],
       rightTab: ['处理方案', '执行结果'].includes(qaRightTab) ? qaRightTab : '处理方案',
       running: runningState,
       testing: false,
@@ -6072,7 +8064,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       draftPlanVersion: null,
       versionSnapshots: latestVersion ? buildVersionSnapshotsFromRecords(versions) : qaGeneratedState && initialTarget ? {
         '1.0': {
-          planNodes: collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(), target)),
+          planNodes: collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(), target, projectId)),
           results: [createSampleResult(fallbackSample, { includeKnowledge: true })],
           sampleFiles: [fallbackSample],
         },
@@ -6144,6 +8136,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   const [expandedPlanGroups, setExpandedPlanGroups] = useState(() => new Set([initialFormType]));
   const [samplePopoverOpen, setSamplePopoverOpen] = useState(false);
   const [issuePopoverOpen, setIssuePopoverOpen] = useState(false);
+  const [scopePopoverOpen, setScopePopoverOpen] = useState(false);
+  const scopeTriggerRef = useRef(null);
+  const scopePopoverRef = useRef(null);
   const [issueTab, setIssueTab] = useState('unresolved');
   const [issueRecords, setIssueRecords] = useState(initialPlanContext.issueRecords);
   const [planRunPopoverOpen, setPlanRunPopoverOpen] = useState(false);
@@ -6170,6 +8165,17 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     }
     return path.join('>');
   })() : '';
+  const categoryPathMap = (() => {
+    const byId = new Map(categories.map((item) => [item.id, item]));
+    const pathOf = (id, seen = new Set()) => {
+      const current = byId.get(id);
+      if (!current || seen.has(id)) return current?.name || '';
+      seen.add(id);
+      const parent = current.parentId ? pathOf(current.parentId, seen) : '';
+      return parent ? `${parent} / ${current.name}` : current.name;
+    };
+    return new Map(categories.map((item) => [item.id, pathOf(item.id)]));
+  })();
   const planFormTypes = category?.formTypes?.length ? category.formTypes : knowledgeFormTypes;
   const activePlanTarget = {
     formType: planFormTypes.includes(selectedPlanTarget.formType) ? selectedPlanTarget.formType : planFormTypes[0],
@@ -6243,6 +8249,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     setIssueRecords(state.issueRecords || []);
     setSamplePopoverOpen(false);
     setIssuePopoverOpen(false);
+    setScopePopoverOpen(false);
     setIssueTab('unresolved');
     setAddOpen(false);
     setAddParentId(null);
@@ -6250,7 +8257,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     setEditingParentId(null);
   };
   const createVersionSnapshot = () => ({
-    planNodes: collapseWorkbenchNodes(cloneWorkbenchNodes(planNodes)),
+    planNodes: collapseWorkbenchNodes(cloneWorkbenchNodes(planNodes).map(expandGraphSchemaSnapshot)),
     results: results.map((result) => ({ ...result })),
     sampleFiles: sampleFiles.map((file) => ({ ...file })),
   });
@@ -6276,6 +8283,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     setEditingNode(null);
     setEditingParentId(null);
     setIssuePopoverOpen(false);
+    setScopePopoverOpen(false);
     setIssueTab('unresolved');
     if (!snapshot) return;
     setPlanNodes(collapseWorkbenchNodes(cloneWorkbenchNodes(snapshot.planNodes || [])));
@@ -6315,6 +8323,14 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     return '';
   };
   const getFormTypeDoneCount = (item) => workbenchFileFormats.filter((format) => getFormatPlanStatus(item, format) === 'done').length;
+  useEffect(() => {
+    if (!scopePopoverOpen) return undefined;
+    const closeOnOutsidePointer = (event) => {
+      if (!scopeTriggerRef.current?.contains(event.target) && !scopePopoverRef.current?.contains(event.target)) setScopePopoverOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsidePointer);
+    return () => document.removeEventListener('mousedown', closeOnOutsidePointer);
+  }, [scopePopoverOpen]);
   const togglePlanGroup = (item) => {
     setExpandedPlanGroups((current) => {
       const next = new Set(current);
@@ -6322,8 +8338,15 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       return next;
     });
   };
-  const workbenchContextText = category ? `${project.name} / ${category.name} / ${getKnowledgeFormTypeLabel(decodeURIComponent(formType || '切片库'))}` : `${project.name} / 临时方案`;
-  const workbenchPlanTitle = category ? `${category.name} · ${getKnowledgeFormTypeLabel(activePlanTarget.formType)} · ${activePlanTarget.fileFormat}` : `兜底方案 · ${getKnowledgeFormTypeLabel(activePlanTarget.formType)} · ${activePlanTarget.fileFormat}`;
+  const workbenchContextText = knowledgePlan
+    ? `${project.name} / ${knowledgePlan.name}`
+    : category ? `${project.name} / ${category.name} / ${getKnowledgeFormTypeLabel(decodeURIComponent(formType || '切片库'))}` : `${project.name} / 临时方案`;
+  const workbenchPlanTitle = knowledgePlan
+    ? knowledgePlan.name
+    : category ? `${category.name} · ${getKnowledgeFormTypeLabel(activePlanTarget.formType)} · ${activePlanTarget.fileFormat}` : `兜底方案 · ${getKnowledgeFormTypeLabel(activePlanTarget.formType)} · ${activePlanTarget.fileFormat}`;
+  const knowledgePlanScopeSummary = knowledgePlan
+    ? `${knowledgePlan.scopeCategories?.length ? `${knowledgePlan.scopeCategories.length} 个目录` : '全部目录'} · ${unifiedPlanFormats.map((item) => formatLabel(item)).join('、')}`
+    : '';
   const knowledgePreviewTab = getKnowledgePreviewTabName(activePlanTarget.formType);
   const rightTabs = ['处理方案', '执行结果', knowledgePreviewTab];
   const { Icon: ActiveFormatIcon, color: activeFormatColor } = workbenchFileFormatMeta[activePlanTarget.fileFormat] || { Icon: FileOutlined, color: '#64748b' };
@@ -6345,9 +8368,10 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     && selectedPlanVersion !== latestSavedPlanVersion;
   const selectedVersionStatus = hasUnsavedDraft ? 'draft' : 'formal';
   const canCopyFormalVersion = canEdit
+    && !knowledgePlan
     && savedPlanVersions.includes(selectedPlanVersion)
     && Boolean(versionSnapshots[selectedPlanVersion]?.planNodes?.length);
-  const sourcePlanScope = category ? 'category' : 'fallback';
+  const sourcePlanScope = knowledgePlan ? 'knowledge' : category ? 'category' : 'fallback';
   const sourceCopyContext = {
     projectId: project.id,
     projectName: project.name,
@@ -6433,6 +8457,18 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       && (record.file?.id === file?.id || getSampleFileKey(record.file) === fileKey)
     ));
   };
+  const renameExecutionRecord = (record, nextName) => {
+    const executionId = record?.id || record?.runId;
+    if (!executionId) return false;
+    const saved = dataStore.updatePlanExecution(executionId, { runName: nextName });
+    if (!saved) return false;
+    setPlanContextField(activePlanTargetKey, 'executionRecords', setExecutionRecords, (current = {}) => ({
+      ...current,
+      [record.runId]: { ...current[record.runId], runName: nextName },
+    }));
+    notify('试跑记录名称已更新', 'success');
+    return true;
+  };
   const [toolCategories, setToolCategories] = useState(() => readUnifiedFlowNodeCatalog().categories || defaultCategories);
   const markPlanDraft = () => {
     setConfirmed(false);
@@ -6494,7 +8530,8 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
 
   useEffect(() => subscribeCatalog(() => {
     const snapshot = readUnifiedFlowNodeCatalog();
-    setCatalog(readWorkbenchCatalog());
+    const latestCatalog = readWorkbenchCatalog();
+    setCatalog(latestCatalog);
     setToolCategories(snapshot.categories || defaultCategories);
   }), []);
   useEffect(() => {
@@ -6588,12 +8625,15 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   const uploadFiles = (files) => {
     if (!files?.length) return;
     const fileList = Array.from(files);
-    const allowedFormat = activePlanTarget.fileFormat;
-    const invalidFiles = fileList.filter((file) => getFileExtension(file.name) !== allowedFormat);
-    const validFiles = fileList.filter((file) => getFileExtension(file.name) === allowedFormat);
-    if (invalidFiles.length) notify(`只能上传 ${allowedFormat} 格式的样例文件`, 'error');
+    const validFiles = knowledgePlan ? fileList : (() => {
+      const allowedFormats = [activePlanTarget.fileFormat];
+      const valid = fileList.filter((file) => allowedFormats.includes(getFileExtension(file.name).toLowerCase()));
+      const invalid = fileList.filter((file) => !allowedFormats.includes(getFileExtension(file.name).toLowerCase()));
+      if (invalid.length) notify(`只能上传 ${allowedFormats.map((item) => formatLabel(item)).join('、')} 格式的样例文件`, 'error');
+      return valid;
+    })();
     if (!validFiles.length) return;
-    const next = validFiles.map((file) => ({ id: `${file.name}-${file.lastModified}`, name: file.name, type: allowedFormat.toUpperCase(), size: `${Math.max(file.size / 1024 / 1024, 0.01).toFixed(2)} MB`, status: '上传中' }));
+    const next = validFiles.map((file) => ({ id: `${file.name}-${file.lastModified}`, name: file.name, type: formatLabel(getFileExtension(file.name).toLowerCase()), size: `${Math.max(file.size / 1024 / 1024, 0.01).toFixed(2)} MB`, status: '上传中' }));
     const nextIds = new Set(next.map((file) => file.id));
     setSampleFiles((current) => [...next, ...current.filter((item) => !next.some((row) => row.id === item.id))]);
     window.setTimeout(() => {
@@ -6610,6 +8650,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     }
     const runContextKey = activePlanTargetKey;
     const runPlan = ensureCurrentPlan();
+    const runStartedAt = localDateTimeText();
     planContextRef.current[runContextKey] = { ...getCurrentPlanContextState(), currentPlanId: runPlan.id };
     const setRunField = (field, setter, updater) => setPlanContextField(runContextKey, field, setter, updater);
     const setRunEvents = (updater) => setRunField('events', setEvents, updater);
@@ -6654,10 +8695,10 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     clearAgentTimers(runContextKey);
     const latestCatalog = readWorkbenchCatalog();
     setCatalog(latestCatalog);
-    const agentPlan = createAgentDemoPlan(activePlanTarget, latestCatalog);
+    const agentPlan = createAgentDemoPlan(activePlanTarget, latestCatalog, projectId);
     const { parser, splitter, extraction, iteration } = agentPlan;
     const isKnowledgeGraphTarget = activePlanTarget.formType === '知识图谱';
-    const graphSchemaSummary = '实体类型：人物、组织、政策文件；属性类型：职务、标签、机构类型、所在国家、适用范围、版本；关系类型：任职于、制定、支持。';
+    const graphSchemaSummary = '已选用「保险业务图谱 Schema」作为图谱结构定义（覆盖保险产品、保险公司、保险条款、保障责任等实体与约束），';
     const runFileFormat = activePlanTarget.fileFormat;
     const preFixNodes = [parser, splitter].filter(Boolean);
     const extractionNodes = [parser, splitter, extraction].filter(Boolean);
@@ -6890,7 +8931,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     });
     step(1200, () => {
       const nextResults = filesSnapshot.map((file) => createSampleResultForPlan(file, finalNodes));
-      const runAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      const runAt = localDateTimeText();
       const runState = planContextRef.current[runContextKey] || {};
       const runVersion = runState.draftPlanVersion || runState.selectedPlanVersion || '1.0';
       const runPlanSnapshot = cloneWorkbenchNodes(finalNodes);
@@ -6902,6 +8943,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
           runId,
           runLabel,
           runAt,
+          startedAt: runStartedAt,
+          endedAt: runAt,
+          status: 'success',
           file: { ...file, status: '已完成' },
           version: runVersion,
           versionStatus: 'draft',
@@ -6918,6 +8962,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
           runId,
           runLabel,
           runAt,
+          startedAt: runStartedAt,
+          endedAt: runAt,
+          status: 'success',
           sampleFileId: result.fileId,
           sampleFileName: result.fileName,
           sampleFile: { ...file, status: '已完成' },
@@ -7144,6 +9191,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       return;
     }
     const plan = ensureCurrentPlan();
+    const runStartedAt = localDateTimeText();
     const contextKey = activePlanTargetKey;
     planContextRef.current[contextKey] = { ...getCurrentPlanContextState(), currentPlanId: plan.id };
     const scoped = createScopedPlanContext(contextKey, plan.id);
@@ -7176,7 +9224,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     });
     scheduleAgentTimer(() => {
       const nextResults = runFiles.map((item) => createSampleResultForPlan(item, runnableNodes));
-      const runAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      const runAt = localDateTimeText();
       scoped.setResults(nextResults);
       const nextExecutionRecords = Object.fromEntries(nextResults.map((result) => {
         const file = runFiles.find((item) => item.id === result.fileId) || { id: result.fileId, name: result.fileName };
@@ -7186,6 +9234,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
           runId,
           runLabel,
           runAt,
+          startedAt: runStartedAt,
+          endedAt: runAt,
+          status: 'success',
           file: { ...file, status: '已完成' },
           version: runVersion,
           versionStatus: runVersionStatus,
@@ -7202,6 +9253,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
           runId,
           runLabel,
           runAt,
+          startedAt: runStartedAt,
+          endedAt: runAt,
+          status: 'success',
           sampleFileId: result.fileId,
           sampleFileName: result.fileName,
           sampleFile: { ...file, status: '已完成' },
@@ -7435,8 +9489,10 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   };
 
   const openEditNode = (node, parentId = null) => {
+    const latestCatalog = readWorkbenchCatalog();
+    setCatalog(latestCatalog);
     setEditingParentId(parentId);
-    setEditingNode(node);
+    setEditingNode(cloneWorkbenchNode(node));
   };
 
   const deleteInnerNode = (parentId, innerNode) => {
@@ -7563,9 +9619,15 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   };
 
   return (
-    <div className="workbench-page">
-      <div className="workbench-grid">
-        <aside className="panel sample-column">
+    <div className={`workbench-page ${knowledgePlan ? 'unified-plan-page' : ''}`}>
+      {knowledgePlan ? (
+        <PageHeader
+          title="配置知识加工方案"
+          actions={<button type="button" className="secondary" onClick={onBack}><LeftOutlined /> 返回方案列表</button>}
+        />
+      ) : null}
+      <div className={`workbench-grid ${knowledgePlan ? 'unified-plan-workbench' : ''}`}>
+        {!knowledgePlan ? <aside className="panel sample-column">
           <div className="scheme-overview">
             <div className="scheme-overview-head">
               <h3>方案工作台</h3>
@@ -7608,19 +9670,45 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
               ))}
             </div>
           </div>
-        </aside>
+        </aside> : null}
         <div className="panel workbench-main-panel">
           <section className="agent-column">
             <div className="panel-title workbench-context-title">
-              <span className="workbench-strip-tag">{category ? '类目方案' : '兜底方案'}</span>
-              <span className="workbench-strip-separator">·</span>
-              <span className="workbench-strip-text">{project.name}</span>
-              {category ? <span className="workbench-strip-separator">·</span> : null}
-              {category ? <span className="workbench-strip-text">{categoryPath}</span> : null}
-              <span className="workbench-strip-separator">·</span>
+              <strong className="workbench-plan-title">{workbenchPlanTitle}</strong>
               <span className="workbench-strip-tag">{getKnowledgeFormTypeLabel(activePlanTarget.formType)}</span>
-              <span className="workbench-strip-separator">·</span>
-              <span className="workbench-strip-tag format" style={{ '--format-color': activeFormatColor }}><ActiveFormatIcon />{activePlanTarget.fileFormat}</span>
+              {knowledgePlan ? (
+                <div className="workbench-scope-control">
+                  <button ref={scopeTriggerRef} type="button" className="workbench-scope-trigger" onClick={() => setScopePopoverOpen((open) => !open)}>
+                    查看适用范围
+                  </button>
+                  {scopePopoverOpen ? (
+                    <div ref={scopePopoverRef} className="workbench-scope-popover">
+                      <section className="workbench-scope-section">
+                        <strong>适用类目</strong>
+                        <div className="workbench-scope-category-list">
+                          {knowledgePlan.scopeCategories?.length ? knowledgePlan.scopeCategories.map((categoryId) => (
+                            <div className="workbench-scope-category" key={categoryId}>
+                              <FolderOpenOutlined />
+                              <span>{categoryPathMap.get(categoryId) || categoryId}</span>
+                            </div>
+                          )) : <div className="workbench-scope-category"><FolderOpenOutlined /><span>全部类目</span></div>}
+                        </div>
+                      </section>
+                      <section className="workbench-scope-section">
+                        <strong>适用格式</strong>
+                        <div className="workbench-scope-format-list">
+                          {unifiedPlanFormats.map((format) => {
+                            const { Icon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+                            return <span className="workbench-scope-format" key={format} style={{ '--format-color': color }}><Icon />{formatLabel(format)}</span>;
+                          })}
+                        </div>
+                      </section>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <span className="workbench-strip-tag format" style={{ '--format-color': activeFormatColor }}><ActiveFormatIcon />{activePlanTarget.fileFormat}</span>
+              )}
             </div>
             <div className="agent-stream" ref={streamRef}>{events.map((event) => <AgentEvent key={event.id} event={event} />)}</div>
             <div className="agent-input">
@@ -7650,10 +9738,10 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
                             <strong>样例文件</strong>
                             <span className="sample-file-popover-head-actions">
                               <button type="button">已接入文件</button>
-                              <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
+                              <button type="button" title={knowledgePlan ? '上传文件' : `上传${unifiedPlanFormats.join('、')}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
                             </span>
                           </div>
-                          <input ref={fileRef} type="file" accept={`.${activePlanTarget.fileFormat}`} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
+                          <input ref={fileRef} type="file" accept={knowledgePlan ? '' : [activePlanTarget.fileFormat].map((item) => `.${item}`).join(',')} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
                           {sampleFiles.length ? sampleFiles.map((file) => {
                             const format = getFileExtension(file.name) || activePlanTarget.fileFormat;
                             const { Icon: SampleFormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
@@ -7795,7 +9883,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
                   )}
                 </div>
               </div>
-            ) : rightTab === '执行结果' ? <ResultPreview executionRecords={executionRecords} /> : <KnowledgeResultPreview formType={activePlanTarget.formType} executionRecords={executionRecords} />}
+            ) : rightTab === '执行结果'
+              ? <ResultPreview executionRecords={executionRecords} onRenameExecutionRecord={renameExecutionRecord} />
+              : <KnowledgeResultPreview formType={activePlanTarget.formType} executionRecords={executionRecords} onRenameExecutionRecord={renameExecutionRecord} />}
             {rightTab === '处理方案' && planNodes.length ? (
               <div className="plan-actions">
                 <div className="plan-run-wrap">
@@ -7806,10 +9896,10 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
                         <strong>样例文件</strong>
                         <span className="sample-file-popover-head-actions">
                           <button type="button">已接入文件</button>
-                          <button type="button" title={`上传${activePlanTarget.fileFormat}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
+                          <button type="button" title={knowledgePlan ? '上传文件' : `上传${unifiedPlanFormats.join('、')}`} onClick={() => fileRef.current?.click()}><FileUploadIcon /> 上传文件</button>
                         </span>
                       </div>
-                      <input ref={fileRef} type="file" accept={`.${activePlanTarget.fileFormat}`} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
+                      <input ref={fileRef} type="file" accept={knowledgePlan ? '' : [activePlanTarget.fileFormat].map((item) => `.${item}`).join(',')} multiple hidden onChange={(event) => uploadFiles(event.target.files)} />
                       {sampleFiles.length ? sampleFiles.map((file) => {
                         const format = getFileExtension(file.name) || activePlanTarget.fileFormat;
                         const { Icon: SampleFormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
@@ -7847,7 +9937,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
         </div>
       </div>
       {addOpen ? <AddToolDialog tools={catalog} categories={toolCategories} nodes={planNodes} parentId={addParentId} onClose={() => { setAddOpen(false); setAddParentId(null); }} onAdd={addTool} /> : null}
-      {editingNode ? <EditNodeDialog node={editingNode} nodes={planNodes} parentId={editingParentId} onClose={() => { setEditingNode(null); setEditingParentId(null); }} onSave={updateNode} /> : null}
+      {editingNode ? <EditNodeDialog node={editingNode} nodes={planNodes} parentId={editingParentId} projectId={projectId} onClose={() => { setEditingNode(null); setEditingParentId(null); }} onSave={updateNode} /> : null}
       {saveConfirmVersion ? (
         <ConfirmDialog
           title="保存方案"
@@ -8005,7 +10095,7 @@ function PlanCopyDialog({
             <span className="field-label-text"><em>*</em>选择文件格式</span>
             <div className="plan-copy-dropdown" ref={formatDropdownRef}>
               <button type="button" className="plan-copy-select-trigger" disabled={copying} onClick={() => { setFormatOpen((current) => !current); setCategoryOpen(false); }}>
-                <span>{form.fileFormat ? form.fileFormat.toUpperCase() : '请选择文件格式'}</span><AntDownOutlined />
+                <span>{form.fileFormat ? formatLabel(form.fileFormat) : '请选择文件格式'}</span><AntDownOutlined />
               </button>
               {formatOpen ? <div className="plan-copy-dropdown-panel plan-copy-format-panel">
                 {workbenchFileFormats.map((format) => {
@@ -8013,7 +10103,7 @@ function PlanCopyDialog({
                   const selected = form.fileFormat === format;
                   return (
                     <button type="button" className={`plan-copy-format-option ${selected ? 'selected' : ''} ${disabled ? 'disabled' : ''}`.trim()} key={format} disabled={disabled} onClick={() => { onFormatSelect(format); setFormatOpen(false); }}>
-                      <span>{format.toUpperCase()}</span>
+                      <span>{formatLabel(format)}</span>
                       {disabled && format === source.fileFormat ? <em>来源组合</em> : null}
                     </button>
                   );
@@ -8412,24 +10502,193 @@ function AddNodeParamGroup({ title, rows, emptyText, showRequired = false }) {
   );
 }
 
-function SimpleNodeConfigParam({ param, onChange }) {
+function SimpleNodeConfigParam({ param, onChange, dynamicOptions = [] }) {
+  const fileInputRef = useRef(null);
+  const detailRef = useRef(null);
+  const panelRef = useRef(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailPosition, setDetailPosition] = useState(null);
+  useEffect(() => {
+    if (!detailOpen) return undefined;
+    const handleMouseDown = (event) => {
+      if (detailRef.current && detailRef.current.contains(event.target)) return;
+      if (panelRef.current && panelRef.current.contains(event.target)) return;
+      setDetailOpen(false);
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [detailOpen]);
   const updateValue = (value) => onChange({ ...param, value, source: { type: 'manual' } });
-  const value = Array.isArray(param.value) ? param.value.join('、') : param.value;
+  const uiSchema = param.uiSchema && typeof param.uiSchema === 'object' ? param.uiSchema : null;
+  const widget = uiSchema?.widget || param.uiWidget || param.type || 'text';
+  const isDynamicSelect = widget === 'select' && uiSchema?.optionSource === 'dynamic' && uiSchema?.dynamicSource?.type === 'knowledgeGraphSchema';
+  const options = (isDynamicSelect ? dynamicOptions : (uiSchema?.options || param.options || [])).map((option) => (
+    option && typeof option === 'object' ? option : { value: option, label: option }
+  ));
+  const rawValue = param.value;
+  const isExpandedSnapshot = isDynamicSelect && rawValue && typeof rawValue === 'object';
+  const comparedValue = isDynamicSelect
+    ? (isExpandedSnapshot ? String(rawValue.schemaId ?? '') : rawValue == null ? '' : String(rawValue))
+    : rawValue == null ? '' : String(rawValue);
+  const selectedValues = Array.isArray(rawValue) ? rawValue.map((item) => String(item)) : [];
+  const optionValues = options.map((option) => String(option.value));
+  const invalidChoiceValue = widget === 'select' || widget === 'radio'
+    ? comparedValue !== '' && !optionValues.includes(comparedValue)
+    : ['multiSelect', 'checkboxGroup', 'tags'].includes(widget)
+      ? selectedValues.find((item) => !optionValues.includes(item))
+      : '';
+  const dynamicMeta = isDynamicSelect ? getDynamicOptionSourceMeta(uiSchema) : null;
+  const selectedOption = isDynamicSelect ? options.find((option) => String(option.value) === comparedValue) || null : null;
+  const selectedValid = isDynamicSelect && comparedValue !== '' && !invalidChoiceValue && Boolean(selectedOption);
+  const returnValue = isDynamicSelect
+    ? (isExpandedSnapshot && rawValue && typeof rawValue === 'object'
+        ? rawValue
+        : selectedOption?.schema ? buildGraphSchemaSnapshotValue(selectedOption.schema) : null)
+    : null;
+  useEffect(() => {
+    if (!detailOpen) return undefined;
+    const updatePosition = () => {
+      const anchor = detailRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const panelWidth = Math.min(680, window.innerWidth - 32);
+      const panelHeight = panelRef.current ? panelRef.current.getBoundingClientRect().height : 300;
+      let top = rect.bottom + 6;
+      let left = rect.right - panelWidth;
+      if (left < 16) left = 16;
+      if (left + panelWidth > window.innerWidth - 16) left = Math.max(16, window.innerWidth - panelWidth - 16);
+      if (top + panelHeight > window.innerHeight - 16) top = Math.max(16, rect.top - panelHeight - 6);
+      setDetailPosition((current) => (current && current.top === top && current.left === left ? current : { top, left }));
+    };
+    updatePosition();
+    document.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      document.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [detailOpen, returnValue]);
+  const helpText = uiSchema ? uiSchema.helpText || '' : param.helpText || param.desc || '';
+  const placeholder = uiSchema?.placeholder || param.placeholder || '';
+  const selectedFileName = rawValue && typeof rawValue === 'object' && !isExpandedSnapshot ? rawValue.name : typeof rawValue === 'string' ? rawValue : '';
+  const formatOptionValue = (optionValue) => {
+    if (typeof optionValue === 'boolean') return optionValue;
+    return optionValue;
+  };
+  const field = widget === 'select' ? (
+    <SelectField value={comparedValue} onChange={(nextValue) => {
+      if (!isDynamicSelect) {
+        updateValue(formatOptionValue(nextValue));
+        return;
+      }
+      const nextOption = options.find((option) => String(option.value) === String(nextValue));
+      updateValue(nextOption?.schema ? buildGraphSchemaSnapshotValue(nextOption.schema) : '');
+    }} missingLabel="当前值已失效">
+      {invalidChoiceValue ? <option value={comparedValue}>{comparedValue}（已失效）</option> : null}
+      {comparedValue === '' ? <option value="" disabled={Boolean(param.required)}>{placeholder || '请选择'}</option> : null}
+      {options.map((option) => <option key={String(option.value)} value={String(option.value)}>{option.label}</option>)}
+      {isDynamicSelect && !options.length ? <option value="" disabled>暂无 Schema，请先在「三元组管理」创建</option> : null}
+    </SelectField>
+  ) : widget === 'radio' ? (
+    <div className="config-choice-group radio-group">
+      {options.map((option) => (
+        <label key={String(option.value)}>
+          <input
+            type="radio"
+            name={`config-${param.id}`}
+            checked={comparedValue === String(option.value)}
+            onChange={() => updateValue(formatOptionValue(option.value))}
+          />
+          <span>{option.label}</span>
+        </label>
+      ))}
+    </div>
+  ) : widget === 'multiSelect' || widget === 'checkboxGroup' || widget === 'tags' ? (
+    <div className={`config-choice-group ${widget === 'multiSelect' ? 'multi-select-group' : 'checkbox-group'}`}>
+      {options.map((option) => {
+        const optionValue = String(option.value);
+        const checked = selectedValues.includes(optionValue);
+        return (
+          <label key={optionValue}>
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => updateValue(checked ? selectedValues.filter((item) => item !== optionValue) : [...selectedValues, optionValue])}
+            />
+            <span>{option.label}</span>
+          </label>
+        );
+      })}
+      {!options.length ? <span className="config-choice-empty">暂无可选项</span> : null}
+    </div>
+  ) : widget === 'switch' ? (
+    <button type="button" className={`switch-control config-value-switch ${rawValue ? 'active' : ''}`} onClick={() => updateValue(!rawValue)} aria-pressed={Boolean(rawValue)}><span /></button>
+  ) : widget === 'fileUpload' ? (
+    <div className="config-file-upload-control">
+      <input
+        ref={fileInputRef}
+        type="file"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) updateValue({ name: file.name, size: file.size, type: file.type, lastModified: file.lastModified });
+          event.target.value = '';
+        }}
+      />
+      <button type="button" className="config-file-select-button" onClick={() => fileInputRef.current?.click()}><PaperClipOutlined /> 选择文件</button>
+      <span className={selectedFileName ? 'has-file' : ''}>{selectedFileName || placeholder || '未选择文件'}</span>
+      {selectedFileName ? <button type="button" className="config-file-clear-button" onClick={() => updateValue('')} aria-label="移除文件"><CloseOutlined /></button> : null}
+    </div>
+  ) : widget === 'textarea' || widget === 'json' ? (
+    <textarea value={rawValue ?? ''} placeholder={placeholder} onChange={(event) => updateValue(event.target.value)} />
+  ) : (
+    <input
+      type={widget === 'number' ? 'number' : widget === 'urlInput' ? 'url' : 'text'}
+      inputMode={widget === 'urlInput' ? 'url' : undefined}
+      min={param.min}
+      max={param.max}
+      value={rawValue ?? ''}
+      placeholder={placeholder}
+      onChange={(event) => updateValue(widget === 'number' ? event.target.value === '' ? '' : Number(event.target.value) : event.target.value)}
+    />
+  );
   return (
-    <label className="simple-node-param-row">
-      <span>{param.label}{param.required ? <em>*</em> : null}</span>
-      {param.type === 'select' ? (
-        <SelectField value={param.value} onChange={updateValue}>
-          {param.options.map((option) => <option key={option} value={option}>{option}</option>)}
-        </SelectField>
-      ) : param.type === 'multiSelect' || param.type === 'tags' ? (
-        <input value={value ?? ''} onChange={(event) => updateValue(event.target.value.split(/[、,]/).filter(Boolean))} />
-      ) : param.type === 'textarea' ? (
-        <textarea value={value ?? ''} onChange={(event) => updateValue(event.target.value)} />
-      ) : (
-        <input type={param.type === 'number' ? 'number' : 'text'} min={param.min} max={param.max} value={value ?? ''} onChange={(event) => updateValue(param.type === 'number' ? Number(event.target.value) : event.target.value)} />
-      )}
-    </label>
+    <div className="simple-node-param-row">
+      <span className="simple-node-param-label">
+        <span>{param.label}{param.required ? <em>*</em> : null}</span>
+      </span>
+      <div className="simple-node-param-control">
+        {field}
+        {selectedValid ? (
+          <div className="config-dynamic-detail-wrap" ref={detailRef}>
+            <button type="button" className={`config-dynamic-detail-link${detailOpen ? ' open' : ''}`} onClick={() => setDetailOpen((open) => !open)}>查看动态数据源详情</button>
+          </div>
+        ) : null}
+        {detailOpen && detailPosition && returnValue ? createPortal(
+          <div className="config-dynamic-detail-panel" ref={panelRef} style={{ top: detailPosition.top, left: detailPosition.left }}>
+            {dynamicMeta ? (
+              <div className="config-dynamic-detail-section">
+                <div className="config-dynamic-detail-title">数据来源信息</div>
+                <div className="config-dynamic-detail-meta">
+                  <div><span>数据源</span><strong>{dynamicMeta.label}</strong></div>
+                  <div><span>过滤范围</span><strong>{dynamicMeta.scope}</strong></div>
+                  <div><span>展示字段</span><strong>{dynamicMeta.displayField === 'name' ? 'Schema 名称' : dynamicMeta.displayField}</strong></div>
+                  <div><span>回填字段</span><strong>{dynamicMeta.valueField === 'content' ? '完整 Schema 内容' : dynamicMeta.valueField}</strong></div>
+                </div>
+              </div>
+            ) : null}
+            <div className="config-dynamic-detail-section">
+              <div className="config-dynamic-detail-title">当前选项回填值</div>
+              <pre className="config-dynamic-detail-return">{JSON.stringify(returnValue, null, 2)}</pre>
+            </div>
+          </div>,
+          document.body
+        ) : null}
+        {helpText ? <small className="simple-node-param-help">{helpText}</small> : null}
+        {param.uiSchemaInvalid ? <small className="config-param-invalid">交互配置与字段类型不匹配，已按字段类型回退展示。</small> : null}
+        {invalidChoiceValue ? <small className="config-param-invalid">当前值「{String(invalidChoiceValue === true ? comparedValue : invalidChoiceValue)}」不在可选项中，请重新选择。</small> : null}
+      </div>
+    </div>
   );
 }
 
@@ -8664,7 +10923,7 @@ function inputArtifactToParam(artifact) {
   };
 }
 
-function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
+function EditNodeDialog({ node, nodes, parentId, projectId, onClose, onSave }) {
   const [draft, setDraft] = useState(cloneWorkbenchNode(node));
   const parentNode = parentId ? nodes.find((item) => item.nodeId === parentId) : null;
   const isKnowledgeGraphNode = isKnowledgeGraphExtractionNode(draft);
@@ -8672,12 +10931,15 @@ function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
     ? [...getPriorNodes(nodes, parentNode.nodeId), ...getPriorNodes(parentNode.innerNodes || [], node.nodeId)]
     : getPriorNodes(nodes, node.nodeId);
   const iterationContext = parentNode ? { parentNode } : null;
+  const projectSchemas = projectId ? dataStore.getKnowledgeGraphSchemas(projectId) : [];
+  const schemaOptions = projectSchemas.map((schema) => ({ value: schema.id, label: schema.name, schema }));
   const scriptParam = draft.params.find((param) => param.id === 'script');
   const normalParams = draft.toolId === 'system-code' ? draft.params.filter((param) => param.id === 'outputVariables') : draft.params;
   const nodeInputParamId = draft.inputParamId || normalParams[0]?.id || '';
   const artifactInputs = draft.inputArtifacts || [];
   const nodeInputParams = artifactInputs.length ? artifactInputs.map(inputArtifactToParam) : normalParams.filter((param) => param.id === nodeInputParamId);
   const configParams = artifactInputs.length ? normalParams : normalParams.filter((param) => param.id !== nodeInputParamId);
+  const useKnowledgeGraphCustomConfig = isKnowledgeGraphNode && !configParams.some((param) => param.hasUiSchema);
   const updateParam = (nextParam) => setDraft((current) => {
     const isNodeInput = nextParam.id === current.inputParamId;
     const inputSource = isNodeInput
@@ -8701,6 +10963,13 @@ function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
       inputArtifacts: (current.inputArtifacts || []).map((artifact) => (artifact.id === nextParam.id ? { ...artifact, source: nextParam.source, value: nextParam.value } : artifact)),
     };
   });
+  const iterationOutputParam = draft.params.find((param) => param.id === 'iterationOutput');
+  const iterationInnerNodeOptions = iterationOutputParam ? getIterationItemOutputOptions(draft) : [];
+  const updateIterationOutputSource = (nextValue) => {
+    if (!iterationOutputParam) return;
+    const [sourceNodeId, ...rest] = String(nextValue || '').split(':');
+    updateParam({ ...iterationOutputParam, source: { type: 'upstream', sourceNodeId, outputPath: rest.join(':') }, value: '' });
+  };
   const updateCodeInput = (idValue, patch) => setDraft((current) => ({
     ...current,
     codeInputs: (current.codeInputs || []).map((input) => input.id === idValue ? { ...input, ...patch } : input),
@@ -8767,15 +11036,20 @@ function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
           <section className="config-section">
             <div className="config-section-head"><h3>配置参数</h3></div>
             <div className="simple-node-param-list">
-              {draft.params.filter((param) => ['concurrency', 'iterationTimeout', 'errorResponseMethod'].includes(param.id)).map((param) => <SimpleNodeConfigParam key={param.id} param={param} onChange={updateParam} />)}
-            </div>
-          </section>
-          <section className="config-section">
-            <div className="config-section-head"><h3>迭代结果来源</h3></div>
-            <div className="param-list">
-              {draft.params.filter((param) => param.id === 'iterationOutput').map((param) => (
-                <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={draft.innerNodes || []} onChange={updateParam} singleLine inlineSource allowFileSource={false} />
-              ))}
+              {draft.params.filter((param) => ['concurrency', 'errorResponseMethod'].includes(param.id)).map((param) => <SimpleNodeConfigParam key={param.id} param={param} onChange={updateParam} />)}
+              <div className="simple-node-param-row">
+                <span className="simple-node-param-label"><span>迭代结果来源{iterationOutputParam?.required ? <em>*</em> : null}</span></span>
+                <div className="simple-node-param-control">
+                  <SelectField value={iterationOutputParam?.source?.type === 'upstream' ? `${iterationOutputParam.source.sourceNodeId}:${iterationOutputParam.source.outputPath}` : ''} onChange={updateIterationOutputSource}>
+                    {iterationInnerNodeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        <OptionLabelWithType label={option.label} type={option.type} />
+                      </option>
+                    ))}
+                  </SelectField>
+                  <small className="simple-node-param-help">选择迭代体子节点的一个输出，每轮结果将汇总为迭代结果数组。</small>
+                </div>
+              </div>
             </div>
           </section>
           <section className="config-section">
@@ -8893,7 +11167,7 @@ function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
               )) : nodeInputParams.length ? nodeInputParams.map((param, index) => <ParamEditor key={param.id} param={param} nodes={nodes} priorNodes={priorNodes} iterationContext={iterationContext} onChange={artifactInputs.length ? updateNodeInputParam : updateParam} singleLine={index === 0} inlineSource showHeader={index === 0} />) : <div className="empty-mini">暂无节点输入</div>}
             </div>
           </section>
-          {isKnowledgeGraphNode ? (
+          {useKnowledgeGraphCustomConfig ? (
             <>
               <section className="config-section">
                 <div className="config-section-head"><h3>配置参数</h3></div>
@@ -8922,7 +11196,7 @@ function EditNodeDialog({ node, nodes, parentId, onClose, onSave }) {
             <section className="config-section">
               <div className="config-section-head"><h3>配置参数</h3></div>
               <div className="simple-node-param-list">
-                {configParams.length ? configParams.map((param) => <SimpleNodeConfigParam key={param.id} param={param} onChange={updateParam} />) : <div className="empty-mini">暂无配置参数</div>}
+                {configParams.length ? configParams.map((param) => <SimpleNodeConfigParam key={param.id} param={param} onChange={updateParam} dynamicOptions={schemaOptions} />) : <div className="empty-mini">暂无配置参数</div>}
               </div>
             </section>
           )}
@@ -9814,6 +12088,8 @@ function sortExecutionRecordsDesc(records) {
 }
 
 function getExecutionRecordLabel(record) {
+  if (record.runName) return record.runName;
+  if (record.runLabel) return record.runLabel;
   const version = record.version || '-';
   const status = record.versionStatus === 'draft' ? '草稿' : '';
   const time = compactRunTime(record.runAt || record.createdAt || '');
@@ -9822,6 +12098,126 @@ function getExecutionRecordLabel(record) {
 
 function getExecutionRecordId(record) {
   return record.runId || `${record.file?.id || record.result?.fileId || 'file'}__${record.version || 'version'}__${record.runAt || record.createdAt || 'latest'}`;
+}
+
+function normalizeExecutionStatus(value, fallback = 'success') {
+  const status = String(value || '').toLowerCase();
+  if (['running', 'executing', 'processing', '执行中', '试跑中'].includes(status)) return 'running';
+  if (['failed', 'failure', 'error', '失败', '执行失败'].includes(status)) return 'failed';
+  if (['skipped', 'not_run', 'notrun', 'unexecuted', '未执行', '已跳过'].includes(status)) return 'notRun';
+  if (['success', 'succeeded', 'completed', 'done', '成功', '已完成'].includes(status)) return 'success';
+  return fallback;
+}
+
+function getExecutionStatusMeta(value, fallback = 'success') {
+  const status = normalizeExecutionStatus(value, fallback);
+  return {
+    success: { status, label: '成功', tone: 'success' },
+    failed: { status, label: '失败', tone: 'danger' },
+    running: { status, label: '执行中', tone: 'blue' },
+    notRun: { status, label: '未执行', tone: 'neutral' },
+  }[status];
+}
+
+function parseExecutionDateTime(value) {
+  if (!value) return null;
+  const date = new Date(String(value).replace(' ', 'T'));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatExecutionDateTime(date, includeDate = true) {
+  if (!date) return '-';
+  const pad = (value) => String(value).padStart(2, '0');
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return includeDate ? `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}` : time;
+}
+
+function getExecutionTimeRange(record) {
+  const startedAt = parseExecutionDateTime(record?.startedAt || record?.runAt || record?.createdAt);
+  const status = normalizeExecutionStatus(record?.status);
+  const endedAt = status === 'running' ? null : parseExecutionDateTime(record?.endedAt || record?.runAt || record?.createdAt);
+  if (!startedAt) return '暂无起止时间';
+  if (!endedAt) return `${formatExecutionDateTime(startedAt)} - 执行中`;
+  const sameDay = startedAt.getFullYear() === endedAt.getFullYear()
+    && startedAt.getMonth() === endedAt.getMonth()
+    && startedAt.getDate() === endedAt.getDate();
+  return `${formatExecutionDateTime(startedAt)} - ${formatExecutionDateTime(endedAt, !sameDay)}`;
+}
+
+function ExecutionRecordInfo({ record, onRename }) {
+  const recordId = getExecutionRecordId(record || {});
+  const recordName = record ? getExecutionRecordLabel(record) : '';
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState(recordName);
+  const [errorMessage, setErrorMessage] = useState('');
+  const statusMeta = getExecutionStatusMeta(record?.status);
+
+  useEffect(() => {
+    setEditing(false);
+    setDraftName(recordName);
+    setErrorMessage('');
+  }, [recordId, recordName]);
+
+  if (!record) return null;
+
+  const cancelEditing = () => {
+    setEditing(false);
+    setDraftName(recordName);
+    setErrorMessage('');
+  };
+  const saveName = () => {
+    const nextName = draftName.trim();
+    if (!nextName) {
+      setErrorMessage('请输入试跑记录名称');
+      return;
+    }
+    if (nextName.length > 50) {
+      setErrorMessage('试跑记录名称最多 50 个字符');
+      return;
+    }
+    if (nextName === recordName) {
+      cancelEditing();
+      return;
+    }
+    if (onRename?.(record, nextName) === false) {
+      setErrorMessage('名称保存失败，请重试');
+      return;
+    }
+    setEditing(false);
+    setErrorMessage('');
+  };
+
+  return (
+    <section className="execution-record-info" aria-label="试跑记录信息">
+      <div className="execution-record-info-main">
+        {editing ? (
+          <div className="execution-record-name-edit">
+            <input
+              autoFocus
+              value={draftName}
+              maxLength={50}
+              onChange={(event) => { setDraftName(event.target.value); setErrorMessage(''); }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') saveName();
+                if (event.key === 'Escape') cancelEditing();
+              }}
+              aria-label="试跑记录名称"
+            />
+            <button type="button" onClick={saveName}>保存</button>
+            <button type="button" className="secondary" onClick={cancelEditing}>取消</button>
+          </div>
+        ) : (
+          <div className="execution-record-name">
+            <strong title={recordName}>{recordName}</strong>
+            <button type="button" aria-label="重命名试跑记录" title="重命名" onClick={() => setEditing(true)}><EditOutlined /></button>
+          </div>
+        )}
+        <Badge tone={statusMeta.tone}>{statusMeta.label}</Badge>
+      </div>
+      {errorMessage ? <span className="execution-record-name-error">{errorMessage}</span> : null}
+      <span className="execution-record-time">{getExecutionTimeRange(record)}</span>
+    </section>
+  );
 }
 
 function KnowledgeGraphPreviewTabs({ payload }) {
@@ -10034,7 +12430,7 @@ function KnowledgeGraphPreviewTabs({ payload }) {
   );
 }
 
-function KnowledgeResultPreview({ formType, executionRecords = {} }) {
+function KnowledgeResultPreview({ formType, executionRecords = {}, onRenameExecutionRecord }) {
   const records = useMemo(() => sortExecutionRecordsDesc(Object.values(executionRecords)), [executionRecords]);
   const fileOptions = useMemo(() => {
     const byId = new Map();
@@ -10110,6 +12506,7 @@ function KnowledgeResultPreview({ formType, executionRecords = {} }) {
           </SelectField>
         </label>
       </div>
+      <ExecutionRecordInfo record={selectedRecord} onRename={onRenameExecutionRecord} />
       {selectedRecord ? (
         formType === '知识图谱' ? <KnowledgeGraphPreviewTabs payload={payload} /> : (
           <section className="knowledge-preview-card">
@@ -10124,7 +12521,7 @@ function KnowledgeResultPreview({ formType, executionRecords = {} }) {
   );
 }
 
-function ResultPreview({ executionRecords = {} }) {
+function ResultPreview({ executionRecords = {}, onRenameExecutionRecord }) {
   const records = useMemo(() => sortExecutionRecordsDesc(Object.values(executionRecords)), [executionRecords]);
   const fileOptions = useMemo(() => {
     const byId = new Map();
@@ -10192,11 +12589,13 @@ function ResultPreview({ executionRecords = {} }) {
           </SelectField>
         </label>
       </div>
+      <ExecutionRecordInfo record={selectedRecord} onRename={onRenameExecutionRecord} />
       {selectedRecord ? (
         <section className="sample-result-group">
-          {(selectedRecord.planNodes || []).map((node, index) => {
-            const run = selectedRecord.result.toolRuns.find((item) => item.nodeId === node.nodeId || item.toolName === node.toolName);
-            return <ToolRunResultCard key={`${selectedRecord.file.id}-${selectedRecord.version}-${node.nodeId}`} run={run} node={node} file={selectedRecord.file} index={index} />;
+          {(selectedRecord.planNodes || []).filter((node) => node.enabled !== false).map((node, index, nodes) => {
+            const nodeExecutions = selectedRecord.result?.nodeExecutions || selectedRecord.result?.toolRuns || [];
+            const run = nodeExecutions.find((item) => item.nodeId === node.nodeId || item.toolName === node.toolName);
+            return <ToolRunResultCard key={`${selectedRecord.file.id}-${selectedRecord.version}-${node.nodeId}`} run={run} node={node} nodes={nodes} file={selectedRecord.file} index={index} />;
           })}
         </section>
       ) : <div className="empty-mini">当前组合暂无执行结果</div>}
@@ -10204,12 +12603,63 @@ function ResultPreview({ executionRecords = {} }) {
   );
 }
 
-function getRunInputPreview({ run, node, file, index }) {
-  if (index === 0 || node?.input === 'sampleFile') {
-    return JSON.stringify({ fileName: file.name, fileType: file.type, fileSize: file.size }, null, 2);
+function isSensitiveSnapshotField(name = '') {
+  return /(^|[_-])(api[_-]?key|apikey|access[_-]?key|accesskey|secret|token|password|credential)([_-]|$)|密钥|令牌|密码|凭证/i.test(String(name));
+}
+
+function maskSensitiveSnapshotValue(value) {
+  if (value == null || value === '') return '********';
+  const text = String(value);
+  if (text.length <= 8) return '********';
+  return `${text.slice(0, 2)}****${text.slice(-2)}`;
+}
+
+function maskSensitiveSnapshotData(value, fieldName = '') {
+  if (isSensitiveSnapshotField(fieldName)) return maskSensitiveSnapshotValue(value);
+  if (Array.isArray(value)) return value.map((item) => maskSensitiveSnapshotData(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, maskSensitiveSnapshotData(item, key)]));
   }
-  const inputPath = run?.parameters?.[0]?.value || node?.inputSource?.outputPath || 'data.result';
-  return JSON.stringify({ source: 'upstream', input: inputPath }, null, 2);
+  return value;
+}
+
+function formatSnapshotContent(value) {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return typeof parsed === 'object' && parsed !== null
+        ? JSON.stringify(maskSensitiveSnapshotData(parsed), null, 2)
+        : value;
+    } catch {
+      return value.replace(
+        /((?:api[_-]?key|apikey|access[_-]?key|accesskey|secret|token|password|credential|密钥|令牌|密码|凭证)\s*[:=]\s*)(["']?)([^,\s"'}]+)\2/gi,
+        (_, prefix, quote, secret) => `${prefix}${quote}${maskSensitiveSnapshotValue(secret)}${quote}`,
+      );
+    }
+  }
+  return JSON.stringify(maskSensitiveSnapshotData(value), null, 2);
+}
+
+function getRunActualInput(run) {
+  if (!run) return null;
+  if (run.actualInput !== undefined) return run.actualInput;
+  if (run.inputSnapshot !== undefined) return run.inputSnapshot;
+  if (run.inputData !== undefined) return run.inputData;
+  if (run.inputFull) {
+    try {
+      return JSON.parse(run.inputFull);
+    } catch {
+      return run.inputFull;
+    }
+  }
+  return null;
+}
+
+function getRunNodeOutput(run) {
+  if (!run) return null;
+  if (run.nodeOutput !== undefined) return run.nodeOutput;
+  if (run.outputSnapshot !== undefined) return run.outputSnapshot;
+  return parseRunOutput(run) ?? run.outputFull ?? null;
 }
 
 function copyText(text) {
@@ -10229,30 +12679,275 @@ function copyText(text) {
   document.body.removeChild(textarea);
 }
 
-function RunResultBlock({ title, content }) {
+function RunCollapsibleBlock({ title, tone = '', className = '', copyContent = null, children }) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <div className="run-block">
+    <div className={`run-block ${tone ? `run-block-${tone}` : ''} ${className}`.trim()}>
       <div className="run-block-head">
-        <h4>{title}</h4>
-        <button type="button" title={`复制${title}`} aria-label={`复制${title}`} onClick={() => copyText(content)}><CopyOutlined /></button>
+        <button
+          type="button"
+          className="run-block-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          <AntDownOutlined className={expanded ? '' : 'collapsed'} />
+          <h4>{title}</h4>
+        </button>
+        {copyContent != null
+          ? <button type="button" className="run-block-copy" title={`复制${title}`} aria-label={`复制${title}`} onClick={() => copyText(copyContent)}><CopyOutlined /></button>
+          : null}
       </div>
-      <pre>{content}</pre>
+      {expanded ? children : null}
     </div>
   );
 }
 
-function ToolRunResultCard({ run, node, file, index }) {
-  if (!run) return null;
-  const inputPreview = getRunInputPreview({ run, node, file, index });
+function RunResultBlock({ title, content, tone = '' }) {
+  return (
+    <RunCollapsibleBlock title={title} tone={tone} copyContent={content}>
+      <div className="run-block-content"><pre>{content}</pre></div>
+    </RunCollapsibleBlock>
+  );
+}
+
+function getRunInputConfigurationSource(item, node) {
+  const name = item.name || item.displayName || '';
+  const nodeInput = [...(node?.inputArtifacts || []), ...(node?.params || [])].find((input) => (
+    [input.displayName, input.label, input.name, input.id].filter(Boolean).includes(name)
+  ));
+  const sourceType = nodeInput?.source?.type || node?.inputSource?.type;
+  if (sourceType === 'file') return '引用原始文件';
+  const source = item.source || item.value || '-';
+  if (/^样例文件(?:\s*·.*)?$/.test(String(source))) return '引用原始文件';
+  return source;
+}
+
+function RunInputBlock({ run, node, nodes, file, status }) {
+  const configuration = run?.inputConfiguration?.length
+    ? run.inputConfiguration
+    : getNodeInputConfigurationSnapshot(node, nodes, file);
+  const actualInput = getRunActualInput(run);
+  return (
+    <RunCollapsibleBlock title="节点输入" className="run-input-block">
+      <div className="run-block-content run-input-content">
+        <div className="run-sub-block">
+          <strong>输入配置</strong>
+          <div className="run-config-list">
+            {configuration.map((item, index) => {
+              const name = item.name || item.displayName || `输入${index + 1}`;
+              const source = getRunInputConfigurationSource(item, node);
+              return <div key={`${name}-${index}`}><span>{name}</span><b>{isSensitiveSnapshotField(name) ? maskSensitiveSnapshotValue(source) : source}</b></div>;
+            })}
+          </div>
+        </div>
+        {status !== 'notRun' ? (
+          <div className="run-sub-block">
+            <div className="run-sub-block-head">
+              <strong>实际输入</strong>
+              {actualInput != null ? <button type="button" title="复制实际输入" aria-label="复制实际输入" onClick={() => copyText(formatSnapshotContent(actualInput))}><CopyOutlined /></button> : null}
+            </div>
+            {actualInput != null
+              ? <pre>{formatSnapshotContent(actualInput)}</pre>
+              : <span className="run-history-missing">历史记录未保存实际输入</span>}
+          </div>
+        ) : null}
+      </div>
+    </RunCollapsibleBlock>
+  );
+}
+
+function RunConfigBlock({ run, node, nodes }) {
+  const snapshotParams = run?.effectiveParameters?.length ? run.effectiveParameters : [];
+  const legacyParams = (run?.parameters || []).map((param) => ({
+    name: param.displayName || getWorkbenchParamLabel(param.name) || param.name,
+    value: param.value,
+    sensitive: Boolean(param.sensitive),
+  }));
+  const nodeParams = node ? getNodeEffectiveParameterSnapshot(node, nodes) : [];
+  const params = snapshotParams.length ? snapshotParams : legacyParams.length ? legacyParams : nodeParams;
+  if (!params.length) return null;
+  return (
+    <RunCollapsibleBlock title="配置参数" className="run-config-block">
+      <div className="run-block-content">
+        <div className="run-config-list">
+          {params.map((param, index) => {
+            const name = param.name || param.displayName || `参数${index + 1}`;
+            const value = param.sensitive || isSensitiveSnapshotField(name)
+              ? maskSensitiveSnapshotValue(param.value)
+              : formatNodeConfigValue(param.value);
+            return <div key={`${name}-${index}`}><span>{name}</span><b>{value || '-'}</b></div>;
+          })}
+        </div>
+      </div>
+    </RunCollapsibleBlock>
+  );
+}
+
+function parseOutputSnapshot(value) {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function getSnapshotValueByPath(snapshot, path) {
+  if (!snapshot || typeof snapshot !== 'object' || !path) return undefined;
+  const segments = String(path).split('.').filter(Boolean);
+  let current = snapshot;
+  for (const segment of segments) {
+    if (!current || typeof current !== 'object' || !(segment in current)) return undefined;
+    current = current[segment];
+  }
+  return current;
+}
+
+function findSnapshotValueByKey(snapshot, targetKey) {
+  if (!snapshot || typeof snapshot !== 'object' || !targetKey) return undefined;
+  if (Object.prototype.hasOwnProperty.call(snapshot, targetKey)) return snapshot[targetKey];
+  for (const value of Object.values(snapshot)) {
+    const matched = findSnapshotValueByKey(value, targetKey);
+    if (matched !== undefined) return matched;
+  }
+  return undefined;
+}
+
+function getNodeOutputFields(node, nodeOutput) {
+  const snapshot = parseOutputSnapshot(nodeOutput);
+  const outputs = getEffectiveNodeOutputs(node);
+  if (!outputs.length) return [{ key: 'node-output', label: '节点输出', path: '', type: '', value: snapshot }];
+  return outputs.map((output, index) => {
+    const path = output.path || output.id || output.name || '';
+    const candidateKeys = [path, output.id, output.name].filter(Boolean);
+    let value;
+    for (const candidate of candidateKeys) {
+      value = getSnapshotValueByPath(snapshot, candidate);
+      if (value === undefined) value = findSnapshotValueByKey(snapshot, String(candidate).split('.').pop());
+      if (value !== undefined) break;
+    }
+    const display = getOutputDisplay(output);
+    return {
+      key: path || `output-${index + 1}`,
+      label: output.displayName || output.label || output.name || `输出字段${index + 1}`,
+      path,
+      type: display.type || output.type || '',
+      value,
+    };
+  });
+}
+
+function RunNodeOutputBlock({ node, nodeOutput }) {
+  const fields = getNodeOutputFields(node, nodeOutput);
+  return (
+    <RunCollapsibleBlock title="节点输出" className="run-output-block">
+      <div className="run-block-content run-output-fields">
+        {fields.map((field) => (
+          <div className="run-output-field" key={field.key}>
+            <div className="run-output-field-head">
+              <strong>{field.label}</strong>
+              {field.type ? <span>{field.type}</span> : null}
+              {field.path ? <code>{field.path}</code> : null}
+              {field.value !== undefined
+                ? <button type="button" className="run-output-copy" title={`复制${field.label}`} aria-label={`复制${field.label}`} onClick={() => copyText(formatSnapshotContent(field.value))}><CopyOutlined /></button>
+                : null}
+            </div>
+            {field.value !== undefined
+              ? <pre>{formatSnapshotContent(field.value)}</pre>
+              : <span className="run-history-missing">历史记录未保存该输出字段</span>}
+          </div>
+        ))}
+      </div>
+    </RunCollapsibleBlock>
+  );
+}
+
+function normalizeInnerRuns(innerRuns) {
+  return innerRuns.map((innerRun) => (Array.isArray(innerRun.batches) && innerRun.batches.length
+    ? innerRun
+    : {
+        ...innerRun,
+        batches: innerRun.nodeOutput != null
+          ? [{ batchIndex: 1, actualInput: innerRun.actualInput ?? null, nodeOutput: innerRun.nodeOutput, status: innerRun.status || '成功', outputFull: innerRun.outputFull }]
+          : [],
+      }));
+}
+
+function getIterationBatchCount(run, innerRuns) {
+  if (Number.isInteger(run?.iterationBatchCount) && run.iterationBatchCount > 0) return run.iterationBatchCount;
+  for (const innerRun of innerRuns) {
+    if (Array.isArray(innerRun.batches) && innerRun.batches.length) return innerRun.batches.length;
+  }
+  return 1;
+}
+
+function InnerRunBatchCard({ innerRun, innerNode, node, file }) {
+  const batchCount = Math.max(innerRun.batches?.length || 1, 1);
+  const [selectedBatch, setSelectedBatch] = useState(1);
+  const currentBatch = Math.min(Math.max(selectedBatch, 1), batchCount);
+  const batch = innerRun.batches?.[currentBatch - 1] || null;
+  const innerStatus = getExecutionStatusMeta(batch?.status, batch ? 'success' : 'notRun');
+  const batchRun = batch && innerRun.batches ? { ...batch, parameters: innerRun.parameters, inputConfiguration: innerRun.inputConfiguration, effectiveParameters: innerRun.effectiveParameters } : null;
+  return (
+    <div className="run-inner-run">
+      <div className="run-inner-run-head">
+        <strong className="run-inner-run-title">
+          <span>{innerRun.toolName || innerNode.toolName}</span>
+          {batchCount > 1 ? (
+            <span className="run-inner-run-batch">
+              <SelectField className="run-batch-select" value={currentBatch} onChange={(value) => setSelectedBatch(Number(value))}>
+                {Array.from({ length: batchCount }, (_, index) => <option key={index + 1} value={index + 1}>{`迭代执行${index + 1}`}</option>)}
+              </SelectField>
+            </span>
+          ) : (
+            <span className="run-inner-run-batch run-batch-static">迭代执行1</span>
+          )}
+        </strong>
+        <Badge tone={innerStatus.tone}>{innerStatus.label}</Badge>
+      </div>
+      {batchRun ? (
+        <>
+          <RunInputBlock run={batchRun} node={innerNode} nodes={node.innerNodes || []} file={file} status={innerStatus.status} />
+          <RunConfigBlock run={batchRun} node={innerNode} nodes={node.innerNodes || []} />
+          <RunNodeOutputBlock node={innerNode} nodeOutput={batch.nodeOutput} />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function ToolRunResultCard({ run, node, nodes, file, index }) {
+  const statusMeta = getExecutionStatusMeta(run?.status, run ? 'success' : 'notRun');
+  const nodeOutput = getRunNodeOutput(run);
+  const error = run?.error || run?.errorMessage || run?.errorInfo || null;
+  const innerRuns = normalizeInnerRuns(Array.isArray(run?.innerRuns) ? run.innerRuns : []);
   return (
     <section className="run-card">
       <div className="run-card-head">
         <div>
           <strong>{node?.toolName || run.toolName}</strong>
+          <span>节点 {index + 1}</span>
         </div>
+        <Badge tone={statusMeta.tone}>{statusMeta.label}</Badge>
       </div>
-      <RunResultBlock title="输入" content={inputPreview} />
-      {run.outputFull ? <RunResultBlock title="输出" content={run.outputFull} /> : null}
+      <RunInputBlock run={run} node={node} nodes={nodes} file={file} status={statusMeta.status} />
+      <RunConfigBlock run={run} node={node} nodes={nodes} />
+      {isIterationNode(node) && innerRuns.length ? (
+        <RunCollapsibleBlock title={`迭代体执行明细（${getIterationBatchCount(run, innerRuns)}次）`} className="run-inner-runs-block">
+          <div className="run-inner-runs">
+            {innerRuns.map((innerRun, innerIndex) => {
+              const innerNode = (node.innerNodes || []).find((item) => item.nodeId === innerRun.nodeId) || (node.innerNodes || [])[innerIndex] || { toolName: innerRun.toolName, category: innerRun.category };
+              return <InnerRunBatchCard key={innerRun.nodeId || `${innerRun.toolName}-${innerIndex}`} innerRun={innerRun} innerNode={innerNode} node={node} file={file} />;
+            })}
+          </div>
+        </RunCollapsibleBlock>
+      ) : null}
+      {statusMeta.status !== 'notRun' && nodeOutput != null
+        ? <RunNodeOutputBlock node={node} nodeOutput={nodeOutput} />
+        : null}
+      {statusMeta.status === 'failed'
+        ? <RunResultBlock title="报错信息" content={error != null ? formatSnapshotContent(error) : '历史记录未保存报错信息'} tone="error" />
+        : null}
     </section>
   );
 }
@@ -10280,6 +12975,8 @@ function getDefaultWorkbenchTarget(projectId = dataStore.getProjects()[0]?.id) {
     formType: category?.formTypes?.[0] || '切片库',
     fileFormat: workbenchFileFormats[0],
     focusVersion: null,
+    knowledgePlanId: null,
+    returnScreen: 'ops-category',
     entryNonce: Date.now(),
   };
 }
@@ -10292,26 +12989,30 @@ export function App() {
   const [toast, setToast] = useState(null);
   const notify = (message, type = 'info') => setToast({ message, type });
   const openSolution = (id) => { setProjectId(id); setActive('ops-category'); };
-  const openWorkbench = (id, categoryId = null, formType = '切片库', fileFormat = workbenchFileFormats[0], focusVersion = null) => {
-    setWorkbenchTarget({ projectId: id, categoryId, formType, fileFormat, focusVersion, entryNonce: Date.now() });
+  const openWorkbench = (id, categoryId = null, formType = '切片库', fileFormat = workbenchFileFormats[0], focusVersion = null, knowledgePlanId = null, returnScreen = 'ops-category') => {
+    setWorkbenchTarget({ projectId: id, categoryId, formType, fileFormat, focusVersion, knowledgePlanId, returnScreen, entryNonce: Date.now() });
     setActive('ops-workbench');
   };
 
   let content;
-  if (active === 'admin-mcp') content = <McpServicePage notify={notify} />;
+  if (active === 'admin-mcp') content = <McpServicePage />;
   else if (active === 'admin-tools') content = <ToolManagementPage notify={notify} />;
-  else if (active === 'ops-projects') content = <ProjectManagementPage notify={notify} onOpenSolution={openSolution} onOpenWorkbench={openWorkbench} />;
-  else if (active === 'ops-category') content = <ProjectSolutionPage projectId={projectId} notify={notify} onBack={() => setActive('ops-projects')} onWorkbench={openWorkbench} />;
-  else if (active === 'ops-workbench') content = <WorkbenchPage key={workbenchTarget.entryNonce} {...workbenchTarget} notify={notify} onBack={() => setActive('ops-category')} onOpenWorkbench={openWorkbench} />;
+  else if (active === 'ops-projects') content = <ProjectManagementPage notify={notify} onOpenSolution={openSolution} />;
+  else if (active === 'ops-category') content = <ProjectSolutionPage projectId={projectId} notify={notify} onBack={() => setActive('ops-projects')} />;
+  else if (active === 'ops-plans') content = <KnowledgePlanPage projectId={projectId} notify={notify} onOpenWorkbench={openWorkbench} />;
+  else if (active === 'ops-access') content = <KnowledgeAccessPage projectId={projectId} notify={notify} onOpenPlans={(id) => { setProjectId(id); setActive('ops-plans'); }} />;
+  else if (active === 'ops-workbench') content = <WorkbenchPage key={workbenchTarget.entryNonce} {...workbenchTarget} notify={notify} onBack={() => setActive(workbenchTarget.returnScreen || 'ops-plans')} onOpenWorkbench={openWorkbench} />;
   else if (active === 'ops-result' || active === 'ops-knowledge-points') content = <KnowledgePointsPage />;
   else if (active === 'ops-slice-library') content = <EmptyPage title="文本切片" />;
   else if (active === 'ops-qa-library') content = <EmptyPage title="问答库" />;
   else content = <EmptyPage title={active} />;
 
+  // 方案配置页（工作台）没有独立菜单项：左侧菜单按来源页面保持高亮（从「知识加工方案」进入则继续选中「知识加工方案」）
+  const menuActive = active === 'ops-workbench' ? (workbenchTarget.returnScreen || 'ops-plans') : active;
+
   return (
-    <Shell active={active} onNavigate={(key) => {
+    <Shell active={active} menuActive={menuActive} onNavigate={(key) => {
       if (key === 'ops-category') setProjectId(projectId || dataStore.getProjects()[0]?.id);
-      if (key === 'ops-workbench') setWorkbenchTarget((current) => getDefaultWorkbenchTarget(current.projectId || dataStore.getProjects()[0]?.id));
       setActive(key === 'ops-result' ? 'ops-knowledge-points' : key);
     }}>
       {content}
