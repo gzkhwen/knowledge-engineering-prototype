@@ -394,6 +394,17 @@ function demoSampleFile(fileFormat, seedName) {
   };
 }
 
+// 上传失败演示样例（R042）：随 demo 种子数据持久化，刷新后仍在，用于演示/验收失败态 UI；
+// 真实运行中产生的上传失败文件不持久化（需求约定）。
+const demoFailedSample = {
+  id: 'demo-sample-upload-failed',
+  name: '医保政策条款明细_大文件版.pdf',
+  type: 'PDF',
+  size: '62.40 MB',
+  status: '上传失败',
+  errorMessage: '文件大小超过 50MB 上限，上传失败（示例数据）',
+};
+
 function demoResult(file, nodes, formType, categoryName, version, categoryId = '') {
   const isFundKnowledgePdf = categoryId === 'cat-wealth-fund' && formType === '知识点' && file.type === 'PDF';
   const isKnowledgeGraph = formType === '知识图谱' && file.type === 'PDF';
@@ -697,7 +708,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v20';
+  const demoVersion = 'workbench-plan-demo-v21';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
@@ -710,7 +721,7 @@ function ensureDemoPlanData() {
   const categoryById = new Map(categories.map((item) => [item.id, item]));
 
   const definitions = [
-    { planScope: 'fallback', formType: '切片库', fileFormat: 'pdf', versions: ['1.0', '1.1'] },
+    { planScope: 'fallback', formType: '切片库', fileFormat: 'pdf', versions: ['1.0', '1.1'], withFailedSample: true },
     { planScope: 'fallback', formType: '切片库', fileFormat: 'docx', versions: ['1.0'] },
     { planScope: 'fallback', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1'] },
     { planScope: 'fallback', formType: 'QA库', fileFormat: 'txt', versions: ['1.0'] },
@@ -845,7 +856,7 @@ function ensureDemoPlanData() {
         planId: plan.id,
         version,
         nodes: versionNodes,
-        sampleFiles: [sample],
+        sampleFiles: definition.withFailedSample ? [sample, demoFailedSample] : [sample],
         results: [result],
         createdAt: `2026-07-0${Math.min(index + 1, 9)} 10:00`,
       });

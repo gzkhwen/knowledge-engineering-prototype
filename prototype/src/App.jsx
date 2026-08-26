@@ -27,6 +27,7 @@ import {
   PaperClipOutlined,
   PlusOutlined,
   RobotOutlined,
+  ReloadOutlined,
   SearchOutlined,
   SendOutlined,
   SettingOutlined,
@@ -35,6 +36,7 @@ import {
   ThunderboltOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
+import { message, Progress } from 'antd';
 import { dataStore, getKnowledgeFormTypeLabel, knowledgeFormTypes } from './dataStore.js';
 import { McpServicePage } from './pages/McpServicePage.jsx';
 import {
@@ -8448,7 +8450,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   );
   const hasAgentTask = Boolean(agentTask);
   const canStopAgent = running || testing;
-  const canSendAgentMessage = !running && !testing && (hasAgentTask || Boolean(agentInput.trim()) || (!planNodes.length && sampleFiles.length > 0));
+  const readySampleFiles = sampleFiles.filter((file) => file.status === '未发送' || file.status === '已完成');
+  const hasPendingSampleFiles = sampleFiles.some((file) => file.status === '上传中' || file.status === '上传失败');
+  const canSendAgentMessage = !running && !testing && !hasPendingSampleFiles && (hasAgentTask || Boolean(agentInput.trim()) || (!planNodes.length && readySampleFiles.length > 0));
   const hasCurrentVersionExecution = (file) => {
     const fileKey = getSampleFileKey(file);
     return selectedVersionStatus === 'formal' && Object.values(executionRecords).some((record) => (
@@ -8622,6 +8626,47 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     notify('已添加演示样例文件', 'success');
   };
 
+  const uploadTimersRef = useRef(new Map());
+  const demoFailFirstUploadRef = useRef(true);
+  const clearUploadTimer = (fileId) => {
+    const timer = uploadTimersRef.current.get(fileId);
+    if (timer) {
+      window.clearInterval(timer);
+      uploadTimersRef.current.delete(fileId);
+    }
+  };
+  useEffect(() => {
+    const timers = uploadTimersRef.current;
+    return () => {
+      timers.forEach((timer) => window.clearInterval(timer));
+      timers.clear();
+    };
+  }, []);
+  const startSimulatedUpload = (file) => {
+    const sizeMB = parseFloat(file.size) || 1;
+    const totalMs = Math.min(3000 + sizeMB * 600, 20000);
+    const stepMs = 120;
+    const stepCount = Math.max(Math.round(totalMs / stepMs), 1);
+    let step = 0;
+    const timer = window.setInterval(() => {
+      step += 1;
+      const progress = Math.min(Math.round((step / stepCount) * 100), 100);
+      setSampleFiles((current) => current.map((item) => (item.id === file.id ? { ...item, progress } : item)));
+      // 演示逻辑：本次进入工作台后第一个上传的文件，进度到 50% 时模拟失败，之后上传的文件均成功
+      if (demoFailFirstUploadRef.current && progress >= 50) {
+        demoFailFirstUploadRef.current = false;
+        clearUploadTimer(file.id);
+        setSampleFiles((current) => current.map((item) => (item.id === file.id ? { ...item, status: '上传失败', progress: undefined, errorMessage: '网络中断导致上传失败，请重新上传（演示）' } : item)));
+        return;
+      }
+      if (progress >= 100) {
+        clearUploadTimer(file.id);
+        setSampleFiles((current) => current.map((item) => (item.id === file.id ? { ...item, status: '未发送', progress: undefined } : item)));
+        message.success('样例文件上传成功');
+      }
+    }, stepMs);
+    uploadTimersRef.current.set(file.id, timer);
+  };
   const uploadFiles = (files) => {
     if (!files?.length) return;
     const fileList = Array.from(files);
@@ -8633,17 +8678,31 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       return valid;
     })();
     if (!validFiles.length) return;
-    const next = validFiles.map((file) => ({ id: `${file.name}-${file.lastModified}`, name: file.name, type: formatLabel(getFileExtension(file.name).toLowerCase()), size: `${Math.max(file.size / 1024 / 1024, 0.01).toFixed(2)} MB`, status: '上传中' }));
-    const nextIds = new Set(next.map((file) => file.id));
-    setSampleFiles((current) => [...next, ...current.filter((item) => !next.some((row) => row.id === item.id))]);
-    window.setTimeout(() => {
-      setSampleFiles((current) => current.map((file) => (nextIds.has(file.id) ? { ...file, status: '未发送' } : file)));
-    }, 700);
-    notify(`已添加 ${next.length} 个样例文件`, 'success');
+    const next = validFiles.map((file) => ({ id: `${file.name}-${file.lastModified}`, name: file.name, type: formatLabel(getFileExtension(file.name).toLowerCase()), size: `${Math.max(file.size / 1024 / 1024, 0.01).toFixed(2)} MB`, status: '上传中', progress: 0 }));
+    const existingIds = new Set(sampleFiles.map((item) => item.id));
+    const duplicates = next.filter((file) => existingIds.has(file.id));
+    const fresh = next.filter((file) => !existingIds.has(file.id));
+    setSampleFiles([...fresh, ...sampleFiles]);
+    fresh.forEach((file) => startSimulatedUpload(file));
+    if (duplicates.length) {
+      message.warning({ content: (<div>{duplicates.map((file) => <div key={file.id}>{file.name} 已存在，本次不上传</div>)}</div>) });
+    }
     if (fileRef.current) fileRef.current.value = '';
+  };
+  const cancelUpload = (fileId) => {
+    clearUploadTimer(fileId);
+    setSampleFiles((current) => current.filter((file) => file.id !== fileId));
+  };
+  const retryUpload = (fileId) => {
+    const target = sampleFiles.find((file) => file.id === fileId);
+    if (!target) return;
+    setSampleFiles((current) => current.map((file) => (file.id === fileId ? { ...file, status: '上传中', progress: 0, errorMessage: undefined } : file)));
+    startSimulatedUpload({ ...target, status: '上传中', progress: 0, errorMessage: undefined });
   };
 
   const runAgent = (files = sampleFiles) => {
+    const readyFiles = (files || []).filter((file) => file.status === '未发送' || file.status === '已完成');
+    files = readyFiles;
     if (!files.length) {
       notify('请先上传或添加样例文件', 'error');
       return;
@@ -9746,16 +9805,34 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
                           {sampleFiles.length ? sampleFiles.map((file) => {
                             const format = getFileExtension(file.name) || activePlanTarget.fileFormat;
                             const { Icon: SampleFormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+                            const uploading = file.status === '上传中';
+                            const failed = file.status === '上传失败';
                             return (
                               <div className="sample-file-popover-item" key={file.id} style={{ '--format-color': color }}>
                                 <span className="scheme-format-icon"><SampleFormatIcon /></span>
                                 <span className="sample-file-popover-name">
                                   <span>{file.name}</span>
+                                  {uploading ? <em className="sample-status-tag status-上传中">上传中</em> : null}
+                                  {failed ? <em className="sample-status-tag status-上传失败">上传失败</em> : null}
+                                  {failed && file.errorMessage ? <em className="sample-file-error-text">{file.errorMessage}</em> : null}
                                 </span>
-                                <span className="sample-file-popover-actions">
-                                  <button type="button" title="发送" disabled={running || testing} onClick={() => sendSampleFile(file)}><SendOutlined /></button>
-                                  <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
-                                </span>
+                                {uploading ? (
+                                  <span className="sample-file-progress">
+                                    <Progress type="circle" percent={file.progress ?? 0} size={20} strokeWidth={8} showInfo={false} />
+                                    <span className="sample-file-progress-text">{file.progress ?? 0}%</span>
+                                    <button type="button" className="sample-file-cancel" title="取消上传" disabled={running || testing} onClick={() => cancelUpload(file.id)}><CloseOutlined /></button>
+                                  </span>
+                                ) : failed ? (
+                                  <span className="sample-file-popover-actions always">
+                                    <button type="button" title="重新上传" disabled={running || testing} onClick={() => retryUpload(file.id)}><ReloadOutlined /></button>
+                                    <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
+                                  </span>
+                                ) : (
+                                  <span className="sample-file-popover-actions">
+                                    <button type="button" title="发送" disabled={running || testing} onClick={() => sendSampleFile(file)}><SendOutlined /></button>
+                                    <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
+                                  </span>
+                                )}
                               </div>
                             );
                           }) : <p>暂无样例文件</p>}
@@ -9905,19 +9982,37 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
                         const format = getFileExtension(file.name) || activePlanTarget.fileFormat;
                         const { Icon: SampleFormatIcon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
                         const alreadyTested = hasCurrentVersionExecution(file);
+                        const uploading = file.status === '上传中';
+                        const failed = file.status === '上传失败';
                         return (
                           <div className="sample-file-popover-item" key={file.id} style={{ '--format-color': color }}>
                             <span className="scheme-format-icon"><SampleFormatIcon /></span>
                             <span className="sample-file-popover-name">
                               <span>{file.name}</span>
+                              {uploading ? <em className="sample-status-tag status-上传中">上传中</em> : null}
+                              {failed ? <em className="sample-status-tag status-上传失败">上传失败</em> : null}
+                              {failed && file.errorMessage ? <em className="sample-file-error-text">{file.errorMessage}</em> : null}
                               {alreadyTested ? <em className="sample-status-tag status-已试跑">已试跑</em> : null}
                             </span>
-                            <span className="sample-file-popover-actions">
-                              <span title={alreadyTested ? '该文件已完成当前版本方案试跑。' : '执行'}>
-                                <button type="button" aria-label={alreadyTested ? '该文件已完成当前版本方案试跑。' : '执行'} disabled={running || testing || alreadyTested} onClick={() => { setPlanRunPopoverOpen(false); testPlan(file); }}><SendOutlined /></button>
+                            {uploading ? (
+                              <span className="sample-file-progress">
+                                <Progress type="circle" percent={file.progress ?? 0} size={20} strokeWidth={8} showInfo={false} />
+                                <span className="sample-file-progress-text">{file.progress ?? 0}%</span>
+                                <button type="button" className="sample-file-cancel" title="取消上传" disabled={running || testing} onClick={() => cancelUpload(file.id)}><CloseOutlined /></button>
                               </span>
-                              <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
-                            </span>
+                            ) : failed ? (
+                              <span className="sample-file-popover-actions always">
+                                <button type="button" title="重新上传" disabled={running || testing} onClick={() => retryUpload(file.id)}><ReloadOutlined /></button>
+                                <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
+                              </span>
+                            ) : (
+                              <span className="sample-file-popover-actions">
+                                <span title={alreadyTested ? '该文件已完成当前版本方案试跑。' : '执行'}>
+                                  <button type="button" aria-label={alreadyTested ? '该文件已完成当前版本方案试跑。' : '执行'} disabled={running || testing || alreadyTested} onClick={() => { setPlanRunPopoverOpen(false); testPlan(file); }}><SendOutlined /></button>
+                                </span>
+                                <button type="button" className="danger" title="删除" disabled={running || testing} onClick={() => deleteSampleFile(file.id)}><DeleteOutlined /></button>
+                              </span>
+                            )}
                           </div>
                         );
                       }) : <p>暂无样例文件</p>}

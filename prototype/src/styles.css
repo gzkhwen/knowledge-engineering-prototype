@@ -1287,6 +1287,14 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .sample-file-popover-actions button.danger { color: #dc2626; background: transparent; }
 .sample-file-popover-actions button.danger:hover { background: #fecaca; }
 .sample-file-popover-actions button:disabled { color: #94a3b8; background: #f1f5f9; cursor: not-allowed; }
+.sample-file-popover-actions.always { display: inline-flex; }
+.sample-file-popover-name { flex-wrap: wrap; row-gap: 2px; }
+.sample-file-error-text { flex: 0 0 100%; color: #dc2626; font-size: 11px; font-style: normal; line-height: 1.4; }
+.sample-file-progress { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 5px; }
+.sample-file-progress-text { color: #475569; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sample-file-cancel { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 999px; color: #64748b; background: transparent; font-size: 12px; }
+.sample-file-cancel:hover { color: #dc2626; background: #fee2e2; }
+.sample-file-cancel:disabled { color: #94a3b8; background: #f1f5f9; cursor: not-allowed; }
 .issue-list-popover { width: 390px; }
 .issue-list-tabs { display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #edf0f5; }
 .issue-list-tabs button { position: relative; height: 30px; padding: 0; color: #64748b; background: transparent; font-size: 12px; }

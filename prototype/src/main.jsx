@@ -1,6 +1,7 @@
 import React, { Component } from "react";
 import { createRoot } from "react-dom/client";
 import { App as AntdApp, Button, Result, Space } from "antd";
+import "@ant-design/v5-patch-for-react-19";
 import { clearPrototypeStorage } from "./storage.js";
 import "./styles.css";
 
