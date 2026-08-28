@@ -35,6 +35,8 @@ import {
   SyncOutlined,
   ThunderboltOutlined,
   ToolOutlined,
+  RedoOutlined,
+  MinusCircleOutlined,
 } from '@ant-design/icons';
 import { message, Progress } from 'antd';
 import { dataStore, getKnowledgeFormTypeLabel, knowledgeFormTypes } from './dataStore.js';
@@ -8141,8 +8143,15 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   const [scopePopoverOpen, setScopePopoverOpen] = useState(false);
   const scopeTriggerRef = useRef(null);
   const scopePopoverRef = useRef(null);
+  const sampleTriggerWrapRef = useRef(null);
+  const issueTriggerWrapRef = useRef(null);
+  const planRunWrapRef = useRef(null);
   const [issueTab, setIssueTab] = useState('unresolved');
   const [issueRecords, setIssueRecords] = useState(initialPlanContext.issueRecords);
+  const [pendingIssues, setPendingIssues] = useState([]);
+  const [executionModeAsk, setExecutionModeAsk] = useState(null);
+  const [modeAskInput, setModeAskInput] = useState('');
+  const [issueTaskActive, setIssueTaskActive] = useState(false);
   const [planRunPopoverOpen, setPlanRunPopoverOpen] = useState(false);
   const [saveConfirmVersion, setSaveConfirmVersion] = useState(null);
   const [pendingPlanVersionSwitch, setPendingPlanVersionSwitch] = useState(null);
@@ -8333,6 +8342,20 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     document.addEventListener('mousedown', closeOnOutsidePointer);
     return () => document.removeEventListener('mousedown', closeOnOutsidePointer);
   }, [scopePopoverOpen]);
+
+  useEffect(() => {
+    if (!samplePopoverOpen && !issuePopoverOpen && !planRunPopoverOpen) return undefined;
+    const closeOnOutsidePointer = (event) => {
+      if (samplePopoverOpen && !sampleTriggerWrapRef.current?.contains(event.target)) setSamplePopoverOpen(false);
+      if (issuePopoverOpen && !issueTriggerWrapRef.current?.contains(event.target)) {
+        setIssuePopoverOpen(false);
+        if (!pendingIssues.length) setIssueTaskActive(false);
+      }
+      if (planRunPopoverOpen && !planRunWrapRef.current?.contains(event.target)) setPlanRunPopoverOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsidePointer);
+    return () => document.removeEventListener('mousedown', closeOnOutsidePointer);
+  }, [samplePopoverOpen, issuePopoverOpen, planRunPopoverOpen, pendingIssues.length]);
   const togglePlanGroup = (item) => {
     setExpandedPlanGroups((current) => {
       const next = new Set(current);
@@ -8451,8 +8474,8 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   const hasAgentTask = Boolean(agentTask);
   const canStopAgent = running || testing;
   const readySampleFiles = sampleFiles.filter((file) => file.status === '未发送' || file.status === '已完成');
-  const hasPendingSampleFiles = sampleFiles.some((file) => file.status === '上传中' || file.status === '上传失败');
-  const canSendAgentMessage = !running && !testing && !hasPendingSampleFiles && (hasAgentTask || Boolean(agentInput.trim()) || (!planNodes.length && readySampleFiles.length > 0));
+  const hasPendingSampleFiles = sampleFiles.some((file) => file.status === '上传中');
+  const canSendAgentMessage = !running && !testing && !hasPendingSampleFiles && (hasAgentTask || Boolean(agentInput.trim()) || pendingIssues.length > 0 || (!planNodes.length && readySampleFiles.length > 0));
   const hasCurrentVersionExecution = (file) => {
     const fileKey = getSampleFileKey(file);
     return selectedVersionStatus === 'formal' && Object.values(executionRecords).some((record) => (
@@ -9135,9 +9158,12 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
 
   const sendAgentInstruction = (instructionOverride = null, eventTitle = '调整意见', issue = null) => {
     const instruction = instructionOverride ?? agentInput.trim();
+    const attachedIssues = issue ? [issue] : pendingIssues;
     const task = agentTask;
     setAgentInput('');
     setAgentTask(null);
+    setPendingIssues([]);
+    setIssueTaskActive(false);
     if (task?.type === 'connection-fix') {
       runSmartRepair(task);
       return;
@@ -9147,12 +9173,13 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       if (node) smartConfigureNode(node, instruction);
       return;
     }
-    if (!instruction && !planNodes.length && sampleFiles.length) {
+    if (!instruction && !attachedIssues.length && !planNodes.length && sampleFiles.length) {
       runAgent(sampleFiles);
       return;
     }
-    if (!instruction) return;
-    pushEvent({ role: 'user', title: eventTitle, content: instruction, status: 'done' });
+    if (!instruction && !attachedIssues.length) return;
+    const userEventTitle = instruction ? eventTitle : '请处理以下反馈问题';
+    pushEvent({ role: 'user', title: userEventTitle, content: instruction, issues: attachedIssues, status: 'done' });
     if (!planNodes.length) {
       if (sampleFiles.length) {
         runAgent(sampleFiles);
@@ -9167,25 +9194,106 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     const scoped = createScopedPlanContext(contextKey, plan.id);
     clearAgentTimers(contextKey);
     scoped.setRunning(true);
+    if (attachedIssues.length) {
+      // 反馈问题处理：合并分析 → 问询执行模式（不直接改动方案，交由用户确认执行模式）
+      const analyzeId = scoped.pushEvent({ role: 'thought', title: '分析反馈问题', content: `收到 ${attachedIssues.length} 条反馈，正在合并分析问题根因与用户诉求，不直接改动当前方案。`, status: 'running', kind: 'toolCall' });
+      scheduleAgentTimer(() => {
+        const analysisText = attachedIssues.map((item) => `· ${item.title}：根因——${item.content}；建议——调整相关节点的处理配置。`).join('\n');
+        scoped.updateEvent(analyzeId, { content: `已合并分析 ${attachedIssues.length} 条反馈：\n${analysisText}\n\n请确认以哪种方式处理，我不会未经确认直接修改当前方案。`, status: 'done' });
+        scoped.pushEvent({ role: 'agent', title: '方案处理建议', content: '已理解您的诉求。当前方案已生成并调整过，建议优先「基于当前版本调整」以保留已完成配置；也可重新生成或手动调整。请选择执行模式。', status: 'done' });
+        scoped.setRunning(false);
+        scoped.persistChat();
+        if (activePlanTargetKeyRef.current === contextKey) setExecutionModeAsk({
+          title: '请选择执行模式',
+          content: '已理解您的诉求。当前方案已生成并调整过，建议优先「基于当前版本调整」以保留已完成配置；也可重新生成或手动调整。请选择执行模式。',
+          options: [
+            { value: 'regenerate', label: '重新生成方案' },
+            { value: 'adjust', label: '基于当前版本调整' },
+            { value: 'manual', label: '用户手动调整' },
+          ],
+          issues: attachedIssues,
+          instruction,
+        });
+      }, 1800, contextKey);
+      return;
+    }
     const eventId = scoped.pushEvent({ role: 'thought', title: '局部更新方案', content: '正在基于当前方案识别需要调整的节点，不重新生成完整链路。', status: 'running', kind: 'toolCall' });
     scheduleAgentTimer(() => {
-      const next = issue ? createIssueFeedbackAdjustedNodes(planNodes, issue) : createOptimizedNodes(planNodes, catalog);
+      const next = createOptimizedNodes(planNodes, catalog);
       scoped.markDraft();
       scoped.setPlanNodes(next);
-      const updateMessage = issue ? `已根据“${issue.title}”调整「${next.find((node) => node.feedbackNote)?.toolName || '目标节点'}」的处理配置。` : '更新结果：按当前 Higress 工具链调整节点承接；当前方案中的工具保持不变。';
-      scoped.updateEvent(eventId, { content: updateMessage, status: 'done' });
-      scoped.pushEvent({ role: 'agent', title: '方案已调整', content: issue ? `已根据问题反馈更新方案配置，并创建新的草稿版本。` : '右侧流程已按现有方案局部更新，后续节点引用已同步到新的分片结果。', status: 'done' });
+      scoped.updateEvent(eventId, { content: '更新结果：按当前 Higress 工具链调整节点承接；当前方案中的工具保持不变。', status: 'done' });
+      scoped.pushEvent({ role: 'agent', title: '方案已调整', content: '右侧流程已按现有方案局部更新，后续节点引用已同步到新的分片结果。', status: 'done' });
       scoped.setRunning(false);
       scoped.persistChat();
       if (activePlanTargetKeyRef.current === contextKey) notify('Agent 已调整处理方案', 'success');
     }, 1600, contextKey);
   };
 
-  const sendIssueToAgent = (issue) => {
+  const switchIssueTab = (tab) => {
+    setIssueTab(tab);
+  };
+
+  const reopenIssue = (issue) => {
     if (!issue) return;
-    const instruction = `请根据以下问题调整当前处理方案：\n${issue.title}：${issue.content}`;
-    setIssuePopoverOpen(false);
-    sendAgentInstruction(instruction, '处理问题清单', issue);
+    if (!window.confirm('确定要将该问题恢复为未解决吗？')) return;
+    const nextIssues = issueRecords.map((item) => (item.id === issue.id ? { ...item, status: 'unresolved', resolvedAt: null } : item));
+    setIssueRecords(nextIssues);
+    if (currentPlanId) dataStore.savePlanIssues(currentPlanId, nextIssues);
+    planContextRef.current[activePlanTargetKey] = { ...(planContextRef.current[activePlanTargetKey] || getCurrentPlanContextState()), issueRecords: nextIssues };
+    notify('问题已恢复为未解决', 'success');
+  };
+
+  const addPendingIssue = (issue) => {
+    if (!issue) return;
+    setPendingIssues((current) => (current.some((item) => item.id === issue.id) ? current : [...current, issue]));
+    setIssueTaskActive(true);
+  };
+
+  const removePendingIssue = (issueId) => {
+    setPendingIssues((current) => {
+      const next = current.filter((issue) => issue.id !== issueId);
+      if (!next.length) setIssueTaskActive(false);
+      return next;
+    });
+  };
+
+  const handleModeExecution = () => {
+    const { issues = [], instruction = '', selected: mode = '' } = executionModeAsk || {};
+    if (!mode) return;
+    const extra = modeAskInput.trim();
+    setExecutionModeAsk(null);
+    setModeAskInput('');
+    const contextKey = activePlanTargetKey;
+    const plan = ensureCurrentPlan();
+    planContextRef.current[contextKey] = { ...getCurrentPlanContextState(), currentPlanId: plan.id };
+    const scoped = createScopedPlanContext(contextKey, plan.id);
+    clearAgentTimers(contextKey);
+    scoped.setRunning(true);
+    const modeLabels = { regenerate: '重新生成方案', adjust: '基于当前版本调整', manual: '用户手动调整' };
+    const eventId = scoped.pushEvent({ role: 'thought', title: modeLabels[mode] || '处理反馈', content: `已选择「${modeLabels[mode] || mode}」${extra ? `，补充说明：${extra}` : ''}，正在执行...`, status: 'running', kind: 'toolCall' });
+    scheduleAgentTimer(() => {
+      if (mode === 'regenerate') {
+        const latestCatalog = readWorkbenchCatalog();
+        const agentPlan = createAgentDemoPlan(activePlanTarget, latestCatalog, projectId);
+        scoped.markDraft();
+        scoped.setPlanNodes(agentPlan.nodes);
+        scoped.updateEvent(eventId, { content: '已按最新工具目录重新生成完整处理方案（新草稿版本），原有调整内容不再保留。', status: 'done' });
+        scoped.pushEvent({ role: 'agent', title: '方案已重新生成', content: '已生成新的完整处理方案草稿，可继续调整或试跑验证。', status: 'done' });
+      } else if (mode === 'adjust') {
+        const next = issues.length ? createIssueFeedbackAdjustedNodes(planNodes, issues[0]) : createOptimizedNodes(planNodes, catalog);
+        scoped.markDraft();
+        scoped.setPlanNodes(next);
+        scoped.updateEvent(eventId, { content: `已基于当前版本按反馈调整「${next.find((node) => node.feedbackNote)?.toolName || '目标节点'}」的处理配置，保留已完成配置。`, status: 'done' });
+        scoped.pushEvent({ role: 'agent', title: '方案已调整', content: '已根据问题反馈更新方案配置，并创建新的草稿版本。', status: 'done' });
+      } else {
+        scoped.updateEvent(eventId, { content: '已记录您的选择：由您手动调整方案。以下为调整建议：请打开需要调整的节点，按反馈修改参数后保存。', status: 'done' });
+        scoped.pushEvent({ role: 'agent', title: '等待手动调整', content: '当前方案未做自动改动。您可在右侧流程中手动调整节点，完成后保存方案版本。', status: 'done' });
+      }
+      scoped.setRunning(false);
+      scoped.persistChat();
+      if (activePlanTargetKeyRef.current === contextKey) notify(`已按「${modeLabels[mode] || mode}」处理`, 'success');
+    }, 1600, contextKey);
   };
 
   const closeIssue = (issue) => {
@@ -9772,26 +9880,68 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
             ) : null}
             <div className="agent-stream" ref={streamRef}>{events.map((event) => <AgentEvent key={event.id} event={event} />)}</div>
             <div className="agent-input">
-              <div className="agent-input-box">
-                {agentTask ? <button type="button" className="agent-task-chip" onClick={() => setAgentTask(null)}>{agentTask.type === 'connection-fix' ? '处理流程连接问题' : `设置${agentTask.toolName}参数`} ×</button> : null}
-                <textarea
-                  ref={agentInputRef}
-                  disabled={running || testing}
-                  value={agentInput}
-                  onChange={(event) => setAgentInput(event.target.value)}
-                  placeholder="输入问题或调整意见，例如：政策条款要优先保留层级..."
-                  rows={1}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey && canSendAgentMessage) {
-                      event.preventDefault();
-                      sendAgentInstruction();
-                    }
-                  }}
-                />
-                <div className="agent-input-footer">
-                  <div className="agent-input-tools">
-                    <div className="sample-file-trigger-wrap">
-                      <button type="button" className="sample-file-trigger" onClick={() => { setPlanRunPopoverOpen(false); setIssuePopoverOpen(false); setSamplePopoverOpen((current) => !current); }}><PaperClipOutlined /> 样例文件</button>
+              {(issueTaskActive || pendingIssues.length) && !executionModeAsk ? (
+                <div className="issue-task-panel">
+                  <span className="issue-task-label"><CodeOutlined /> 处理反馈问题：</span>
+                  {pendingIssues.map((issue) => (
+                    <span className="issue-task-tag" key={issue.id}>
+                      <span className="issue-task-tag-text">{issue.title}</span>
+                      <button type="button" className="issue-task-tag-remove" title="移除（取消勾选）" onClick={() => removePendingIssue(issue.id)}>×</button>
+                    </span>
+                  ))}
+                  <button type="button" className="issue-task-close" title="退出处理反馈问题" onClick={() => { setIssueTaskActive(false); setPendingIssues([]); }}>×</button>
+                </div>
+              ) : null}
+              {executionModeAsk ? (
+                <div className="mode-ask-panel">
+                  <div className="mode-ask-head">
+                    <p className="mode-ask-tip">{executionModeAsk.content}</p>
+                    <button type="button" className="mode-ask-close" title="关闭问询" onClick={() => { setExecutionModeAsk(null); setModeAskInput(''); }}><CloseOutlined /></button>
+                  </div>
+                  <div className="mode-ask-options">
+                    {executionModeAsk.options.map((option) => (
+                        <label className="mode-ask-option" key={option.value}>
+                          <input type="checkbox" checked={executionModeAsk.selected === option.value} onChange={() => setExecutionModeAsk((current) => ({ ...current, selected: current.selected === option.value ? null : option.value }))} />
+                          <span>{option.label}</span>
+                        </label>
+                    ))}
+                  </div>
+                  <div className="mode-ask-actions">
+                    <input
+                      type="text"
+                      className="mode-ask-textarea"
+                      disabled={running || testing}
+                      value={modeAskInput}
+                      onChange={(event) => setModeAskInput(event.target.value)}
+                      placeholder="补充说明（可选），将随所选模式一并处理..."
+                    />
+                    <button type="button" className="mode-ask-submit" title="确认" disabled={running || testing || !executionModeAsk.selected} onClick={handleModeExecution}><SendOutlined /></button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="agent-input-box">
+                    <>
+                      {agentTask ? <button type="button" className="agent-task-chip" onClick={() => setAgentTask(null)}>{agentTask.type === 'connection-fix' ? '处理流程连接问题' : `设置${agentTask.toolName}参数`} ×</button> : null}
+                      <textarea
+                        ref={agentInputRef}
+                        disabled={running || testing}
+                        value={agentInput}
+                        onChange={(event) => setAgentInput(event.target.value)}
+                        placeholder="输入问题或调整意见，例如：政策条款要优先保留层级..."
+                        rows={1}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.shiftKey && canSendAgentMessage) {
+                            event.preventDefault();
+                            sendAgentInstruction();
+                          }
+                        }}
+                      />
+                    </>
+                    <div className="agent-input-footer">
+                    <div className="agent-input-tools">
+                      <div className="sample-file-trigger-wrap" ref={sampleTriggerWrapRef}>
+                        <button type="button" className="sample-file-trigger" onClick={() => { setPlanRunPopoverOpen(false); setIssuePopoverOpen(false); setSamplePopoverOpen((current) => !current); }}><PaperClipOutlined /> 样例文件</button>
                       {samplePopoverOpen ? (
                         <div className="sample-file-popover">
                           <div className="sample-file-popover-head">
@@ -9839,35 +9989,57 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
                         </div>
                       ) : null}
                     </div>
-                    <div className="issue-list-trigger-wrap">
-                      <button type="button" className="sample-file-trigger issue-list-trigger" onClick={() => { setPlanRunPopoverOpen(false); setSamplePopoverOpen(false); setIssuePopoverOpen((current) => !current); }}><ExclamationCircleOutlined /> 问题清单</button>
+                    <div className="issue-list-trigger-wrap" ref={issueTriggerWrapRef}>
+                      <button type="button" className="sample-file-trigger issue-list-trigger" onClick={() => { setPlanRunPopoverOpen(false); setSamplePopoverOpen(false); const willOpen = !issuePopoverOpen; if (willOpen) setIssueTaskActive(true); else if (!pendingIssues.length) setIssueTaskActive(false); setIssuePopoverOpen(willOpen); }}><ExclamationCircleOutlined /> 处理反馈问题</button>
                       {issuePopoverOpen ? (
                         <div className="sample-file-popover issue-list-popover">
                           <div className="sample-file-popover-head">
-                            <strong>问题清单</strong>
+                            <strong>请选择要处理的反馈</strong>
                           </div>
                           <div className="issue-list-tabs">
-                            <button type="button" className={issueTab === 'unresolved' ? 'active' : ''} onClick={() => setIssueTab('unresolved')}>未解决 ({unresolvedIssues.length})</button>
-                            <button type="button" className={issueTab === 'resolved' ? 'active' : ''} onClick={() => setIssueTab('resolved')}>已解决 ({resolvedIssues.length})</button>
+                            <button type="button" className={issueTab === 'unresolved' ? 'active' : ''} onClick={() => switchIssueTab('unresolved')}>未解决 ({unresolvedIssues.length})</button>
+                            <button type="button" className={issueTab === 'resolved' ? 'active' : ''} onClick={() => switchIssueTab('resolved')}>已解决 ({resolvedIssues.length})</button>
                           </div>
                           {issueTab === 'unresolved' ? (
                             unresolvedIssues.length ? <div className="issue-list-items">
-                              {unresolvedIssues.map((issue) => (
-                                <div className="issue-list-item" key={issue.id}>
-                                  <span><strong>{issue.title}</strong><em>{issue.content}</em></span>
-                                  <span className="issue-list-item-actions">
-                                    <button type="button" title="发送" disabled={running || testing} onClick={() => sendIssueToAgent(issue)}><SendOutlined /></button>
-                                    <button type="button" title="关闭" disabled={running || testing} onClick={() => closeIssue(issue)}><CheckCircleOutlined /></button>
-                                  </span>
-                                </div>
-                              ))}
+                              {unresolvedIssues.map((issue) => {
+                                const added = pendingIssues.some((item) => item.id === issue.id);
+                                return (
+                                  <div className={`issue-list-item ${added ? 'added' : ''}`} key={issue.id}>
+                                    <span className="issue-list-item-body">
+                                      <em className="issue-list-item-desc">{issue.content}</em>
+                                      <span className="issue-list-item-meta">{issue.author || '—'} · {issue.createdAt}{added ? <em className="issue-added-tag">已添加</em> : null}</span>
+                                    </span>
+                                    <span className="issue-list-item-actions">
+                                      {added ? (
+                                        <button type="button" title="撤销添加" onClick={() => removePendingIssue(issue.id)}><MinusCircleOutlined /></button>
+                                      ) : (
+                                        <button type="button" title="添加到状态栏" onClick={() => addPendingIssue(issue)}><PlusOutlined /></button>
+                                      )}
+                                      <button type="button" title="标记为已解决" onClick={() => closeIssue(issue)}><CheckCircleOutlined /></button>
+                                    </span>
+                                  </div>
+                                );
+                              })}
                             </div> : <p>暂无未解决问题</p>
                           ) : resolvedIssues.length ? <div className="issue-list-items">
-                            {resolvedIssues.map((issue) => (
-                              <div className="issue-list-item resolved" key={issue.id}>
-                                <span><strong>{issue.title}</strong><em>{issue.content}</em></span>
-                              </div>
-                            ))}
+                            {resolvedIssues.map((issue) => {
+                              const added = pendingIssues.some((item) => item.id === issue.id);
+                              return (
+                                <div className={`issue-list-item resolved ${added ? 'added' : ''}`} key={issue.id}>
+                                  <span className="issue-list-item-body">
+                                    <em className="issue-list-item-desc">{issue.content}</em>
+                                    <span className="issue-list-item-meta">{issue.author || '—'} · {issue.createdAt}</span>
+                                  </span>
+                                  <span className="issue-list-item-actions">
+                                    {added ? (
+                                      <button type="button" className="issue-act-undo" title="撤销添加" onClick={() => removePendingIssue(issue.id)}><MinusCircleOutlined /></button>
+                                    ) : null}
+                                    <button type="button" title="恢复为未解决" onClick={() => reopenIssue(issue)}><RedoOutlined /></button>
+                                  </span>
+                                </div>
+                              );
+                            })}
                           </div> : <p>暂无已解决问题</p>}
                         </div>
                       ) : null}
@@ -9883,7 +10055,9 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
                     {canStopAgent ? <SyncOutlined spin /> : <SendOutlined />}
                   </button>
                 </div>
-              </div>
+                  </div>
+              </>
+            )}
             </div>
           </section>
           <aside className={`plan-column ${rightTab === '处理方案' && !planNodes.length ? 'empty-plan-column' : ''}`}>
@@ -9966,7 +10140,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
               : <KnowledgeResultPreview formType={activePlanTarget.formType} executionRecords={executionRecords} onRenameExecutionRecord={renameExecutionRecord} />}
             {rightTab === '处理方案' && planNodes.length ? (
               <div className="plan-actions">
-                <div className="plan-run-wrap">
+                <div className="plan-run-wrap" ref={planRunWrapRef}>
                   <button type="button" className="secondary" disabled={running || testing} onClick={() => { setSamplePopoverOpen(false); setPlanRunPopoverOpen((current) => !current); }}>{testing ? '试跑中' : '方案试跑'}</button>
                   {planRunPopoverOpen ? (
                     <div className="sample-file-popover plan-run-popover">
@@ -10247,10 +10421,23 @@ function PlanCopyResultDialog({ results, onClose, onView }) {
 }
 
 function AgentEvent({ event }) {
+  const hasIssues = event.issues?.length;
+  const hasContent = event.content && event.content.trim();
+  const showTitle = event.title && event.role !== 'user';
+  const issuesLabel = hasContent ? '本次的反馈问题清单：' : '请处理以下反馈问题：';
   return (
     <div className={`agent-event ${event.role} ${event.kind === 'toolCall' ? 'tool-call' : ''}`}>
-      <strong>{event.status === 'running' ? <SyncOutlined spin /> : event.kind === 'toolCall' ? <StarOutlined /> : null}{event.title}</strong>
-      <p>{event.content}</p>
+      {showTitle ? <strong>{event.status === 'running' ? <SyncOutlined spin /> : event.kind === 'toolCall' ? <StarOutlined /> : null}{event.title}</strong> : null}
+      {hasContent || !hasIssues ? <p>{event.content}</p> : null}
+      {hasIssues ? (
+        <div className="agent-event-issues">
+          {hasContent ? <span className="agent-event-issues-divider" /> : null}
+          <p className="agent-event-issues-label">{issuesLabel}</p>
+          <ul className="agent-event-issues-list">
+            {event.issues.map((issue) => <li key={issue.id}>{issue.title}</li>)}
+          </ul>
+        </div>
+      ) : null}
       {event.flowSteps?.length ? <div className="flow-steps">{event.flowSteps.map((step, index) => <span key={step}>{step}{index < event.flowSteps.length - 1 ? ' →' : ''}</span>)}</div> : null}
     </div>
   );

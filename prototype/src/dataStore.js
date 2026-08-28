@@ -361,9 +361,10 @@ function demoNodeSets(formType, fileFormat, categoryId = '') {
       graphNode('保险业务图谱 Schema', '抽取保险合同中的保险产品、保险公司、保险条款、保障责任与疾病等对象；保留来源分片与原文证据，仅输出当前文档的图谱片段。'),
       graphNode('政策文件图谱 Schema', '抽取政策文件中的责任主体、发布机构和政策文件；保留来源分片与原文证据，仅输出当前文档的图谱片段。'),
       graphNode('', '按所选 Schema 抽取实体、属性与关系，保留来源分片与原文证据，仅输出当前文档的图谱片段。'),
+      iteration,
     ];
   }
-  if (formType === '切片库') return [parser, splitter];
+  if (formType === '切片库') return [parser, splitter, iteration];
   if (formType === 'QA库') {
     return [
       parser,
@@ -377,6 +378,7 @@ function demoNodeSets(formType, fileFormat, categoryId = '') {
           additional_requirement: '使用医保客服常用表达，答案严格基于原文。',
         },
       },
+      iteration,
     ];
   }
   return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration];
@@ -388,6 +390,27 @@ function demoSampleFile(fileFormat, seedName) {
   return {
     id: `demo-sample-${slugText(name)}`,
     name,
+    type: meta.type,
+    size: meta.size,
+    status: '已完成',
+  };
+}
+
+// 每个方案的第二份样例（同格式不同文件），用于演示多文件接入与多次试跑
+const demoSecondFileMeta = {
+  pdf: { name: '医保政策条款明细_补充版.pdf', type: 'PDF', size: '3.12 MB' },
+  docx: { name: '开户流程手册_操作篇.docx', type: 'DOCX', size: '2.05 MB' },
+  xlsx: { name: '客户问答清单_增补.xlsx', type: 'XLSX', size: '1.58 MB' },
+  pptx: { name: '理财产品培训课件_二期.pptx', type: 'PPTX', size: '4.20 MB' },
+  txt: { name: '投诉工单导出_批次二.txt', type: 'TXT', size: '0.56 MB' },
+  md: { name: '宣传话术清单_增补.md', type: 'MD', size: '0.48 MB' },
+};
+
+function demoSecondSampleFile(fileFormat) {
+  const meta = demoSecondFileMeta[fileFormat] || demoSecondFileMeta.pdf;
+  return {
+    id: `demo-sample-${slugText(meta.name)}`,
+    name: meta.name,
     type: meta.type,
     size: meta.size,
     status: '已完成',
@@ -618,7 +641,7 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
   return { fileId: file.id, fileName: file.name, toolRuns: nodeExecutions, nodeExecutions };
 }
 
-function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sampleName, categoryId }) {
+function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sampleName, categoryId, issues = [] }) {
   const scopeName = categoryName || '空间兜底';
   const fileName = sampleName || demoFileMeta[fileFormat]?.name || '样例文件';
   const formatNames = {
@@ -650,6 +673,22 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
     md: '需要保留Markdown标题层级、列表和代码块边界，避免破坏原始结构。',
   };
   const baseId = `chat-${slugText(scopeName)}-${slugText(formType)}-${fileFormat}`;
+  // 调整方案演示轮次：版本数 >=2 且存在反馈问题时，追加"反馈 -> 分析 -> 定点调整 -> 新版本试跑"完整闭环
+  const buildAdjustmentMessages = () => {
+    if (versionCount < 2 || !issues.length) return [];
+    const issue = issues[0];
+    const adjustedVersion = `1.${versionCount - 1}`;
+    const nodeName = formType === '知识图谱' ? '单文档图谱抽取' : formType === 'QA库' ? 'QA提取-支持问法扩写' : formType === '知识点' ? '知识点提取' : 'Markdown结构化分块';
+    const adjustDetail = formType === '知识图谱' ? '抽取规则与 Schema 约束' : '参数配置';
+    return [
+      { role: 'user', title: '处理反馈问题', content: `试跑结果收到一条反馈：${issue.title}——${issue.content}。请基于当前方案定点调整，不要重新生成全新方案。` },
+      { role: 'thought', title: '分析反馈问题', content: `已合并分析该反馈：问题与「${nodeName}」节点的${adjustDetail}相关，可在保留其余链路的前提下定点调整。`, kind: 'toolCall' },
+      { role: 'thought', title: '调整节点参数', content: `已调整「${nodeName}」的配置并校验前后节点输入输出承接关系，将保存为新版本 ${adjustedVersion}。`, kind: 'toolCall' },
+      { role: 'user', title: '试跑新版本', content: '请用当前样例试跑新版本，确认该反馈已解决。' },
+      { role: 'thought', title: '样例试跑', content: `新版本试跑完成：解析、分片与后续节点均执行成功，已生成${finalNodeNames[formType]}，反馈问题已解决。`, kind: 'toolCall' },
+      { role: 'agent', title: '方案已调整', content: `已按反馈完成定点调整并保存为 ${adjustedVersion} 版本，原 1.0 版本保留可随时回退。` },
+    ];
+  };
   if (formType === '知识图谱' && fileFormat === 'pdf') {
     const messages = [
       { role: 'agent', title: '处理方案生成助手', content: `请发送${scopeName}的政策类 PDF 样例。我会先确认单文档处理边界，再生成可复用的单文档图谱抽取方案。` },
@@ -665,7 +704,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
       { role: 'thought', title: '样例试跑', content: '已完成 18 个文本切片的图谱抽取，生成实体、实体关系、属性关系及来源证据；孤立实体已按配置保留。', kind: 'toolCall' },
       { role: 'agent', title: '方案生成完成', content: `已完成方案搭建、Schema 参数配置与样例试跑。当前已有 ${versionCount} 个版本，最新版本可继续编辑并保存。` },
     ];
-    return messages.map((message, index) => ({ id: `${baseId}-${index + 1}`, status: 'done', ...message }));
+    return [...messages, ...buildAdjustmentMessages()].map((message, index) => ({ id: `${baseId}-${index + 1}`, status: 'done', ...message }));
   }
   if (categoryId === 'cat-wealth-fund' && formType === '知识点' && fileFormat === 'pdf') {
     const messages = [
@@ -680,7 +719,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
       { role: 'thought', title: '样例试跑', content: '已完成 26 页版面解析、18 个结构化分块、24 条知识点的提取与打标。', kind: 'toolCall' },
       { role: 'agent', title: '方案生成完成', content: '已完成方案搭建、参数配置和样例试跑，可保存为 1.0 正式版本。' },
     ];
-    return messages.map((message, index) => ({ id: `${baseId}-${index + 1}`, status: 'done', ...message }));
+    return [...messages, ...buildAdjustmentMessages()].map((message, index) => ({ id: `${baseId}-${index + 1}`, status: 'done', ...message }));
   }
   const messages = [
     { role: 'agent', title: '处理方案生成助手', content: `当前配置对象为${scopeName}的${getKnowledgeFormTypeLabel(formType)} ${fileFormat}处理方案。你可以发送样例文件，我会先分析文件结构，再生成可保存的处理方案。` },
@@ -700,7 +739,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
     { role: 'thought', title: '样例试跑', content: `已执行样例试跑：解析、分片和后置节点均执行成功，已生成${finalNodeNames[formType]}。`, kind: 'toolCall' },
     { role: 'agent', title: '方案生成完成', content: `已完成方案搭建、参数配置、链路检查和样例试跑。${versionCount > 1 ? `当前已有${versionCount}个历史版本，最新版本可继续编辑后保存为新版本。` : '当前已有1个可保存版本，后续修改会保存为新版本。'}` },
   ];
-  return messages.map((message, index) => ({
+  return [...messages, ...buildAdjustmentMessages()].map((message, index) => ({
     id: `${baseId}-${index + 1}`,
     status: 'done',
     ...message,
@@ -708,7 +747,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v21';
+  const demoVersion = 'workbench-plan-demo-v23';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
@@ -721,37 +760,37 @@ function ensureDemoPlanData() {
   const categoryById = new Map(categories.map((item) => [item.id, item]));
 
   const definitions = [
-    { planScope: 'fallback', formType: '切片库', fileFormat: 'pdf', versions: ['1.0', '1.1'], withFailedSample: true },
-    { planScope: 'fallback', formType: '切片库', fileFormat: 'docx', versions: ['1.0'] },
-    { planScope: 'fallback', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1'] },
-    { planScope: 'fallback', formType: 'QA库', fileFormat: 'txt', versions: ['1.0'] },
-    { planScope: 'fallback', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
-    { planScope: 'fallback', formType: '知识点', fileFormat: 'md', versions: ['1.0'] },
-    { planScope: 'fallback', formType: '知识图谱', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'] },
-    { categoryId: 'cat-wealth-fund', formType: '切片库', fileFormat: 'pdf', versions: ['1.0'] },
-    { categoryId: 'cat-wealth-fund', formType: '切片库', fileFormat: 'docx', versions: ['1.0'] },
-    { categoryId: 'cat-wealth-fund', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'] },
-    { categoryId: 'cat-wealth-fund', formType: 'QA库', fileFormat: 'xlsx', versions: ['1.0'] },
-    { categoryId: 'cat-wealth-fund', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
-    { categoryId: 'cat-wealth-fund', formType: '知识图谱', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'] },
-    { categoryId: 'cat-wealth-fund-risk', formType: '切片库', fileFormat: 'pdf', versions: ['1.0'] },
-    { categoryId: 'cat-wealth-fund-risk', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0'] },
-    { categoryId: 'cat-wealth-fund-risk', formType: '知识点', fileFormat: 'md', versions: ['1.0'] },
-    { categoryId: 'cat-credit-personal', formType: '切片库', fileFormat: 'pdf', versions: ['1.0'] },
-    { categoryId: 'cat-credit-personal', formType: '切片库', fileFormat: 'docx', versions: ['1.0'] },
-    { categoryId: 'cat-credit-personal', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0'] },
-    { categoryId: 'cat-credit-personal', formType: '知识点', fileFormat: 'txt', versions: ['1.0'] },
-    { categoryId: 'cat-open-account', formType: '切片库', fileFormat: 'pdf', versions: ['1.8', '1.9', '2.0'] },
-    { categoryId: 'cat-open-account', formType: '切片库', fileFormat: 'pptx', versions: ['1.0'] },
-    { categoryId: 'cat-open-account', formType: 'QA库', fileFormat: 'docx', versions: ['1.0'] },
-    { categoryId: 'cat-open-account', formType: '知识点', fileFormat: 'md', versions: ['1.0'] },
-    { categoryId: 'cat-complaint', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0'] },
-    { categoryId: 'cat-complaint', formType: 'QA库', fileFormat: 'txt', versions: ['1.0'] },
-    { categoryId: 'cat-complaint', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
-    { categoryId: 'cat-copy-review', formType: '切片库', fileFormat: 'docx', versions: ['1.0'] },
-    { categoryId: 'cat-copy-review', formType: 'QA库', fileFormat: 'md', versions: ['1.0'] },
-    { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'pdf', versions: ['1.0'] },
-    { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'docx', versions: ['1.0'] },
+    { planScope: 'fallback', formType: '切片库', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
+    { planScope: 'fallback', formType: '切片库', fileFormat: 'docx', versions: ['1.0', '1.1'], withFailedSample: true },
+    { planScope: 'fallback', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
+    { planScope: 'fallback', formType: 'QA库', fileFormat: 'txt', versions: ['1.0', '1.1'], withFailedSample: true },
+    { planScope: 'fallback', formType: '知识点', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
+    { planScope: 'fallback', formType: '知识点', fileFormat: 'md', versions: ['1.0', '1.1'], withFailedSample: true },
+    { planScope: 'fallback', formType: '知识图谱', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
+    { categoryId: 'cat-wealth-fund', formType: '切片库', fileFormat: 'pdf', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-wealth-fund', formType: '切片库', fileFormat: 'docx', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-wealth-fund', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
+    { categoryId: 'cat-wealth-fund', formType: 'QA库', fileFormat: 'xlsx', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-wealth-fund', formType: '知识点', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
+    { categoryId: 'cat-wealth-fund', formType: '知识图谱', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
+    { categoryId: 'cat-wealth-fund-risk', formType: '切片库', fileFormat: 'pdf', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-wealth-fund-risk', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
+    { categoryId: 'cat-wealth-fund-risk', formType: '知识点', fileFormat: 'md', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-credit-personal', formType: '切片库', fileFormat: 'pdf', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-credit-personal', formType: '切片库', fileFormat: 'docx', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-credit-personal', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-credit-personal', formType: '知识点', fileFormat: 'txt', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-open-account', formType: '切片库', fileFormat: 'pdf', versions: ['1.8', '1.9', '2.0'], withFailedSample: true },
+    { categoryId: 'cat-open-account', formType: '切片库', fileFormat: 'pptx', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-open-account', formType: 'QA库', fileFormat: 'docx', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-open-account', formType: '知识点', fileFormat: 'md', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
+    { categoryId: 'cat-complaint', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-complaint', formType: 'QA库', fileFormat: 'txt', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-complaint', formType: '知识点', fileFormat: 'pdf', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-copy-review', formType: '切片库', fileFormat: 'docx', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-copy-review', formType: 'QA库', fileFormat: 'md', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'pdf', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-copy-review', formType: '知识点', fileFormat: 'docx', versions: ['1.0', '1.1'], withFailedSample: true },
   ]
     .filter((item) => !(item.formType === '知识点' && item.fileFormat === 'pdf' && item.categoryId !== 'cat-wealth-fund'))
     .map((item) => ({ planScope: item.planScope || 'category', creationMode: 'agent', ...item }));
@@ -785,51 +824,53 @@ function ensureDemoPlanData() {
     };
     const nodes = demoNodeSets(definition.formType, definition.fileFormat, definition.categoryId);
     const sample = demoSampleFile(definition.fileFormat, definition.categoryId === 'cat-wealth-fund' && definition.formType === '知识点' && definition.fileFormat === 'pdf' ? '基金产品说明书.pdf' : undefined);
+    const sample2 = demoSecondSampleFile(definition.fileFormat);
     plans.push(plan);
     const issueTemplates = definition.formType === '切片库'
       ? [
-        ['上下文完整性', '部分切片缺少章节标题，阅读时无法判断原文所属段落。', 'unresolved'],
-        ['表格内容保留', '表格中的条件与说明被拆分到不同切片，建议保留同一行内容。', 'unresolved'],
-        ['切片粒度', '过短的标题切片已与后续正文合并。', 'resolved'],
+        ['上下文完整性', '部分切片缺少章节标题，阅读时无法判断原文所属段落。', 'unresolved', '张三'],
+        ['表格内容保留', '表格中的条件与说明被拆分到不同切片，建议保留同一行内容。', 'unresolved', '李四'],
+        ['切片粒度', '过短的标题切片已与后续正文合并。', 'resolved', '王五'],
       ]
       : definition.formType === 'QA库'
         ? [
-          ['答案约束', '部分问答答案未保留办理条件和例外说明。', 'unresolved'],
-          ['问题表达', '部分问题表达与用户常见提问方式不一致。', 'unresolved'],
-          ['来源引用', '已补充问答结果中的原文来源定位。', 'resolved'],
+          ['答案约束', '部分问答答案未保留办理条件和例外说明。', 'unresolved', '赵敏'],
+          ['问题表达', '部分问题表达与用户常见提问方式不一致。', 'unresolved', '张三'],
+          ['来源引用', '已补充问答结果中的原文来源定位。', 'resolved', '李四'],
         ]
         : definition.formType === '知识图谱'
           ? [
-            ['覆盖完整性', '文档部分章节抽取后图谱关系覆盖率不足。', 'unresolved'],
-            ['关系粒度', '关系类型与标准 Schema 对齐建议加强边类型治理。', 'unresolved'],
-            ['实体补全', '孤立实体建议返回到 Schema 建议流程复核。', 'resolved'],
+            ['覆盖完整性', '文档部分章节抽取后图谱关系覆盖率不足。', 'unresolved', '孙丽'],
+            ['关系粒度', '关系类型与标准 Schema 对齐建议加强边类型治理。', 'unresolved', '王五'],
+            ['实体补全', '孤立实体建议返回到 Schema 建议流程复核。', 'resolved', '张三'],
           ]
         : [
-          ['适用对象', '部分知识点未保留适用对象与适用范围。', 'unresolved'],
-          ['内容去重', '相近知识点在结果中重复出现，需要合并。', 'unresolved'],
-          ['标签完整性', '已补充知识点的主题标签。', 'resolved'],
+          ['适用对象', '部分知识点未保留适用对象与适用范围。', 'unresolved', '李四'],
+          ['内容去重', '相近知识点在结果中重复出现，需要合并。', 'unresolved', '赵敏'],
+          ['标签完整性', '已补充知识点的主题标签。', 'resolved', '王五'],
         ];
-    issueTemplates.forEach(([title, content, status], issueIndex) => {
+    issueTemplates.forEach(([title, content, status, author], issueIndex) => {
       planIssues.push({
         id: `demo-plan-issue-${plan.id}-${issueIndex + 1}`,
         planId: plan.id,
         title,
         content,
         status,
+        author: author || '张三',
         createdAt: `2026-07-0${issueIndex + 3} 11:00`,
         resolvedAt: status === 'resolved' ? `2026-07-0${issueIndex + 4} 16:20` : null,
       });
     });
-    const seedExecution = ({ version, versionNodes, result, index, versionStatus }) => {
+    const seedExecution = ({ version, versionNodes, result, index, versionStatus, sampleFile = sample }) => {
       const isDraft = versionStatus === 'draft';
       const runDay = Math.min(index + (isDraft ? 1 : 2), 9);
       const runTime = isDraft ? '09:30:00' : '15:30:00';
       const compactRunTime = isDraft ? '093000' : '153000';
       const statusSlug = isDraft ? 'draft' : 'formal';
       executions.push({
-        id: `demo-exec-${plan.id}-${version.replace('.', '-')}-${statusSlug}-${sample.id}`,
-        runId: `demo-run-${plan.id}-${version.replace('.', '-')}-${statusSlug}-${sample.id}`,
-        runLabel: `${version}${isDraft ? '草稿' : ''}-2026070${runDay}${compactRunTime}`,
+        id: `demo-exec-${plan.id}-${version.replace('.', '-')}-${statusSlug}-${sampleFile.id}`,
+        runId: `demo-run-${plan.id}-${version.replace('.', '-')}-${statusSlug}-${sampleFile.id}`,
+        runLabel: `${version}${isDraft ? '草稿' : ''}-2026070${runDay}${compactRunTime}-${sampleFile.id === sample2.id ? '二' : '一'}`,
         runAt: `2026-07-0${runDay} ${runTime}`,
         startedAt: `2026-07-0${runDay} ${isDraft ? '09:29:32' : '15:29:12'}`,
         endedAt: `2026-07-0${runDay} ${runTime}`,
@@ -837,9 +878,9 @@ function ensureDemoPlanData() {
         planId: plan.id,
         planVersionId: isDraft ? null : `demo-version-${plan.id}-${version.replace('.', '-')}`,
         version,
-        sampleFileId: sample.id,
-        sampleFileName: sample.name,
-        sampleFile: sample,
+        sampleFileId: sampleFile.id,
+        sampleFileName: sampleFile.name,
+        sampleFile,
         fileFormat: definition.fileFormat,
         planSnapshot: versionNodes,
         planNodes: versionNodes,
@@ -848,6 +889,7 @@ function ensureDemoPlanData() {
         createdAt: `2026-07-0${runDay} ${runTime}`,
       });
     };
+    const versionCount = definition.versions.length;
     definition.versions.forEach((version, index) => {
       const versionNodes = nodes.map((node) => ({ ...node }));
       const result = demoResult(sample, versionNodes, definition.formType, categoryName, version, definition.categoryId);
@@ -856,21 +898,29 @@ function ensureDemoPlanData() {
         planId: plan.id,
         version,
         nodes: versionNodes,
-        sampleFiles: definition.withFailedSample ? [sample, demoFailedSample] : [sample],
+        sampleFiles: [sample, sample2, ...(definition.withFailedSample ? [demoFailedSample] : [])],
         results: [result],
         createdAt: `2026-07-0${Math.min(index + 1, 9)} 10:00`,
       });
-      if (definition.creationMode === 'agent' && index === 0) {
-        seedExecution({ version, versionNodes, result, index, versionStatus: 'draft' });
-      }
-      if (definition.versions.length > 1 && index === definition.versions.length - 1) {
-        seedExecution({ version, versionNodes, result, index, versionStatus: 'formal' });
+      seedExecution({ version, versionNodes, result, index, versionStatus: index === 0 ? 'draft' : 'formal' });
+      if (index === versionCount - 1) {
+        // 最新版本再用第二份样例试跑一次，体现多文件接入与多次试跑
+        const result2 = demoResult(sample2, versionNodes, definition.formType, categoryName, version, definition.categoryId);
+        seedExecution({ version, versionNodes, result: result2, index, versionStatus: 'formal', sampleFile: sample2 });
       }
     });
     chats.push({
       id: `demo-chat-${plan.id}`,
       planId: plan.id,
-      messages: demoChatMessages({ categoryName, formType: definition.formType, fileFormat: definition.fileFormat, versionCount: definition.versions.length, sampleName: sample.name, categoryId: definition.categoryId }),
+      messages: demoChatMessages({
+        categoryName,
+        formType: definition.formType,
+        fileFormat: definition.fileFormat,
+        versionCount: definition.versions.length,
+        sampleName: sample.name,
+        categoryId: definition.categoryId,
+        issues: issueTemplates.map(([title, content]) => ({ title, content })),
+      }),
       createdAt: '2026-07-01 09:15',
       updatedAt: '2026-07-09 09:30',
     });
