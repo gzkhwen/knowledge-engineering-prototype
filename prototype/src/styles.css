@@ -3092,7 +3092,7 @@ select.select-field,
 .run-output-field-head .run-output-copy { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 24px; margin-left: auto; border-radius: 6px; color: #667085; background: transparent; }
 .run-output-field-head .run-output-copy:hover { color: #0f63f6; background: #e9f2ff; }
 
-/* R044 反馈问题处理逻辑优化：复选框、确定按钮、标签区、问询面板、气泡问题列表 */
+/* R044 工作台支持多反馈合并处理：复选框、确定按钮、标签区、问询面板、气泡问题列表 */
 .issue-select-checkbox { width: 14px; height: 14px; margin: 2px 0 0; accent-color: #1d5fd6; cursor: pointer; }
 .issue-confirm-btn { height: 24px; padding: 0 10px; border: 0; border-radius: 5px; color: #fff; background: #0f63f6; font-size: 12px; cursor: pointer; }
 .issue-confirm-btn:hover { background: #0b55d8; }
@@ -3127,7 +3127,7 @@ select.select-field,
 .agent-event-issues-list li { color: #344054; font-size: 13px; line-height: 1.8; }
 .agent-event-issue-tag { display: inline-flex; align-items: center; max-width: 100%; padding: 2px 9px; border-radius: 999px; color: #1d4ed8; background: #dbeafe; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* R044 处理反馈问题状态栏面板（输入框上方，左上右上圆角、贴紧输入框、标签横向流动换行） */
+/* R044 多反馈合并处理状态栏面板（输入框上方，左上右上圆角、贴紧输入框、标签横向流动换行） */
 .issue-task-panel {
   display: flex;
   align-items: center;

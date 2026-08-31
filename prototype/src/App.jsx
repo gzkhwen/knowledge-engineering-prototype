@@ -9195,7 +9195,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     clearAgentTimers(contextKey);
     scoped.setRunning(true);
     if (attachedIssues.length) {
-      // 反馈问题处理：合并分析 → 问询执行模式（不直接改动方案，交由用户确认执行模式）
+      // R044 多反馈合并处理：合并分析 → 问询执行模式（不直接改动方案，交由用户确认执行模式）
       const analyzeId = scoped.pushEvent({ role: 'thought', title: '分析反馈问题', content: `收到 ${attachedIssues.length} 条反馈，正在合并分析问题根因与用户诉求，不直接改动当前方案。`, status: 'running', kind: 'toolCall' });
       scheduleAgentTimer(() => {
         const analysisText = attachedIssues.map((item) => `· ${item.title}：根因——${item.content}；建议——调整相关节点的处理配置。`).join('\n');
