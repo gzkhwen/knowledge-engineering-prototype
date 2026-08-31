@@ -1,4 +1,4 @@
-import { Children, isValidElement, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Children, Fragment, isValidElement, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ApiOutlined,
@@ -22,6 +22,7 @@ import {
   FileWordFilled,
   FolderOpenOutlined,
   HomeOutlined,
+  InfoCircleOutlined,
   MenuFoldOutlined,
   MoreOutlined,
   PaperClipOutlined,
@@ -39,7 +40,7 @@ import {
   MinusCircleOutlined,
 } from '@ant-design/icons';
 import { message, Progress } from 'antd';
-import { dataStore, getKnowledgeFormTypeLabel, knowledgeFormTypes } from './dataStore.js';
+import { dataStore, demoNodeSets, demoResult, getKnowledgeFormTypeLabel, knowledgeFormTypes } from './dataStore.js';
 import { McpServicePage } from './pages/McpServicePage.jsx';
 import {
   createKnowledgeToolFromRaw,
@@ -333,7 +334,9 @@ function Shell({ active, menuActive = active, onNavigate, children }) {
       title: '运营端',
       items: [
         ['ops-projects', '知识空间管理'],
-        ['ops-access', '知识接入'],
+        ['ops-access', '知识接入', [
+          ['ops-file-upload', '文件上传'],
+        ]],
         ['ops-plans', '知识加工方案'],
         ['ops-result', '知识加工结果', [
           ['ops-slice-library', '文本切片'],
@@ -375,7 +378,7 @@ function Shell({ active, menuActive = active, onNavigate, children }) {
               const childActive = children?.some(([childKey]) => menuActive === childKey);
               return (
                 <div className={`nav-block ${childActive ? 'active' : ''}`} key={key}>
-                  <button type="button" className={`nav-item ${menuActive === key || childActive ? 'active' : ''}`} onClick={() => onNavigate(key)}>
+                  <button type="button" className={`nav-item ${menuActive === key ? 'active' : ''}`} onClick={() => onNavigate(key)}>
                     <span>{label}</span>
                   </button>
                   {children?.length ? (
@@ -460,6 +463,36 @@ const knowledgePointRows = [
   },
 ];
 
+const knowledgeResultCategories = [
+  { id: 'all', name: '全部类目', count: '99+' },
+  { id: 'eval-v2', name: '806版本评测 > 产品知识库', count: '99+' },
+];
+
+const standardSliceRows = [
+  { id: 'slice-1', content: '百年人寿保险股份有限公司 百年附加医惠通医疗保险产品责任说明，包含保险责任、责任免除、投保规则与犹豫期约定。', source: '03 百年附加医惠通医疗保险产品介绍', status: '-', length: 2617 },
+  { id: 'slice-2', content: '# 交银人寿意外骨折医疗保险 20 版 保障方案与投保须知', source: '交银人寿意外骨折医疗保险条款', status: '-', length: 46 },
+  { id: 'slice-3', content: '个险新人专属会课程（2020版）——新人首月经营动作与拜访要点', source: '44-新人培训-新人专属课程', status: '-', length: 16 },
+  { id: 'slice-4', content: '【卓越新人60天成长训练系列】第一课：读懂产品，建立专业信任', source: '1-新人培训-读懂产品', status: '-', length: 21 },
+  { id: 'slice-5', content: '<table><tr><th colspan="6"><p>百年臻爱人生终身寿险 保险利益演示表</p>', source: '百年臻爱人生终身寿险条款', status: '-', length: 2999 },
+  { id: 'slice-6', content: '<table><tr><th colspan="4"><p>银保+保全规则+117规则 业务处理指引', source: '银保+保全规则+117.pdf', status: '-', length: 3017 },
+];
+
+const parentSliceRows = [
+  { id: 'pslice-1', content: '百年人寿保险股份有限公司 百年附加医惠通医疗保险产品责任说明（父切片）', source: '03 百年附加医惠通医疗保险产品介绍', status: '-', length: 2617, children: 4 },
+  { id: 'pslice-2', content: '个险新人专属会课程（2020版）——新人首月经营动作与拜访要点（父切片）', source: '44-新人培训-新人专属课程', status: '-', length: 320, children: 8 },
+  { id: 'pslice-3', content: '【卓越新人60天成长训练系列】第一课：读懂产品，建立专业信任（父切片）', source: '1-新人培训-读懂产品', status: '-', length: 420, children: 6 },
+  { id: 'pslice-4', content: '<table><tr><th colspan="6"><p>百年臻爱人生终身寿险 保险利益演示表（父切片）', source: '百年臻爱人生终身寿险条款', status: '-', length: 2999, children: 12 },
+];
+
+const qaRows = [
+  { id: 'qa-1', question: '知识图谱与认知智能是什么关系？', answer: '知识图谱是认知智能的底层基础设施之一，通过结构化知识表达支撑推理、问答与决策。', status: '-', source: '面向人工智能新基建知识图谱应用' },
+  { id: 'qa-2', question: '图计算核心算法有哪些？', answer: '图计算核心算法包括：1. 遍历类算法（BFS/DFS）；2. 路径与可达性算法；3. 社区发现与中心性算法。', status: '-', source: '面向人工智能新基建知识图谱应用' },
+  { id: 'qa-3', question: '人工智能在新基建中扮演什么角色？', answer: '在新基建的三大规划领域中，人工智能既是基础设施的组成部分，也是赋能其他领域的关键技术。', status: '-', source: '面向人工智能新基建知识图谱应用' },
+  { id: 'qa-4', question: '知识图谱的基本构建流程是什么？', answer: '知识图谱的构建遵循知识抽取、知识融合、知识加工与知识应用四个环节。', status: '-', source: '面向人工智能新基建知识图谱应用' },
+  { id: 'qa-5', question: '公安知识图谱的应用场景有哪些？', answer: '公安知识图谱重点解决数据关联、线索挖掘与案情推演等问题，提升研判效率。', status: '-', source: '面向人工智能新基建知识图谱应用' },
+  { id: 'qa-6', question: '智慧建筑知识图谱如何构建？', answer: '集合构建以BIM数据与规范为基础，抽取建筑构件、空间关系与运维规则形成图谱。', status: '-', source: '面向人工智能新基建知识图谱应用' },
+];
+
 function KnowledgePointsPage() {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [query, setQuery] = useState('');
@@ -476,6 +509,10 @@ function KnowledgePointsPage() {
     labelPool: ['产品', '营销', '风控', '服务', '门店', '合规'],
     structureAware: '开启',
   });
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [stoppedIds, setStoppedIds] = useState(() => new Set());
+  const [removedIds, setRemovedIds] = useState(() => new Set());
+  const [snapshotRow, setSnapshotRow] = useState(null);
   const filteredRows = knowledgePointRows.filter((row) => {
     const keyword = query.trim().toLowerCase();
     const queryMatched = !keyword
@@ -488,6 +525,13 @@ function KnowledgePointsPage() {
     if (sourceFilter !== '来源文件' && row.source !== sourceFilter) return false;
     if (tagFilter !== '标签' && row.tag !== tagFilter) return false;
     return true;
+  });
+  const visibleRows = filteredRows.filter((row) => !removedIds.has(row.id));
+  const toggleStop = (rowId) => setStoppedIds((current) => {
+    const next = new Set(current);
+    if (next.has(rowId)) next.delete(rowId);
+    else next.add(rowId);
+    return next;
   });
   useEffect(() => () => {
     if (taggingTimerRef.current) window.clearTimeout(taggingTimerRef.current);
@@ -525,7 +569,7 @@ function KnowledgePointsPage() {
 
   return (
     <>
-      <div className="knowledge-result-page">
+      <div className="knowledge-result-page" onClick={() => setOpenMenuId(null)}>
         <aside className="knowledge-category-panel panel">
           <div className="knowledge-category-title">知识类目</div>
           {knowledgePointCategories.map((category) => (
@@ -609,8 +653,8 @@ function KnowledgePointsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((row) => (
-                  <tr key={row.id}>
+                {visibleRows.map((row) => (
+                  <tr key={row.id} className={stoppedIds.has(row.id) ? 'row-disabled' : ''}>
                     <td className="knowledge-expand-cell"><RightChevron /></td>
                     <td className="strong">{row.title}</td>
                     <td>{row.content}</td>
@@ -619,13 +663,23 @@ function KnowledgePointsPage() {
                     <td><Badge tone={row.status === '启用' ? 'success' : 'neutral'}>{row.status}</Badge></td>
                     <td>{row.updatedAt}</td>
                     <td className="actions knowledge-actions">
+                      <button type="button">查看</button>
                       <button type="button">编辑</button>
-                      <button type="button">{row.status === '启用' ? '停用' : '启用'}</button>
-                      <button type="button" title="更多"><MoreOutlined /></button>
+                      <div className="more-menu-wrap">
+                        <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多"><MoreOutlined /></button>
+                        {openMenuId === row.id ? (
+                          <div className="more-menu-panel" onClick={(e) => e.stopPropagation()}>
+                            <button type="button" onClick={() => toggleStop(row.id)}>{stoppedIds.has(row.id) ? '启用' : '停用'}</button>
+                            <button type="button" onClick={() => { setOpenMenuId(null); setSnapshotRow(buildResultSnapshot(row, '知识点')); }}>查看处理方案</button>
+                            <button type="button" onClick={() => setOpenMenuId(null)}>问题记录</button>
+                            <button type="button" className="danger" onClick={() => { setOpenMenuId(null); setRemovedIds((current) => new Set(current).add(row.id)); }}>删除</button>
+                          </div>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
-                {filteredRows.length === 0 ? <tr><td colSpan={8} className="empty-table-cell">暂无匹配知识点</td></tr> : null}
+                {visibleRows.length === 0 ? <tr><td colSpan={8} className="empty-table-cell">暂无匹配知识点</td></tr> : null}
               </tbody>
             </table>
             <div className="knowledge-pagination">
@@ -665,7 +719,318 @@ function KnowledgePointsPage() {
           onRetag={reopenTaggingSettings}
         />
       ) : null}
+      {snapshotRow ? (
+        <Drawer title="查看加工方案" onClose={() => setSnapshotRow(null)} className="result-plan-drawer">
+          <ResultPlanSnapshotView snapshot={snapshotRow} />
+        </Drawer>
+      ) : null}
     </>
+  );
+}
+
+function SliceLibraryPage() {
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [sliceTab, setSliceTab] = useState('标准切片');
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('全部状态');
+  const [sourceFilter, setSourceFilter] = useState('来源文件');
+  const [tagFilter, setTagFilter] = useState('选择标签');
+  const [expandedId, setExpandedId] = useState(null);
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [stoppedIds, setStoppedIds] = useState(() => new Set());
+  const [removedIds, setRemovedIds] = useState(() => new Set());
+  const [snapshotRow, setSnapshotRow] = useState(null);
+  const rows = sliceTab === '标准切片' ? standardSliceRows : parentSliceRows;
+  const filteredRows = rows.filter((row) => {
+    const keyword = query.trim().toLowerCase();
+    const queryMatched = !keyword || row.content.toLowerCase().includes(keyword);
+    if (!queryMatched) return false;
+    if (statusFilter !== '全部状态' && row.status !== statusFilter) return false;
+    if (sourceFilter !== '来源文件' && row.source !== sourceFilter) return false;
+    return true;
+  });
+  const visibleRows = filteredRows.filter((row) => !removedIds.has(row.id));
+  const toggleStop = (rowId) => setStoppedIds((current) => {
+    const next = new Set(current);
+    if (next.has(rowId)) next.delete(rowId);
+    else next.add(rowId);
+    return next;
+  });
+  return (
+    <Fragment>
+    <div className="knowledge-result-page" onClick={() => setOpenMenuId(null)}>
+      <aside className="knowledge-category-panel panel">
+        <div className="knowledge-category-title">知识类目</div>
+        {knowledgeResultCategories.map((category) => (
+          <button
+            type="button"
+            key={category.id}
+            className={`knowledge-category-item ${selectedCategory === category.id ? 'active' : ''}`}
+            onClick={() => setSelectedCategory(category.id)}
+          >
+            <span>{category.name}</span>
+            <strong>{category.count}</strong>
+          </button>
+        ))}
+      </aside>
+      <section className="knowledge-main">
+        <PageHeader title={<>文本切片 <InfoCircleOutlined className="page-header-hint" /></>} actions={<span className="project-space-label">知识空间：806版本评测V2</span>} />
+        <div className="knowledge-content-tabs">
+          <button type="button" className={sliceTab === '标准切片' ? 'active' : ''} onClick={() => { setSliceTab('标准切片'); setExpandedId(null); }}>标准切片</button>
+          <button type="button" className={sliceTab === '父子切片' ? 'active' : ''} onClick={() => { setSliceTab('父子切片'); setExpandedId(null); }}>父子切片</button>
+        </div>
+        <Toolbar className="knowledge-list-toolbar">
+          <button type="button" className="primary"><PlusOutlined /> 新增切片</button>
+          <SearchBox value={query} onChange={setQuery} placeholder="切片内容关键词" />
+          <SelectField value={statusFilter} onChange={setStatusFilter}>
+            <option>全部状态</option>
+            <option>已校验</option>
+            <option>待校验</option>
+          </SelectField>
+          <SelectField value={sourceFilter} onChange={setSourceFilter}>
+            <option>来源文件</option>
+            <option>03 百年附加医惠通医疗保险产品介绍</option>
+            <option>交银人寿意外骨折医疗保险条款</option>
+            <option>44-新人培训-新人专属课程</option>
+            <option>1-新人培训-读懂产品</option>
+            <option>百年臻爱人生终身寿险条款</option>
+            <option>银保+保全规则+117.pdf</option>
+          </SelectField>
+          <SelectField value={tagFilter} onChange={setTagFilter}>
+            <option>选择标签</option>
+            <option>产品</option>
+            <option>培训</option>
+            <option>条款</option>
+            <option>规则</option>
+          </SelectField>
+        </Toolbar>
+        <section className="panel knowledge-table-panel">
+          <table className="data-table knowledge-table slice-table">
+            <colgroup>
+              <col className="slice-col-expand" />
+              <col className="slice-col-content" />
+              <col className="slice-col-source" />
+              <col className="slice-col-status" />
+              <col className="slice-col-length" />
+              <col className="slice-col-action" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th />
+                <th>切片内容</th>
+                <th>来源文件</th>
+                <th>来源文件状态</th>
+                <th>切片长度</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((row) => (
+                <Fragment key={row.id}>
+                  <tr className={stoppedIds.has(row.id) ? 'row-disabled' : ''}>
+                    <td className="knowledge-expand-cell"><button type="button" className={`slice-expand-toggle ${expandedId === row.id ? 'expanded' : ''}`} onClick={() => setExpandedId(expandedId === row.id ? null : row.id)} aria-label="展开详情"><RightChevron /></button></td>
+                    <td className="strong">{row.content}</td>
+                    <td>{row.source}</td>
+                    <td>{row.status}</td>
+                    <td>{row.length}</td>
+                    <td className="actions knowledge-actions">
+                      <button type="button">查看</button>
+                      <button type="button">编辑</button>
+                      <div className="more-menu-wrap">
+                        <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多"><MoreOutlined /></button>
+                        {openMenuId === row.id ? (
+                          <div className="more-menu-panel" onClick={(e) => e.stopPropagation()}>
+                            <button type="button" onClick={() => toggleStop(row.id)}>{stoppedIds.has(row.id) ? '启用' : '停用'}</button>
+                            <button type="button" onClick={() => { setOpenMenuId(null); setSnapshotRow(buildResultSnapshot(row, '切片库')); }}>查看处理方案</button>
+                            <button type="button" onClick={() => setOpenMenuId(null)}>问题记录</button>
+                            <button type="button" className="danger" onClick={() => { setOpenMenuId(null); setRemovedIds((current) => new Set(current).add(row.id)); }}>删除</button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                  {expandedId === row.id ? (
+                    <tr className="slice-detail-row">
+                      <td colSpan={6}>
+                        <div className="slice-detail-content">切片内容：{row.content}</div>
+                        {row.children ? <div className="slice-detail-sub">包含 {row.children} 个子切片</div> : null}
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              ))}
+              {visibleRows.length === 0 ? <tr><td colSpan={6} className="empty-table-cell">暂无匹配切片</td></tr> : null}
+            </tbody>
+          </table>
+          <div className="knowledge-pagination">
+            <span>共 4341 条</span>
+            <button type="button">&lt;</button>
+            <button type="button" className="active">1</button>
+            <button type="button">2</button>
+            <button type="button">3</button>
+            <button type="button">4</button>
+            <button type="button">5</button>
+            <span className="page-ellipsis">…</span>
+            <button type="button">435</button>
+            <button type="button">&gt;</button>
+            <button type="button" className="page-size">10 条/页</button>
+          </div>
+        </section>
+      </section>
+    </div>
+    {snapshotRow ? (
+      <Drawer title="查看加工方案" onClose={() => setSnapshotRow(null)} className="result-plan-drawer">
+        <ResultPlanSnapshotView snapshot={snapshotRow} />
+      </Drawer>
+    ) : null}
+    </Fragment>
+  );
+}
+
+function QaLibraryPage() {
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('全部状态');
+  const [sourceFilter, setSourceFilter] = useState('来源文件');
+  const [tagFilter, setTagFilter] = useState('选择标签');
+  const [expandedId, setExpandedId] = useState(null);
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [stoppedIds, setStoppedIds] = useState(() => new Set());
+  const [removedIds, setRemovedIds] = useState(() => new Set());
+  const [snapshotRow, setSnapshotRow] = useState(null);
+  const filteredRows = qaRows.filter((row) => {
+    const keyword = query.trim().toLowerCase();
+    const queryMatched = !keyword
+      || row.question.toLowerCase().includes(keyword)
+      || row.answer.toLowerCase().includes(keyword);
+    if (!queryMatched) return false;
+    if (statusFilter !== '全部状态' && row.status !== statusFilter) return false;
+    if (sourceFilter !== '来源文件' && row.source !== sourceFilter) return false;
+    return true;
+  });
+  const visibleRows = filteredRows.filter((row) => !removedIds.has(row.id));
+  const toggleStop = (rowId) => setStoppedIds((current) => {
+    const next = new Set(current);
+    if (next.has(rowId)) next.delete(rowId);
+    else next.add(rowId);
+    return next;
+  });
+  return (
+    <Fragment>
+    <div className="knowledge-result-page" onClick={() => setOpenMenuId(null)}>
+      <aside className="knowledge-category-panel panel">
+        <div className="knowledge-category-title">知识类目</div>
+        {knowledgeResultCategories.map((category) => (
+          <button
+            type="button"
+            key={category.id}
+            className={`knowledge-category-item ${selectedCategory === category.id ? 'active' : ''}`}
+            onClick={() => setSelectedCategory(category.id)}
+          >
+            <span>{category.name}</span>
+            <strong>{category.count}</strong>
+          </button>
+        ))}
+      </aside>
+      <section className="knowledge-main">
+        <PageHeader title={<>问答库 <InfoCircleOutlined className="page-header-hint" /></>} actions={<span className="project-space-label">知识空间：806版本评测V2</span>} />
+        <Toolbar className="knowledge-list-toolbar">
+          <button type="button" className="primary"><PlusOutlined /> 新增问答</button>
+          <SearchBox value={query} onChange={setQuery} placeholder="搜索问题/答案" />
+          <SelectField value={statusFilter} onChange={setStatusFilter}>
+            <option>全部状态</option>
+            <option>已发布</option>
+            <option>草稿</option>
+          </SelectField>
+          <SelectField value={sourceFilter} onChange={setSourceFilter}>
+            <option>来源文件</option>
+            <option>面向人工智能新基建知识图谱应用</option>
+            <option>知识图谱标准与规范</option>
+          </SelectField>
+          <SelectField value={tagFilter} onChange={setTagFilter}>
+            <option>选择标签</option>
+            <option>知识图谱</option>
+            <option>人工智能</option>
+            <option>新基建</option>
+          </SelectField>
+        </Toolbar>
+        <section className="panel knowledge-table-panel">
+          <table className="data-table knowledge-table qa-table">
+            <colgroup>
+              <col className="qa-col-expand" />
+              <col className="qa-col-question" />
+              <col className="qa-col-answer" />
+              <col className="qa-col-status" />
+              <col className="qa-col-source" />
+              <col className="qa-col-action" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th />
+                <th>问题</th>
+                <th>标准答案</th>
+                <th>来源文件状态</th>
+                <th>来源文件</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((row) => (
+                <Fragment key={row.id}>
+                  <tr className={stoppedIds.has(row.id) ? 'row-disabled' : ''}>
+                    <td className="knowledge-expand-cell"><button type="button" className={`slice-expand-toggle ${expandedId === row.id ? 'expanded' : ''}`} onClick={() => setExpandedId(expandedId === row.id ? null : row.id)} aria-label="展开详情"><RightChevron /></button></td>
+                    <td className="strong">{row.question}</td>
+                    <td>{row.answer}</td>
+                    <td>{row.status}</td>
+                    <td>{row.source}</td>
+                    <td className="actions knowledge-actions">
+                      <button type="button">查看</button>
+                      <button type="button">编辑</button>
+                      <div className="more-menu-wrap">
+                        <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多"><MoreOutlined /></button>
+                        {openMenuId === row.id ? (
+                          <div className="more-menu-panel" onClick={(e) => e.stopPropagation()}>
+                            <button type="button" onClick={() => toggleStop(row.id)}>{stoppedIds.has(row.id) ? '启用' : '停用'}</button>
+                            <button type="button" onClick={() => { setOpenMenuId(null); setSnapshotRow(buildResultSnapshot(row, 'QA库')); }}>查看处理方案</button>
+                            <button type="button" onClick={() => setOpenMenuId(null)}>问题记录</button>
+                            <button type="button" className="danger" onClick={() => { setOpenMenuId(null); setRemovedIds((current) => new Set(current).add(row.id)); }}>删除</button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                  {expandedId === row.id ? (
+                    <tr className="slice-detail-row">
+                      <td colSpan={6}><div className="slice-detail-content">问题：{row.question}</div><div className="slice-detail-sub">标准答案：{row.answer}</div></td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              ))}
+              {visibleRows.length === 0 ? <tr><td colSpan={6} className="empty-table-cell">暂无匹配问答</td></tr> : null}
+            </tbody>
+          </table>
+          <div className="knowledge-pagination">
+            <span>共 988 条</span>
+            <button type="button">&lt;</button>
+            <button type="button" className="active">1</button>
+            <button type="button">2</button>
+            <button type="button">3</button>
+            <button type="button">4</button>
+            <button type="button">5</button>
+            <span className="page-ellipsis">…</span>
+            <button type="button">99</button>
+            <button type="button">&gt;</button>
+            <button type="button" className="page-size">10 条/页</button>
+          </div>
+        </section>
+      </section>
+    </div>
+    {snapshotRow ? (
+      <Drawer title="查看加工方案" onClose={() => setSnapshotRow(null)} className="result-plan-drawer">
+        <ResultPlanSnapshotView snapshot={snapshotRow} />
+      </Drawer>
+    ) : null}
+    </Fragment>
   );
 }
 
@@ -6366,19 +6731,37 @@ function getNodeInputConfigurationSnapshot(node, nodes = [], file = null) {
     name: artifact.displayName || artifact.label || artifact.name || '节点输入',
     source: getSourceText(artifact.source || node?.inputSource, artifact.value),
   }));
-  (node?.params || []).filter((param) => (
-    param.id === node?.inputParamId || ['file', 'upstream', 'iteration'].includes(param.source?.type)
-  )).forEach((param) => inputs.push({
-    name: param.displayName || param.label || param.name || param.id || '节点输入',
-    source: getSourceText(param.source || node?.inputSource, param.value),
-  }));
+  const isIteration = isIterationNode(node);
+  (node?.params || []).forEach((param) => {
+    if (isIteration && param.id !== node?.inputParamId) return;
+    if (param.id === node?.inputParamId || ['file', 'upstream', 'iteration'].includes(param.source?.type)) {
+      inputs.push({
+        name: param.displayName || param.label || param.name || param.id || '节点输入',
+        source: getSourceText(param.source || node?.inputSource, param.value),
+      });
+    }
+  });
   if (!inputs.length) inputs.push({ name: '节点输入', source: getSourceText(node?.inputSource || (file ? { type: 'file' } : {})) });
   return inputs;
 }
 
+const iterationConfigParamOrder = ['concurrency', 'errorResponseMethod', 'iterationOutput'];
+
+function sortIterationConfigParams(params) {
+  return [...params].sort((a, b) => {
+    const indexA = iterationConfigParamOrder.indexOf(a.id);
+    const indexB = iterationConfigParamOrder.indexOf(b.id);
+    return (indexA === -1 ? iterationConfigParamOrder.length : indexA) - (indexB === -1 ? iterationConfigParamOrder.length : indexB);
+  });
+}
+
 function getNodeEffectiveParameterSnapshot(node, nodes = []) {
   if (!node) return [];
-  return getToolPreviewParams(node).map((param) => ({
+  const previewParams = getToolPreviewParams(node);
+  const params = isIterationNode(node)
+    ? sortIterationConfigParams(previewParams.filter((param) => param.id !== node?.inputParamId))
+    : previewParams;
+  return params.map((param) => ({
     name: param.displayName || param.label || param.name || param.id,
     value: getParamPreview(param, nodes),
     source: param.source?.type || 'manual',
@@ -6621,7 +7004,7 @@ function getParamPreview(param, nodes = []) {
 }
 
 const nodeDefinitionSnapshotSchemaVersion = 1;
-const demoExecutionSnapshotSchemaVersion = 3;
+const demoExecutionSnapshotSchemaVersion = 4;
 
 function markPlanNodeDefinitionSnapshot(node) {
   return {
@@ -7922,6 +8305,611 @@ function KnowledgeAccessPage({ projectId, notify, onOpenPlans }) {
           </div>
         )}
       </section> */}
+    </div>
+  );
+}
+
+// 知识接入 -> 文件上传：正式文件列表一级页面（R039 正式文件加工链路追踪入口）
+const fileUploadSeedRows = [
+  { id: 'fu-1', name: '面向人工智能新基建的知识图谱行业白皮书', source: '行业研究报告', category: '营销知识', tagCategory: '-', tag: '—', format: 'pdf', enabled: true, processStatus: '已处理', size: '2.35 MB', uploadTime: '08/18 10:21:36' },
+  { id: 'fu-2', name: '特种车商业保险示范条款（2020版）', source: '监管政策库', category: '营销知识', tagCategory: '-', tag: '—', format: 'docx', enabled: true, processStatus: '已处理', size: '40.82 KB', uploadTime: '08/18 10:27:22' },
+  { id: 'fu-3', name: '百年康惠保（旗舰版）重大疾病保险条款', source: '保险条款库', category: '营销知识', tagCategory: '-', tag: '—', format: 'docx', enabled: true, processStatus: '处理中', size: '1.16 MB', uploadTime: '08/18 10:31:05' },
+  { id: 'fu-4', name: '04 百年康惠保（旗舰版2.0）重大疾病保险条款', source: '保险条款库', category: '营销知识', tagCategory: '-', tag: '—', format: 'docx', enabled: true, processStatus: '已处理', size: '1.34 MB', uploadTime: '08/18 10:35:47' },
+  { id: 'fu-5', name: '04 百年附加惠通费用补偿医疗保险条款', source: '保险条款库', category: '营销知识', tagCategory: '保险', tag: '豁免责任', format: 'docx', enabled: false, processStatus: '待处理', size: '0.89 MB', uploadTime: '08/18 10:40:12' },
+  { id: 'fu-6', name: '02 百年附加惠通费用补偿医疗保险条款', source: '保险条款库', category: '营销知识', tagCategory: '保险', tag: '豁免责任', format: 'docx', enabled: true, processStatus: '已处理', size: '0.92 MB', uploadTime: '08/18 10:44:50' },
+  { id: 'fu-7', name: '03 百年附加惠通费用补偿医疗保险条款', source: '保险条款库', category: '营销知识', tagCategory: '保险', tag: '豁免责任', format: 'docx', enabled: true, processStatus: '待处理', size: '0.95 MB', uploadTime: '08/18 10:49:18' },
+];
+
+function FileUploadPage({ projectId, notify }) {
+  const [keyword, setKeyword] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('全部类目');
+  const [enabledFilter, setEnabledFilter] = useState('全部状态');
+  const [processFilter, setProcessFilter] = useState('全部文件状态');
+  const [sourceFilter, setSourceFilter] = useState('全部来源');
+  const [tagFilter, setTagFilter] = useState('全部标签');
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [detailFile, setDetailFile] = useState(null);
+  const [chainFile, setChainFile] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
+  const categoryOptions = ['全部类目', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.category)))];
+  const sourceOptions = ['全部来源', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.source)))];
+  const tagOptions = ['全部标签', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.tag).filter((tag) => tag !== '—')))];
+  const resolveCategoryId = (categoryName) => {
+    const solution = dataStore.getProjectSolution(project.id);
+    const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
+    return (categories.find((item) => item.name === categoryName) || {}).id || '';
+  };
+  const openChain = (row) => setChainFile({ ...row, categoryId: resolveCategoryId(row.category) });
+
+  const rows = fileUploadSeedRows.filter((row) => {
+    const kw = keyword.trim().toLowerCase();
+    if (kw && !row.name.toLowerCase().includes(kw)) return false;
+    if (categoryFilter !== '全部类目' && row.category !== categoryFilter) return false;
+    if (enabledFilter !== '全部状态' && (enabledFilter === '启用' ? !row.enabled : row.enabled)) return false;
+    if (processFilter !== '全部文件状态' && row.processStatus !== processFilter) return false;
+    if (sourceFilter !== '全部来源' && row.source !== sourceFilter) return false;
+    if (tagFilter !== '全部标签' && row.tag !== tagFilter) return false;
+    return true;
+  });
+
+  const toggleRow = (id) => {
+    setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  };
+  const toggleAll = () => {
+    setSelectedIds((current) => (rows.every((row) => current.includes(row.id)) ? [] : rows.map((row) => row.id)));
+  };
+  const batchAction = (label) => {
+    if (!selectedIds.length) return;
+    notify(`已对 ${selectedIds.length} 个文件执行「${label}」`, 'success');
+    setSelectedIds([]);
+  };
+  const onPickFiles = () => {
+    if (!fileInputRef.current) return;
+    fileInputRef.current.click();
+  };
+  const onFilesChosen = (event) => {
+    const fileList = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!fileList.length) return;
+    notify(`已选择 ${fileList.length} 个文件，上传执行不在本期原型范围内`, 'success');
+  };
+
+  const formatMeta = (format) => workbenchFileFormatMeta[format];
+
+  return (
+    <div className="file-upload-page">
+      <PageHeader
+        title="文件上传"
+        actions={(
+          <span className="file-upload-space-select">
+            <span className="file-upload-space-prefix">知识空间：</span>
+            <SelectField value={project?.id || ''} onChange={() => {}} missingLabel="请选择知识空间" dropdownMinWidth={220}>
+              {[project].filter(Boolean).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+            </SelectField>
+          </span>
+        )}
+      />
+      <Toolbar className="file-upload-toolbar">
+        <button type="button" className="primary" onClick={onPickFiles}><FileUploadIcon /> 上传文件</button>
+        <input ref={fileInputRef} type="file" multiple hidden onChange={onFilesChosen} />
+        <SearchBox value={keyword} onChange={setKeyword} placeholder="搜索文件名" />
+        <SelectField value={categoryFilter} onChange={setCategoryFilter} dropdownMinWidth={120}>
+          {categoryOptions.map((option) => <option key={option}>{option}</option>)}
+        </SelectField>
+        <SelectField value={enabledFilter} onChange={setEnabledFilter} dropdownMinWidth={110}>
+          <option>全部状态</option>
+          <option>启用</option>
+          <option>停用</option>
+        </SelectField>
+        <SelectField value={processFilter} onChange={setProcessFilter} dropdownMinWidth={120}>
+          <option>全部文件状态</option>
+          <option>待处理</option>
+          <option>处理中</option>
+          <option>已处理</option>
+        </SelectField>
+        <SelectField value={sourceFilter} onChange={setSourceFilter} dropdownMinWidth={110}>
+          {sourceOptions.map((option) => <option key={option}>{option}</option>)}
+        </SelectField>
+        <SelectField value={tagFilter} onChange={setTagFilter} dropdownMinWidth={110}>
+          {tagOptions.map((option) => <option key={option}>{option}</option>)}
+        </SelectField>
+      </Toolbar>
+      <section className="panel file-upload-table-panel">
+        <table className="data-table file-upload-table">
+          <colgroup>
+            <col className="file-upload-col-check" />
+            <col className="file-upload-col-name" />
+            <col className="file-upload-col-category" />
+            <col className="file-upload-col-tagcat" />
+            <col className="file-upload-col-tag" />
+            <col className="file-upload-col-format" />
+            <col className="file-upload-col-action" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th><TreeCheckbox checked={rows.length > 0 && rows.every((row) => selectedIds.includes(row.id))} indeterminate={selectedIds.length > 0 && !rows.every((row) => selectedIds.includes(row.id))} onChange={toggleAll} /></th>
+              <th>文件名称</th>
+              <th>知识类目</th>
+              <th>标签分类</th>
+              <th>标签</th>
+              <th>格式</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const meta = formatMeta(row.format);
+              const FormatIcon = meta?.Icon;
+              return (
+                <tr key={row.id}>
+                  <td><TreeCheckbox checked={selectedIds.includes(row.id)} onChange={() => toggleRow(row.id)} /></td>
+                  <td>
+                    <div className="file-upload-name">
+                      <span className="strong">{row.name}</span>
+                      <small>来源：{row.source}</small>
+                    </div>
+                  </td>
+                  <td>{row.category}</td>
+                  <td>{row.tagCategory}</td>
+                  <td>{row.tag}</td>
+                  <td>
+                    <span className="file-upload-format" style={meta?.color ? { color: meta.color } : undefined}>
+                      {FormatIcon ? <FormatIcon /> : null}
+                      {row.format.toUpperCase()}
+                    </span>
+                  </td>
+                  <td className="actions">
+                    <button type="button" onClick={() => setDetailFile(row)}>文件详情</button>
+                    <button type="button" onClick={() => openChain(row)}>处理链路</button>
+                    <button type="button" title="更多"><MoreOutlined /></button>
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 ? <tr><td colSpan={7} className="empty-table-cell">暂无匹配文件</td></tr> : null}
+          </tbody>
+        </table>
+        {selectedIds.length ? (
+          <div className="file-upload-batchbar">
+            <span className="file-upload-batchbar-count">已选 {selectedIds.length} 项</span>
+            <button type="button" onClick={() => batchAction('停用')}>停用</button>
+            <button type="button" onClick={() => batchAction('启用')}>启用</button>
+            <button type="button" onClick={() => batchAction('开始处理')}>开始处理</button>
+            <button type="button" onClick={() => batchAction('批量确认类目')}>批量确认类目</button>
+            <button type="button" onClick={() => batchAction('批量编辑类目')}>批量编辑类目</button>
+            <button type="button" className="danger-link" onClick={() => batchAction('删除')}>删除</button>
+          </div>
+        ) : null}
+      </section>
+      {detailFile ? (
+        <Drawer title="文件详情" onClose={() => setDetailFile(null)}>
+          <div className="file-upload-detail">
+            <h3>{detailFile.name}</h3>
+            <div className="file-upload-detail-grid">
+              <div><label>知识类目</label><strong>{detailFile.category}</strong></div>
+              <div><label>来源</label><strong>{detailFile.source}</strong></div>
+              <div><label>格式</label><strong>{detailFile.format.toUpperCase()}</strong></div>
+              <div><label>标签分类</label><strong>{detailFile.tagCategory}</strong></div>
+              <div><label>标签</label><strong>{detailFile.tag}</strong></div>
+              <div><label>启用状态</label><strong>{detailFile.enabled ? '启用' : '停用'}</strong></div>
+              <div><label>文件状态</label><strong>{detailFile.processStatus}</strong></div>
+            </div>
+            <p className="file-upload-detail-tip">展示文件的类目、来源、格式与状态等基础信息。</p>
+          </div>
+        </Drawer>
+      ) : null}
+      {chainFile ? (
+        <Drawer title="处理链路 · 过程追踪" onClose={() => setChainFile(null)} className="file-upload-chain-drawer">
+          <FileChainView file={chainFile} />
+        </Drawer>
+      ) : null}
+    </div>
+  );
+}
+
+function parseMonthDayTime(text) {
+  if (!text) return null;
+  const str = String(text);
+  const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
+  const isoDateTimeMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/);
+  if (isoDateTimeMatch) {
+    const [, year, month, day, hour, minute, second] = isoDateTimeMatch;
+    return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+  }
+  const match = str.match(/^(\d{2})\/(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/);
+  if (!match) return null;
+  const [, month, day, hour, minute, second] = match;
+  return new Date(2026, Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+}
+
+function formatMonthDayTime(date) {
+  if (!date || Number.isNaN(date.getTime())) return '-';
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function formatUploadDate(text) {
+  const date = parseMonthDayTime(text);
+  return date ? formatMonthDayTime(date) : String(text || '-');
+}
+
+function formatChainDuration(seconds) {
+  const rounded = Math.max(1, Math.round(seconds));
+  if (rounded < 60) return `${rounded}秒`;
+  return `${Math.floor(rounded / 60)}分${String(rounded % 60).padStart(2, '0')}秒`;
+}
+
+function formatChainTimeRange(startedAt, endedAt) {
+  const start = parseMonthDayTime(startedAt);
+  if (!start) return '暂无执行时间';
+  const end = parseMonthDayTime(endedAt);
+  if (!end) return `${formatMonthDayTime(start)} - 执行中`;
+  const sameDay = start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth() && start.getDate() === end.getDate();
+  const pad = (value) => String(value).padStart(2, '0');
+  const endTime = `${pad(end.getHours())}:${pad(end.getMinutes())}:${pad(end.getSeconds())}`;
+  return `${formatMonthDayTime(start)} - ${sameDay ? endTime : formatMonthDayTime(end)}`;
+}
+
+function mapFileProcessStatus(status) {
+  if (status === '已处理') return '处理成功';
+  if (status === '处理中') return '处理中';
+  if (status === '待处理') return '待处理';
+  return status || '-';
+}
+
+function chainTypeLabel(category = '') {
+  const map = { 文档解析: '通用解析', 文本分片: '通用切片', 知识提取: '知识提取', 系统节点: '迭代执行' };
+  return map[category] || category || '处理';
+}
+
+function buildRunCatalog(file, formType) {
+  const formLabel = getKnowledgeFormTypeLabel(formType);
+  const baseName = `${file.category}${formLabel}${file.format}处理方案`;
+  const baseTime = parseMonthDayTime(file.uploadTime) || new Date();
+  const makeRun = (planId, version, runIndex, status, durationSeconds, minutes) => {
+    const startDate = new Date(baseTime.getTime() + minutes * 60000);
+    const endDate = new Date(startDate.getTime() + durationSeconds * 1000);
+    const startedAt = formatMonthDayTime(startDate);
+    return {
+      id: `${file.id}-${formType}-${planId}-v${version}-r${runIndex}`,
+      planId,
+      version,
+      runIndex,
+      status,
+      durationSeconds,
+      durationText: formatChainDuration(durationSeconds),
+      startedAt,
+      endedAt: formatMonthDayTime(endDate),
+      runLabel: `${version}-${compactRunTime(startDate.toISOString())}`,
+    };
+  };
+  return {
+    plans: [
+      {
+        id: `${file.id}-${formType}-plan-a`,
+        name: baseName,
+        versions: [
+          { id: `${file.id}-${formType}-plan-a-v1.0`, version: '1.0', runs: [
+            makeRun('plan-a', '1.0', 1, '成功', 86, 3),
+            makeRun('plan-a', '1.0', 2, '成功', 78, 6),
+          ]},
+          { id: `${file.id}-${formType}-plan-a-v1.1`, version: '1.1', runs: [
+            makeRun('plan-a', '1.1', 1, '失败', 122, 12),
+          ]},
+        ],
+      },
+      {
+        id: `${file.id}-${formType}-plan-b`,
+        name: `${baseName}（优化版）`,
+        versions: [
+          { id: `${file.id}-${formType}-plan-b-v1.0`, version: '1.0', runs: [
+            makeRun('plan-b', '1.0', 1, '成功', 48, 20),
+          ]},
+        ],
+      },
+    ],
+  };
+}
+
+function buildChainForRun(file, formType, run) {
+  const fileLike = {
+    id: file.id,
+    fileId: file.id,
+    name: file.name,
+    type: (file.format || '').toUpperCase(),
+    size: file.size || '—',
+  };
+  const nodes = demoNodeSets(formType, file.format, file.categoryId || '').map((node, index) => ({
+    ...node,
+    nodeId: node.nodeId || `${file.id}-${formType}-${index}-${node.toolName}`,
+    params: node.params || [],
+    outputs: node.outputs || [],
+    inputArtifacts: node.inputArtifacts || [],
+    innerNodes: node.innerNodes || [],
+  }));
+  const result = demoResult(fileLike, nodes, formType, file.category || '', run.version, file.categoryId || '');
+  const failIndex = run.status === '失败' ? Math.min(2, nodes.length - 1) : -1;
+  const isRunning = file.processStatus === '处理中' || run.status === '执行中';
+  result.nodeExecutions.forEach((nodeRun, index) => {
+    if (isRunning) {
+      nodeRun.status = '执行中';
+      nodeRun.nodeOutput = null;
+      nodeRun.outputFull = null;
+    } else if (failIndex >= 0) {
+      if (index < failIndex) {
+        nodeRun.status = '成功';
+      } else if (index === failIndex) {
+        nodeRun.status = '失败';
+        nodeRun.nodeOutput = null;
+        nodeRun.outputFull = null;
+        nodeRun.error = '运行时异常：上游节点输出缺少必要字段，节点中断执行（示例数据）';
+      } else {
+        nodeRun.status = '未执行';
+        nodeRun.nodeOutput = null;
+        nodeRun.outputFull = null;
+      }
+    } else {
+      nodeRun.status = '成功';
+    }
+  });
+  const baseTime = parseMonthDayTime(run.startedAt) || new Date();
+  const durations = ['1.66s', '0.32s', '0.98s', '0.24s', '0.15s'];
+  result.nodeExecutions.forEach((nodeRun, index) => {
+    nodeRun.chainTime = formatMonthDayTime(new Date(baseTime.getTime() + index * 45 * 1000));
+    nodeRun.chainDuration = durations[index] || `${(0.2 + index * 0.1).toFixed(2)}s`;
+  });
+  return { nodes, result };
+}
+
+function getRunNodeSubtitleText(run, node) {
+  const nodeTypeText = `类型：${chainTypeLabel(node?.category || run.category)}`;
+  const nodeStartRaw = run?.chainTime || run?.startedAt || run?.startTime || '';
+  const nodeDurationText = run?.chainDuration || (run ? getExecutionDurationText(run) : '-');
+  let nodeTimeRange = nodeStartRaw || '-';
+  if (nodeStartRaw && nodeStartRaw !== '-') {
+    const startDate = parseMonthDayTime(nodeStartRaw) || parseExecutionDateTime(nodeStartRaw);
+    if (startDate) {
+      const seconds = (() => {
+        const raw = run?.chainDuration || '';
+        const m = String(raw).match(/(\d+)分(\d+)秒/);
+        if (m) return Number(m[1]) * 60 + Number(m[2]);
+        const s = String(raw).match(/([\d.]+)s/);
+        if (s) return Math.round(parseFloat(s[1]));
+        const sec = String(raw).match(/(\d+)秒/);
+        if (sec) return Number(sec[1]);
+        return null;
+      })();
+      if (Number.isFinite(seconds) && seconds > 0) {
+        const endDate = new Date(startDate.getTime() + seconds * 1000);
+        const sameDay = startDate.getFullYear() === endDate.getFullYear() && startDate.getMonth() === endDate.getMonth() && startDate.getDate() === endDate.getDate();
+        const pad = (v) => String(v).padStart(2, '0');
+        const startText = formatMonthDayTime(startDate);
+        const endText = sameDay ? `${pad(endDate.getHours())}:${pad(endDate.getMinutes())}:${pad(endDate.getSeconds())}` : formatMonthDayTime(endDate);
+        nodeTimeRange = `${startText} - ${endText}`;
+      } else {
+        nodeTimeRange = formatMonthDayTime(startDate);
+      }
+    }
+  }
+  return `${nodeTypeText} · 执行时间：${nodeTimeRange} · 耗时 ${nodeDurationText}`;
+}
+
+function ProcessingChainNodeCard({ run, node, nodes, file, index }) {
+  const statusMeta = getExecutionStatusMeta(run?.status, run ? 'success' : 'notRun');
+  const nodeOutput = getRunNodeOutput(run);
+  const error = run?.error || run?.errorMessage || run?.errorInfo || null;
+  const innerRuns = normalizeInnerRuns(Array.isArray(run?.innerRuns) ? run.innerRuns : []);
+  const nodeSubtitleText = getRunNodeSubtitleText(run, node);
+  return (
+    <section className="run-card file-chain-node">
+      <div className="run-card-head workbench-node-head">
+        <div className="workbench-node-head-main">
+          <div className="workbench-node-title-row">
+            <span className="step-number small">{String(index + 1)}</span>
+            <strong>{node?.toolName || run.toolName}</strong>
+          </div>
+          <div className="workbench-node-subtitle">
+            <span title={nodeSubtitleText}>{nodeSubtitleText}</span>
+          </div>
+        </div>
+        <Badge tone={statusMeta.tone}>{statusMeta.label}</Badge>
+      </div>
+      <RunInputBlock run={run} node={node} nodes={nodes} file={file} status={statusMeta.status} />
+      <RunConfigBlock run={run} node={node} nodes={nodes} />
+      {isIterationNode(node) && innerRuns.length ? (
+        <RunCollapsibleBlock title={`迭代体执行明细（${getIterationBatchCount(run, innerRuns)}次）`} className="run-inner-runs-block">
+          <div className="run-inner-runs">
+            {innerRuns.map((innerRun, innerIndex) => {
+              const innerNode = (node.innerNodes || []).find((item) => item.nodeId === innerRun.nodeId) || (node.innerNodes || [])[innerIndex] || { toolName: innerRun.toolName, category: innerRun.category };
+              return <InnerRunBatchCard key={innerRun.nodeId || `${innerRun.toolName}-${innerIndex}`} innerRun={innerRun} innerNode={innerNode} node={node} file={file} />;
+            })}
+          </div>
+        </RunCollapsibleBlock>
+      ) : null}
+      {statusMeta.status !== 'notRun' && nodeOutput != null
+        ? <RunNodeOutputBlock node={node} nodeOutput={nodeOutput} />
+        : null}
+      {statusMeta.status === 'failed'
+        ? <RunResultBlock title="报错信息" content={error != null ? formatSnapshotContent(error) : '历史记录未保存报错信息'} tone="error" />
+        : null}
+    </section>
+  );
+}
+
+function FileChainView({ file }) {
+  const forms = knowledgeFormTypes;
+  const [activeForm, setActiveForm] = useState(forms[0]);
+  const catalog = buildRunCatalog(file, activeForm);
+  const [planId, setPlanId] = useState(() => catalog.plans[0].id);
+  const plan = catalog.plans.find((item) => item.id === planId) || catalog.plans[0];
+  const [versionId, setVersionId] = useState(() => plan.versions[0].id);
+  const version = plan.versions.find((item) => item.id === versionId) || plan.versions[0];
+  const [runId, setRunId] = useState(() => version.runs[0].id);
+  const run = version.runs.find((item) => item.id === runId) || version.runs[0];
+
+  const switchForm = (form) => {
+    const nextCatalog = buildRunCatalog(file, form);
+    setActiveForm(form);
+    setPlanId(nextCatalog.plans[0].id);
+    setVersionId(nextCatalog.plans[0].versions[0].id);
+    setRunId(nextCatalog.plans[0].versions[0].runs[0].id);
+  };
+  const switchPlan = (nextPlanId) => {
+    const nextPlan = catalog.plans.find((item) => item.id === nextPlanId);
+    if (!nextPlan) return;
+    setPlanId(nextPlan.id);
+    setVersionId(nextPlan.versions[0].id);
+    setRunId(nextPlan.versions[0].runs[0].id);
+  };
+  const switchVersion = (nextVersionId) => {
+    const nextVersion = plan.versions.find((item) => item.id === nextVersionId);
+    if (!nextVersion) return;
+    setVersionId(nextVersion.id);
+    setRunId(nextVersion.runs[0].id);
+  };
+  const switchRun = (nextRunId) => setRunId(nextRunId);
+
+  const { nodes, result } = buildChainForRun(file, activeForm, run);
+  const statusText = mapFileProcessStatus(file.processStatus);
+  const chainNodes = nodes.filter((node) => node.enabled !== false);
+  const executions = result.nodeExecutions || result.toolRuns || [];
+  const isRunning = file.processStatus === '处理中';
+  const runStatusMeta = getExecutionStatusMeta(
+    isRunning ? '执行中' : run.status,
+    run ? (run.status === '失败' ? 'failed' : 'success') : 'notRun',
+  );
+  const timeRange = formatChainTimeRange(run.startedAt, isRunning ? null : run.endedAt);
+  const durationText = isRunning ? '—' : run.durationText;
+
+  const content = statusText === '待处理'
+    ? <div className="empty-mini large">该文件尚未处理，暂无可追踪的处理链路。</div>
+    : (
+      <>
+        <h3 className="drawer-section-title file-chain-section-title">标准化处理流程</h3>
+        <div className="tabs file-chain-tabs">
+          {forms.map((form) => (
+            <button key={form} type="button" className={activeForm === form ? 'active' : ''} onClick={() => switchForm(form)}>
+              {getKnowledgeFormTypeLabel(form)}
+            </button>
+          ))}
+        </div>
+        <section className="file-chain-record">
+          <div className="file-chain-record-selects">
+            <label>
+              <span>方案</span>
+              <SelectField value={planId} onChange={switchPlan} dropdownMinWidth={220}>
+                {catalog.plans.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </SelectField>
+            </label>
+            <label>
+              <span>方案版本</span>
+              <SelectField value={versionId} onChange={switchVersion} dropdownMinWidth={130}>
+                {plan.versions.map((item) => <option key={item.id} value={item.id}>{item.version}</option>)}
+              </SelectField>
+            </label>
+            <label>
+              <span>执行记录</span>
+              <SelectField value={runId} onChange={switchRun} dropdownMinWidth={230}>
+                {version.runs.map((item) => <option key={item.id} value={item.id}>{item.runLabel}</option>)}
+              </SelectField>
+            </label>
+          </div>
+          <div className="file-chain-record-meta">
+            <div className="file-chain-record-meta-main">
+              <div className="file-chain-record-meta-name"><strong title={run.runLabel}>{run.runLabel}</strong></div>
+              <Badge tone={runStatusMeta.tone}>{runStatusMeta.label}</Badge>
+            </div>
+            <span className="file-chain-record-meta-time">执行时间：{timeRange} · 耗时 {durationText}</span>
+          </div>
+        </section>
+        <section className="sample-result-group file-chain-nodes">
+          {chainNodes.map((node, index) => (
+            <ProcessingChainNodeCard
+              key={`${file.id}-${activeForm}-${planId}-${versionId}-${runId}-${node.nodeId}`}
+              run={executions.find((item) => item.nodeId === node.nodeId || item.toolName === node.toolName)}
+              node={node}
+              nodes={chainNodes}
+              file={file}
+              index={index}
+            />
+          ))}
+        </section>
+      </>
+    );
+  return (
+    <div className="file-chain">
+      <div className="file-chain-info">
+        <div><label>知识类目</label><strong>{file.category}</strong></div>
+        <div><label>文件格式</label><strong>{file.format.toUpperCase()}</strong></div>
+        <div><label>文件大小</label><strong>{file.size}</strong></div>
+        <div><label>文件状态</label><strong>{statusText}</strong></div>
+        <div><label>启用状态</label><strong>{file.enabled ? '启用' : '停用'}</strong></div>
+        <div><label>上传时间</label><strong>{formatUploadDate(file.uploadTime)}</strong></div>
+        <div><label>标签</label><strong>{file.tag}</strong></div>
+      </div>
+      {content}
+    </div>
+  );
+}
+
+function buildResultSnapshot(row, formType) {
+  const file = {
+    id: row.id,
+    fileId: row.id,
+    name: row.source || row.question || '知识结果',
+    type: 'DOCX',
+    category: '营销知识',
+    format: 'docx',
+    size: '1.16 MB',
+    processStatus: '已处理',
+    enabled: true,
+    uploadTime: '2026-08-18 10:31:05',
+    tag: '-',
+    categoryId: '',
+  };
+  const catalog = buildRunCatalog(file, formType);
+  const plan = catalog.plans[0];
+  const version = plan.versions[0];
+  const run = version.runs[0];
+  return { file, formType, plan, version, run };
+}
+
+function ResultPlanSnapshotView({ snapshot }) {
+  const { nodes, result } = useMemo(() => buildChainForRun(snapshot.file, snapshot.formType, snapshot.run), [snapshot]);
+  const chainNodes = nodes.filter((node) => node.enabled !== false);
+  const executions = result.nodeExecutions || result.toolRuns || [];
+  const timeRange = formatChainTimeRange(snapshot.run.startedAt, snapshot.run.endedAt);
+  const runStatusMeta = getExecutionStatusMeta(
+    snapshot.run.status,
+    snapshot.run.status === '失败' ? 'failed' : 'success',
+  );
+  return (
+    <div className="result-plan-snapshot">
+      <section className="result-plan-snapshot-meta">
+        <div className="meta-full"><label>加工方案</label><span>{snapshot.plan.name}</span></div>
+        <div><label>方案版本</label><span>{snapshot.version.version}</span></div>
+        <div><label>执行时间</label><span>{timeRange}</span></div>
+        <div><label>耗时</label><span>{snapshot.run.durationText}</span></div>
+        <div><label>执行结果</label><Badge tone={runStatusMeta.tone}>{runStatusMeta.label}</Badge></div>
+      </section>
+      <section className="sample-result-group file-chain-nodes">
+        {chainNodes.map((node, index) => (
+          <ProcessingChainNodeCard
+            key={node.nodeId}
+            run={executions.find((item) => item.nodeId === node.nodeId || item.toolName === node.toolName)}
+            node={node}
+            nodes={chainNodes}
+            file={snapshot.file}
+            index={index}
+          />
+        ))}
+      </section>
     </div>
   );
 }
@@ -12419,12 +13407,25 @@ function getExecutionTimeRange(record) {
   const startedAt = parseExecutionDateTime(record?.startedAt || record?.runAt || record?.createdAt);
   const status = normalizeExecutionStatus(record?.status);
   const endedAt = status === 'running' ? null : parseExecutionDateTime(record?.endedAt || record?.runAt || record?.createdAt);
-  if (!startedAt) return '暂无起止时间';
+  if (!startedAt) return '暂无执行时间';
   if (!endedAt) return `${formatExecutionDateTime(startedAt)} - 执行中`;
   const sameDay = startedAt.getFullYear() === endedAt.getFullYear()
     && startedAt.getMonth() === endedAt.getMonth()
     && startedAt.getDate() === endedAt.getDate();
   return `${formatExecutionDateTime(startedAt)} - ${formatExecutionDateTime(endedAt, !sameDay)}`;
+}
+
+function getExecutionDurationText(record) {
+  if (!record) return '-';
+  if (record.durationText) return record.durationText;
+  if (Number.isFinite(record.durationSeconds)) return formatChainDuration(record.durationSeconds);
+  const status = normalizeExecutionStatus(record.status);
+  if (status === 'running') return '—';
+  const start = parseExecutionDateTime(record.startedAt || record.runAt || record.createdAt);
+  const end = parseExecutionDateTime(record.endedAt || record.runAt || record.createdAt);
+  if (!start || !end) return '-';
+  const seconds = Math.max(1, Math.round((end.getTime() - start.getTime()) / 1000));
+  return formatChainDuration(seconds);
 }
 
 function ExecutionRecordInfo({ record, onRename }) {
@@ -12498,7 +13499,7 @@ function ExecutionRecordInfo({ record, onRename }) {
         <Badge tone={statusMeta.tone}>{statusMeta.label}</Badge>
       </div>
       {errorMessage ? <span className="execution-record-name-error">{errorMessage}</span> : null}
-      <span className="execution-record-time">{getExecutionTimeRange(record)}</span>
+      <span className="execution-record-time">执行时间：{getExecutionTimeRange(record)} · 耗时 {getExecutionDurationText(record)}</span>
     </section>
   );
 }
@@ -13130,7 +14131,6 @@ function RunNodeOutputBlock({ node, nodeOutput }) {
             <div className="run-output-field-head">
               <strong>{field.label}</strong>
               {field.type ? <span>{field.type}</span> : null}
-              {field.path ? <code>{field.path}</code> : null}
               {field.value !== undefined
                 ? <button type="button" className="run-output-copy" title={`复制${field.label}`} aria-label={`复制${field.label}`} onClick={() => copyText(formatSnapshotContent(field.value))}><CopyOutlined /></button>
                 : null}
@@ -13179,11 +14179,11 @@ function InnerRunBatchCard({ innerRun, innerNode, node, file }) {
           {batchCount > 1 ? (
             <span className="run-inner-run-batch">
               <SelectField className="run-batch-select" value={currentBatch} onChange={(value) => setSelectedBatch(Number(value))}>
-                {Array.from({ length: batchCount }, (_, index) => <option key={index + 1} value={index + 1}>{`迭代执行${index + 1}`}</option>)}
+                {Array.from({ length: batchCount }, (_, index) => <option key={index + 1} value={index + 1}>{`第${index + 1}次执行`}</option>)}
               </SelectField>
             </span>
           ) : (
-            <span className="run-inner-run-batch run-batch-static">迭代执行1</span>
+            <span className="run-inner-run-batch run-batch-static">第1次执行</span>
           )}
         </strong>
         <Badge tone={innerStatus.tone}>{innerStatus.label}</Badge>
@@ -13204,12 +14204,18 @@ function ToolRunResultCard({ run, node, nodes, file, index }) {
   const nodeOutput = getRunNodeOutput(run);
   const error = run?.error || run?.errorMessage || run?.errorInfo || null;
   const innerRuns = normalizeInnerRuns(Array.isArray(run?.innerRuns) ? run.innerRuns : []);
+  const nodeSubtitleText = getRunNodeSubtitleText(run, node);
   return (
     <section className="run-card">
-      <div className="run-card-head">
-        <div>
-          <strong>{node?.toolName || run.toolName}</strong>
-          <span>节点 {index + 1}</span>
+      <div className="run-card-head workbench-node-head">
+        <div className="workbench-node-head-main">
+          <div className="workbench-node-title-row">
+            <span className="step-number small">{String(index + 1)}</span>
+            <strong>{node?.toolName || run.toolName}</strong>
+          </div>
+          <div className="workbench-node-subtitle">
+            <span title={nodeSubtitleText}>{nodeSubtitleText}</span>
+          </div>
         </div>
         <Badge tone={statusMeta.tone}>{statusMeta.label}</Badge>
       </div>
@@ -13248,7 +14254,7 @@ function SamplePreview({ files, results = [] }) {
 }
 
 // 导航状态与 URL 同步：刷新后停留在当前页面（含方案配置工作台等深层位置）
-const NAVIGABLE_SCREENS = new Set(['ops-projects', 'ops-category', 'ops-plans', 'ops-access', 'ops-workbench', 'ops-knowledge-points', 'admin-mcp', 'admin-tools', 'ops-slice-library', 'ops-qa-library']);
+const NAVIGABLE_SCREENS = new Set(['ops-projects', 'ops-category', 'ops-plans', 'ops-access', 'ops-file-upload', 'ops-workbench', 'ops-knowledge-points', 'admin-mcp', 'admin-tools', 'ops-slice-library', 'ops-qa-library']);
 
 function serializeNavigation(active, projectId, workbenchTarget) {
   const query = new URLSearchParams(window.location.search);
@@ -13343,10 +14349,11 @@ export function App() {
   else if (active === 'ops-category') content = <ProjectSolutionPage projectId={projectId} notify={notify} onBack={() => setActive('ops-projects')} />;
   else if (active === 'ops-plans') content = <KnowledgePlanPage projectId={projectId} notify={notify} onOpenWorkbench={openWorkbench} />;
   else if (active === 'ops-access') content = <KnowledgeAccessPage projectId={projectId} notify={notify} onOpenPlans={(id) => { setProjectId(id); setActive('ops-plans'); }} />;
+  else if (active === 'ops-file-upload') content = <FileUploadPage projectId={projectId} notify={notify} />;
   else if (active === 'ops-workbench') content = <WorkbenchPage key={workbenchTarget.entryNonce} {...workbenchTarget} notify={notify} onBack={() => setActive(workbenchTarget.returnScreen || 'ops-plans')} onOpenWorkbench={openWorkbench} />;
   else if (active === 'ops-result' || active === 'ops-knowledge-points') content = <KnowledgePointsPage />;
-  else if (active === 'ops-slice-library') content = <EmptyPage title="文本切片" />;
-  else if (active === 'ops-qa-library') content = <EmptyPage title="问答库" />;
+  else if (active === 'ops-slice-library') content = <SliceLibraryPage />;
+  else if (active === 'ops-qa-library') content = <QaLibraryPage />;
   else content = <EmptyPage title={active} />;
 
   // 方案配置页（工作台）没有独立菜单项：左侧菜单按来源页面保持高亮（从「知识加工方案」进入则继续选中「知识加工方案」）
@@ -13355,7 +14362,8 @@ export function App() {
   return (
     <Shell active={active} menuActive={menuActive} onNavigate={(key) => {
       if (key === 'ops-category') setProjectId(projectId || dataStore.getProjects()[0]?.id);
-      setActive(key === 'ops-result' ? 'ops-knowledge-points' : key);
+      if (key === 'ops-access') setActive('ops-file-upload');
+      else setActive(key === 'ops-result' ? 'ops-knowledge-points' : key);
     }}>
       {content}
       <Toast toast={toast} onClose={() => setToast(null)} />

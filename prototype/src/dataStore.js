@@ -327,20 +327,97 @@ function demoGraphSchemaRef(projectId, schemaName) {
   };
 }
 
-function demoNodeSets(formType, fileFormat, categoryId = '') {
-  const parserNodes = {
-    pdf: { toolId: 'ke-idp-mineru-ocr', toolName: 'MinerU版面解析', category: '文档解析' },
-    docx: { toolId: 'ke-idp-mx-ocr', toolName: '通用OCR解析', category: '文档解析' },
-    xlsx: { toolId: 'ke-idp-glm-ocr', toolName: 'GLM文档解析', category: '文档解析' },
-    pptx: { toolId: 'ke-idp-hunyuan-ocr', toolName: 'Hunyuan文档解析', category: '文档解析' },
-    txt: { toolId: 'ke-idp-mx-ocr', toolName: '通用OCR解析', category: '文档解析' },
-    md: { toolId: 'ke-idp-deepseek-ocr', toolName: 'DeepSeek文档解析', category: '文档解析' },
-  };
+export function demoNodeSets(formType, fileFormat, categoryId = '') {
+  const parserNodes = (() => {
+    const configs = {
+      pdf: { toolId: 'ke-idp-mineru-ocr', toolName: 'MinerU版面解析' },
+      docx: { toolId: 'ke-idp-mx-ocr', toolName: '通用OCR解析' },
+      xlsx: { toolId: 'ke-idp-glm-ocr', toolName: 'GLM文档解析' },
+      pptx: { toolId: 'ke-idp-hunyuan-ocr', toolName: 'Hunyuan文档解析' },
+      txt: { toolId: 'ke-idp-mx-ocr', toolName: '通用OCR解析' },
+      md: { toolId: 'ke-idp-deepseek-ocr', toolName: 'DeepSeek文档解析' },
+    };
+    const params = [
+      { id: 'file', name: 'file', displayName: '文件对象', label: '文件对象', type: 'file', required: true, value: '', source: { type: 'file' } },
+      { id: 'parse_mode', name: 'parse_mode', displayName: '解析模式', label: '解析模式', type: 'select', value: '版面解析', options: ['通用解析', '版面解析', 'OCR 解析', '条款解析'], source: { type: 'manual' } },
+      { id: 'language', name: 'language', displayName: '文档语言', label: '文档语言', type: 'select', value: '简体中文', options: ['简体中文', '英文', '日文'], source: { type: 'manual' } },
+      { id: 'table_mode', name: 'table_mode', displayName: '表格处理模式', label: '表格处理模式', type: 'select', value: '结构化表格', options: ['结构化表格', '保留图片', '忽略表格'], source: { type: 'manual' } },
+      { id: 'enable_image_caption', name: 'enable_image_caption', displayName: '图片说明生成', label: '图片说明生成', type: 'select', value: '关闭', options: ['开启', '关闭'], source: { type: 'manual' } },
+    ];
+    const outputs = [
+      { id: 'documentParseResult', path: 'documentParseResult', name: 'documentParseResult', displayName: '文档解析结果', label: '文档解析结果', type: 'object', desc: 'object，包含解析后的版面、文本、图片和表格信息。' },
+    ];
+    return Object.fromEntries(Object.entries(configs).map(([format, base]) => [format, { ...base, category: '文档解析', inputParamId: 'file', params, outputs }]));
+  })();
   const parser = parserNodes[fileFormat] || parserNodes.pdf;
-  const splitter = { toolId: 'ke-idp-markdown-chunk', toolName: 'Markdown结构化分块', category: '文本分片' };
-  const iteration = { toolId: 'system-iteration', toolName: '迭代执行', category: '系统节点' };
+  const splitter = {
+    toolId: 'ke-idp-markdown-chunk',
+    toolName: 'Markdown结构化分块',
+    category: '文本分片',
+    inputParamId: 'input',
+    params: [
+      { id: 'input', name: 'input', displayName: '输入内容', label: '输入内容', type: 'textarea', required: true, value: '', source: { type: 'upstream', sourceNodeId: '', outputPath: '' } },
+      { id: 'chunk_strategy', name: 'chunk_strategy', displayName: '分块策略', label: '分块策略', type: 'select', value: '按标题', options: ['按标题', '按段落', '按语义'], source: { type: 'manual' } },
+      { id: 'max_chunk_size', name: 'max_chunk_size', displayName: '最大切片长度', label: '最大切片长度', type: 'number', value: 1200, source: { type: 'manual' } },
+      { id: 'overlap_size', name: 'overlap_size', displayName: '重叠长度', label: '重叠长度', type: 'number', value: 120, source: { type: 'manual' } },
+    ],
+    outputs: [
+      { id: 'textChunkResult', path: 'textChunkResult', name: 'textChunkResult', displayName: '文本分片结果', label: '文本分片结果', type: 'array<object>', desc: 'array<object>，按标题层级或自适应策略生成的文本分片列表。' },
+      { id: 'stats', path: 'stats', name: 'stats', displayName: '分片统计', label: '分片统计', type: 'object', desc: 'object，分片数量等统计信息。' },
+    ],
+  };
+  const taggingNode = {
+    toolId: 'knowledge-tagging',
+    toolName: '知识点打标',
+    category: '知识提取',
+    inputParamId: 'taggingObject',
+    params: [
+      { id: 'taggingObject', name: 'taggingObject', displayName: '打标对象', label: '打标对象', type: 'textarea', required: true, value: '', source: { type: 'iteration', outputPath: 'currentElement' } },
+      { id: 'knowledgeTitle', name: 'knowledgeTitle', displayName: '知识点标题', label: '知识点标题', type: 'text', value: '', source: { type: 'manual' } },
+      { id: 'sourceChunkIds', name: 'sourceChunkIds', displayName: '来源分片', label: '来源分片', type: 'textarea', value: '', source: { type: 'manual' } },
+      { id: 'tagStrategy', name: 'tagStrategy', displayName: '打标策略', label: '打标策略', type: 'select', value: '结构感知打标', options: ['规则标签优先', '结构感知打标', '模型自动打标'], source: { type: 'manual' } },
+      { id: 'labelPool', name: 'labelPool', displayName: '标签范围', label: '标签范围', type: 'tags', value: ['适用对象', '办理条件', '材料要求'], source: { type: 'manual' } },
+    ],
+    outputs: [
+      { id: 'tagResult', path: 'tagResult', name: 'tagResult', displayName: '打标结果', label: '打标结果', type: 'object', desc: 'object，本轮知识点打标结果，包含标签、类别和来源分片。' },
+      { id: 'tagSummary', path: 'tagSummary', name: 'tagSummary', displayName: '标签摘要', label: '标签摘要', type: 'string', desc: 'string，本轮打标结果的摘要说明。' },
+    ],
+  };
+  const iteration = {
+    toolId: 'system-iteration',
+    toolName: '迭代执行',
+    category: '系统节点',
+    inputParamId: 'iterationInput',
+    params: [
+      { id: 'iterationInput', name: 'iterationInput', displayName: '迭代输入数组', label: '迭代输入数组', type: 'target', schemaType: 'Array', required: true, value: '', source: { type: 'upstream', sourceNodeId: '', outputPath: '' } },
+      { id: 'iterationOutput', name: 'iterationOutput', displayName: '迭代结果来源', label: '迭代结果来源', type: 'target', required: true, value: '', source: { type: 'upstream', sourceNodeId: '', outputPath: 'tagResult' } },
+      { id: 'concurrency', name: 'concurrency', displayName: '并发数量', label: '并发数量', type: 'number', required: true, min: 1, max: 5, value: 1, source: { type: 'manual' } },
+      { id: 'errorResponseMethod', name: 'errorResponseMethod', displayName: '单次执行错误响应方法', label: '单次执行错误响应方法', type: 'select', required: true, value: '错误时终止', options: ['错误时终止', '忽略错误并继续'], source: { type: 'manual' } },
+    ],
+    outputs: [
+      { id: 'iterationResult', path: 'iterationResult', name: 'iterationResult', displayName: '迭代结果', label: '迭代结果', type: 'Array', desc: 'Array，迭代体每轮单次输出聚合后的结果数组。' },
+    ],
+    innerNodes: [taggingNode],
+  };
+  const summaryNode = {
+    toolId: 'summary',
+    toolName: '知识点提取',
+    category: '知识提取',
+    inputParamId: 'input',
+    params: [
+      { id: 'input', name: 'input', displayName: '输入内容', label: '输入内容', type: 'textarea', required: true, value: '', source: { type: 'upstream', sourceNodeId: '', outputPath: '' } },
+      { id: 'summary_type', name: 'summary_type', displayName: '摘要类型', label: '摘要类型', type: 'select', value: '政策摘要', options: ['政策摘要', '要点摘要'], source: { type: 'manual' } },
+      { id: 'model', name: 'model', displayName: '模型', label: '模型', type: 'select', value: 'qwen3-8b', options: ['qwen3-8b', 'qwen3-32b'], source: { type: 'manual' } },
+    ],
+    outputs: [
+      { id: 'summary', path: 'summary', name: 'summary', displayName: '政策摘要', label: '政策摘要', type: 'string', desc: 'string，当前文档的知识点摘要正文。' },
+      { id: 'summaryResult', path: 'summaryResult', name: 'summaryResult', displayName: '知识点结果', label: '知识点结果', type: 'array<object>', desc: 'array<object>，知识点条目和来源引用，包含 title、content、sourceChunkIds。' },
+      { id: 'applicableUsers', path: 'applicableUsers', name: 'applicableUsers', displayName: '适用对象', label: '适用对象', type: 'array<string>', desc: 'array<string>，适用对象列表。' },
+      { id: 'keyRules', path: 'keyRules', name: 'keyRules', displayName: '关键规则', label: '关键规则', type: 'array<string>', desc: 'array<string>，关键规则列表。' },
+    ],
+  };
   if (categoryId === 'cat-wealth-fund' && formType === '知识点' && fileFormat === 'pdf') {
-    return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration];
+    return [parser, splitter, summaryNode, iteration];
   }
   if (formType === '知识图谱') {
     const demoProject = read(keys.projects, []).find((item) => item.id === 'proj-main') || read(keys.projects, [])[0];
@@ -349,6 +426,16 @@ function demoNodeSets(formType, fileFormat, categoryId = '') {
       toolId: 'ke-idp-extract_document_knowledge_graph',
       toolName: '单文档图谱抽取',
       category: '知识提取',
+      inputParamId: 'input',
+      params: [
+        { id: 'input', name: 'input', displayName: '输入内容', label: '输入内容', type: 'textarea', required: true, value: '', source: { type: 'upstream', sourceNodeId: '', outputPath: '' } },
+        { id: 'graph_schema', name: 'graph_schema', displayName: '图谱Schema', label: '图谱Schema', type: 'select', value: schemaName || '', source: { type: 'manual' } },
+        { id: 'include_isolated_entities', name: 'include_isolated_entities', displayName: '保留孤立实体', label: '保留孤立实体', type: 'boolean', value: true, source: { type: 'manual' } },
+        { id: 'extraction_instruction', name: 'extraction_instruction', displayName: '补充抽取说明', label: '补充抽取说明', type: 'textarea', value: extractionInstruction, source: { type: 'manual' } },
+      ],
+      outputs: [
+        { id: 'graph_fragment', path: 'graph_fragment', name: 'graph_fragment', displayName: '图谱抽取结果', label: '图谱抽取结果', type: 'object', desc: 'object，当前文档的图谱片段，包含实体、关系和来源证据。' },
+      ],
       demoConfig: {
         graph_schema: demoGraphSchemaRef(demoProjectId, schemaName),
         include_isolated_entities: true,
@@ -373,6 +460,16 @@ function demoNodeSets(formType, fileFormat, categoryId = '') {
         toolId: 'ke-idp-knowledge_extract_text-qa-expansion',
         toolName: 'QA提取-支持问法扩写',
         category: '知识提取',
+        inputParamId: 'content',
+        params: [
+          { id: 'content', name: 'content', displayName: '输入内容', label: '输入内容', type: 'textarea', required: true, value: '', source: { type: 'upstream', sourceNodeId: '', outputPath: '' } },
+          { id: 'expansion_count', name: 'expansion_count', displayName: '问法扩写数量', label: '问法扩写数量', type: 'number', min: 0, max: 10, value: 3, source: { type: 'manual' } },
+          { id: 'additional_requirement', name: 'additional_requirement', displayName: '补充抽取要求', label: '补充抽取要求', type: 'textarea', value: '使用医保客服常用表达，答案严格基于原文。', source: { type: 'manual' } },
+        ],
+        outputs: [
+          { id: 'qa_pairs', path: 'qa_pairs', name: 'qa_pairs', displayName: '问答对结果', label: '问答对结果', type: 'array<object>', desc: 'array<object>，标准问答对、问法扩写及来源依据。' },
+          { id: 'stats', path: 'stats', name: 'stats', displayName: '统计', label: '统计', type: 'object', desc: 'object，问答对数量和来源分片等统计信息。' },
+        ],
         demoConfig: {
           expansion_count: 3,
           additional_requirement: '使用医保客服常用表达，答案严格基于原文。',
@@ -381,7 +478,7 @@ function demoNodeSets(formType, fileFormat, categoryId = '') {
       iteration,
     ];
   }
-  return [parser, splitter, { toolId: 'summary', toolName: '知识点提取', category: '知识提取' }, iteration];
+  return [parser, splitter, summaryNode, iteration];
 }
 
 function demoSampleFile(fileFormat, seedName) {
@@ -428,7 +525,7 @@ const demoFailedSample = {
   errorMessage: '文件大小超过 50MB 上限，上传失败（示例数据）',
 };
 
-function demoResult(file, nodes, formType, categoryName, version, categoryId = '') {
+export function demoResult(file, nodes, formType, categoryName, version, categoryId = '') {
   const isFundKnowledgePdf = categoryId === 'cat-wealth-fund' && formType === '知识点' && file.type === 'PDF';
   const isKnowledgeGraph = formType === '知识图谱' && file.type === 'PDF';
   const sliceItems = isFundKnowledgePdf ? [
@@ -563,6 +660,7 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
   ];
   const getRunPayload = (node, index) => {
     if (isFundKnowledgePdf && node.toolName === 'MinerU版面解析') return { outputPath: 'documentParseResult', outputFull: { documentParseResult: { pageCount: 26, titleCount: 38, tableCount: 6, markdownReady: true } } };
+    if (node.outputs?.[0]?.path === 'documentParseResult') return { outputPath: 'documentParseResult', outputFull: { documentParseResult: { pageCount: 26, titleCount: 38, tableCount: 6, markdownReady: true } } };
     if (node.toolName === 'Markdown结构化分块') return { outputPath: 'textChunkResult', outputFull: { textChunkResult: sliceItems, stats: { chunkCount: isFundKnowledgePdf ? 18 : sliceItems.length } } };
     if (node.toolName === 'QA提取-支持问法扩写' || node.toolName === 'QA提取') {
       return {
@@ -573,7 +671,15 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
         },
       };
     }
-    if (node.toolName === '知识点提取') return { outputPath: 'summaryResult', outputFull: { summary: isFundKnowledgePdf ? '已识别基金适当性、申购赎回、费用与风险提示等知识点。' : '该政策说明医保参保人员异地就医备案与费用结算要求。', summaryResult: knowledgeItems } };
+    if (node.toolName === '知识点提取') return {
+      outputPath: 'summaryResult',
+      outputFull: {
+        summary: isFundKnowledgePdf ? '已识别基金适当性、申购赎回、费用与风险提示等知识点。' : '该政策说明医保参保人员异地就医备案与费用结算要求。',
+        summaryResult: knowledgeItems,
+        applicableUsers: isFundKnowledgePdf ? ['基金投资者', '代销机构'] : ['城镇职工基本医保参保人', '城乡居民基本医保参保人'],
+        keyRules: isFundKnowledgePdf ? ['投资者应根据自身风险承受能力选择匹配产品', '申购确认时间以基金合同和销售机构规则为准'] : ['异地就医需先备案', '结算结果需支持人工复核'],
+      },
+    };
     if (node.toolName === '实体关系抽取') return {
       outputPath: 'entity_relation_candidates',
       outputFull: {
@@ -593,18 +699,31 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
     }
     return { outputPath: `data.step${index + 1}`, outputFull: { result: { status: 'success', count: 3 + index, sample: ['适用对象', '办理条件', '材料要求'].slice(0, Math.min(3, index + 1)) } } };
   };
+  const resolveDemoParamValue = (node, param) => {
+    const config = node.demoConfig || {};
+    let raw;
+    if (param.id === 'expansion_count') raw = config.expansion_count != null ? String(config.expansion_count) : param.value;
+    else if (param.id === 'additional_requirement') raw = config.additional_requirement != null ? String(config.additional_requirement) : param.value;
+    else if (param.id === 'graph_schema') raw = config.graph_schema && typeof config.graph_schema === 'object' ? config.graph_schema.schemaName : (param.value == null ? '' : param.value);
+    else if (param.id === 'include_isolated_entities') raw = config.include_isolated_entities != null ? (config.include_isolated_entities ? '是' : '否') : param.value;
+    else if (param.id === 'extraction_instruction') raw = config.extraction_instruction != null ? String(config.extraction_instruction) : param.value;
+    else raw = param.value;
+    if (Array.isArray(raw)) return raw.join('、');
+    if (typeof raw === 'boolean') return raw ? '是' : '否';
+    return raw == null ? '' : String(raw);
+  };
   const runs = nodes.map((node, index) => {
     const payload = getRunPayload(node, index);
-    const parameters = node.toolName === 'QA提取-支持问法扩写' ? [
-      { name: '待提取文本', value: 'textChunkResult' },
-      { name: '问法扩写数量', value: String(node.demoConfig?.expansion_count || 3) },
-      { name: '补充抽取要求', value: node.demoConfig?.additional_requirement || '使用医保客服常用表达，答案严格基于原文。' },
-    ] : node.demoConfig ? [
-      { name: '文本分片', value: 'textChunkResult' },
-      { name: '图谱结构定义', value: node.demoConfig.graph_schema && typeof node.demoConfig.graph_schema === 'object' ? node.demoConfig.graph_schema.schemaName : '未选择' },
-      { name: '保留孤立实体', value: node.demoConfig.include_isolated_entities ? '是' : '否' },
-      { name: '补充抽取说明', value: node.demoConfig.extraction_instruction },
-    ] : [{ name: index === 0 ? '样例文件' : '输入来源', value: index === 0 ? file.name : `data.step${index}` }];
+    const parameters = node.toolName === '迭代执行' ? [
+      { name: '并发数量', value: '1' },
+      { name: '单次执行错误响应方法', value: '错误时终止' },
+      { name: '迭代结果来源', value: '上游节点 · 知识点打标 · tagResult' },
+    ] : (node.params || [])
+      .filter((param) => param.id !== node.inputParamId)
+      .map((param) => ({
+        name: param.displayName || param.label || param.name,
+        value: resolveDemoParamValue(node, param),
+      }));
     return {
       nodeId: node.nodeId,
       toolName: node.toolName,
@@ -621,21 +740,69 @@ function demoResult(file, nodes, formType, categoryName, version, categoryId = '
       }, null, 2),
     };
   });
+  const iterationItems = formType === 'QA库' ? qaItems.map((item) => ({ ...item, verified: true })) : formType === '知识点' ? knowledgeItems : sliceItems;
+  const buildInnerRuns = (iterationNode) => (iterationNode.innerNodes || []).map((innerNode, innerIndex) => {
+    const innerParams = (innerNode.params || [])
+      .filter((param) => param.id !== innerNode.inputParamId)
+      .map((param) => ({ name: param.displayName || param.name, value: Array.isArray(param.value) ? param.value.join('、') : String(param.value || '') }));
+    const batches = iterationItems.map((item, batchIndex) => {
+      const tagResult = {
+        knowledgePointId: item.knowledgePointId || item.qaId || `item-${batchIndex + 1}`,
+        chunkId: item.sourceChunkIds?.[0] || item.sourceChunkId || `chunk-${String(batchIndex + 1).padStart(3, '0')}`,
+        title: item.title || item.question || `知识点${batchIndex + 1}`,
+        content: item.content || item.answer || '示例内容。',
+        tags: Array.isArray(item.tags) && item.tags.length ? item.tags : ['知识标签'],
+        category: '政策适用范围',
+        confidence: Math.min(0.99, Number((0.9 + batchIndex * 0.02).toFixed(2))),
+        sourceChunkIds: item.sourceChunkIds || (item.sourceChunkId ? [item.sourceChunkId] : []),
+      };
+      const nodeOutput = { tagResult, tagSummary: `已生成第 ${batchIndex + 1} 个知识点标签结果。` };
+      return { batchIndex: batchIndex + 1, actualInput: item, nodeOutput, status: '成功', outputFull: JSON.stringify(nodeOutput, null, 2) };
+    });
+    return {
+      nodeId: innerNode.nodeId || `${iterationNode.nodeId || 'iteration'}-inner-${innerIndex + 1}`,
+      toolName: innerNode.toolName,
+      category: innerNode.category,
+      parameters: innerParams,
+      inputConfiguration: [{ name: '打标对象', source: '迭代变量 · 当前元素' }],
+      effectiveParameters: innerParams,
+      batches,
+    };
+  });
+  const parseNodePayload = (run) => {
+    const parsed = JSON.parse(run.outputFull);
+    const { version: _version, target: _target, node: _node, fileName: _fileName, ...payload } = parsed;
+    return payload;
+  };
   const nodeExecutions = runs.map((run, index) => {
     const previousRun = index > 0 ? runs[index - 1] : null;
-    const previousOutput = previousRun ? JSON.parse(previousRun.outputFull) : null;
-    const effectiveParameters = run.parameters
-      .filter((param) => !['样例文件', '输入来源', '待提取文本', '文本分片'].includes(param.name))
-      .map((param) => ({ name: param.name, value: param.value }));
+    const previousOutput = index === 0 ? null : parseNodePayload(previousRun);
+    const isIteration = run.toolName === '迭代执行';
+    const effectiveParameters = run.parameters.map((param) => ({ name: param.name, value: param.value }));
+    const inputParam = (nodes[index]?.params || []).find((param) => param.id === nodes[index]?.inputParamId);
+    const inputName = inputParam?.displayName || inputParam?.label || inputParam?.name || '节点输入';
+    const inputConfiguration = [{
+      name: inputName,
+      source: index === 0 ? '引用原始文件' : `上游节点 · ${nodes[index - 1]?.toolName || '来源节点'} · ${previousRun?.outputPath || '节点输出'}`,
+    }];
+    const innerRuns = isIteration ? buildInnerRuns(nodes[index]) : undefined;
+    const extra = {};
+    if (isIteration) {
+      extra.innerRuns = innerRuns;
+      extra.iterationBatchCount = innerRuns?.[0]?.batches.length || iterationItems.length;
+    }
+    let nodeOutput = parseNodePayload(run);
+    if (isIteration) {
+      nodeOutput = { ...nodeOutput, iterationStats: { total: iterationItems.length, success: iterationItems.length, failed: 0, concurrency: 1, errorResponseMethod: '错误时终止' } };
+      run.outputFull = JSON.stringify(nodeOutput, null, 2);
+    }
     return {
       ...run,
-      inputConfiguration: [{
-        name: index === 0 ? '样例文件' : '节点输入',
-        source: index === 0 ? '引用原始文件' : `上游节点 · ${nodes[index - 1]?.toolName || '来源节点'} · ${previousRun?.outputPath || '节点输出'}`,
-      }],
+      inputConfiguration,
       actualInput: index === 0 ? { fileName: file.name, fileType: file.type, fileSize: file.size } : previousOutput,
       effectiveParameters,
-      nodeOutput: JSON.parse(run.outputFull),
+      nodeOutput,
+      ...extra,
     };
   });
   return { fileId: file.id, fileName: file.name, toolRuns: nodeExecutions, nodeExecutions };
