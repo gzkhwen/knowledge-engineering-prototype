@@ -30,8 +30,9 @@ for (const match of assets) {
       `<script type="module" crossorigin src="${reference}"></script>`,
       // Function replacer keeps the content verbatim: a string replacement
       // would interpret "$&"/"$$" inside the inlined assets and corrupt them.
-      // The bundle is self-contained; classic scripts also work when opened via file://.
-      () => `<script>${script}</script>`,
+      // Keep type="module": the bundle uses import.meta.url, which is invalid
+      // in a classic script; inline module scripts also run over file://.
+      () => `<script type="module">${script}</script>`,
     );
   }
 }
