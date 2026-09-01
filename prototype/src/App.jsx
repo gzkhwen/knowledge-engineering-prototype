@@ -7490,16 +7490,6 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
     return map;
   }, [categories]);
 
-  const planCountByFormType = useMemo(() => {
-    const map = new Map(knowledgeFormTypes.map((form) => [form, 0]));
-    if (selectedProjectId) {
-      dataStore.getKnowledgePlans(selectedProjectId).forEach((plan) => {
-        if (map.has(plan.formType)) map.set(plan.formType, map.get(plan.formType) + 1);
-      });
-    }
-    return map;
-  }, [selectedProjectId, version]);
-
   const openCreate = () => setDialog({
     mode: 'create',
     name: '',
@@ -7648,7 +7638,6 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
                 onClick={() => { setActiveFormType(form); setGraphTab('single'); }}
               >
                 <span>{getKnowledgeFormTypeLabel(form)}</span>
-                <em className="plan-form-count">{planCountByFormType.get(form) || 0}</em>
               </button>
             ))}
           </div>
@@ -7702,15 +7691,13 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
                 <col className="plan-col-name" />
                 <col className="plan-col-scope" />
                 <col className="plan-col-status" />
-                <col className="plan-col-files" />
                 <col className="plan-col-run" />
                 <col className="plan-col-action" />
               </colgroup>
-              <thead><tr><th>方案名称</th><th>适用范围</th><th>状态</th><th>加工文件</th><th>最近执行</th><th>操作</th></tr></thead>
+              <thead><tr><th>方案名称</th><th>适用范围</th><th>状态</th><th>最近编辑时间</th><th>操作</th></tr></thead>
               <tbody>
                 {filteredPlans.map((plan) => {
                   const { categoryText, formatText } = scopeText(plan);
-                  const stats = dataStore.getKnowledgePlanStats(plan.id);
                   return (
                     <tr key={plan.id}>
                       <td className="strong">{plan.name}</td>
@@ -7721,8 +7708,7 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
                         </div>
                       </td>
                       <td><Badge tone={plan.status === 'active' ? 'success' : 'neutral'}>{plan.status === 'active' ? '启用' : '停用'}</Badge></td>
-                      <td>{stats.fileCount ? `${stats.fileCount} 个` : '-'}</td>
-                      <td>{stats.lastRunAt || '-'}</td>
+                      <td>{plan.updatedAt || '-'}</td>
                       <td className="actions">
                         <button type="button" onClick={() => configurePlan(plan)}>配置</button>
                         <button type="button" onClick={() => openEdit(plan)}>编辑</button>
@@ -7733,7 +7719,7 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
                   );
                 })}
                 {!filteredPlans.length ? (
-                  <tr><td colSpan={6} className="empty-table-cell">暂无{getKnowledgeFormTypeLabel(activeFormType)}方案，点击「新建方案」创建</td></tr>
+                  <tr><td colSpan={5} className="empty-table-cell">暂无{getKnowledgeFormTypeLabel(activeFormType)}方案，点击「新建方案」创建</td></tr>
                 ) : null}
               </tbody>
             </table>

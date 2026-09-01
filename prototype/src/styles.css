@@ -2991,8 +2991,6 @@ select.select-field,
 }
 .plan-form-item:hover { background: #f4f7fb; }
 .plan-form-item.active { background: #e9f2ff; color: #1d5fd6; font-weight: 600; }
-.plan-form-count { color: #98a2b3; font-size: 12px; font-style: normal; }
-.plan-form-item.active .plan-form-count { color: #1d5fd6; }
 .plan-table-panel { overflow: visible; }
 .plan-table-head { margin-bottom: 4px; }
 .plan-table-head h2 { margin: 0; font-size: 15px; font-weight: 700; color: #111827; }
@@ -3025,7 +3023,6 @@ select.select-field,
 .plan-col-name { width: 15%; }
 .plan-col-scope { width: 24%; }
 .plan-col-status { width: 8%; }
-.plan-col-files { width: 9%; }
 .plan-col-run { width: 17%; }
 .plan-col-action { width: 27%; }
 .plan-table { min-width: 1120px; }
