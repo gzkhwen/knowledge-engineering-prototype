@@ -18,7 +18,9 @@ for (const match of assets) {
     const style = content.toString("utf8").replaceAll("</style", "<\\/style");
     html = html.replace(
       `<link rel="stylesheet" crossorigin href="${reference}">`,
-      `<style data-source="${fileName}">${style}</style>`,
+      // Function replacer keeps the content verbatim: a string replacement
+      // would interpret "$&"/"$$" inside the inlined assets and corrupt them.
+      () => `<style data-source="${fileName}">${style}</style>`,
     );
   } else if (fileName.endsWith(".js")) {
     // Escape "</script" and "<!--" inside the bundle: the HTML parser would
@@ -26,8 +28,10 @@ for (const match of assets) {
     const script = content.toString("utf8").replaceAll("</script", "<\\/script").replaceAll("<!--", "<\\!--");
     html = html.replace(
       `<script type="module" crossorigin src="${reference}"></script>`,
+      // Function replacer keeps the content verbatim: a string replacement
+      // would interpret "$&"/"$$" inside the inlined assets and corrupt them.
       // The bundle is self-contained; classic scripts also work when opened via file://.
-      `<script>${script}</script>`,
+      () => `<script>${script}</script>`,
     );
   }
 }
