@@ -1983,7 +1983,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .run-output-field + .run-output-field { padding-top: 10px; border-top: 1px dashed #d0d5dd; }
 .run-output-field-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .run-output-field-head strong { color: #344054; font-size: 11px; font-weight: 600; }
-.run-output-field-head span { padding: 1px 5px; border-radius: 4px; color: #475467; background: #e4e7ec; font-size: 10px; }
+.run-output-field-head > span { display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 4px; color: #475467; background: #e4e7ec; font-size: 10px; box-sizing: border-box; }
 .run-block-content pre { background: #0f172a; color: #e2e8f0; border-color: #1e293b; }
 .run-output-field pre { background: #0f172a; color: #e2e8f0; border-color: #1e293b; }
 .run-block-error { background: #fffafa; }
@@ -3218,8 +3218,12 @@ select.select-field,
 .run-inner-run-title > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-batch-select.select-field { min-height: 26px; padding: 2px 8px; font-size: 12px; line-height: 1.5; background: #fff; border: 1px solid #cbd5e1; }
 .run-batch-static { font-size: 12px; line-height: 1.5; color: #344054; background: #f2f4f7; border: 1px solid #e3eaf3; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
-.run-output-field-head .run-output-copy { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 24px; margin-left: auto; border-radius: 6px; color: #667085; background: transparent; }
-.run-output-field-head .run-output-copy:hover { color: #0f63f6; background: #e9f2ff; }
+.run-output-field-head .run-output-copy { display: grid; place-items: center; flex: 0 0 auto; width: 16px; height: 16px; margin-left: auto; border-radius: 4px; color: #667085; background: #f2f4f7; padding: 0; border: 0; }
+.run-output-field-head .run-output-copy:hover { color: #0f63f6; background: #f2f4f7; }
+.run-output-field-head .run-output-download { display: grid; place-items: center; flex: 0 0 auto; width: 16px; height: 16px; border-radius: 4px; color: #667085; background: #f2f4f7; padding: 0; text-decoration: none; }
+.run-output-field-head .run-output-download:hover { color: #0f63f6; background: #f2f4f7; }
+.run-output-field-head .run-output-copy .anticon,
+.run-output-field-head .run-output-download .anticon { font-size: 12px; line-height: 1; }
 
 /* R044 工作台支持多反馈合并处理：复选框、确定按钮、标签区、问询面板、气泡问题列表 */
 .issue-select-checkbox { width: 14px; height: 14px; margin: 2px 0 0; accent-color: #1d5fd6; cursor: pointer; }

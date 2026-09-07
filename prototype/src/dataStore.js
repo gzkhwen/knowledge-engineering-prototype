@@ -714,6 +714,9 @@ export function demoResult(file, nodes, formType, categoryName, version, categor
   };
   const runs = nodes.map((node, index) => {
     const payload = getRunPayload(node, index);
+    const outputS3Url = node.category === '文档解析' || node.category === '文本分片'
+      ? `https://demo-result-store.example.com/executions/${encodeURIComponent(file.fileId || 'file')}/${encodeURIComponent(node.toolName)}/full-result.json`
+      : null;
     const parameters = node.toolName === '迭代执行' ? [
       { name: '并发数量', value: '1' },
       { name: '单次执行错误响应方法', value: '错误时终止' },
@@ -731,6 +734,7 @@ export function demoResult(file, nodes, formType, categoryName, version, categor
       outputPath: payload.outputPath,
       parameters,
       status: '成功',
+      ...(outputS3Url ? { outputS3Url } : {}),
       outputFull: JSON.stringify({
         version,
         target: `${categoryName || '兜底方案'} / ${getKnowledgeFormTypeLabel(formType)}`,
@@ -914,7 +918,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v23';
+  const demoVersion = 'workbench-plan-demo-v24';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);

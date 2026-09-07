@@ -10,6 +10,7 @@ import {
   CloudServerOutlined,
   CodeOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   DownOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
@@ -6648,6 +6649,7 @@ function createSampleResult(file, options = {}) {
         { name: 'language', value: 'zh-CN' },
       ],
       status: '成功',
+      outputS3Url: `https://demo-result-store.example.com/executions/${encodeURIComponent(file.id)}/文件解析/full-result.json`,
       outputFull: JSON.stringify({ title: '医保政策样例', sections: [{ title: '适用范围', page: 1, content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' }, { title: '办理条件', page: 2, content: '参保人员因长期居住、转诊转院或急诊抢救需要异地就医的，可申请备案。' }], paragraphs: [{ id: 'p1', heading: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' }], metadata: { fileName: file.name, pageCount: 4, parserVersion: 'policy-parser-1.0', elapsedMs: 128 } }, null, 2),
     },
     {
@@ -6656,6 +6658,7 @@ function createSampleResult(file, options = {}) {
       outputPath: 'textChunkResult',
       parameters: [{ name: 'input', value: 'documentParseResult' }, { name: 'chunk_size', value: '800' }, { name: 'overlap', value: '80' }],
       status: '成功',
+      outputS3Url: `https://demo-result-store.example.com/executions/${encodeURIComponent(file.id)}/文本分片/full-result.json`,
       outputFull: JSON.stringify({ textChunkResult: [{ chunkId: 'chunk-001', title: '适用范围', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。', page: 1 }, { chunkId: 'chunk-002', title: '办理条件', text: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。', page: 2 }], stats: { chunkCount: 2, chunkSize: 800, overlap: 80 } }, null, 2),
     },
     ...(options.includeKnowledgeGraph ? [{
@@ -6876,6 +6879,11 @@ function createInnerBatchForSnapshot(innerNode, innerNodes, file, item, batchInd
 function createSampleResultForPlan(file, nodes) {
   const hasKnowledgeGraph = nodes.some((node) => isKnowledgeGraphExtractionNode(node));
   const defaultRuns = createSampleResult(file, { includeKnowledge: true, includeKnowledgeGraph: hasKnowledgeGraph }).toolRuns;
+  const buildDemoS3Url = (fileId, category, toolName, index) => (
+    category === '文档解析' || category === '文本分片'
+      ? `https://demo-result-store.example.com/executions/${encodeURIComponent(fileId)}/${encodeURIComponent(toolName || `node-${index + 1}`)}/full-result.json`
+      : null
+  );
   const nodeRuns = nodes.filter((node) => node.enabled).map((node, index) => {
     const matched = defaultRuns.find((run) => run.toolName === node.toolName);
     const effectiveParameters = getNodeEffectiveParameterSnapshot(node, nodes);
@@ -6886,11 +6894,13 @@ function createSampleResultForPlan(file, nodes) {
       source: param.source,
       sensitive: param.sensitive,
     }));
+    const outputS3Url = buildDemoS3Url(file.id, node.category, node.toolName, index);
     if (matched) {
       const next = { ...matched, nodeId: node.nodeId, toolName: node.toolName, category: node.category, parameters };
       const nodeOutput = completeNodeOutputSnapshot(node, parseRunOutput(next), file);
       return {
         ...next,
+        ...(outputS3Url ? { outputS3Url } : {}),
         inputConfiguration: getNodeInputConfigurationSnapshot(node, nodes, file),
         effectiveParameters,
         nodeOutput,
@@ -6905,6 +6915,7 @@ function createSampleResultForPlan(file, nodes) {
       category: node.category,
       outputPath,
       status: '成功',
+      ...(outputS3Url ? { outputS3Url } : {}),
       parameters,
       inputConfiguration: getNodeInputConfigurationSnapshot(node, nodes, file),
       effectiveParameters,
@@ -8719,7 +8730,7 @@ function ProcessingChainNodeCard({ run, node, nodes, file, index }) {
         </RunCollapsibleBlock>
       ) : null}
       {statusMeta.status !== 'notRun' && nodeOutput != null
-        ? <RunNodeOutputBlock node={node} nodeOutput={nodeOutput} />
+        ? <RunNodeOutputBlock node={node} nodeOutput={nodeOutput} outputS3Url={run?.outputS3Url} />
         : null}
       {statusMeta.status === 'failed'
         ? <RunResultBlock title="报错信息" content={error != null ? formatSnapshotContent(error) : '历史记录未保存报错信息'} tone="error" />
@@ -13925,6 +13936,10 @@ function getRunActualInput(run) {
   return null;
 }
 
+function isS3AddressValue(value) {
+  return typeof value === 'string' && /^https?:\/\/\S+$/i.test(value.trim());
+}
+
 function getRunNodeOutput(run) {
   if (!run) return null;
   if (run.nodeOutput !== undefined) return run.nodeOutput;
@@ -14107,8 +14122,18 @@ function getNodeOutputFields(node, nodeOutput) {
   });
 }
 
-function RunNodeOutputBlock({ node, nodeOutput }) {
-  const fields = getNodeOutputFields(node, nodeOutput);
+function getFullResultFieldLabel(node) {
+  const category = node?.category || '';
+  if (category === '文档解析') return '解析结果';
+  if (category === '文本分片') return '分块结果';
+  return '完整结果';
+}
+
+function RunNodeOutputBlock({ node, nodeOutput, outputS3Url }) {
+  const baseFields = getNodeOutputFields(node, nodeOutput);
+  const fields = outputS3Url
+    ? [...baseFields, { key: 'output-s3-url', label: getFullResultFieldLabel(node), type: 'string', path: '', value: outputS3Url }]
+    : baseFields;
   return (
     <RunCollapsibleBlock title="节点输出" className="run-output-block">
       <div className="run-block-content run-output-fields">
@@ -14119,6 +14144,9 @@ function RunNodeOutputBlock({ node, nodeOutput }) {
               {field.type ? <span>{field.type}</span> : null}
               {field.value !== undefined
                 ? <button type="button" className="run-output-copy" title={`复制${field.label}`} aria-label={`复制${field.label}`} onClick={() => copyText(formatSnapshotContent(field.value))}><CopyOutlined /></button>
+                : null}
+              {isS3AddressValue(field.value)
+                ? <a className="run-output-download" href={String(field.value)} download title={`下载${field.label}`} aria-label={`下载${field.label}`}><DownloadOutlined /></a>
                 : null}
             </div>
             {field.value !== undefined
@@ -14178,7 +14206,7 @@ function InnerRunBatchCard({ innerRun, innerNode, node, file }) {
         <>
           <RunInputBlock run={batchRun} node={innerNode} nodes={node.innerNodes || []} file={file} status={innerStatus.status} />
           <RunConfigBlock run={batchRun} node={innerNode} nodes={node.innerNodes || []} />
-          <RunNodeOutputBlock node={innerNode} nodeOutput={batch.nodeOutput} />
+          <RunNodeOutputBlock node={innerNode} nodeOutput={batch.nodeOutput} outputS3Url={batch?.outputS3Url} />
         </>
       ) : null}
     </div>
@@ -14218,7 +14246,7 @@ function ToolRunResultCard({ run, node, nodes, file, index }) {
         </RunCollapsibleBlock>
       ) : null}
       {statusMeta.status !== 'notRun' && nodeOutput != null
-        ? <RunNodeOutputBlock node={node} nodeOutput={nodeOutput} />
+        ? <RunNodeOutputBlock node={node} nodeOutput={nodeOutput} outputS3Url={run?.outputS3Url} />
         : null}
       {statusMeta.status === 'failed'
         ? <RunResultBlock title="报错信息" content={error != null ? formatSnapshotContent(error) : '历史记录未保存报错信息'} tone="error" />
