@@ -4,6 +4,66 @@ const SERVICES_KEY = 'knowledge-engineering-demo-higress-mcp-services-v23';
 const CATALOG_KEY = 'knowledge-engineering-demo-higress-managed-tools-v23';
 const CATEGORY_KEY = 'knowledge-engineering-demo-higress-managed-tool-categories-v23';
 const CATALOG_EVENT = 'knowledge-engineering-managed-tool-catalog-changed';
+const TENANT_USAGE_KEY = 'knowledge-engineering-demo-higress-node-tenant-usage-v1';
+const TENANT_SCOPE_ALL = 'all';
+const TENANT_SCOPE_SELF = 'tenant';
+
+// 流程节点可用租户范围（R049 流程节点支持跨租户）：
+// 节点增加「可用租户」属性，默认仅本租户可用，可设置为全部租户可用。
+export const DEFAULT_TENANT_ID = 'default';
+export const platformTenants = [
+  { id: DEFAULT_TENANT_ID, name: 'default', badge: '项' },
+  { id: 'tenant-cmb', name: '长安银行', badge: '长' },
+];
+
+export function getTenantName(tenantId) {
+  const matched = platformTenants.find((tenant) => tenant.id === tenantId);
+  return matched?.name || tenantId || DEFAULT_TENANT_ID;
+}
+
+export function getToolOwnerTenantId(tool) {
+  return tool?.ownerTenantId || DEFAULT_TENANT_ID;
+}
+
+export function getToolVisibilityScope(tool) {
+  return tool?.visibilityScope === TENANT_SCOPE_ALL ? TENANT_SCOPE_ALL : TENANT_SCOPE_SELF;
+}
+
+// 本期只覆盖由 MCP 工具创建的流程节点；平台内置节点与系统节点不参与可见范围控制。
+export function isTenantScopedFlowTool(tool) {
+  if (!tool) return false;
+  if (tool.category === '系统节点') return false;
+  return (tool.kind || tool.nodeKind || '外部工具') !== '内置工具';
+}
+
+export function isToolVisibleToTenant(tool, tenantId = DEFAULT_TENANT_ID) {
+  if (!isTenantScopedFlowTool(tool)) return true;
+  return getToolOwnerTenantId(tool) === tenantId || getToolVisibilityScope(tool) === TENANT_SCOPE_ALL;
+}
+
+export function getToolTenantScopeLabel(tool) {
+  if (!isTenantScopedFlowTool(tool)) return '—';
+  return getToolVisibilityScope(tool) === TENANT_SCOPE_ALL ? '全部租户' : '仅本租户';
+}
+
+// 原型演示：记录其他租户在知识加工方案中引用过该公开节点，供「收回可见范围」时拦截与提示。
+export function listNodeTenantUsage(toolId) {
+  if (!toolId) return [];
+  const usage = readStoredJson(TENANT_USAGE_KEY, [], (value) => Array.isArray(value));
+  const tenantIds = usage
+    .filter((item) => item && item.toolId === toolId)
+    .map((item) => item.tenantId)
+    .filter(Boolean);
+  return Array.from(new Set(tenantIds));
+}
+
+export function recordNodeTenantUsage(toolId, tenantId) {
+  if (!toolId || !tenantId) return;
+  const usage = readStoredJson(TENANT_USAGE_KEY, [], (value) => Array.isArray(value));
+  if (usage.some((item) => item?.toolId === toolId && item?.tenantId === tenantId)) return;
+  writeStoredJson(TENANT_USAGE_KEY, [...usage, { toolId, tenantId, recordedAt: new Date().toISOString() }]);
+}
+
 const GRAPH_TOOL_CANONICAL_ID = 'ke-idp-extract_document_knowledge_graph';
 const GRAPH_TOOL_CANONICAL_NAME = '单文档图谱抽取';
 const GRAPH_TOOL_LEGACY_NAME = '知识图谱抽取';
@@ -2213,6 +2273,8 @@ export function createKnowledgeToolFromRaw(source, overrides = {}) {
     name,
     description: overrides.description?.trim() || rawTool.description || '由 MCP 原始工具创建的流程节点。',
     category: overrides.category || rawTool.category || '未分类',
+    ownerTenantId: overrides.ownerTenantId || DEFAULT_TENANT_ID,
+    visibilityScope: overrides.visibilityScope === TENANT_SCOPE_ALL ? TENANT_SCOPE_ALL : TENANT_SCOPE_SELF,
     sourceServiceId: source?.serviceId || '',
     sourceServiceName: source?.serviceName || '',
     sourceToolName: rawTool.name || '',

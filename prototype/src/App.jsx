@@ -1,4 +1,4 @@
-import { Children, Fragment, isValidElement, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Children, Fragment, createContext, isValidElement, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ApiOutlined,
@@ -8,13 +8,16 @@ import {
   LeftOutlined,
   CloseOutlined,
   CloudServerOutlined,
+  CloudUploadOutlined,
   CodeOutlined,
+  CustomerServiceOutlined,
   DeleteOutlined,
   DownloadOutlined,
   DownOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
   FileExcelFilled,
+  FileImageOutlined,
   FileMarkdownFilled,
   FileOutlined,
   FilePdfFilled,
@@ -46,10 +49,20 @@ import { McpServicePage } from './pages/McpServicePage.jsx';
 import {
   createKnowledgeToolFromRaw,
   createEmptyServiceDraft,
+  DEFAULT_TENANT_ID,
   defaultCategories,
+  getTenantName,
+  getToolOwnerTenantId,
+  getToolTenantScopeLabel,
+  getToolVisibilityScope,
+  isTenantScopedFlowTool,
+  isToolVisibleToTenant,
+  listNodeTenantUsage,
   listRawMcpTools,
   loadServices,
+  platformTenants,
   readCatalog,
+  recordNodeTenantUsage,
   saveCatalog,
   saveServices,
   subscribeCatalog,
@@ -57,6 +70,13 @@ import {
 } from './toolCatalog.js';
 
 const allToolsCategory = '全部';
+
+// 当前租户上下文：跨租户可见的流程节点需要知道「本租户」是谁。
+const TenantContext = createContext({ tenantId: DEFAULT_TENANT_ID, tenants: platformTenants, switchTenant: () => {} });
+
+function useTenant() {
+  return useContext(TenantContext);
+}
 
 function makeId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -245,16 +265,18 @@ function Modal({ title, children, footer, onClose, wide = false, className = '' 
   );
 }
 
-function Drawer({ title, children, onClose, wide = false, className = '' }) {
+function Drawer({ title, children, onClose, wide = false, className = '', footer = null, darkHead = false }) {
   return (
     <div className="drawer-layer">
       <div className="drawer-mask" onClick={onClose} />
-      <aside className={`drawer ${wide ? 'wide' : ''} ${className}`.trim()}>
+      <aside className={`drawer ${wide ? 'wide' : ''} ${footer ? 'has-footer' : ''} ${darkHead ? 'dark-head' : ''} ${className}`.trim()}>
         <div className="drawer-head">
+          {darkHead ? <button type="button" className="icon-button" onClick={onClose}><CloseOutlined /></button> : null}
           <h2>{title}</h2>
-          <button type="button" className="icon-button" onClick={onClose}><CloseOutlined /></button>
+          {darkHead ? null : <button type="button" className="icon-button" onClick={onClose}><CloseOutlined /></button>}
         </div>
         <div className="drawer-body">{children}</div>
+        {footer ? <div className="drawer-foot">{footer}</div> : null}
       </aside>
     </div>
   );
@@ -329,6 +351,54 @@ function AgentCodeEditorField({ label, value, onChange, onGenerate, generating =
   );
 }
 
+function TenantSwitcher() {
+  const { tenantId, tenants, switchTenant } = useTenant();
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleMouseDown = (event) => {
+      if (boxRef.current && boxRef.current.contains(event.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [open]);
+  const current = tenants.find((tenant) => tenant.id === tenantId) || tenants[0];
+  return (
+    <div className="tenant-switch" ref={boxRef}>
+      <button
+        type="button"
+        className="tenant-select"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>{current?.badge || '项'}</span> {current?.name || tenantId} <DownOutlined />
+      </button>
+      {open ? (
+        <div className="tenant-menu" role="listbox" aria-label="切换租户">
+          <div className="tenant-menu-title">切换当前租户</div>
+          {tenants.map((tenant) => (
+            <button
+              type="button"
+              key={tenant.id}
+              role="option"
+              aria-selected={tenant.id === tenantId}
+              className={`tenant-menu-item ${tenant.id === tenantId ? 'active' : ''}`.trim()}
+              onClick={() => { switchTenant(tenant.id); setOpen(false); }}
+            >
+              <span className="tenant-menu-badge">{tenant.badge}</span>
+              <span className="tenant-menu-name">{tenant.name}</span>
+              {tenant.id === tenantId ? <CheckCircleOutlined className="tenant-menu-check" /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Shell({ active, menuActive = active, onNavigate, children }) {
   const navGroups = [
     {
@@ -344,6 +414,7 @@ function Shell({ active, menuActive = active, onNavigate, children }) {
           ['ops-qa-library', '问答库'],
           ['ops-knowledge-points', '知识点'],
         ]],
+        ['ops-retrieval', '搜索测试'],
         ['ops-package', '知识包管理'],
       ],
     },
@@ -365,7 +436,7 @@ function Shell({ active, menuActive = active, onNavigate, children }) {
           <button type="button" className="active">知识工程</button>
         </nav>
         <div className="top-actions">
-          <button type="button" className="tenant-select"><span>项</span> default <DownOutlined /></button>
+          <TenantSwitcher />
           <button type="button">文档</button>
           <button type="button">反馈</button>
           <button type="button" className="avatar">U</button>
@@ -436,6 +507,15 @@ const knowledgePointCategories = [
 
 const knowledgePointRows = [
   {
+    id: 'kp-4',
+    title: '甲类药品报销比例',
+    content: '甲类药品按参保地政策全额纳入报销范围，样例中阿莫西林胶囊、二甲双胍片、奥美拉唑肠溶胶囊的报销比例分别为 90%、95%、92%。',
+    source: '医保药品目录清单.csv',
+    tag: '医保',
+    status: '启用',
+    updatedAt: '2026-09-02 15:20',
+  },
+  {
     id: 'kp-1',
     title: '喜茶门店标准服务',
     content: '围绕门店接待、点单、出杯与客诉处理沉淀...',
@@ -470,6 +550,7 @@ const knowledgeResultCategories = [
 ];
 
 const standardSliceRows = [
+  { id: 'slice-7', content: '医保药品目录清单：阿莫西林胶囊（胶囊，90%，甲类）、布洛芬缓释胶囊（缓释胶囊，85%，乙类）、二甲双胍片（片剂，95%，甲类）。', source: '医保药品目录清单.csv', status: '-', length: 96 },
   { id: 'slice-1', content: '百年人寿保险股份有限公司 百年附加医惠通医疗保险产品责任说明，包含保险责任、责任免除、投保规则与犹豫期约定。', source: '03 百年附加医惠通医疗保险产品介绍', status: '-', length: 2617 },
   { id: 'slice-2', content: '# 交银人寿意外骨折医疗保险 20 版 保障方案与投保须知', source: '交银人寿意外骨折医疗保险条款', status: '-', length: 46 },
   { id: 'slice-3', content: '个险新人专属会课程（2020版）——新人首月经营动作与拜访要点', source: '44-新人培训-新人专属课程', status: '-', length: 16 },
@@ -486,6 +567,7 @@ const parentSliceRows = [
 ];
 
 const qaRows = [
+  { id: 'qa-7', question: '阿莫西林胶囊的报销比例是多少？', answer: '阿莫西林胶囊（胶囊剂型）的报销比例为 90%，属于甲类药品。', status: '-', source: '客户问答清单.csv' },
   { id: 'qa-1', question: '知识图谱与认知智能是什么关系？', answer: '知识图谱是认知智能的底层基础设施之一，通过结构化知识表达支撑推理、问答与决策。', status: '-', source: '面向人工智能新基建知识图谱应用' },
   { id: 'qa-2', question: '图计算核心算法有哪些？', answer: '图计算核心算法包括：1. 遍历类算法（BFS/DFS）；2. 路径与可达性算法；3. 社区发现与中心性算法。', status: '-', source: '面向人工智能新基建知识图谱应用' },
   { id: 'qa-3', question: '人工智能在新基建中扮演什么角色？', answer: '在新基建的三大规划领域中，人工智能既是基础设施的组成部分，也是赋能其他领域的关键技术。', status: '-', source: '面向人工智能新基建知识图谱应用' },
@@ -513,6 +595,7 @@ function KnowledgePointsPage() {
   const [openMenuId, setOpenMenuId] = useState(null);
   const [stoppedIds, setStoppedIds] = useState(() => new Set());
   const [removedIds, setRemovedIds] = useState(() => new Set());
+  const [detailRow, setDetailRow] = useState(null);
   const [snapshotRow, setSnapshotRow] = useState(null);
   const filteredRows = knowledgePointRows.filter((row) => {
     const keyword = query.trim().toLowerCase();
@@ -664,7 +747,7 @@ function KnowledgePointsPage() {
                     <td><Badge tone={row.status === '启用' ? 'success' : 'neutral'}>{row.status}</Badge></td>
                     <td>{row.updatedAt}</td>
                     <td className="actions knowledge-actions">
-                      <button type="button">查看</button>
+                      <button type="button" onClick={() => setDetailRow(row)}>查看</button>
                       <button type="button">编辑</button>
                       <div className="more-menu-wrap">
                         <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多"><MoreOutlined /></button>
@@ -725,6 +808,12 @@ function KnowledgePointsPage() {
           <ResultPlanSnapshotView snapshot={snapshotRow} />
         </Drawer>
       ) : null}
+      {detailRow ? (
+        <KnowledgeResultDetailDrawer
+          seed={resolveResultDetailSeed('知识点', detailRow)}
+          onClose={() => setDetailRow(null)}
+        />
+      ) : null}
     </>
   );
 }
@@ -741,6 +830,7 @@ function SliceLibraryPage() {
   const [stoppedIds, setStoppedIds] = useState(() => new Set());
   const [removedIds, setRemovedIds] = useState(() => new Set());
   const [snapshotRow, setSnapshotRow] = useState(null);
+  const [detailRow, setDetailRow] = useState(null);
   const rows = sliceTab === '标准切片' ? standardSliceRows : parentSliceRows;
   const filteredRows = rows.filter((row) => {
     const keyword = query.trim().toLowerCase();
@@ -835,7 +925,7 @@ function SliceLibraryPage() {
                     <td>{row.status}</td>
                     <td>{row.length}</td>
                     <td className="actions knowledge-actions">
-                      <button type="button">查看</button>
+                      <button type="button" onClick={() => setDetailRow(row)}>查看</button>
                       <button type="button">编辑</button>
                       <div className="more-menu-wrap">
                         <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多"><MoreOutlined /></button>
@@ -884,6 +974,12 @@ function SliceLibraryPage() {
         <ResultPlanSnapshotView snapshot={snapshotRow} />
       </Drawer>
     ) : null}
+    {detailRow ? (
+      <KnowledgeResultDetailDrawer
+        seed={resolveResultDetailSeed('切片库', detailRow)}
+        onClose={() => setDetailRow(null)}
+      />
+    ) : null}
     </Fragment>
   );
 }
@@ -898,6 +994,7 @@ function QaLibraryPage() {
   const [openMenuId, setOpenMenuId] = useState(null);
   const [stoppedIds, setStoppedIds] = useState(() => new Set());
   const [removedIds, setRemovedIds] = useState(() => new Set());
+  const [detailRow, setDetailRow] = useState(null);
   const [snapshotRow, setSnapshotRow] = useState(null);
   const filteredRows = qaRows.filter((row) => {
     const keyword = query.trim().toLowerCase();
@@ -985,7 +1082,7 @@ function QaLibraryPage() {
                     <td>{row.status}</td>
                     <td>{row.source}</td>
                     <td className="actions knowledge-actions">
-                      <button type="button">查看</button>
+                      <button type="button" onClick={() => setDetailRow(row)}>查看</button>
                       <button type="button">编辑</button>
                       <div className="more-menu-wrap">
                         <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多"><MoreOutlined /></button>
@@ -1030,6 +1127,12 @@ function QaLibraryPage() {
       <Drawer title="查看加工方案" onClose={() => setSnapshotRow(null)} className="result-plan-drawer">
         <ResultPlanSnapshotView snapshot={snapshotRow} />
       </Drawer>
+    ) : null}
+    {detailRow ? (
+      <KnowledgeResultDetailDrawer
+        seed={resolveResultDetailSeed('QA库', detailRow)}
+        onClose={() => setDetailRow(null)}
+      />
     ) : null}
     </Fragment>
   );
@@ -1469,16 +1572,28 @@ function ToolSchemaCard({ tool }) {
 }
 
 function ToolManagementPage({ notify }) {
-  const [snapshot, setSnapshot] = useState(() => normalizeToolSnapshot(readManagementFlowNodeCatalog()));
+  const { tenantId } = useTenant();
+  // snapshot 持有全量节点（写入边界），列表展示按当前租户可见性过滤，避免过滤后的回写丢掉其他租户的节点。
+  const [snapshot, setSnapshot] = useState(() => normalizeToolSnapshot(readManagementFlowNodeCatalog('')));
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(allToolsCategory);
   const [categoryDraft, setCategoryDraft] = useState(null);
   const [categoryDeleteDialog, setCategoryDeleteDialog] = useState(null);
   const [toolDisableDialog, setToolDisableDialog] = useState(null);
+  const [scopeChangeDialog, setScopeChangeDialog] = useState(null);
   const [detailTool, setDetailTool] = useState(null);
   const [createDraft, setCreateDraft] = useState(null);
 
-  useEffect(() => subscribeCatalog(() => setSnapshot(normalizeToolSnapshot(readManagementFlowNodeCatalog()))), []);
+  useEffect(() => subscribeCatalog(() => setSnapshot(normalizeToolSnapshot(readManagementFlowNodeCatalog('')))), []);
+
+  useEffect(() => {
+    setSelectedCategory(allToolsCategory);
+  }, [tenantId]);
+
+  const visibleTools = useMemo(
+    () => snapshot.tools.filter((tool) => isToolVisibleToTenant(tool, tenantId)),
+    [snapshot.tools, tenantId],
+  );
 
   useEffect(() => {
     setDetailTool((current) => (current ? snapshot.tools.find((tool) => tool.id === current.id) || null : null));
@@ -1490,15 +1605,22 @@ function ToolManagementPage({ notify }) {
     saveCatalog(tools, categories);
   };
 
+  // 其他租户（非归属租户）在知识加工方案中引用过该节点的记录。
+  const getCrossTenantUsage = (tool) => {
+    if (!tool || !isTenantScopedFlowTool(tool)) return [];
+    const ownerTenantId = getToolOwnerTenantId(tool);
+    return listNodeTenantUsage(tool.id).filter((item) => item !== ownerTenantId);
+  };
+
   const categoryCounts = useMemo(() => {
     const counts = {};
-    snapshot.tools.forEach((tool) => {
+    visibleTools.forEach((tool) => {
       counts[tool.category] = (counts[tool.category] || 0) + 1;
     });
     return counts;
-  }, [snapshot.tools]);
+  }, [visibleTools]);
 
-  const filteredTools = useMemo(() => snapshot.tools.filter((tool) => {
+  const filteredTools = useMemo(() => visibleTools.filter((tool) => {
     if (selectedCategory !== allToolsCategory && tool.category !== selectedCategory) return false;
     if (!query.trim()) return true;
     const keyword = query.trim().toLowerCase();
@@ -1506,7 +1628,7 @@ function ToolManagementPage({ notify }) {
       || tool.description.toLowerCase().includes(keyword)
       || tool.sourceToolName?.toLowerCase().includes(keyword)
       || tool.sourceServiceName?.toLowerCase().includes(keyword);
-  }), [query, selectedCategory, snapshot.tools]);
+  }), [query, selectedCategory, visibleTools]);
 
   const rawSources = useMemo(() => listRawMcpTools(loadServices()), [snapshot.tools.length]);
   const detailRawSource = detailTool ? rawSources.find((source) => (
@@ -1561,7 +1683,7 @@ function ToolManagementPage({ notify }) {
 
   const openCreateTool = () => {
     const firstSource = rawSources.find(hasOutputSchema);
-    setCreateDraft(makeKnowledgeToolDraft(firstSource, snapshot.categories[1] || snapshot.categories[0] || '未分类'));
+    setCreateDraft(makeKnowledgeToolDraft(firstSource, snapshot.categories[1] || snapshot.categories[0] || '未分类', tenantId));
   };
 
   const openEditTool = (tool) => {
@@ -1589,11 +1711,12 @@ function ToolManagementPage({ notify }) {
   const toggleToolEnabled = (tool) => {
     if (tool.enabled) {
       const references = dataStore.getFormalPlanReferencesByToolId(tool.id);
+      const crossTenantUsage = getCrossTenantUsage(tool);
       if (references.spaceCount > 0) {
-        setToolDisableDialog({ type: 'blocked', tool, references });
+        setToolDisableDialog({ type: 'blocked', tool, references, crossTenantUsage });
         return;
       }
-      setToolDisableDialog({ type: 'confirm', tool });
+      setToolDisableDialog(crossTenantUsage.length ? { type: 'confirm-cross-tenant', tool, crossTenantUsage } : { type: 'confirm', tool });
       return;
     }
     persist(snapshot.tools.map((item) => (item.id === tool.id ? {
@@ -1628,6 +1751,8 @@ function ToolManagementPage({ notify }) {
       name: draftToSave.name,
       description: draftToSave.description,
       category: draftToSave.category,
+      ownerTenantId: draftToSave.ownerTenantId,
+      visibilityScope: draftToSave.visibilityScope === 'all' ? 'all' : 'tenant',
       inputArtifacts: draftToSave.inputArtifacts,
       inputs: draftToSave.inputs,
       outputs: buildDraftOutputs(draftToSave),
@@ -1641,6 +1766,20 @@ function ToolManagementPage({ notify }) {
       exceptionRules: draftToSave.exceptionRules,
     };
     if (draftToSave.id) {
+      const currentTool = snapshot.tools.find((tool) => tool.id === draftToSave.id);
+      // 已公开的节点被其他租户使用时，禁止收回为「仅本租户可用」。
+      if (
+        currentTool
+        && isTenantScopedFlowTool(currentTool)
+        && getToolVisibilityScope(currentTool) === 'all'
+        && overrides.visibilityScope === 'tenant'
+      ) {
+        const crossTenantUsage = getCrossTenantUsage(currentTool);
+        if (crossTenantUsage.length > 0) {
+          setScopeChangeDialog({ tool: currentTool, crossTenantUsage });
+          return;
+        }
+      }
       persist(snapshot.tools.map((tool) => (tool.id === draftToSave.id ? applyKnowledgeToolDraft(tool, overrides) : tool)));
       notify('流程节点已更新', 'success');
     } else {
@@ -1673,7 +1812,7 @@ function ToolManagementPage({ notify }) {
         <aside className="category-sidebar panel">
           <div className="side-head"><strong>节点类型</strong><button type="button" title="新增节点类型" onClick={openCreateCategory}><PlusOutlined /></button></div>
           <button type="button" className={`category-button ${selectedCategory === allToolsCategory ? 'active' : ''}`} onClick={() => setSelectedCategory(allToolsCategory)}>
-            <span>全部</span><Badge>{snapshot.tools.length}</Badge>
+            <span>全部</span><Badge>{visibleTools.length}</Badge>
           </button>
           {snapshot.categories.map((category) => (
             <button type="button" key={category} className={`category-button category-row ${selectedCategory === category ? 'active' : ''}`} onClick={() => setSelectedCategory(category)}>
@@ -1695,6 +1834,8 @@ function ToolManagementPage({ notify }) {
             <colgroup>
               <col className="standard-tool-col-name" />
               <col className="standard-tool-col-source" />
+              <col className="standard-tool-col-tenant" />
+              <col className="standard-tool-col-scope" />
               <col className="standard-tool-col-status" />
               <col className="standard-tool-col-owner" />
               <col className="standard-tool-col-updated" />
@@ -1704,6 +1845,8 @@ function ToolManagementPage({ notify }) {
               <tr className="config-param-base-row">
                 <th>节点名称</th>
                 <th>来源工具</th>
+                <th>归属租户</th>
+                <th>可用租户</th>
                 <th>状态</th>
                 <th>创建人</th>
                 <th>最近更新</th>
@@ -1716,9 +1859,18 @@ function ToolManagementPage({ notify }) {
                   <td>
                     <div className="standard-tool-name-cell">
                       <strong>{tool.name}</strong>
+                      {isTenantScopedFlowTool(tool) && getToolOwnerTenantId(tool) !== tenantId ? (
+                        <span className="cross-tenant-tag">跨租户 · 来自 {getTenantName(getToolOwnerTenantId(tool))}</span>
+                      ) : null}
                     </div>
                   </td>
                   <td title={`${tool.sourceServiceName || tool.serviceName || '-'} / ${tool.sourceToolName || '-'}`}>{tool.sourceServiceName || tool.serviceName || '-'} / {tool.sourceToolName || '-'}</td>
+                  <td>{isTenantScopedFlowTool(tool) ? getTenantName(getToolOwnerTenantId(tool)) : '—'}</td>
+                  <td>
+                    {isTenantScopedFlowTool(tool)
+                      ? <Badge tone={getToolVisibilityScope(tool) === 'all' ? 'blue' : 'neutral'}>{getToolTenantScopeLabel(tool)}</Badge>
+                      : <span className="muted-text">平台内置</span>}
+                  </td>
                   <td><Badge tone={tool.enabled ? 'success' : 'neutral'}>{tool.enabled ? '启用' : '停用'}</Badge></td>
                   <td>{tool.createdBy || '系统管理员'}</td>
                   <td>{tool.updatedAt || tool.lastModifiedAt || tool.lastSyncedAt || '-'}</td>
@@ -1730,7 +1882,7 @@ function ToolManagementPage({ notify }) {
                   </td>
                 </tr>
               ))}
-              {filteredTools.length === 0 ? <tr><td colSpan={6} className="empty-table-cell">暂无匹配工具</td></tr> : null}
+              {filteredTools.length === 0 ? <tr><td colSpan={8} className="empty-table-cell">暂无匹配工具</td></tr> : null}
             </tbody>
           </table>
         </section>
@@ -1767,17 +1919,44 @@ function ToolManagementPage({ notify }) {
       {toolDisableDialog?.type === 'blocked' ? (
         <ConfirmDialog
           title="无法停用流程节点"
-          message={`当前节点已被${toolDisableDialog.references.spaceCount}个知识空间的处理方案引用，禁止停用。`}
+          message={[
+            toolDisableDialog.references.spaceCount > 0
+              ? `当前节点已被 ${toolDisableDialog.references.spaceCount} 个知识空间的处理方案引用，禁止停用。`
+              : '',
+            toolDisableDialog.crossTenantUsage?.length
+              ? `该节点已设为「全部租户可用」，且正被 ${toolDisableDialog.crossTenantUsage.map((item) => getTenantName(item)).join('、')} 租户使用，停用会影响其他租户的处理方案。`
+              : '',
+          ].filter(Boolean).join('')}
           cancelText=""
           confirmText="知道了"
           onCancel={() => setToolDisableDialog(null)}
           onConfirm={() => setToolDisableDialog(null)}
         />
       ) : null}
+      {scopeChangeDialog ? (
+        <ConfirmDialog
+          title="无法收回可见范围"
+          message={`该节点已设为「全部租户可用」，且正被 ${scopeChangeDialog.crossTenantUsage.map((item) => getTenantName(item)).join('、')} 租户使用，无法改回「仅本租户可用」。如需收回，请先在其他租户的处理方案中移除该节点。`}
+          cancelText=""
+          confirmText="知道了"
+          onCancel={() => setScopeChangeDialog(null)}
+          onConfirm={() => setScopeChangeDialog(null)}
+        />
+      ) : null}
       {toolDisableDialog?.type === 'confirm' ? (
         <ConfirmDialog
           title="停用流程节点"
           message="节点停用后，运营端配置处理方案将无法使用此节点，确定停用？"
+          confirmText="确定停用"
+          onCancel={() => setToolDisableDialog(null)}
+          onConfirm={() => confirmDisableTool(toolDisableDialog.tool)}
+        />
+      ) : null}
+      {toolDisableDialog?.type === 'confirm-cross-tenant' ? (
+        <ConfirmDialog
+          danger
+          title="停用跨租户节点"
+          message={`该节点已设为「全部租户可用」，且正被 ${toolDisableDialog.crossTenantUsage.map((item) => getTenantName(item)).join('、')} 租户使用。停用后这些租户的处理方案将无法使用此节点，确定停用？`}
           confirmText="确定停用"
           onCancel={() => setToolDisableDialog(null)}
           onConfirm={() => confirmDisableTool(toolDisableDialog.tool)}
@@ -1806,7 +1985,7 @@ function ToolManagementPage({ notify }) {
   );
 }
 
-function makeKnowledgeToolDraft(source, category) {
+function makeKnowledgeToolDraft(source, category, tenantId = DEFAULT_TENANT_ID) {
   return {
     id: null,
     sourceId: source?.id || '',
@@ -1816,6 +1995,9 @@ function makeKnowledgeToolDraft(source, category) {
     name: source?.tool?.name || '',
     description: source?.tool?.description || '',
     category,
+    nodeKind: '外部工具',
+    ownerTenantId: tenantId,
+    visibilityScope: 'tenant',
     inputArtifacts: [createEmptyInputArtifact()],
     inputs: [createEmptyConfigParam()],
     outputs: [createEmptyNodeOutput()],
@@ -1855,6 +2037,9 @@ function makeKnowledgeToolEditDraft(tool) {
     name: tool.name || '',
     description: tool.description || '',
     category: tool.category || '未分类',
+    nodeKind: tool.kind || '外部工具',
+    ownerTenantId: getToolOwnerTenantId(tool),
+    visibilityScope: getToolVisibilityScope(tool),
     inputArtifacts: normalizeInputArtifacts(tool.inputArtifacts || [], tool.inputs || []),
     inputs: normalizeDraftInputs(tool.inputs || []),
     outputs: normalizeDraftOutputs(tool.outputs || []).filter((output) => !output.isPersistenceOutput),
@@ -1876,6 +2061,10 @@ function applyKnowledgeToolDraft(tool, draft) {
     name: draft.name?.trim() || tool.name,
     description: draft.description?.trim() || tool.description,
     category: draft.category || tool.category,
+    ownerTenantId: draft.ownerTenantId || getToolOwnerTenantId(tool),
+    visibilityScope: isTenantScopedFlowTool(tool)
+      ? (draft.visibilityScope === 'all' ? 'all' : 'tenant')
+      : tool.visibilityScope,
     inputArtifacts: draft.inputArtifacts || tool.inputArtifacts || [],
     inputs: draft.inputs || tool.inputs,
     outputs: buildDraftOutputs(draft),
@@ -2592,11 +2781,21 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
   const selectSource = (sourceId) => {
     const source = sources.find((item) => item.id === sourceId);
     if (!hasOutputSchema(source)) return;
-    setDraft({ ...makeKnowledgeToolDraft(source, draft.category || categories[0] || '未分类'), selectedMcpId: source?.serviceId || '', step: 0 });
+    setDraft({
+      ...makeKnowledgeToolDraft(source, draft.category || categories[0] || '未分类', draft.ownerTenantId || DEFAULT_TENANT_ID),
+      visibilityScope: draft.visibilityScope || 'tenant',
+      selectedMcpId: source?.serviceId || '',
+      step: 0,
+    });
   };
   const selectMcp = (serviceId) => {
     const source = sources.find((item) => item.serviceId === serviceId && hasOutputSchema(item));
-    setDraft({ ...makeKnowledgeToolDraft(source, draft.category || categories[0] || '未分类'), selectedMcpId: serviceId, step: 0 });
+    setDraft({
+      ...makeKnowledgeToolDraft(source, draft.category || categories[0] || '未分类', draft.ownerTenantId || DEFAULT_TENANT_ID),
+      visibilityScope: draft.visibilityScope || 'tenant',
+      selectedMcpId: serviceId,
+      step: 0,
+    });
   };
   const updateParam = (kind, index, key, value) => {
     const patch = key && typeof key === 'object' ? key : { [key]: value };
@@ -2778,6 +2977,7 @@ function KnowledgeToolCreateModal({ draft, setDraft, sources, categories, onClos
 
 function NodeBindingStep({ draft, setDraft, sources, selectedSource, selectedMcpId, mcpOptions, filteredSources, categories, onSelectMcp, onSelectSource }) {
   const toolDescription = selectedSource?.tool?.description || '选择原始 MCP 工具后展示工具描述。';
+  const scopeEditable = isTenantScopedFlowTool(draft);
   return (
     <section className="node-binding-grid">
       <div className="binding-column">
@@ -2824,6 +3024,20 @@ function NodeBindingStep({ draft, setDraft, sources, selectedSource, selectedMcp
         <div className="schema-card binding-box">
           <Field label="节点名称" required><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
           <Field label="节点类型" required><SelectField value={draft.category} onChange={(category) => setDraft({ ...draft, category })}>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</SelectField></Field>
+          {scopeEditable ? (
+            <Field label="可用租户" required>
+              <SelectField
+                value={getToolVisibilityScope(draft)}
+                onChange={(value) => setDraft({ ...draft, visibilityScope: value === 'all' ? 'all' : 'tenant' })}
+                dropdownMinWidth={240}
+              >
+                <option value="tenant">仅本租户可用（{getTenantName(getToolOwnerTenantId(draft))}）</option>
+                <option value="all">全部租户可用</option>
+              </SelectField>
+            </Field>
+          ) : (
+            <Field label="可用租户"><div className="mcp-description-box">平台内置节点不参与租户可见范围设置，全部租户可用。</div></Field>
+          )}
           <Field label="节点描述" required><textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></Field>
         </div>
       </div>
@@ -3538,6 +3752,12 @@ function NodeDetailBasicInfo({ tool, rawSource }) {
     ['节点名称', tool.name || '-'],
     ['节点类型', tool.category || '-'],
     ['节点描述', tool.description || '-'],
+    ...(isTenantScopedFlowTool(tool)
+      ? [
+        ['归属租户', getTenantName(getToolOwnerTenantId(tool))],
+        ['可用租户', getToolVisibilityScope(tool) === 'all' ? '全部租户' : `仅本租户（${getTenantName(getToolOwnerTenantId(tool))}）`],
+      ]
+      : [['可用租户', '平台内置节点，全部租户可用']]),
     ['MCP服务', tool.sourceServiceName || rawSource?.serviceName || tool.serviceName || '-'],
     ['原始MCP工具', tool.sourceToolName || rawTool.name || '-'],
     ...(rawTool.capability ? [['能力标识', rawTool.capability]] : []),
@@ -4554,7 +4774,7 @@ function FileUploadIcon({ className = '' }) {
   );
 }
 
-const toolDialogCategoryOrder = [...defaultCategories, '系统节点', '未分类'];
+const toolDialogCategoryOrder = [...defaultCategories, '通用解析', '系统节点', '未分类'];
 const categoryAliases = { 内容处理: '文本分片', 文档分块: '文本分片', 智能生成: '知识提取', 内容抽取: '知识提取', 系统工具: '系统节点' };
 const sampleDemoFile = { id: 'demo-policy-sample', name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB', status: '未发送' };
 const knowledgePreviewTabNames = {
@@ -4563,15 +4783,30 @@ const knowledgePreviewTabNames = {
   知识点: '知识点结果预览',
   知识图谱: '知识图谱结果预览',
 };
-const workbenchFileFormats = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md'];
+const workbenchFileFormats = ['pdf', 'docx', 'xlsx', 'csv', 'pptx', 'txt', 'md'];
 const workbenchSampleNames = ['医保政策样例', '理财产品说明书', '客户问答清单'];
 const workbenchFileFormatMeta = {
   pdf: { Icon: FilePdfFilled, color: '#dc2626' },
   docx: { Icon: FileWordFilled, color: '#2563eb' },
   xlsx: { Icon: FileExcelFilled, color: '#16a34a' },
+  csv: { Icon: FileExcelFilled, color: '#0d9488' },
   pptx: { Icon: FilePptFilled, color: '#ea580c' },
   txt: { Icon: FileTextOutlined, color: '#64748b' },
   md: { Icon: FileMarkdownFilled, color: '#334155' },
+  // 音频格式：仅用于文件列表与上传抽屉的展示，不属于知识加工方案的格式范围。
+  mp3: { Icon: CustomerServiceOutlined, color: '#ea580c' },
+  wav: { Icon: CustomerServiceOutlined, color: '#ea580c' },
+  m4a: { Icon: CustomerServiceOutlined, color: '#ea580c' },
+  aac: { Icon: CustomerServiceOutlined, color: '#ea580c' },
+  amr: { Icon: CustomerServiceOutlined, color: '#ea580c' },
+  flac: { Icon: CustomerServiceOutlined, color: '#ea580c' },
+  ogg: { Icon: CustomerServiceOutlined, color: '#ea580c' },
+  opus: { Icon: CustomerServiceOutlined, color: '#ea580c' },
+  wma: { Icon: CustomerServiceOutlined, color: '#ea580c' },
+  // 图片格式同上。
+  png: { Icon: FileImageOutlined, color: '#7c3aed' },
+  jpg: { Icon: FileImageOutlined, color: '#7c3aed' },
+  jpeg: { Icon: FileImageOutlined, color: '#7c3aed' },
 };
 const getFileExtension = (name = '') => name.split('.').pop()?.toLowerCase() || '';
 const getSampleFileKey = (file = {}) => String(file.name || file.id || '').trim().toLowerCase();
@@ -4691,6 +4926,11 @@ const defaultParamDescriptions = {
   system_prompt: '问答提取提示词。',
   summary_type: '摘要类型。',
   topK: '需要返回的关键词数量上限。',
+  // 048 需求：CSV 解析节点参数说明。
+  encoding: 'CSV 文件编码，默认自动探测，可手工指定 UTF-8、GBK、GB2312、GB18030。',
+  delimiter: '列分隔符，默认自动识别，可手工指定逗号、分号、制表符或竖线。',
+  hasHeader: '首行是否为表头，开启后表头会随每个切片重复输出。',
+  emptyRow: '空行处理方式，默认丢弃全空行。',
 };
 
 const workbenchParamLabels = {
@@ -4701,6 +4941,11 @@ const workbenchParamLabels = {
   input: '输入内容',
   chunk_size: '切片长度',
   chunk_strategy: '分块策略',
+  // 048 需求：CSV 解析参数。
+  encoding: '文件编码',
+  delimiter: '分隔符',
+  hasHeader: '首行为表头',
+  emptyRow: '空行处理',
   max_chunk_size: '最大切片长度',
   overlap_size: '重叠长度',
   overlap: '重叠长度',
@@ -4730,6 +4975,8 @@ const workbenchParamLabels = {
   tag_strategy: '打标策略',
   labelPool: '标签范围',
   label_pool: '标签范围',
+  markdownUrl: 'Markdown表格内容地址',
+  tableCoordinates: '表格行列坐标',
 };
 
 const workbenchOutputLabels = {
@@ -4740,6 +4987,9 @@ const workbenchOutputLabels = {
   documentSections: '文档章节',
   documentBlocks: '文档块',
   documentParseResult: '文档解析结果',
+  // 048 需求：CSV 解析节点输出。
+  markdownUrl: 'Markdown表格内容地址',
+  tableCoordinates: '表格行列坐标',
   tables: '表格结果',
   figures: '图片结果',
   layout: '版面结构',
@@ -4858,6 +5108,29 @@ const baseTools = [
       makeParam('content', 'content', '', { type: 'textarea' }),
     ],
     outputs: [makeOutput('sections', '政策章节结构', 'Array<json>，包含医保政策章节、标题和正文。', 'sections')],
+  },
+  {
+    // 048 需求新增：CSV 解析节点，节点类型为「通用解析」。
+    id: 'csv-parser',
+    name: 'CSV 解析',
+    category: '通用解析',
+    serviceName: '客户自建文档处理 MCP',
+    summary: 'CSV 文件解析为保留表头与行列结构的 Markdown 表格，支持逗号、分号、制表符、竖线等分隔符。',
+    status: '可用',
+    input: 'sampleFile',
+    output: 'rawText',
+    inputParamId: 'file',
+    params: [
+      makeParam('file', 'file', '{ "fileUrl": "${sample.fileUrl}", "fileName": "${sample.fileName}", "fileType": "csv" }', { type: 'textarea', required: true, source: { type: 'file' } }),
+      makeParam('encoding', '文件编码', '自动探测', { type: 'select', options: ['自动探测', 'UTF-8', 'GBK', 'GB2312', 'GB18030'] }),
+      makeParam('delimiter', '分隔符', '自动识别', { type: 'select', options: ['自动识别', '逗号', '分号', '制表符', '竖线'] }),
+      makeParam('hasHeader', '首行为表头', true, { type: 'boolean' }),
+      makeParam('emptyRow', '空行处理', '丢弃', { type: 'select', options: ['丢弃', '保留'] }),
+    ],
+    outputs: [
+      makeOutput('markdownUrl', 'Markdown表格内容地址', 'string，解析后保留表头与行列结构的 Markdown 表格内容地址。', 'markdownUrl', 'string'),
+      makeOutput('tableCoordinates', '表格行列坐标', 'Array<json>，与 markdownUrl 对应的行列坐标，每个文本单元带文本 ID、原始行号与列范围。', 'tableCoordinates', 'array<object>'),
+    ],
   },
   {
     id: 'chunk-splitter',
@@ -5178,6 +5451,10 @@ function managedToolToWorkbenchTool(tool) {
     name: tool.name,
     category,
     semanticCategory,
+    managedToolId: tool.id,
+    ownerTenantId: getToolOwnerTenantId(tool),
+    visibilityScope: getToolVisibilityScope(tool),
+    nodeKind: tool.kind || '外部工具',
     serviceName: tool.serviceName || '-',
     summary: tool.description || '',
     status: tool.status || (tool.enabled === false ? '不可用' : '可用'),
@@ -5194,7 +5471,7 @@ function isDisabledFlowNode(tool) {
   return tool.status === '不可用' || tool.status === '禁用' || tool.enabled === false;
 }
 
-function readUnifiedFlowNodeCatalog() {
+function readUnifiedFlowNodeCatalog(tenantId = DEFAULT_TENANT_ID) {
   const catalog = readCatalog();
   const systemTools = baseTools
     .filter((tool) => tool.sourceType === 'system')
@@ -5205,24 +5482,32 @@ function readUnifiedFlowNodeCatalog() {
       category: '系统节点',
       sourceType: 'system',
     }));
-  const byId = new Map([...catalog.tools, ...systemTools].map((tool) => [tool.id, tool]));
+  const tenantVisibleTools = catalog.tools
+    .filter((tool) => (tenantId ? isToolVisibleToTenant(tool, tenantId) : true))
+    .map((tool) => ({
+      ...tool,
+      ownerTenantId: getToolOwnerTenantId(tool),
+      visibilityScope: getToolVisibilityScope(tool),
+    }));
+  const byId = new Map([...tenantVisibleTools, ...systemTools].map((tool) => [tool.id, tool]));
   const tools = Array.from(byId.values());
   return {
     tools,
+    // 节点类型跨租户共享：分类列表不做租户过滤，节点数量按当前租户可见节点统计。
     categories: sortWorkbenchCategories(Array.from(new Set([...(catalog.categories || []), '系统节点', ...tools.map((tool) => tool.category)].filter(Boolean)))),
   };
 }
 
-function readManagementFlowNodeCatalog() {
-  const catalog = readUnifiedFlowNodeCatalog();
+function readManagementFlowNodeCatalog(tenantId = DEFAULT_TENANT_ID) {
+  const catalog = readUnifiedFlowNodeCatalog(tenantId);
   return {
     tools: catalog.tools.filter((tool) => tool.category !== '系统节点'),
     categories: catalog.categories.filter((category) => category !== '系统节点'),
   };
 }
 
-function readWorkbenchCatalog() {
-  return readUnifiedFlowNodeCatalog().tools
+function readWorkbenchCatalog(tenantId = DEFAULT_TENANT_ID) {
+  return readUnifiedFlowNodeCatalog(tenantId).tools
     .filter((tool) => !isDisabledFlowNode(tool))
     .map((tool) => {
       const nextTool = tool.sourceType === 'system' ? tool : managedToolToWorkbenchTool(tool);
@@ -7147,16 +7432,104 @@ function getRuntimeLabel(status) {
   }[status] || '';
 }
 
-const knowledgePlanFileFormats = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md'];
+const knowledgePlanFileFormats = ['pdf', 'docx', 'xlsx', 'csv', 'pptx', 'txt', 'md'];
 
 function formatLabel(format) {
   const compatMap = { docx: 'docx（兼容doc）', xlsx: 'xlsx（兼容xls）', pptx: 'pptx（兼容ppt）' };
   return compatMap[format] || (format ? format.toUpperCase() : format);
 }
 
+// 文件格式组：筛选器与格式选择器按「格式组」呈现，与真实产品口径一致。
+// 本次变更：「表格」组的格式清单由 xls、xlsx 扩展为 xls、xlsx、csv。
+const knowledgeFormatGroups = [
+  { id: 'pdf', label: 'PDF', displayLabel: 'PDF(pdf)', formats: ['pdf'] },
+  { id: 'doc', label: '文档', displayLabel: '文档(doc、docx)', formats: ['docx'] },
+  { id: 'sheet', label: '表格', displayLabel: '表格(xls、xlsx、csv)', formats: ['xlsx', 'csv'] },
+  { id: 'slide', label: '演示文档', displayLabel: '演示文档(ppt、pptx)', formats: ['pptx'] },
+  { id: 'text', label: '文本', displayLabel: '文本(txt)', formats: ['txt'] },
+  { id: 'md', label: 'Markdown', displayLabel: 'Markdown(md)', formats: ['md'] },
+];
+
+function formatGroupOf(format) {
+  return knowledgeFormatGroups.find((group) => group.formats.includes(format)) || null;
+}
+
+// 格式组展示名：优先用具体格式（如 CSV），无法归类时回退到格式本身。
+function formatGroupLabel(format, { preferFormat = false } = {}) {
+  const group = formatGroupOf(format);
+  if (!group) return formatLabel(format);
+  if (preferFormat && group.formats.length > 1) return formatLabel(format);
+  return group.displayLabel;
+}
+
+// 「表格」组（xls、xlsx、csv）：用于方案弹窗内提示 CSV 与 xls/xlsx 的解析链路差异。
+const sheetFormatGroup = knowledgeFormatGroups.find((group) => group.id === 'sheet');
+const isSheetFormatSelected = (formats = []) => Boolean(sheetFormatGroup
+  && sheetFormatGroup.formats.some((format) => formats.includes(format)));
+
+// 上传文件类型（上传/更新文件抽屉的四个类型卡片）。
+const uploadFileTypes = [
+  {
+    id: 'text',
+    name: '文本文档数据',
+    desc: '对上传的文本文件进行解析和加工处理。',
+    formats: ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'md', 'txt', 'html'],
+    icon: FileTextOutlined,
+    color: '#2563eb',
+  },
+  {
+    id: 'sheet',
+    name: '表格型知识数据',
+    desc: '读取表格中的文本信息，按行构建知识切片。',
+    // 本次变更：格式白名单由 xls、xlsx 扩展为 xls、xlsx、csv。
+    formats: ['xls', 'xlsx', 'csv'],
+    icon: FileExcelFilled,
+    color: '#16a34a',
+  },
+  {
+    id: 'image',
+    name: '图片文件',
+    desc: '对上传的图片文件进行解析和加工处理。',
+    formats: ['png', 'jpg', 'jpeg'],
+    icon: FileImageOutlined,
+    color: '#7c3aed',
+  },
+  {
+    id: 'audio',
+    name: '音频文件',
+    desc: '对上传的音频文件进行自动解析。',
+    formats: ['mp3', 'wav', 'm4a', 'aac', 'amr', 'flac', 'ogg', 'opus', 'wma'],
+    icon: CustomerServiceOutlined,
+    color: '#ea580c',
+  },
+];
+
+// 各文件类型的单文件大小上限与单次上传数量上限。
+const uploadTypeLimits = {
+  text: { maxSize: '100MB', maxCount: 50 },
+  sheet: { maxSize: '100MB', maxCount: 50 },
+  image: { maxSize: '100MB', maxCount: 100 },
+  audio: { maxSize: '500MB', maxCount: 100 },
+};
+
+function getUploadFileType(typeId) {
+  return uploadFileTypes.find((item) => item.id === typeId) || uploadFileTypes[0];
+}
+
+function uploadTypeAccept(type) {
+  return (type?.formats || []).map((format) => `.${format}`).join(',');
+}
+
 function formatFileSize(size = 0) {
   if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(2)} MB`;
   return `${Math.max(1, Math.round(size / 1024))} KB`;
+}
+
+// 把「100MB」这类上限文案换算成字节数，用于上传时的单文件大小校验。
+function parseSizeLimit(text = '') {
+  const value = Number.parseFloat(text);
+  if (Number.isNaN(value)) return Number.POSITIVE_INFINITY;
+  return /GB/i.test(text) ? value * 1024 * 1024 * 1024 : value * 1024 * 1024;
 }
 
 function TreeCheckbox({ checked, indeterminate = false, disabled = false, onChange }) {
@@ -7302,6 +7675,25 @@ function CategoryTreeMultiSelect({ categories, selectedIds, onChange, placeholde
   );
 }
 
+// 已选格式的展示标签：整个格式组被选中时按组展示，只选中组内部分格式时按具体格式展示。
+function selectedFormatTags(selectedFormats = []) {
+  const tags = [];
+  knowledgeFormatGroups.forEach((group) => {
+    const hits = group.formats.filter((format) => selectedFormats.includes(format));
+    if (!hits.length) return;
+    if (hits.length === group.formats.length && group.formats.length > 1) {
+      tags.push({ key: group.id, label: group.displayLabel, formats: group.formats });
+    } else {
+      hits.forEach((format) => tags.push({ key: format, label: formatLabel(format), formats: [format] }));
+    }
+  });
+  // 兜底：未归入任何格式组的格式仍然展示出来。
+  selectedFormats
+    .filter((format) => !formatGroupOf(format))
+    .forEach((format) => tags.push({ key: format, label: formatLabel(format), formats: [format] }));
+  return tags;
+}
+
 function FormatMultiSelect({ selectedFormats, onChange }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
@@ -7313,16 +7705,19 @@ function FormatMultiSelect({ selectedFormats, onChange }) {
     document.addEventListener('mousedown', closeOnOutside);
     return () => document.removeEventListener('mousedown', closeOnOutside);
   }, [open]);
-  const toggleFormat = (format) => {
-    onChange(selectedFormats.includes(format)
-      ? selectedFormats.filter((item) => item !== format)
-      : [...selectedFormats, format]);
+  // 以「格式组」为最小选择单位：勾选一组即勾选该组全部格式。
+  const toggleGroup = (group) => {
+    const allSelected = group.formats.every((format) => selectedFormats.includes(format));
+    onChange(allSelected
+      ? selectedFormats.filter((format) => !group.formats.includes(format))
+      : [...selectedFormats.filter((format) => !group.formats.includes(format)), ...group.formats]);
   };
-  const removeFormat = (event, format) => {
+  const removeTag = (event, formats) => {
     event.preventDefault();
     event.stopPropagation();
-    onChange(selectedFormats.filter((item) => item !== format));
+    onChange(selectedFormats.filter((format) => !formats.includes(format)));
   };
+  const tags = selectedFormatTags(selectedFormats);
   return (
     <div ref={rootRef} className={`plan-format-multiselect ${open ? 'open' : ''}`}>
       <div
@@ -7338,13 +7733,13 @@ function FormatMultiSelect({ selectedFormats, onChange }) {
         }}
       >
         <span className="plan-format-selected">
-          {selectedFormats.length ? selectedFormats.map((format) => {
-            const { Icon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+          {tags.length ? tags.map((tag) => {
+            const { Icon, color } = workbenchFileFormatMeta[tag.formats[0]] || { Icon: FileOutlined, color: '#64748b' };
             return (
-              <span className="plan-format-tag" key={format} style={{ '--format-color': color }}>
+              <span className="plan-format-tag" key={tag.key} style={{ '--format-color': color }}>
                 <Icon />
-                <span>{formatLabel(format)}</span>
-                <button type="button" aria-label={`移除 ${formatLabel(format)}`} onClick={(event) => removeFormat(event, format)}><CloseOutlined /></button>
+                <span>{tag.label}</span>
+                <button type="button" aria-label={`移除 ${tag.label}`} onClick={(event) => removeTag(event, tag.formats)}><CloseOutlined /></button>
               </span>
             );
           }) : <span className="plan-format-placeholder">请选择文件格式</span>}
@@ -7354,13 +7749,14 @@ function FormatMultiSelect({ selectedFormats, onChange }) {
       {open ? (
         <div className="plan-format-panel" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
           <div className="plan-format-options">
-            {knowledgePlanFileFormats.map((format) => {
-              const { Icon, color } = workbenchFileFormatMeta[format] || { Icon: FileOutlined, color: '#64748b' };
+            {knowledgeFormatGroups.map((group) => {
+              const { Icon, color } = workbenchFileFormatMeta[group.formats[0]] || { Icon: FileOutlined, color: '#64748b' };
+              const checked = group.formats.every((format) => selectedFormats.includes(format));
               return (
-                <label className="plan-format-option" key={format} style={{ '--format-color': color }}>
-                  <TreeCheckbox checked={selectedFormats.includes(format)} onChange={() => toggleFormat(format)} />
+                <label className="plan-format-option" key={group.id} style={{ '--format-color': color }}>
+                  <TreeCheckbox checked={checked} onChange={() => toggleGroup(group)} />
                   <span className="plan-format-option-icon"><Icon /></span>
-                  <span>{formatLabel(format)}</span>
+                  <span>{group.displayLabel}</span>
                 </label>
               );
             })}
@@ -7590,15 +7986,28 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
     const categoryText = plan.scopeCategories?.length
       ? plan.scopeCategories.map((id) => categoryPathMap.get(id) || '未知目录').join('、')
       : '不限类目';
+    // 列表口径与筛选器一致，按格式组展示（如「表格(xls、xlsx、csv)」）。
     const formatText = plan.scopeFormats?.length
-      ? plan.scopeFormats.map((format) => formatLabel(format)).join('、')
+      ? (() => {
+          const labels = [];
+          knowledgeFormatGroups.forEach((group) => {
+            if (group.formats.some((format) => plan.scopeFormats.includes(format))) labels.push(group.displayLabel);
+          });
+          plan.scopeFormats.filter((format) => !formatGroupOf(format)).forEach((format) => labels.push(formatLabel(format)));
+          return labels.length ? labels.join('、') : '不限格式';
+        })()
       : '不限格式';
     return { categoryText, formatText };
   };
 
   const filteredPlans = plans.filter((plan) => {
     if (statusFilter && plan.status !== statusFilter) return false;
-    if (formatFilter && plan.scopeFormats?.length && !plan.scopeFormats.includes(formatFilter)) return false;
+    // 格式筛选按「格式组」匹配：方案范围与该组任一格式相交即命中。
+    if (formatFilter) {
+      const group = knowledgeFormatGroups.find((item) => item.id === formatFilter);
+      const groupFormats = group ? group.formats : [formatFilter];
+      if (plan.scopeFormats?.length && !plan.scopeFormats.some((format) => groupFormats.includes(format))) return false;
+    }
     if (categoryFilterIds.length && plan.scopeCategories?.length) {
       const matched = plan.scopeCategories.some((id) => categoryFilterIds.includes(id));
       if (!matched) return false;
@@ -7683,7 +8092,9 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
             </SelectField>
             <SelectField value={formatFilter} onChange={setFormatFilter}>
               <option value="">全部格式</option>
-              {knowledgePlanFileFormats.map((format) => <option value={format} key={format}>{formatLabel(format)}</option>)}
+              {knowledgeFormatGroups.map((group) => (
+                <option value={group.id} key={group.id}>{group.displayLabel}</option>
+              ))}
             </SelectField>
             <CategoryTreeMultiSelect
               categories={categories}
@@ -7817,6 +8228,9 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
                   selectedFormats={dialog.scopeFormats}
                   onChange={(formats) => setDialog((current) => ({ ...current, scopeFormats: formats }))}
                 />
+                {isSheetFormatSelected(dialog.scopeFormats) ? (
+                  <p className="plan-format-chain-tip">CSV 与 xls、xlsx 的解析链路不同：CSV 走表格解析，产出 Markdown 表格与行列坐标；xls、xlsx 仍走文档解析，本期不产出行列坐标。</p>
+                ) : null}
               </Field>
             ) : null}
             {dialog.mode === 'create' ? <p className="info-line">保存后将自动进入方案配置流程。</p> : null}
@@ -8315,39 +8729,484 @@ const fileUploadSeedRows = [
   { id: 'fu-5', name: '04 百年附加惠通费用补偿医疗保险条款', source: '保险条款库', category: '营销知识', tagCategory: '保险', tag: '豁免责任', format: 'docx', enabled: false, processStatus: '待处理', size: '0.89 MB', uploadTime: '08/18 10:40:12' },
   { id: 'fu-6', name: '02 百年附加惠通费用补偿医疗保险条款', source: '保险条款库', category: '营销知识', tagCategory: '保险', tag: '豁免责任', format: 'docx', enabled: true, processStatus: '已处理', size: '0.92 MB', uploadTime: '08/18 10:44:50' },
   { id: 'fu-7', name: '03 百年附加惠通费用补偿医疗保险条款', source: '保险条款库', category: '营销知识', tagCategory: '保险', tag: '豁免责任', format: 'docx', enabled: true, processStatus: '待处理', size: '0.95 MB', uploadTime: '08/18 10:49:18' },
+  // CSV 样例：表格型知识数据，格式组为「表格(xls、xlsx、csv)」。
+  { id: 'fu-8', name: '医保药品目录清单', source: '监管政策库', category: '医保知识', tagCategory: '医保', tag: '药品目录', format: 'csv', enabled: true, processStatus: '已处理', size: '1.24 MB', uploadTime: '08/18 10:53:41' },
+  { id: 'fu-9', name: '客户问答清单', source: '业务知识库', category: '医保知识', tagCategory: '医保', tag: '常见问题', format: 'csv', enabled: true, processStatus: '处理中', size: '0.86 MB', uploadTime: '08/18 10:58:07' },
+  // 音频样例：来自音频文件上传需求。
+  { id: 'fu-10', name: '客服录音_医保报销咨询', source: '客服系统', category: '医保知识', tagCategory: '医保', tag: '客服录音', format: 'mp3', enabled: true, processStatus: '已处理', size: '18.42 MB', uploadTime: '08/18 11:02:33' },
 ];
+
+// 上传文件抽屉：先选文件类型与知识类目，再上传文件，下一步勾选知识加工方案。
+// 本次变更：表格型知识数据可选格式增加 CSV，上传后的文件按「格式组」参与方案匹配。
+const uploadFormatAlias = { doc: 'docx', xls: 'xlsx', ppt: 'pptx' };
+
+function normalizeUploadFormat(extension = '') {
+  const ext = String(extension).toLowerCase();
+  return uploadFormatAlias[ext] || ext;
+}
+
+function uploadFormatGroupText(format) {
+  const group = formatGroupOf(normalizeUploadFormat(format));
+  return group ? group.displayLabel : '-';
+}
+
+// 方案可加工的格式集合，用于「下一步：勾选方案」按上传文件的格式组过滤可选方案。
+function planMatchesUploadFiles(plan, fileFormats = []) {
+  const scope = plan.scopeFormats?.length ? plan.scopeFormats : workbenchFileFormats;
+  return fileFormats.some((format) => scope.includes(normalizeUploadFormat(format)));
+}
+
+function PickedFileTable({ files, emptyText, onRemove }) {
+  if (!files.length) return <div className="upload-picked-empty">{emptyText}</div>;
+  return (
+    <table className="upload-picked-table">
+      <colgroup>
+        <col className="upload-picked-col-name" />
+        <col className="upload-picked-col-format" />
+        <col className="upload-picked-col-group" />
+        <col className="upload-picked-col-size" />
+        {onRemove ? <col className="upload-picked-col-action" /> : null}
+      </colgroup>
+      <thead>
+        <tr>
+          <th>文件名称</th>
+          <th>格式</th>
+          <th>格式组</th>
+          <th>大小</th>
+          {onRemove ? <th>操作</th> : null}
+        </tr>
+      </thead>
+      <tbody>
+        {files.map((file) => (
+          <tr key={file.key}>
+            <td><span className="upload-picked-name" title={file.name}>{file.name}</span></td>
+            <td>{file.extension}</td>
+            <td>{uploadFormatGroupText(file.extension)}</td>
+            <td>{file.sizeText || formatFileSize(file.size)}</td>
+            {onRemove ? (
+              <td className="upload-picked-action">
+                <button type="button" className="danger-link" onClick={() => onRemove(file.key)}>删除</button>
+              </td>
+            ) : null}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function UploadTypeCards({ value, onChange }) {
+  return (
+    <div className="upload-type-cards">
+      {uploadFileTypes.map((type) => {
+        const TypeIcon = type.icon;
+        const active = value === type.id;
+        return (
+          <button
+            type="button"
+            key={type.id}
+            className={`upload-type-card ${active ? 'active' : ''}`}
+            style={{ '--type-color': type.color }}
+            onClick={() => onChange(type.id)}
+          >
+            <span className="upload-type-card-head">
+              <span className="upload-type-card-icon"><TypeIcon /></span>
+              <span className="upload-type-card-name">{type.name}</span>
+            </span>
+            <span className="upload-type-card-desc">{type.desc}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// 约束文案与 Axure 稿保持一致：「单次上传文件数量上限为 N 个；支持 …；单文件不能超过 …；文件标题不能超过 255 字符。」
+function UploadConstraintLine({ type }) {
+  const limit = uploadTypeLimits[type.id] || uploadTypeLimits.text;
+  return (
+    <p className="upload-constraint">
+      单次上传文件数量上限为 {limit.maxCount} 个；支持 {type.formats.join('、')}；单文件不能超过 {limit.maxSize}；文件标题不能超过 255 字符。
+    </p>
+  );
+}
+
+// 上传 / 更新文件抽屉内可选的标签（原型样例数据）。
+const uploadTagOptions = ['医保', '药品目录', '常见问题', '营销知识', '产品知识', '风控'];
+
+// 上传 / 更新文件抽屉「勾选方案」步骤共用的方案列表。
+function UploadPlanList({ plans, planId, onSelect }) {
+  if (!plans.length) {
+    return <div className="upload-picked-empty">没有可加工已选文件格式的启用中方案，请先在「知识加工方案」中新建或调整方案。</div>;
+  }
+  return (
+    <div className="upload-plan-list">
+      {plans.map((plan) => (
+        <label className={`upload-plan-item ${planId === plan.id ? 'active' : ''}`} key={plan.id}>
+          <input type="radio" name="upload-plan" checked={planId === plan.id} onChange={() => onSelect(plan.id)} />
+          <span className="upload-plan-name">{plan.name}</span>
+          <span className="upload-plan-formats">
+            {(plan.scopeFormats?.length ? plan.scopeFormats : workbenchFileFormats)
+              .map((format) => formatGroupLabel(format))
+              .filter((label, index, list) => list.indexOf(label) === index)
+              .join('、')}
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function UploadFileDrawer({ project, plans, onClose, onSubmit }) {
+  const [typeId, setTypeId] = useState(uploadFileTypes[0].id);
+  const [categoryMode, setCategoryMode] = useState('assign');
+  const [categoryId, setCategoryId] = useState('');
+  const [tag, setTag] = useState('');
+  const [files, setFiles] = useState([]);
+  const [step, setStep] = useState('files');
+  const [planId, setPlanId] = useState('');
+  const [error, setError] = useState('');
+  const inputRef = useRef(null);
+
+  const type = getUploadFileType(typeId);
+  const limit = uploadTypeLimits[type.id] || uploadTypeLimits.text;
+  const solution = dataStore.getProjectSolution(project?.id);
+  const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
+  const leafCategories = categories.filter((cat) => !categories.some((item) => item.parentId === cat.id));
+  const matchedPlans = plans.filter((plan) => plan.status === 'active' && planMatchesUploadFiles(plan, files.map((file) => file.extension)));
+
+  const switchType = (nextTypeId) => {
+    setTypeId(nextTypeId);
+    setFiles([]);
+    setError('');
+  };
+  const onFilesChosen = (event) => {
+    const picked = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!picked.length) return;
+    const allowed = getUploadFileType(typeId).formats;
+    const accepted = picked.filter((file) => allowed.includes(getFileExtension(file.name)));
+    const rejected = picked.filter((file) => !allowed.includes(getFileExtension(file.name)));
+    const oversize = accepted.filter((file) => file.size > parseSizeLimit(limit.maxSize));
+    const kept = accepted.filter((file) => file.size <= parseSizeLimit(limit.maxSize));
+    setFiles((current) => [
+      ...current,
+      ...kept.map((file) => ({
+        key: `${file.name}-${file.size}-${file.lastModified}`,
+        name: file.name,
+        size: file.size,
+        extension: getFileExtension(file.name),
+      })),
+    ]);
+    const tips = [];
+    if (rejected.length) tips.push(`${rejected.length} 个文件格式不属于「${type.name}」`);
+    if (oversize.length) tips.push(`${oversize.length} 个文件超过 ${limit.maxSize}`);
+    setError(tips.length ? `${tips.join('，')}，已跳过。` : '');
+  };
+  const removeFile = (key) => setFiles((current) => current.filter((file) => file.key !== key));
+
+  const gotoPlans = () => {
+    if (!files.length) {
+      setError('请先上传至少 1 个文件。');
+      return;
+    }
+    if (files.length > limit.maxCount) {
+      setError(`单次上传文件数量上限 ${limit.maxCount} 个，请删除多余文件。`);
+      return;
+    }
+    if (categoryMode === 'assign' && !categoryId) {
+      setError('请选择知识类目。');
+      return;
+    }
+    setError('');
+    setStep('plans');
+  };
+
+  const confirmUpload = () => {
+    if (!planId) {
+      setError('请选择一个知识加工方案。');
+      return;
+    }
+    onSubmit({
+      typeName: type.name,
+      files,
+      categoryIds: categoryId ? [categoryId] : [],
+      tagCategory: '',
+      tag,
+      plan: matchedPlans.find((plan) => plan.id === planId),
+    });
+  };
+
+  return (
+    <Drawer
+      title="上传文件"
+      onClose={onClose}
+      className="upload-drawer"
+      darkHead
+      footer={step === 'files' ? (
+        <>
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button type="button" className="primary" onClick={gotoPlans}>下一步：勾选方案</button>
+        </>
+      ) : (
+        <>
+          <button type="button" className="secondary" onClick={() => { setError(''); setStep('files'); }}>上一步</button>
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button type="button" className="primary" onClick={confirmUpload}>确定上传</button>
+        </>
+      )}
+    >
+      <div className="upload-file-drawer">
+        {step === 'files' ? (
+          <>
+            <Field label="选择文件类型" required group>
+              <UploadTypeCards value={typeId} onChange={switchType} />
+            </Field>
+            <Field label="知识类目" required group>
+              <div className="upload-segmented">
+                <button type="button" className={categoryMode === 'assign' ? 'active' : ''} onClick={() => setCategoryMode('assign')}>指定类目上传</button>
+                <button
+                  type="button"
+                  className={categoryMode === 'recommend' ? 'active' : ''}
+                  onClick={() => { setCategoryMode('recommend'); setCategoryId(''); }}
+                >
+                  推荐类目上传
+                </button>
+              </div>
+              <SelectField
+                value={categoryId}
+                onChange={setCategoryId}
+                disabled={categoryMode === 'recommend'}
+                missingLabel={categoryMode === 'recommend' ? '由系统推荐类目' : '请选择知识类目'}
+              >
+                <option value="">{categoryMode === 'recommend' ? '由系统推荐类目' : '请选择知识类目'}</option>
+                {leafCategories.map((cat) => <option value={cat.id} key={cat.id}>{cat.name}</option>)}
+              </SelectField>
+            </Field>
+            <Field label="标签" help="标签用于在知识空间内对文件做二次分类，便于检索与筛选。">
+              <SelectField value={tag} onChange={setTag} missingLabel="请选择标签">
+                <option value="">请选择标签</option>
+                {uploadTagOptions.map((item) => <option value={item} key={item}>{item}</option>)}
+              </SelectField>
+            </Field>
+            <Field label="上传文件" required group>
+              <button type="button" className="upload-dropzone" onClick={() => inputRef.current?.click()}>
+                <span className="upload-dropzone-icon"><CloudUploadOutlined /></span>
+                <span className="upload-dropzone-main">{type.name}</span>
+                <UploadConstraintLine type={type} />
+              </button>
+              <input ref={inputRef} type="file" multiple hidden accept={uploadTypeAccept(type)} onChange={onFilesChosen} />
+              <PickedFileTable files={files} emptyText="尚未选择文件。" onRemove={removeFile} />
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label={`已选文件（${files.length}）`} group>
+              <PickedFileTable files={files} emptyText="尚未选择文件。" />
+            </Field>
+            <Field label="勾选方案" required group>
+              <p className="upload-plan-hint">仅展示可加工已选文件格式的启用中方案，方案名称右侧为适用格式组。</p>
+              <UploadPlanList plans={matchedPlans} planId={planId} onSelect={setPlanId} />
+            </Field>
+          </>
+        )}
+        {error ? <p className="upload-error">{error}</p> : null}
+      </div>
+    </Drawer>
+  );
+}
+
+// 更新文件抽屉：原文件只读，仅允许替换为 1 个同类型文件；整体交互与上传文件抽屉对齐。
+function UpdateFileDrawer({ row, project, plans = [], onClose, onSubmit }) {
+  const matchedType = uploadFileTypes.find((type) => type.formats.includes(row.format)) || uploadFileTypes[0];
+  const [file, setFile] = useState(null);
+  const [categoryMode, setCategoryMode] = useState('assign');
+  const [categoryId, setCategoryId] = useState('');
+  const [tag, setTag] = useState('');
+  const [step, setStep] = useState('files');
+  const [planId, setPlanId] = useState('');
+  const [error, setError] = useState('');
+  const inputRef = useRef(null);
+  const limit = uploadTypeLimits[matchedType.id] || uploadTypeLimits.text;
+  const solution = dataStore.getProjectSolution(project?.id);
+  const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
+  const leafCategories = categories.filter((cat) => !categories.some((item) => item.parentId === cat.id));
+  const matchedPlans = plans.filter((plan) => plan.status === 'active' && planMatchesUploadFiles(plan, [row.format]));
+  const originMeta = workbenchFileFormatMeta[normalizeUploadFormat(row.format)];
+  const OriginIcon = originMeta?.Icon || FileOutlined;
+
+  const onFilesChosen = (event) => {
+    const [picked] = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!picked) return;
+    if (!matchedType.formats.includes(getFileExtension(picked.name))) {
+      setFile(null);
+      setError(`更新文件的格式需与原文件一致，支持格式：${matchedType.formats.join('、')}。`);
+      return;
+    }
+    if (picked.size > parseSizeLimit(limit.maxSize)) {
+      setFile(null);
+      setError(`单个文件不超过 ${limit.maxSize}。`);
+      return;
+    }
+    setError('');
+    setFile({ key: `${picked.name}-${picked.size}-${picked.lastModified}`, name: picked.name, size: picked.size, extension: getFileExtension(picked.name) });
+  };
+
+  const gotoPlans = () => {
+    if (!file) {
+      setError('请先选择要替换的新文件。');
+      return;
+    }
+    setError('');
+    setStep('plans');
+  };
+
+  const confirmUpdate = () => {
+    if (!planId) {
+      setError('请选择一个知识加工方案。');
+      return;
+    }
+    onSubmit(file);
+  };
+
+  return (
+    <Drawer
+      title="更新文件"
+      onClose={onClose}
+      className="upload-drawer"
+      darkHead
+      footer={step === 'files' ? (
+        <>
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button type="button" className="primary" onClick={gotoPlans}>下一步：勾选方案</button>
+        </>
+      ) : (
+        <>
+          <button type="button" className="secondary" onClick={() => { setError(''); setStep('files'); }}>上一步</button>
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button type="button" className="primary" onClick={confirmUpdate}>确定更新</button>
+        </>
+      )}
+    >
+      <div className="upload-file-drawer">
+        <Field label="原文件" group>
+          <div className="upload-origin-file">
+            <span className="upload-origin-icon" style={originMeta?.color ? { color: originMeta.color } : undefined}><OriginIcon /></span>
+            <span className="upload-origin-name" title={`${row.name}.${row.format}`}>{row.name}.{row.format}</span>
+          </div>
+        </Field>
+        {step === 'files' ? (
+          <>
+            <Field label="选择文件类型" required group>
+              <UploadTypeCards value={matchedType.id} onChange={() => {}} />
+            </Field>
+            <Field label="知识类目" required group>
+              <div className="upload-segmented">
+                <button type="button" className={categoryMode === 'assign' ? 'active' : ''} onClick={() => setCategoryMode('assign')}>指定类目上传</button>
+                <button
+                  type="button"
+                  className={categoryMode === 'recommend' ? 'active' : ''}
+                  onClick={() => { setCategoryMode('recommend'); setCategoryId(''); }}
+                >
+                  推荐类目上传
+                </button>
+              </div>
+              <SelectField
+                value={categoryId}
+                onChange={setCategoryId}
+                disabled={categoryMode === 'recommend'}
+                missingLabel={categoryMode === 'recommend' ? '由系统推荐类目' : '请选择知识类目'}
+              >
+                <option value="">{categoryMode === 'recommend' ? '由系统推荐类目' : '请选择知识类目'}</option>
+                {leafCategories.map((cat) => <option value={cat.id} key={cat.id}>{cat.name}</option>)}
+              </SelectField>
+            </Field>
+            <Field label="标签" help="标签用于在知识空间内对文件做二次分类，便于检索与筛选。">
+              <SelectField value={tag} onChange={setTag} missingLabel="请选择标签">
+                <option value="">请选择标签</option>
+                {uploadTagOptions.map((item) => <option value={item} key={item}>{item}</option>)}
+              </SelectField>
+            </Field>
+            <Field label="上传文件" required group>
+              <button type="button" className="upload-dropzone" onClick={() => inputRef.current?.click()}>
+                <span className="upload-dropzone-icon"><CloudUploadOutlined /></span>
+                <span className="upload-dropzone-main">{matchedType.name}</span>
+                <p className="upload-constraint">单次仅可更新 1 个文件；支持 {matchedType.formats.join('、')}；单文件不能超过 {limit.maxSize}；文件标题不能超过 255 字符。</p>
+              </button>
+              <input ref={inputRef} type="file" hidden accept={uploadTypeAccept(matchedType)} onChange={onFilesChosen} />
+              <PickedFileTable
+                files={file ? [{ ...file, sizeText: formatFileSize(file.size) }] : []}
+                emptyText="尚未选择新文件。"
+                onRemove={() => { setFile(null); setError(''); }}
+              />
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label="已选文件（1）" group>
+              <PickedFileTable files={file ? [{ ...file, sizeText: formatFileSize(file.size) }] : []} emptyText="尚未选择新文件。" />
+            </Field>
+            <Field label="勾选方案" required group>
+              <p className="upload-plan-hint">仅展示可加工已选文件格式的启用中方案，方案名称右侧为适用格式组。</p>
+              <UploadPlanList plans={matchedPlans} planId={planId} onSelect={setPlanId} />
+            </Field>
+          </>
+        )}
+        {step === 'plans' ? <p className="upload-constraint upload-constraint-left">更新后原文件的历史加工结果保留，新文件将按所选方案重新走一遍知识加工流程。</p> : null}
+        {error ? <p className="upload-error">{error}</p> : null}
+      </div>
+    </Drawer>
+  );
+}
 
 function FileUploadPage({ projectId, notify }) {
   const [keyword, setKeyword] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('全部类目');
-  const [enabledFilter, setEnabledFilter] = useState('全部状态');
-  const [processFilter, setProcessFilter] = useState('全部文件状态');
-  const [sourceFilter, setSourceFilter] = useState('全部来源');
-  const [tagFilter, setTagFilter] = useState('全部标签');
+  const [categoryFilter, setCategoryFilter] = useState('知识类目');
+  const [enabledFilter, setEnabledFilter] = useState('启用状态');
+  const [processFilter, setProcessFilter] = useState('文件状态');
+  const [sourceFilter, setSourceFilter] = useState('来源');
+  const [tagFilter, setTagFilter] = useState('标签');
   const [selectedIds, setSelectedIds] = useState([]);
   const [detailFile, setDetailFile] = useState(null);
   const [chainFile, setChainFile] = useState(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [updateFile, setUpdateFile] = useState(null);
+  const [extraRows, setExtraRows] = useState([]);
+  const [formatGroupFilter, setFormatGroupFilter] = useState('');
   const fileInputRef = useRef(null);
 
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
-  const categoryOptions = ['全部类目', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.category)))];
-  const sourceOptions = ['全部来源', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.source)))];
-  const tagOptions = ['全部标签', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.tag).filter((tag) => tag !== '—')))];
+  const categoryOptions = ['知识类目', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.category)))];
+  const sourceOptions = ['来源', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.source)))];
+  const tagOptions = ['标签', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.tag).filter((tag) => tag !== '—')))];
   const resolveCategoryId = (categoryName) => {
     const solution = dataStore.getProjectSolution(project.id);
     const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
     return (categories.find((item) => item.name === categoryName) || {}).id || '';
   };
+  const resolveCategoryName = (categoryId) => {
+    const solution = dataStore.getProjectSolution(project.id);
+    const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
+    return (categories.find((item) => item.id === categoryId) || {}).name || categoryId;
+  };
   const openChain = (row) => setChainFile({ ...row, categoryId: resolveCategoryId(row.category) });
 
-  const rows = fileUploadSeedRows.filter((row) => {
+  // 上传的新文件排在最前；筛选与统计口径以合并后的列表为准。
+  const allRows = [...extraRows, ...fileUploadSeedRows];
+  const rows = allRows.filter((row) => {
     const kw = keyword.trim().toLowerCase();
     if (kw && !row.name.toLowerCase().includes(kw)) return false;
-    if (categoryFilter !== '全部类目' && row.category !== categoryFilter) return false;
-    if (enabledFilter !== '全部状态' && (enabledFilter === '启用' ? !row.enabled : row.enabled)) return false;
-    if (processFilter !== '全部文件状态' && row.processStatus !== processFilter) return false;
-    if (sourceFilter !== '全部来源' && row.source !== sourceFilter) return false;
-    if (tagFilter !== '全部标签' && row.tag !== tagFilter) return false;
+    if (categoryFilter !== '知识类目' && row.category !== categoryFilter) return false;
+    if (enabledFilter !== '启用状态' && (enabledFilter === '启用' ? !row.enabled : row.enabled)) return false;
+    if (processFilter !== '文件状态' && row.processStatus !== processFilter) return false;
+    if (sourceFilter !== '来源' && row.source !== sourceFilter) return false;
+    if (tagFilter !== '标签' && row.tag !== tagFilter) return false;
+    // 格式筛选按「格式组」匹配：表格(xls、xlsx、csv) 选中时 xlsx 与 csv 都命中。
+    if (formatGroupFilter) {
+      const group = knowledgeFormatGroups.find((item) => item.id === formatGroupFilter);
+      if (group && !group.formats.includes(normalizeUploadFormat(row.format))) return false;
+    }
     return true;
   });
 
@@ -8372,6 +9231,36 @@ function FileUploadPage({ projectId, notify }) {
     if (!fileList.length) return;
     notify(`已选择 ${fileList.length} 个文件，上传执行不在本期原型范围内`, 'success');
   };
+  // 上传抽屉「确定上传」：把文件落到列表顶部，状态为待处理，并回带所选方案。
+  const submitUpload = ({ files, categoryIds, tagCategory, tag, plan, typeName }) => {
+    const now = new Date();
+    const categoryText = categoryIds.length ? categoryIds.map((id) => resolveCategoryName(id)).join('、') : '未指定类目';
+    setExtraRows((current) => [
+      ...files.map((file, index) => ({
+        id: `fu-new-${file.key}-${index}`,
+        name: file.name.replace(/\.[^.]+$/, ''),
+        source: `手动上传 · ${typeName}`,
+        category: categoryText,
+        tagCategory: tagCategory || '-',
+        tag: tag || '—',
+        format: normalizeUploadFormat(file.extension),
+        enabled: true,
+        processStatus: '待处理',
+        size: formatFileSize(file.size),
+        uploadTime: `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`,
+      })),
+      ...current,
+    ]);
+    notify(`已上传 ${files.length} 个文件，将按方案「${plan?.name || '-'}」进行知识加工`, 'success');
+    setUploadOpen(false);
+  };
+  const submitUpdate = (file) => {
+    setExtraRows((current) => current.map((row) => (row.id === updateFile.id
+      ? { ...row, name: file.name.replace(/\.[^.]+$/, ''), size: formatFileSize(file.size), processStatus: '待处理', enabled: true }
+      : row)));
+    notify(`已更新文件「${file.name}」，将重新走一遍知识加工流程`, 'success');
+    setUpdateFile(null);
+  };
 
   const formatMeta = (format) => workbenchFileFormatMeta[format];
 
@@ -8389,29 +9278,33 @@ function FileUploadPage({ projectId, notify }) {
         )}
       />
       <Toolbar className="file-upload-toolbar">
-        <button type="button" className="primary" onClick={onPickFiles}><FileUploadIcon /> 上传文件</button>
+        <button type="button" className="primary" onClick={() => setUploadOpen(true)}><FileUploadIcon /> 上传文件</button>
         <input ref={fileInputRef} type="file" multiple hidden onChange={onFilesChosen} />
-        <SearchBox value={keyword} onChange={setKeyword} placeholder="搜索文件名" />
         <SelectField value={categoryFilter} onChange={setCategoryFilter} dropdownMinWidth={120}>
-          {categoryOptions.map((option) => <option key={option}>{option}</option>)}
+          {categoryOptions.map((option) => <option value={option} key={option}>{option}</option>)}
         </SelectField>
         <SelectField value={enabledFilter} onChange={setEnabledFilter} dropdownMinWidth={110}>
-          <option>全部状态</option>
-          <option>启用</option>
-          <option>停用</option>
+          <option value="启用状态">启用状态</option>
+          <option value="启用">启用</option>
+          <option value="停用">停用</option>
         </SelectField>
         <SelectField value={processFilter} onChange={setProcessFilter} dropdownMinWidth={120}>
-          <option>全部文件状态</option>
-          <option>待处理</option>
-          <option>处理中</option>
-          <option>已处理</option>
+          <option value="文件状态">文件状态</option>
+          <option value="待处理">待处理</option>
+          <option value="处理中">处理中</option>
+          <option value="已处理">已处理</option>
+        </SelectField>
+        <SelectField value={formatGroupFilter} onChange={setFormatGroupFilter} dropdownMinWidth={200}>
+          <option value="">文件格式</option>
+          {knowledgeFormatGroups.map((group) => <option value={group.id} key={group.id}>{group.displayLabel}</option>)}
         </SelectField>
         <SelectField value={sourceFilter} onChange={setSourceFilter} dropdownMinWidth={110}>
-          {sourceOptions.map((option) => <option key={option}>{option}</option>)}
+          {sourceOptions.map((option) => <option value={option} key={option}>{option}</option>)}
         </SelectField>
         <SelectField value={tagFilter} onChange={setTagFilter} dropdownMinWidth={110}>
-          {tagOptions.map((option) => <option key={option}>{option}</option>)}
+          {tagOptions.map((option) => <option value={option} key={option}>{option}</option>)}
         </SelectField>
+        <SearchBox value={keyword} onChange={setKeyword} placeholder="搜索文件名" />
       </Toolbar>
       <section className="panel file-upload-table-panel">
         <table className="data-table file-upload-table">
@@ -8460,7 +9353,7 @@ function FileUploadPage({ projectId, notify }) {
                   <td className="actions">
                     <button type="button" onClick={() => setDetailFile(row)}>文件详情</button>
                     <button type="button" onClick={() => openChain(row)}>处理链路</button>
-                    <button type="button" title="更多"><MoreOutlined /></button>
+                    <button type="button" onClick={() => setUpdateFile(row)}>更新文件</button>
                   </td>
                 </tr>
               );
@@ -8501,6 +9394,23 @@ function FileUploadPage({ projectId, notify }) {
         <Drawer title="处理链路 · 过程追踪" onClose={() => setChainFile(null)} className="file-upload-chain-drawer">
           <FileChainView file={chainFile} />
         </Drawer>
+      ) : null}
+      {uploadOpen ? (
+        <UploadFileDrawer
+          project={project}
+          plans={dataStore.getKnowledgePlans(project?.id)}
+          onClose={() => setUploadOpen(false)}
+          onSubmit={submitUpload}
+        />
+      ) : null}
+      {updateFile ? (
+        <UpdateFileDrawer
+          row={updateFile}
+          project={project}
+          plans={dataStore.getKnowledgePlans(project?.id)}
+          onClose={() => setUpdateFile(null)}
+          onSubmit={submitUpdate}
+        />
       ) : null}
     </div>
   );
@@ -8942,7 +9852,713 @@ function expandGraphSchemaSnapshot(node) {
   return nextNode;
 }
 
+/* ============================================================================
+ * 知识加工结果详情（048 需求新增）
+ * 切片详情 / 问答详情 / 知识点详情共用一套「原文对照 + 形态内容」三栏结构：
+ *   左栏 文件预览：CSV 走表格预览（表头行 + 数据行，命中行高亮），音频走播放器 + 时间轴
+ *   中栏 解析文本预览：按文本单元列出 ID、行号 / 时间轴、文本、列范围，支持定位
+ *   右栏 形态内容：切片 / 问答对 / 知识点，携带关联文本与行列范围或时间轴
+ * ========================================================================== */
+
+// CSV 原文表格：第 1 行为表头，数据行从第 2 行开始，列范围为第 1–4 列。
+const detailCsvTable = {
+  fileName: '医保药品目录清单.csv',
+  headers: ['药品名称', '剂型', '报销比例', '备注'],
+  rows: [
+    { row: 2, cells: ['阿莫西林胶囊', '胶囊', '90%', '甲类'], textId: 'T2' },
+    { row: 3, cells: ['布洛芬缓释胶囊', '缓释胶囊', '85%', '乙类'], textId: 'T3' },
+    { row: 4, cells: ['二甲双胍片', '片剂', '95%', '甲类'], textId: 'T4' },
+    { row: 5, cells: ['阿托伐他汀钙片', '片剂', '80%', '乙类'], textId: 'T5' },
+    { row: 6, cells: ['缬沙坦胶囊', '胶囊', '88%', '乙类'], textId: 'T6' },
+    { row: 7, cells: ['奥美拉唑肠溶胶囊', '肠溶胶囊', '92%', '甲类'], textId: 'T7' },
+    { row: 8, cells: ['硝苯地平控释片', '控释片', '86%', '乙类'], textId: 'T8' },
+    { row: 9, cells: ['瑞舒伐他汀钙片', '片剂', '78%', '乙类'], textId: 'T9' },
+  ],
+};
+
+// CSV 解析文本单元（解析工具「表格行列坐标」输出的文本 ID / 行号 / 列范围）。
+const detailCsvTextUnits = [
+  { id: 'T1', rowLabel: '第 1 行（表头）', colRange: '第 1–4 列', text: '药品名称 | 剂型 | 报销比例 | 备注' },
+  ...detailCsvTable.rows.map((row) => ({
+    id: row.textId,
+    rowLabel: `第 ${row.row} 行`,
+    colRange: '第 1–4 列',
+    text: row.cells.join(' | '),
+  })),
+];
+
+// 音频解析文本单元（音频解析工具「时间轴记录」输出的文本 ID / 开始时间 / 结束时间）。
+const detailAudioTextUnits = [
+  { id: 'A1', start: '00:00', end: '00:18', text: '您好，这里是医保客服中心，请问有什么可以帮您？' },
+  { id: 'A2', start: '00:18', end: '00:52', text: '我想咨询一下，异地就医备案之后，报销比例和本地一样吗？' },
+  { id: 'A3', start: '00:52', end: '01:40', text: '备案成功后，在备案地定点医疗机构就医，报销比例按参保地政策执行，具体比例以参保地目录为准。' },
+  { id: 'A4', start: '01:40', end: '02:25', text: '那如果我是急诊住院，没有提前备案怎么办？' },
+  { id: 'A5', start: '02:25', end: '03:12', text: '急诊抢救视同已备案，出院后按参保地规定补办备案手续即可，不影响本次报销。' },
+];
+
+const detailPdfTextUnits = [
+  { id: 'P1', page: '第 1 页', section: '第 1 段', text: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' },
+  { id: 'P2', page: '第 2 页', section: '第 1 段', text: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。' },
+  { id: 'P3', page: '第 3 页', section: '第 1 段', text: '备案成功后，在备案地定点医疗机构就医，可直接结算。' },
+];
+
+// 切片：每个切片携带关联文本 ID 与行列坐标（CSV）或时间轴（音频），表头随分片重复。
+const detailCsvChunks = [
+  { id: 'csv-chunk-001', index: 1, rowRange: '第 2–4 行', colRange: '第 1–4 列', textIds: ['T2', 'T3', 'T4'], length: 96, content: '| 药品名称 | 剂型 | 报销比例 | 备注 |\n| --- | --- | --- | --- |\n| 阿莫西林胶囊 | 胶囊 | 90% | 甲类 |\n| 布洛芬缓释胶囊 | 缓释胶囊 | 85% | 乙类 |\n| 二甲双胍片 | 片剂 | 95% | 甲类 |' },
+  { id: 'csv-chunk-002', index: 2, rowRange: '第 5–7 行', colRange: '第 1–4 列', textIds: ['T5', 'T6', 'T7'], length: 104, content: '| 药品名称 | 剂型 | 报销比例 | 备注 |\n| --- | --- | --- | --- |\n| 阿托伐他汀钙片 | 片剂 | 80% | 乙类 |\n| 缬沙坦胶囊 | 胶囊 | 88% | 乙类 |\n| 奥美拉唑肠溶胶囊 | 肠溶胶囊 | 92% | 甲类 |' },
+  { id: 'csv-chunk-003', index: 3, rowRange: '第 8–9 行', colRange: '第 1–4 列', textIds: ['T8', 'T9'], length: 72, content: '| 药品名称 | 剂型 | 报销比例 | 备注 |\n| --- | --- | --- | --- |\n| 硝苯地平控释片 | 控释片 | 86% | 乙类 |\n| 瑞舒伐他汀钙片 | 片剂 | 78% | 乙类 |' },
+];
+
+const detailAudioChunks = [
+  { id: 'audio-chunk-001', index: 1, rowRange: '00:18–01:40', colRange: '第 2–3 段', textIds: ['A2', 'A3'], length: 128, content: '我想咨询一下，异地就医备案之后，报销比例和本地一样吗？备案成功后，在备案地定点医疗机构就医，报销比例按参保地政策执行，具体比例以参保地目录为准。' },
+  { id: 'audio-chunk-002', index: 2, rowRange: '01:40–03:12', colRange: '第 4–5 段', textIds: ['A4', 'A5'], length: 116, content: '那如果我是急诊住院，没有提前备案怎么办？急诊抢救视同已备案，出院后按参保地规定补办备案手续即可，不影响本次报销。' },
+];
+
+const detailPdfChunks = [
+  { id: 'pdf-chunk-001', index: 1, rowRange: '第 1 页', colRange: '第 1 段', textIds: ['P1'], length: 40, content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' },
+  { id: 'pdf-chunk-002', index: 2, rowRange: '第 2 页', colRange: '第 1 段', textIds: ['P2'], length: 36, content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。' },
+];
+
+// 详情页样例：形态 × 文件类型。切片是详情页的公共底稿，问答对与知识点再引用一个或多个切片。
+const resultDetailSeeds = {
+  'slice-csv': {
+    id: 'slice-csv',
+    formType: '切片库',
+    format: 'csv',
+    fileName: detailCsvTable.fileName,
+    categoryName: '医保知识',
+    planName: '医保知识切片库csv处理方案',
+    version: '1.1',
+    textUnits: detailCsvTextUnits,
+    table: detailCsvTable,
+    chunks: detailCsvChunks,
+  },
+  'slice-audio': {
+    id: 'slice-audio',
+    formType: '切片库',
+    format: 'mp3',
+    fileName: '客服录音_医保报销咨询.mp3',
+    categoryName: '医保知识',
+    planName: '医保知识切片库mp3处理方案',
+    version: '1.0',
+    textUnits: detailAudioTextUnits,
+    audio: { duration: '03:12', urlLabel: '客服录音_医保报销咨询.mp3' },
+    chunks: detailAudioChunks,
+  },
+  'slice-pdf': {
+    id: 'slice-pdf',
+    formType: '切片库',
+    format: 'pdf',
+    fileName: '医保政策样例.pdf',
+    categoryName: '医保知识',
+    planName: '医保知识切片库pdf处理方案',
+    version: '1.2',
+    textUnits: detailPdfTextUnits,
+    chunks: detailPdfChunks,
+  },
+  'qa-csv': {
+    id: 'qa-csv',
+    formType: 'QA库',
+    format: 'csv',
+    fileName: detailCsvTable.fileName,
+    categoryName: '医保知识',
+    planName: '医保知识QA库csv处理方案',
+    version: '1.0',
+    textUnits: detailCsvTextUnits,
+    table: detailCsvTable,
+    chunks: detailCsvChunks,
+    qaPairs: [
+      { id: 'qa-csv-1', index: 1, question: '阿莫西林胶囊的报销比例是多少？', answer: '阿莫西林胶囊（胶囊剂型）的报销比例为 90%，属于甲类药品。', textIds: ['T2'], chunkIds: ['csv-chunk-001'] },
+      { id: 'qa-csv-2', index: 2, question: '乙类药品的报销比例一般是多少？', answer: '乙类药品的报销比例在 78%–88% 之间，如阿托伐他汀钙片 80%、缬沙坦胶囊 88%。', textIds: ['T5', 'T6'], chunkIds: ['csv-chunk-002'] },
+      // 一个问答对应多个切片：中间栏展示切片列表，每个切片带关联文本与行列坐标。
+      { id: 'qa-csv-3', index: 3, question: '甲类药品和乙类药品的报销比例有什么差别？', answer: '甲类药品按参保地政策全额纳入报销范围，报销比例 90%–95%；乙类药品需个人先行自付一定比例，报销比例 78%–88%。', textIds: ['T2', 'T4', 'T5', 'T6'], chunkIds: ['csv-chunk-001', 'csv-chunk-002'] },
+    ],
+  },
+  'qa-audio': {
+    id: 'qa-audio',
+    formType: 'QA库',
+    format: 'mp3',
+    fileName: '客服录音_医保报销咨询.mp3',
+    categoryName: '医保知识',
+    planName: '医保知识QA库mp3处理方案',
+    version: '1.0',
+    textUnits: detailAudioTextUnits,
+    audio: { duration: '03:12', urlLabel: '客服录音_医保报销咨询.mp3' },
+    chunks: detailAudioChunks,
+    qaPairs: [
+      { id: 'qa-audio-1', index: 1, question: '异地就医备案后报销比例和本地一样吗？', answer: '备案成功后，在备案地定点医疗机构就医，报销比例按参保地政策执行，具体比例以参保地目录为准。', textIds: ['A2', 'A3'], chunkIds: ['audio-chunk-001'] },
+      { id: 'qa-audio-2', index: 2, question: '急诊住院没有提前备案还能报销吗？', answer: '急诊抢救视同已备案，出院后按参保地规定补办备案手续即可，不影响本次报销。', textIds: ['A4', 'A5'], chunkIds: ['audio-chunk-002'] },
+    ],
+  },
+  'kp-csv': {
+    id: 'kp-csv',
+    formType: '知识点',
+    format: 'csv',
+    fileName: detailCsvTable.fileName,
+    categoryName: '医保知识',
+    planName: '医保知识知识点csv处理方案',
+    version: '1.1',
+    textUnits: detailCsvTextUnits,
+    table: detailCsvTable,
+    chunks: detailCsvChunks,
+    knowledgePoints: [
+      {
+        id: 'kp-csv-1',
+        index: 1,
+        title: '甲类药品报销比例',
+        content: '甲类药品按参保地政策全额纳入报销范围，样例中阿莫西林胶囊、二甲双胍片、奥美拉唑肠溶胶囊的报销比例分别为 90%、95%、92%。',
+        applicableUsers: ['参保人员', '医保经办人员'],
+        keyRules: ['甲类药品全额纳入报销范围', '报销比例以参保地目录为准'],
+        tags: ['医保', '药品目录', '报销比例'],
+        textIds: ['T2', 'T4', 'T7'],
+        chunkIds: ['csv-chunk-001', 'csv-chunk-002'],
+      },
+      {
+        id: 'kp-csv-2',
+        index: 2,
+        title: '乙类药品报销比例',
+        content: '乙类药品需个人先自付一定比例后再纳入报销，样例中阿托伐他汀钙片、缬沙坦胶囊、硝苯地平控释片、瑞舒伐他汀钙片的报销比例在 78%–88% 之间。',
+        applicableUsers: ['参保人员'],
+        keyRules: ['乙类药品需个人先行自付', '报销比例区间为 78%–88%'],
+        tags: ['医保', '药品目录', '乙类'],
+        textIds: ['T5', 'T6', 'T8', 'T9'],
+        chunkIds: ['csv-chunk-002', 'csv-chunk-003'],
+      },
+    ],
+  },
+  'kp-audio': {
+    id: 'kp-audio',
+    formType: '知识点',
+    format: 'mp3',
+    fileName: '客服录音_医保报销咨询.mp3',
+    categoryName: '医保知识',
+    planName: '医保知识知识点mp3处理方案',
+    version: '1.0',
+    textUnits: detailAudioTextUnits,
+    audio: { duration: '03:12', urlLabel: '客服录音_医保报销咨询.mp3' },
+    chunks: detailAudioChunks,
+    knowledgePoints: [
+      {
+        id: 'kp-audio-1',
+        index: 1,
+        title: '异地就医备案后的报销口径',
+        content: '备案成功后，在备案地定点医疗机构就医，报销比例按参保地政策执行，具体比例以参保地目录为准。',
+        applicableUsers: ['参保人员', '客服人员'],
+        keyRules: ['按参保地政策执行', '比例以参保地目录为准'],
+        tags: ['医保', '异地就医', '备案'],
+        textIds: ['A2', 'A3'],
+        chunkIds: ['audio-chunk-001'],
+      },
+      {
+        id: 'kp-audio-2',
+        index: 2,
+        title: '急诊抢救的备案补办',
+        content: '急诊抢救视同已备案，出院后按参保地规定补办备案手续即可，不影响本次报销。',
+        applicableUsers: ['参保人员'],
+        keyRules: ['急诊视同已备案', '出院后补办备案手续'],
+        tags: ['医保', '急诊', '备案'],
+        textIds: ['A4', 'A5'],
+        chunkIds: ['audio-chunk-002'],
+      },
+    ],
+  },
+};
+
+// 一个形态内容（切片 / 问答对 / 知识点）关联的切片列表。
+function getRelatedChunks(seed, item) {
+  if (!item) return [];
+  const ids = item.chunkIds || [];
+  return (seed.chunks || []).filter((chunk) => ids.includes(chunk.id));
+}
+
+// 关联文本 ID：优先取形态内容声明的，其次由关联切片汇总。
+function getRelatedTextIds(seed, item) {
+  if (!item) return [];
+  if (item.textIds?.length) return item.textIds;
+  return Array.from(new Set(getRelatedChunks(seed, item).flatMap((chunk) => chunk.textIds || [])));
+}
+
+// 定位状态标签的值：单个切片用切片自身的范围，多个切片用覆盖范围的并集表达。
+function getLocatorValue(seed, item) {
+  const chunks = getRelatedChunks(seed, item);
+  if (!chunks.length) return item?.rowRange || '-';
+  if (chunks.length === 1) return chunks[0].rowRange;
+  return `${chunks[0].rowRange.split('–')[0]}–${chunks[chunks.length - 1].rowRange.split('–').pop()}`;
+}
+
+// 列表页「查看」入口按行映射到详情样例：CSV / 音频 / PDF 各有一条样例。
+function resolveResultDetailSeed(formType, row) {
+  if (!row) return null;
+  const text = `${row.source || ''}${row.content || ''}${row.title || ''}${row.question || ''}`;
+  const isCsv = /csv|药品目录|客户问答清单/i.test(text);
+  const isAudio = /mp3|录音|音频/i.test(text);
+  const format = isAudio ? 'mp3' : isCsv ? 'csv' : 'pdf';
+  const prefix = formType === 'QA库' ? 'qa' : formType === '知识点' ? 'kp' : 'slice';
+  const key = `${prefix}-${isAudio ? 'audio' : isCsv ? 'csv' : 'pdf'}`;
+  return resultDetailSeeds[key] || resultDetailSeeds['slice-pdf'];
+}
+
+function MarkdownTablePreview({ content }) {
+  const lines = String(content || '').split('\n').filter((line) => line.trim());
+  if (lines.length < 2) return <pre className="detail-chunk-plain">{content}</pre>;
+  const parseRow = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+  const headers = parseRow(lines[0]);
+  const rows = lines.slice(2).map(parseRow);
+  return (
+    <div className="detail-md-table-wrap">
+      <table className="detail-md-table">
+        <thead>
+          <tr>{headers.map((header, index) => <th key={`${header}-${index}`}>{header}</th>)}</tr>
+        </thead>
+        <tbody>
+          {rows.map((cells, rowIndex) => (
+            <tr key={`row-${rowIndex}`}>{cells.map((cell, cellIndex) => <td key={`cell-${cellIndex}`}>{cell}</td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ResultFilePreview({ seed, activeTextIds }) {
+  const activeRowNumbers = new Set(
+    (seed.textUnits || [])
+      .filter((unit) => activeTextIds.includes(unit.id))
+      .map((unit) => Number.parseInt(String(unit.rowLabel).replace(/[^\d]/g, ''), 10))
+      .filter((value) => !Number.isNaN(value)),
+  );
+  const csvScrollRef = useRef(null);
+  const firstActiveRow = Array.from(activeRowNumbers).sort((a, b) => a - b)[0] ?? null;
+  // 表格预览默认定位到当前切片 / 解析文本单元所在的行区间。
+  useEffect(() => {
+    if (seed.format !== 'csv' || !seed.table || firstActiveRow == null) return;
+    const container = csvScrollRef.current;
+    const target = container?.querySelector(`[data-preview-row="${firstActiveRow}"]`);
+    if (!container || !target) return;
+    const offset = target.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    // 目标行已在可视区域内时不滚动，避免每次定位都跳动。
+    if (offset < 0 || offset + target.offsetHeight > container.clientHeight) {
+      container.scrollTop += offset - container.clientHeight / 3;
+    }
+  }, [seed.format, seed.table, firstActiveRow]);
+  if (seed.format === 'csv' && seed.table) {
+    return (
+      <div className="detail-preview-scroll" ref={csvScrollRef}>
+        <table className="data-table detail-preview-table">
+          <thead>
+            <tr>
+              <th className="detail-preview-rowno">行号</th>
+              {seed.table.headers.map((header) => <th key={header}>{header}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="detail-preview-header-row">
+              <td className="detail-preview-rowno">1</td>
+              {seed.table.headers.map((header) => <td key={`h-${header}`} className="strong">{header}</td>)}
+            </tr>
+            {seed.table.rows.map((row) => (
+              <tr key={row.row} data-preview-row={row.row} className={activeRowNumbers.has(row.row) ? 'detail-preview-hit-row' : ''}>
+                <td className="detail-preview-rowno">{row.row}</td>
+                {row.cells.map((cell, cellIndex) => <td key={`${row.row}-${cellIndex}`}>{cell}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  if (seed.format === 'mp3' && seed.audio) {
+    const activeUnits = (seed.textUnits || []).filter((unit) => activeTextIds.includes(unit.id));
+    const rangeText = activeUnits.length ? `${activeUnits[0].start}–${activeUnits[activeUnits.length - 1].end}` : seed.audio.duration;
+    return (
+      <div className="detail-audio-preview">
+        <div className="detail-audio-player">
+          <span className="detail-audio-play" aria-hidden="true">▶</span>
+          <span className="detail-audio-name">{seed.audio.urlLabel}</span>
+          <span className="detail-audio-duration">{rangeText} / {seed.audio.duration}</span>
+        </div>
+        <div className="detail-audio-timeline">
+          {(seed.textUnits || []).map((unit) => (
+            <span key={unit.id} className={`detail-audio-segment ${activeTextIds.includes(unit.id) ? 'active' : ''}`}>
+              <b>{unit.id}</b>
+              <span>{unit.start}–{unit.end}</span>
+            </span>
+          ))}
+        </div>
+        <p className="detail-preview-tip">音频按时间段切分，命中片段在时间轴上高亮；点击解析文本预览中的时间轴可定位播放位置。</p>
+      </div>
+    );
+  }
+  return (
+    <div className="detail-pdf-preview">
+      {(seed.textUnits || []).map((unit) => (
+        <div key={unit.id} className={`detail-pdf-page ${activeTextIds.includes(unit.id) ? 'active' : ''}`}>
+          <div className="detail-pdf-page-head">{unit.page}</div>
+          <p>{unit.text}</p>
+        </div>
+      ))}
+      <p className="detail-preview-tip">PDF 按页切分，命中页在预览中高亮。</p>
+    </div>
+  );
+}
+
+// 解析文本预览的列口径：音频为「ID、文本、开始时间、结束时间、操作」，
+// 表格类为「ID、文本、行号、列范围、操作」，PDF 为「ID、文本、页码、段落、操作」。
+const resultTextUnitColumns = {
+  mp3: [
+    { key: 'id', label: 'ID', width: '52px' },
+    { key: 'text', label: '文本', width: 'minmax(0, 1fr)' },
+    { key: 'start', label: '开始时间', width: '84px' },
+    { key: 'end', label: '结束时间', width: '84px' },
+    { key: 'action', label: '操作', width: '56px' },
+  ],
+  csv: [
+    { key: 'id', label: 'ID', width: '52px' },
+    { key: 'text', label: '文本', width: 'minmax(0, 1fr)' },
+    { key: 'rowLabel', label: '行号', width: '76px' },
+    { key: 'colRange', label: '列范围', width: '92px' },
+    { key: 'action', label: '操作', width: '56px' },
+  ],
+  pdf: [
+    { key: 'id', label: 'ID', width: '52px' },
+    { key: 'text', label: '文本', width: 'minmax(0, 1fr)' },
+    { key: 'page', label: '页码', width: '76px' },
+    { key: 'section', label: '段落', width: '76px' },
+    { key: 'action', label: '操作', width: '56px' },
+  ],
+};
+
+function ResultTextUnits({ seed, activeTextIds, onLocate }) {
+  const columns = resultTextUnitColumns[seed.format] || resultTextUnitColumns.pdf;
+  const gridTemplate = columns.map((column) => column.width).join(' ');
+  return (
+    <div className="detail-text-units" style={{ '--unit-columns': gridTemplate }}>
+      <div className="detail-text-units-head">
+        {columns.map((column) => <span key={column.key}>{column.label}</span>)}
+      </div>
+      <div className="detail-text-units-body">
+        {seed.textUnits.map((unit) => (
+          <div key={unit.id} className={`detail-text-unit ${activeTextIds.includes(unit.id) ? 'active' : ''}`}>
+            {columns.map((column) => {
+              if (column.key === 'text') {
+                return <span key={column.key} className="detail-text-unit-text" title={unit.text}>{unit.text}</span>;
+              }
+              if (column.key === 'action') {
+                return <span key={column.key}><button type="button" onClick={() => onLocate(unit.id)}>定位</button></span>;
+              }
+              return <span key={column.key}>{unit[column.key] ?? '-'}</span>;
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// 关联切片列表：一个问答对 / 知识点对应多个切片时，中间栏展示切片列表。
+function RelatedChunkList({ seed, chunks, activeChunkIds, onLocate }) {
+  const locatorLabel = seed.format === 'mp3' ? '时间轴' : seed.format === 'csv' ? '行列坐标' : '页码';
+  return (
+    <div className="detail-related-chunks">
+      <div className="detail-related-head">关联切片（{chunks.length}）</div>
+      {chunks.map((chunk) => (
+        <div key={chunk.id} className={`detail-related-item ${activeChunkIds.includes(chunk.id) ? 'active' : ''}`}>
+          <div className="detail-item-title">
+            <span className="detail-item-index">#{chunk.index}</span>
+            <span>{seed.fileName}</span>
+          </div>
+          <div className="detail-item-locator">
+            <span className="detail-locator-tag">{locatorLabel}：{seed.format === 'mp3' ? `${chunk.textIds.map((id) => seed.textUnits.find((unit) => unit.id === id)).filter(Boolean).map((unit) => `${unit.start}–${unit.end}`).join('、')}` : chunk.rowRange}</span>
+            <span className="detail-locator-tag">关联文本：{(chunk.textIds || []).join('、')}</span>
+          </div>
+          {seed.format === 'csv' ? <MarkdownTablePreview content={chunk.content} /> : <p className="detail-chunk-text">{chunk.content}</p>}
+          <div className="detail-item-foot">
+            <span><button type="button" className="detail-play-btn" onClick={() => onLocate(chunk.textIds[0])}>▶ 播放</button></span>
+            <span>长度：{chunk.length}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 知识加工结果详情页：切片详情 / 问答详情 / 知识点详情共用。
+function KnowledgeResultDetailPage({ seed, initialItemId }) {
+  const items = seed.formType === 'QA库' ? seed.qaPairs : seed.formType === '知识点' ? seed.knowledgePoints : seed.chunks;
+  const initialIndex = Math.max(0, items.findIndex((item) => item.id === initialItemId));
+  const [activeIndex, setActiveIndex] = useState(initialIndex);
+  const [locatedTextId, setLocatedTextId] = useState(null);
+  const [fileInfoOpen, setFileInfoOpen] = useState(false);
+  const activeItem = items[activeIndex] || items[0];
+  const activeTextIds = activeItem?.textIds || [];
+  const itemLabel = seed.formType === 'QA库' ? '问答对' : seed.formType === '知识点' ? '知识点' : '切片';
+
+  // 「定位」把解析文本单元所属的形态内容切到前台，同时高亮该文本单元。
+  const locateTextUnit = (textId) => {
+    setLocatedTextId(textId);
+    const ownerIndex = items.findIndex((item) => (item.textIds || []).includes(textId));
+    if (ownerIndex >= 0) setActiveIndex(ownerIndex);
+  };
+  const highlightedTextIds = locatedTextId && activeTextIds.includes(locatedTextId) ? [locatedTextId] : activeTextIds;
+
+  // 详情页头部定位标签：CSV 展示行列范围，音频展示时间轴，PDF 展示页码。
+  const locatorLabel = seed.format === 'csv' ? '行列范围' : seed.format === 'mp3' ? '时间轴' : '页码';
+  const relatedChunks = getRelatedChunks(seed, activeItem);
+  const relatedTextIds = getRelatedTextIds(seed, activeItem);
+  // 一个问答对 / 知识点关联多个切片时，中间栏改为展示切片列表。
+  const showChunkList = seed.formType !== '切片库' && relatedChunks.length > 1;
+  // 标题栏的时间轴取值：音频取关联文本的时间段，其余取行列坐标 / 页码。
+  const locatorValue = seed.format === 'mp3'
+    ? relatedTextIds.map((id) => seed.textUnits.find((unit) => unit.id === id)).filter(Boolean).map((unit) => `${unit.start}–${unit.end}`).join('、')
+    : getLocatorValue(seed, activeItem);
+
+  return (
+    <div className="knowledge-result-detail-page">
+      <div className="detail-topbar">
+        <button type="button" className="detail-fileinfo-btn" onClick={() => setFileInfoOpen((open) => !open)}>
+          <FileTextOutlined /> 文件信息
+        </button>
+      </div>
+      {fileInfoOpen ? (
+        <div className="detail-meta-bar">
+          <span><label>文件</label><strong>{seed.fileName}</strong></span>
+          <span><label>知识类目</label><strong>{seed.categoryName}</strong></span>
+          <span><label>加工方案</label><strong>{seed.planName}</strong></span>
+          <span><label>方案版本</label><strong>v{seed.version}</strong></span>
+          <span><label>{locatorLabel}</label><strong>{locatorValue || '-'}</strong></span>
+          <span><label>格式组</label><strong>{formatGroupLabel(normalizeUploadFormat(seed.format))}</strong></span>
+        </div>
+      ) : null}
+      <div className="detail-columns">
+        <section className="panel detail-column">
+          <div className="detail-column-head">文件预览</div>
+          <ResultFilePreview seed={seed} activeTextIds={highlightedTextIds} />
+        </section>
+        <section className="panel detail-column">
+          <div className="detail-column-head">
+            <span>{showChunkList ? '切片列表' : '解析文本预览'}</span>
+            {showChunkList ? <span className="detail-column-note">共 {relatedChunks.length} 个切片</span> : null}
+          </div>
+          <div className="detail-column-body">
+            {showChunkList ? (
+              <RelatedChunkList
+                seed={seed}
+                chunks={relatedChunks}
+                activeChunkIds={relatedChunks.map((chunk) => chunk.id)}
+                onLocate={locateTextUnit}
+              />
+            ) : null}
+            <div className="detail-sub-head">{showChunkList ? '解析文本预览' : null}</div>
+            <ResultTextUnits seed={seed} activeTextIds={highlightedTextIds} onLocate={locateTextUnit} />
+          </div>
+        </section>
+        <section className="panel detail-column">
+          <div className="detail-column-head">
+            <span>{itemLabel}内容</span>
+            <span className="detail-column-pager">
+              <button type="button" disabled={activeIndex <= 0} onClick={() => { setLocatedTextId(null); setActiveIndex(activeIndex - 1); }}>上一{seed.formType === '切片库' ? '片' : '条'}</button>
+              <em>{activeIndex + 1} / {items.length}</em>
+              <button type="button" disabled={activeIndex >= items.length - 1} onClick={() => { setLocatedTextId(null); setActiveIndex(activeIndex + 1); }}>下一{seed.formType === '切片库' ? '片' : '条'}</button>
+            </span>
+          </div>
+          <div className="detail-item-card">
+            {/* 标题栏：序号、文件名、关联文本、定位值（音频为时间轴），音频另带播放按钮。 */}
+            <div className="detail-item-titlebar">
+              <span className="detail-item-index">#{activeItem.index}</span>
+              <span className="detail-item-filename" title={seed.fileName}>{seed.fileName}</span>
+              <span className="detail-locator-tag">关联文本：{relatedTextIds.join('、') || '-'}</span>
+              <span className="detail-locator-tag">{locatorLabel}：{locatorValue || '-'}</span>
+              {seed.format === 'mp3' ? (
+                <button type="button" className="detail-play-btn" onClick={() => locateTextUnit(relatedTextIds[0])}>▶ 播放</button>
+              ) : null}
+            </div>
+            <div className="detail-item-body">
+              {seed.formType === 'QA库' ? (
+                <div className="detail-qa-body">
+                  <div className="detail-qa-row"><label>问题</label><p>{activeItem.question}</p></div>
+                  <div className="detail-qa-row"><label>答案</label><p>{activeItem.answer}</p></div>
+                </div>
+              ) : seed.formType === '知识点' ? (
+                <div className="detail-kp-body">
+                  <h3>{activeItem.title}</h3>
+                  <p>{activeItem.content}</p>
+                  <div className="detail-kp-grid">
+                    <div><label>适用对象</label><div className="detail-chip-row">{activeItem.applicableUsers.map((item) => <span className="detail-chip" key={item}>{item}</span>)}</div></div>
+                    <div><label>关键规则</label><ul className="detail-rule-list">{activeItem.keyRules.map((item) => <li key={item}>{item}</li>)}</ul></div>
+                    <div><label>标签</label><div className="detail-chip-row">{activeItem.tags.map((item) => <span className="detail-chip" key={item}>{item}</span>)}</div></div>
+                  </div>
+                </div>
+              ) : seed.format === 'csv' ? (
+                <MarkdownTablePreview content={activeItem.content} />
+              ) : (
+                <p className="detail-chunk-text">{activeItem.content}</p>
+              )}
+            </div>
+            <div className="detail-item-foot">
+              <span>关联切片：{relatedChunks.length} 个</span>
+              <span>长度：{activeItem.length ?? '-'}</span>
+              <span>来源方案：{seed.planName} v{seed.version}</span>
+            </div>
+          </div>
+          <div className="detail-item-list">
+            {items.map((item, index) => (
+              <button
+                type="button"
+                key={item.id}
+                className={`detail-item-list-row ${index === activeIndex ? 'active' : ''}`}
+                onClick={() => { setLocatedTextId(null); setActiveIndex(index); }}
+              >
+                <span className="detail-item-index">#{item.index}</span>
+                <span className="detail-item-list-text">
+                  {seed.formType === 'QA库' ? item.question : seed.formType === '知识点' ? item.title : String(item.content).split('\n').slice(2).join(' ').slice(0, 24)}
+                </span>
+                <span className="detail-item-list-range">{getLocatorValue(seed, item)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// 知识加工结果详情（切片 / 问答 / 知识点）以二级抽屉打开，不替换列表页。
+function KnowledgeResultDetailDrawer({ seed, initialItemId, onClose }) {
+  const title = seed.formType === 'QA库' ? '问答详情' : seed.formType === '知识点' ? '知识点详情' : '切片详情';
+  return (
+    <Drawer title={title} onClose={onClose} className="result-detail-drawer" darkHead wide>
+      <KnowledgeResultDetailPage seed={seed} initialItemId={initialItemId} />
+    </Drawer>
+  );
+}
+
+function buildResultDetailSeedByKey(key) {
+  return resultDetailSeeds[key] || resultDetailSeeds['slice-pdf'];
+}
+
+// 搜索测试：面向已入库知识做检索效果验证，命中结果可跳转到对应详情页定位原文。
+// 页面层级为「搜索测试 → 检索测试 → 检索结果」。
+const retrievalFormTypeOptions = ['全部形态', '切片库', 'QA库', '知识点'];
+const retrievalHitSeeds = [
+  { id: 'hit-1', formType: '切片库', score: 0.92, content: '| 药品名称 | 剂型 | 报销比例 | 备注 |\n| --- | --- | --- | --- |\n| 阿莫西林胶囊 | 胶囊 | 90% | 甲类 |', source: '医保药品目录清单.csv', seedKey: 'slice-csv', itemId: 'csv-chunk-001', locator: '第 2–4 行 · 第 1–4 列' },
+  { id: 'hit-2', formType: '切片库', score: 0.88, content: '| 药品名称 | 剂型 | 报销比例 | 备注 |\n| --- | --- | --- | --- |\n| 阿托伐他汀钙片 | 片剂 | 80% | 乙类 |', source: '医保药品目录清单.csv', seedKey: 'slice-csv', itemId: 'csv-chunk-002', locator: '第 5–7 行 · 第 1–4 列' },
+  { id: 'hit-3', formType: 'QA库', score: 0.85, content: '问：阿莫西林胶囊的报销比例是多少？\n答：阿莫西林胶囊（胶囊剂型）的报销比例为 90%，属于甲类药品。', source: '客户问答清单.csv', seedKey: 'qa-csv', itemId: 'qa-csv-1', locator: '第 2 行 · 第 1–4 列' },
+  { id: 'hit-4', formType: '知识点', score: 0.81, content: '甲类药品报销比例：甲类药品按参保地政策全额纳入报销范围，样例中阿莫西林胶囊、二甲双胍片、奥美拉唑肠溶胶囊的报销比例分别为 90%、95%、92%。', source: '医保药品目录清单.csv', seedKey: 'kp-csv', itemId: 'kp-csv-1', locator: '第 2–7 行 · 第 1–4 列' },
+  { id: 'hit-5', formType: '切片库', score: 0.79, content: '我想咨询一下，异地就医备案之后，报销比例和本地一样吗？备案成功后，在备案地定点医疗机构就医，报销比例按参保地政策执行。', source: '客服录音_医保报销咨询.mp3', seedKey: 'slice-audio', itemId: 'audio-chunk-001', locator: '00:18–01:40 · 第 2–3 段' },
+  { id: 'hit-6', formType: 'QA库', score: 0.74, content: '问：急诊住院没有提前备案还能报销吗？\n答：急诊抢救视同已备案，出院后按参保地规定补办备案手续即可，不影响本次报销。', source: '客服录音_医保报销咨询.mp3', seedKey: 'qa-audio', itemId: 'qa-audio-2', locator: '01:40–03:12 · 第 4–5 段' },
+];
+
+function RetrievalTestPage({ notify }) {
+  const [tagCategory, setTagCategory] = useState('全部标签分类');
+  const [tag, setTag] = useState('全部标签');
+  const [formType, setFormType] = useState('全部形态');
+  const [topK, setTopK] = useState('5');
+  const [threshold, setThreshold] = useState('0.5');
+  const [query, setQuery] = useState('阿莫西林胶囊的报销比例是多少');
+  const [searched, setSearched] = useState(true);
+  const [elapsed, setElapsed] = useState('128ms');
+  const [detailTarget, setDetailTarget] = useState(null);
+
+  const hits = retrievalHitSeeds
+    .filter((hit) => formType === '全部形态' || hit.formType === formType)
+    .filter((hit) => Number(hit.score) >= Number(threshold || 0))
+    .slice(0, Number(topK) || 5);
+
+  const runSearch = () => {
+    if (!query.trim()) {
+      notify('请输入检索内容', 'error');
+      return;
+    }
+    setSearched(true);
+    setElapsed(`${Math.round(96 + Math.random() * 84)}ms`);
+  };
+
+  return (
+    <div className="retrieval-test-page">
+      <PageHeader title="搜索测试" />
+      <div className="retrieval-breadcrumb">
+        <span>检索测试</span>
+        <em>/</em>
+        <span className="active">检索结果</span>
+      </div>
+      <section className="panel retrieval-config-panel">
+        <div className="retrieval-panel-title">检索测试</div>
+        <div className="retrieval-config-row">
+          <label>标签过滤</label>
+          <SelectField value={tagCategory} onChange={setTagCategory} dropdownMinWidth={160}>
+            <option>全部标签分类</option>
+            <option>医保</option>
+            <option>基金</option>
+            <option>保险</option>
+          </SelectField>
+          <SelectField value={tag} onChange={setTag} dropdownMinWidth={140}>
+            <option>全部标签</option>
+            <option>药品目录</option>
+            <option>报销比例</option>
+            <option>异地就医</option>
+          </SelectField>
+        </div>
+        <div className="retrieval-config-row">
+          <label>检索参数</label>
+          <SelectField value={formType} onChange={setFormType} dropdownMinWidth={140}>
+            {retrievalFormTypeOptions.map((option) => <option key={option}>{option}</option>)}
+          </SelectField>
+          <SelectField value={topK} onChange={setTopK} dropdownMinWidth={120}>
+            <option value="3">返回 3 条</option>
+            <option value="5">返回 5 条</option>
+            <option value="10">返回 10 条</option>
+          </SelectField>
+          <SelectField value={threshold} onChange={setThreshold} dropdownMinWidth={140}>
+            <option value="0">相似度不限</option>
+            <option value="0.5">相似度 ≥ 0.5</option>
+            <option value="0.8">相似度 ≥ 0.8</option>
+          </SelectField>
+        </div>
+        <div className="retrieval-query-row">
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入检索内容，验证知识加工结果能否被召回" />
+          <button type="button" className="primary" onClick={runSearch}><SearchOutlined /> 测试检索</button>
+        </div>
+      </section>
+      <section className="panel retrieval-result-panel">
+        <div className="retrieval-result-head">
+          <span>检索结果</span>
+          {searched ? <span className="retrieval-result-meta">响应耗时 {elapsed} · 命中 {hits.length} 条</span> : null}
+        </div>
+        {searched && hits.length ? (
+          <div className="retrieval-hit-list">
+            {hits.map((hit, index) => (
+              <div className="retrieval-hit" key={hit.id}>
+                <div className="retrieval-hit-head">
+                  <span className="retrieval-hit-index">#{index + 1}</span>
+                  <span className="badge neutral">{getKnowledgeFormTypeLabel(hit.formType)}</span>
+                  <span className="retrieval-hit-score">得分 {hit.score.toFixed(2)}</span>
+                  <span className="retrieval-hit-locator">{hit.locator}</span>
+                </div>
+                <pre className="retrieval-hit-content">{hit.content}</pre>
+                <div className="retrieval-hit-foot">
+                  <span>来源文件：{hit.source}</span>
+                  <button type="button" onClick={() => setDetailTarget({ seedKey: hit.seedKey, itemId: hit.itemId })}>查看原文</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="retrieval-empty">{searched ? '没有命中结果，请调整检索内容或降低相似度阈值。' : '输入检索内容后点击「测试检索」。'}</div>
+        )}
+      </section>
+      {detailTarget ? (
+        <KnowledgeResultDetailDrawer
+          seed={buildResultDetailSeedByKey(detailTarget.seedKey)}
+          initialItemId={detailTarget.itemId}
+          onClose={() => setDetailTarget(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersion, knowledgePlanId, entryNonce, notify, onBack, onOpenWorkbench }) {
+  const { tenantId } = useTenant();
   const qaParams = new URLSearchParams(window.location.search);
   const qaMode = qaParams.get('qa') === '1';
   const qaGeneratedState = qaMode && qaParams.get('demoState') === 'generated';
@@ -9038,7 +10654,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       currentPlanId: plan?.id || null,
       sampleFiles: currentSampleFiles,
       events: storedChat || (generatedState ? generatedAgentEvents : runningState ? runningAgentEvents : initialAgentEvents),
-      planNodes: latestVersion ? latestNodes : runningState ? createAgentDemoNodes(readWorkbenchCatalog(), target, projectId).slice(0, 4) : qaGeneratedState && initialTarget ? collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(), target, projectId)) : [],
+      planNodes: latestVersion ? latestNodes : runningState ? createAgentDemoNodes(readWorkbenchCatalog(tenantId), target, projectId).slice(0, 4) : qaGeneratedState && initialTarget ? collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(tenantId), target, projectId)) : [],
       rightTab: ['处理方案', '执行结果'].includes(qaRightTab) ? qaRightTab : '处理方案',
       running: runningState,
       testing: false,
@@ -9053,7 +10669,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
       draftPlanVersion: null,
       versionSnapshots: latestVersion ? buildVersionSnapshotsFromRecords(versions) : qaGeneratedState && initialTarget ? {
         '1.0': {
-          planNodes: collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(), target, projectId)),
+          planNodes: collapseWorkbenchNodes(createAgentDemoNodes(readWorkbenchCatalog(tenantId), target, projectId)),
           results: [createSampleResult(fallbackSample, { includeKnowledge: true })],
           sampleFiles: [fallbackSample],
         },
@@ -9065,7 +10681,11 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   const initialPlanContextRef = useRef(null);
   if (!initialPlanContextRef.current) initialPlanContextRef.current = createPlanContextState(initialPlanTarget);
   const initialPlanContext = initialPlanContextRef.current;
-  const [catalog, setCatalog] = useState(() => readWorkbenchCatalog());
+  const [catalog, setCatalog] = useState(() => readWorkbenchCatalog(tenantId));
+
+  useEffect(() => {
+    setCatalog(readWorkbenchCatalog(tenantId));
+  }, [tenantId]);
   const [currentPlanId, setCurrentPlanId] = useState(initialPlanContext.currentPlanId);
   const [sampleFiles, setSampleFiles] = useState(initialPlanContext.sampleFiles);
   const [events, setEvents] = useState(initialPlanContext.events);
@@ -9481,7 +11101,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     notify('试跑记录名称已更新', 'success');
     return true;
   };
-  const [toolCategories, setToolCategories] = useState(() => readUnifiedFlowNodeCatalog().categories || defaultCategories);
+  const [toolCategories, setToolCategories] = useState(() => readUnifiedFlowNodeCatalog(tenantId).categories || defaultCategories);
   const markPlanDraft = () => {
     setConfirmed(false);
     setDraftPlanVersion((current) => {
@@ -9541,8 +11161,8 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   };
 
   useEffect(() => subscribeCatalog(() => {
-    const snapshot = readUnifiedFlowNodeCatalog();
-    const latestCatalog = readWorkbenchCatalog();
+    const snapshot = readUnifiedFlowNodeCatalog(tenantId);
+    const latestCatalog = readWorkbenchCatalog(tenantId);
     setCatalog(latestCatalog);
     setToolCategories(snapshot.categories || defaultCategories);
   }), []);
@@ -9760,7 +11380,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     };
     setIssuePopoverOpen(false);
     clearAgentTimers(runContextKey);
-    const latestCatalog = readWorkbenchCatalog();
+    const latestCatalog = readWorkbenchCatalog(tenantId);
     setCatalog(latestCatalog);
     const agentPlan = createAgentDemoPlan(activePlanTarget, latestCatalog, projectId);
     const { parser, splitter, extraction, iteration } = agentPlan;
@@ -10259,7 +11879,7 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
     const eventId = scoped.pushEvent({ role: 'thought', title: modeLabels[mode] || '处理反馈', content: `已选择「${modeLabels[mode] || mode}」${extra ? `，补充说明：${extra}` : ''}，正在执行...`, status: 'running', kind: 'toolCall' });
     scheduleAgentTimer(() => {
       if (mode === 'regenerate') {
-        const latestCatalog = readWorkbenchCatalog();
+        const latestCatalog = readWorkbenchCatalog(tenantId);
         const agentPlan = createAgentDemoPlan(activePlanTarget, latestCatalog, projectId);
         scoped.markDraft();
         scoped.setPlanNodes(agentPlan.nodes);
@@ -10301,6 +11921,10 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
 
   const addTool = (tool) => {
     if (!tool) return;
+    // 其他租户把公开节点加入处理方案时，记录跨租户使用，供归属租户收回可见范围时拦截。
+    if (isTenantScopedFlowTool(tool) && getToolOwnerTenantId(tool) !== tenantId) {
+      recordNodeTenantUsage(tool.managedToolId || tool.id, tenantId);
+    }
     if (addParentId) {
       const node = applyIterationSourceToNode(clearManualNodeConfig(createWorkbenchNode(tool, { type: 'fixed' })));
       setPlanNodes((current) => current.map((item) => {
@@ -10633,15 +12257,15 @@ function WorkbenchPage({ projectId, categoryId, formType, fileFormat, focusVersi
   };
 
   const openAddNode = (parentId = null) => {
-    const snapshot = readUnifiedFlowNodeCatalog();
-    setCatalog(readWorkbenchCatalog());
+    const snapshot = readUnifiedFlowNodeCatalog(tenantId);
+    setCatalog(readWorkbenchCatalog(tenantId));
     setToolCategories(snapshot.categories || defaultCategories);
     setAddParentId(parentId);
     setAddOpen(true);
   };
 
   const openEditNode = (node, parentId = null) => {
-    const latestCatalog = readWorkbenchCatalog();
+    const latestCatalog = readWorkbenchCatalog(tenantId);
     setCatalog(latestCatalog);
     setEditingParentId(parentId);
     setEditingNode(cloneWorkbenchNode(node));
@@ -11685,6 +13309,7 @@ function ToolRuntimeRow({ node, nodes, warnings, needsSmartHandling, runtime, ca
 }
 
 function AddToolDialog({ tools, categories, nodes, parentId, onClose, onAdd }) {
+  const { tenantId } = useTenant();
   const [category, setCategory] = useState(allToolsCategory);
   const scopedTools = parentId ? tools.filter((tool) => tool.id !== 'system-iteration') : tools;
   const [selectedId, setSelectedId] = useState(scopedTools[0]?.id || '');
@@ -11703,7 +13328,14 @@ function AddToolDialog({ tools, categories, nodes, parentId, onClose, onAdd }) {
       <div className="add-tool-grid">
         <div className="tool-picker-list category-picker"><div className="tool-picker-title">节点分类</div>{scopedCats.map((cat) => <button type="button" key={cat} className={category === cat ? 'active' : ''} onClick={() => { setCategory(cat); setSelectedId((cat === allToolsCategory ? scopedTools : scopedTools.filter((tool) => tool.category === cat))[0]?.id || ''); }}><span>{cat}</span><Badge>{cat === allToolsCategory ? scopedTools.length : scopedTools.filter((tool) => tool.category === cat).length}</Badge></button>)}</div>
         <div className="tool-picker-list tool-list-picker"><div className="tool-picker-title">节点列表</div>{filtered.map((tool) => {
-          return <button type="button" key={tool.id} className={selectedId === tool.id ? 'active' : ''} onClick={() => setSelectedId(tool.id)}><strong>{tool.name}</strong><span>{tool.category} · {tool.summary}</span></button>;
+          const crossTenant = isTenantScopedFlowTool(tool) && getToolOwnerTenantId(tool) !== tenantId;
+          return (
+            <button type="button" key={tool.id} className={selectedId === tool.id ? 'active' : ''} onClick={() => setSelectedId(tool.id)}>
+              <strong>{tool.name}</strong>
+              {crossTenant ? <em className="cross-tenant-tag">跨租户 · 来自 {getTenantName(getToolOwnerTenantId(tool))}</em> : null}
+              <span>{tool.category} · {tool.summary}</span>
+            </button>
+          );
         })}</div>
         <div className="tool-detail-mini">{current ? <AddNodeDetail tool={current} /> : null}</div>
       </div>
@@ -11725,6 +13357,12 @@ function AddNodeDetail({ tool }) {
   }));
   return (
     <div className="add-node-detail">
+      {isTenantScopedFlowTool(tool) ? (
+        <div className="add-node-tenant-meta">
+          <span>归属租户：{getTenantName(getToolOwnerTenantId(tool))}</span>
+          <span>可用租户：{getToolVisibilityScope(tool) === 'all' ? '全部租户' : '仅本租户'}</span>
+        </div>
+      ) : null}
       <AddNodeParamGroup title="节点输入" rows={nodeInputRows} emptyText="暂无节点输入" showRequired />
       <AddNodeParamGroup title="配置参数" rows={configParams.map((param) => paramToNodeDetailRow(param))} emptyText="暂无配置参数" showRequired />
       <AddNodeParamGroup title="节点输出" rows={outputRows} emptyText="暂无节点输出" />
@@ -13331,6 +14969,10 @@ function KnowledgeResultItems({ formType, payload }) {
           );
         }
         const content = item.content || item.text || item.summary || '';
+        // 表格类切片携带行列坐标：预览中同时展示行列范围与关联文本 ID。
+        const rowRange = item.rowRange || item.row_range || '';
+        const colRange = item.colRange || item.col_range || '';
+        const textIds = Array.isArray(item.textIds) ? item.textIds : Array.isArray(item.text_ids) ? item.text_ids : [];
         const meta = [content ? `${getTextLength(content)}字` : '', item.page ? `第${item.page}页` : ''].filter(Boolean).join(' · ');
         return (
           <article className="knowledge-result-item" key={`slice-${index}`}>
@@ -13338,7 +14980,15 @@ function KnowledgeResultItems({ formType, payload }) {
               <strong>分片{index + 1}</strong>
               {meta ? <span>{meta}</span> : null}
             </div>
-            <p>{content || '-'}</p>
+            {rowRange || colRange || textIds.length ? (
+              <div className="detail-locator-row">
+                {rowRange ? <span className="detail-locator-tag">行范围：{rowRange}</span> : null}
+                {colRange ? <span className="detail-locator-tag">列范围：{colRange}</span> : null}
+                {textIds.length ? <span className="detail-locator-tag">关联文本：{textIds.join('、')}</span> : null}
+              </div>
+            ) : null}
+            {item.title ? <em className="knowledge-result-item-title">{item.title}</em> : null}
+            {rowRange && String(content).includes('|') ? <MarkdownTablePreview content={content} /> : <p>{content || '-'}</p>}
           </article>
         );
       })}
@@ -14268,7 +15918,7 @@ function SamplePreview({ files, results = [] }) {
 }
 
 // 导航状态与 URL 同步：刷新后停留在当前页面（含方案配置工作台等深层位置）
-const NAVIGABLE_SCREENS = new Set(['ops-projects', 'ops-category', 'ops-plans', 'ops-access', 'ops-file-upload', 'ops-workbench', 'ops-knowledge-points', 'admin-mcp', 'admin-tools', 'ops-slice-library', 'ops-qa-library']);
+const NAVIGABLE_SCREENS = new Set(['ops-projects', 'ops-category', 'ops-plans', 'ops-access', 'ops-file-upload', 'ops-workbench', 'ops-knowledge-points', 'admin-mcp', 'admin-tools', 'ops-slice-library', 'ops-qa-library', 'ops-retrieval']);
 
 function serializeNavigation(active, projectId, workbenchTarget) {
   const query = new URLSearchParams(window.location.search);
@@ -14346,6 +15996,7 @@ export function App() {
   const [projectId, setProjectId] = useState(initialNavigation.projectId);
   const [workbenchTarget, setWorkbenchTarget] = useState(initialNavigation.workbenchTarget);
   const [toast, setToast] = useState(null);
+  const [tenantId, setTenantId] = useState(DEFAULT_TENANT_ID);
   const notify = (message, type = 'info') => setToast({ message, type });
   useEffect(() => {
     serializeNavigation(active, projectId, workbenchTarget);
@@ -14368,19 +16019,24 @@ export function App() {
   else if (active === 'ops-result' || active === 'ops-knowledge-points') content = <KnowledgePointsPage />;
   else if (active === 'ops-slice-library') content = <SliceLibraryPage />;
   else if (active === 'ops-qa-library') content = <QaLibraryPage />;
+  else if (active === 'ops-retrieval') content = <RetrievalTestPage notify={notify} />;
   else content = <EmptyPage title={active} />;
 
   // 方案配置页（工作台）没有独立菜单项：左侧菜单按来源页面保持高亮（从「知识加工方案」进入则继续选中「知识加工方案」）
   const menuActive = active === 'ops-workbench' ? (workbenchTarget.returnScreen || 'ops-plans') : active;
 
+  const tenantContextValue = useMemo(() => ({ tenantId, tenants: platformTenants, switchTenant: setTenantId }), [tenantId]);
+
   return (
-    <Shell active={active} menuActive={menuActive} onNavigate={(key) => {
-      if (key === 'ops-category') setProjectId(projectId || dataStore.getProjects()[0]?.id);
-      if (key === 'ops-access') setActive('ops-file-upload');
-      else setActive(key === 'ops-result' ? 'ops-knowledge-points' : key);
-    }}>
-      {content}
-      <Toast toast={toast} onClose={() => setToast(null)} />
-    </Shell>
+    <TenantContext.Provider value={tenantContextValue}>
+      <Shell active={active} menuActive={menuActive} onNavigate={(key) => {
+        if (key === 'ops-category') setProjectId(projectId || dataStore.getProjects()[0]?.id);
+        if (key === 'ops-access') setActive('ops-file-upload');
+        else setActive(key === 'ops-result' ? 'ops-knowledge-points' : key);
+      }}>
+        {content}
+        <Toast toast={toast} onClose={() => setToast(null)} />
+      </Shell>
+    </TenantContext.Provider>
   );
 }

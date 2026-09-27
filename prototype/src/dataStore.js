@@ -25,7 +25,7 @@ const arrayStorageKeys = new Set(Object.entries(keys)
   .map(([, key]) => key));
 
 const formTypes = ['切片库', 'QA库', '知识点', '知识图谱'];
-const supportedKnowledgePlanFormats = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md'];
+const supportedKnowledgePlanFormats = ['pdf', 'docx', 'xlsx', 'csv', 'pptx', 'txt', 'md'];
 const formTypeDisplayNames = {
   切片库: '文本切片',
   QA库: '问答库',
@@ -296,6 +296,7 @@ const demoFileMeta = {
   pdf: { name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB' },
   docx: { name: '开户流程手册.docx', type: 'DOCX', size: '1.86 MB' },
   xlsx: { name: '客户问答清单.xlsx', type: 'XLSX', size: '1.32 MB' },
+  csv: { name: '医保药品目录清单.csv', type: 'CSV', size: '1.24 MB' },
   pptx: { name: '理财产品培训课件.pptx', type: 'PPTX', size: '3.16 MB' },
   txt: { name: '投诉工单导出.txt', type: 'TXT', size: '0.42 MB' },
   md: { name: '宣传话术清单.md', type: 'MD', size: '0.36 MB' },
@@ -333,6 +334,25 @@ export function demoNodeSets(formType, fileFormat, categoryId = '') {
       pdf: { toolId: 'ke-idp-mineru-ocr', toolName: 'MinerU版面解析' },
       docx: { toolId: 'ke-idp-mx-ocr', toolName: '通用OCR解析' },
       xlsx: { toolId: 'ke-idp-glm-ocr', toolName: 'GLM文档解析' },
+      // CSV 解析：按「编码探测 → 分隔符与引号规则识别 → 表头识别 → 输出 Markdown 表格与行列坐标」解析，
+      // 节点类型为通用解析，持久化存储知识形态为 ParserStorage。
+      csv: {
+        toolId: 'csv-parser',
+        toolName: 'CSV 解析',
+        category: '通用解析',
+        inputParamId: 'file',
+        params: [
+          { id: 'file', name: 'file', displayName: '文件对象', label: '文件对象', type: 'file', required: true, value: '', source: { type: 'file' } },
+          { id: 'encoding', name: 'encoding', displayName: '文件编码', label: '文件编码', type: 'select', value: '自动探测', options: ['自动探测', 'UTF-8', 'GBK', 'GB2312', 'GB18030'], source: { type: 'manual' } },
+          { id: 'delimiter', name: 'delimiter', displayName: '分隔符', label: '分隔符', type: 'select', value: '自动识别', options: ['自动识别', '逗号', '分号', '制表符', '竖线'], source: { type: 'manual' } },
+          { id: 'hasHeader', name: 'hasHeader', displayName: '首行为表头', label: '首行为表头', type: 'boolean', value: true, source: { type: 'manual' } },
+          { id: 'emptyRow', name: 'emptyRow', displayName: '空行处理', label: '空行处理', type: 'select', value: '丢弃', options: ['丢弃', '保留'], source: { type: 'manual' } },
+        ],
+        outputs: [
+          { id: 'markdownUrl', path: 'markdownUrl', name: 'markdownUrl', displayName: 'Markdown表格内容地址', label: 'Markdown表格内容地址', type: 'string', desc: 'string，解析后保留表头与行列结构的 Markdown 表格内容地址。' },
+          { id: 'tableCoordinates', path: 'tableCoordinates', name: 'tableCoordinates', displayName: '表格行列坐标', label: '表格行列坐标', type: 'array<object>', desc: 'array<object>，与 markdownUrl 对应的行列坐标，每个文本单元带文本 ID、原始行号与列范围。' },
+        ],
+      },
       pptx: { toolId: 'ke-idp-hunyuan-ocr', toolName: 'Hunyuan文档解析' },
       txt: { toolId: 'ke-idp-mx-ocr', toolName: '通用OCR解析' },
       md: { toolId: 'ke-idp-deepseek-ocr', toolName: 'DeepSeek文档解析' },
@@ -347,7 +367,8 @@ export function demoNodeSets(formType, fileFormat, categoryId = '') {
     const outputs = [
       { id: 'documentParseResult', path: 'documentParseResult', name: 'documentParseResult', displayName: '文档解析结果', label: '文档解析结果', type: 'object', desc: 'object，包含解析后的版面、文本、图片和表格信息。' },
     ];
-    return Object.fromEntries(Object.entries(configs).map(([format, base]) => [format, { ...base, category: '文档解析', inputParamId: 'file', params, outputs }]));
+    // 默认取通用文档解析节点的类目/参数/输出，format 自身带同名键时以自身为准（如 CSV 解析）。
+    return Object.fromEntries(Object.entries(configs).map(([format, base]) => [format, { category: '文档解析', inputParamId: 'file', params, outputs, ...base }]));
   })();
   const parser = parserNodes[fileFormat] || parserNodes.pdf;
   const splitter = {
@@ -498,6 +519,7 @@ const demoSecondFileMeta = {
   pdf: { name: '医保政策条款明细_补充版.pdf', type: 'PDF', size: '3.12 MB' },
   docx: { name: '开户流程手册_操作篇.docx', type: 'DOCX', size: '2.05 MB' },
   xlsx: { name: '客户问答清单_增补.xlsx', type: 'XLSX', size: '1.58 MB' },
+  csv: { name: '医保药品目录清单_增补.csv', type: 'CSV', size: '1.46 MB' },
   pptx: { name: '理财产品培训课件_二期.pptx', type: 'PPTX', size: '4.20 MB' },
   txt: { name: '投诉工单导出_批次二.txt', type: 'TXT', size: '0.56 MB' },
   md: { name: '宣传话术清单_增补.md', type: 'MD', size: '0.48 MB' },
@@ -528,7 +550,12 @@ const demoFailedSample = {
 export function demoResult(file, nodes, formType, categoryName, version, categoryId = '') {
   const isFundKnowledgePdf = categoryId === 'cat-wealth-fund' && formType === '知识点' && file.type === 'PDF';
   const isKnowledgeGraph = formType === '知识图谱' && file.type === 'PDF';
-  const sliceItems = isFundKnowledgePdf ? [
+  const isCsvTable = file.type === 'CSV';
+  const sliceItems = isCsvTable ? [
+    // 表格语义分片：分片边界落在完整数据行上，每个分片重复携带表头，并关联覆盖的文本 ID 与行列范围。
+    { chunkId: 'csv-chunk-001', title: '第 2–4 行 · 第 1–3 列', content: '| 药品名称 | 剂型 | 报销比例 |\n| --- | --- | --- |\n| 阿莫西林胶囊 | 胶囊 | 90% |\n| 布洛芬缓释胶囊 | 缓释胶囊 | 85% |\n| 二甲双胍片 | 片剂 | 95% |', page: null, textIds: ['T2', 'T3', 'T4'], rowRange: '第 2–4 行', colRange: '第 1–3 列' },
+    { chunkId: 'csv-chunk-002', title: '第 5–7 行 · 第 1–3 列', content: '| 药品名称 | 剂型 | 报销比例 |\n| --- | --- | --- |\n| 阿托伐他汀钙片 | 片剂 | 80% |\n| 缬沙坦胶囊 | 胶囊 | 88% |\n| 奥美拉唑肠溶胶囊 | 肠溶胶囊 | 92% |', page: null, textIds: ['T5', 'T6', 'T7'], rowRange: '第 5–7 行', colRange: '第 1–3 列' },
+  ] : isFundKnowledgePdf ? [
     { chunkId: 'fund-chunk-001', title: '基金概况与投资目标', content: '本基金主要投资于符合基金合同约定的资产，投资者应结合自身风险承受能力审慎决策。', page: 2 },
     { chunkId: 'fund-chunk-002', title: '风险收益特征', content: '基金净值可能波动，过往业绩不代表未来表现，投资者需关注产品风险等级和投资范围。', page: 6 },
     { chunkId: 'fund-chunk-003', title: '申购赎回规则', content: '申购、赎回申请按交易日规则确认，到账时间以基金合同和销售机构公告为准。', page: 14 },
@@ -819,6 +846,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
     pdf: 'PDF版式文档',
     docx: 'Word结构化文档',
     xlsx: 'Excel表格文件',
+    csv: 'CSV表格文件',
     pptx: 'PPT课件文件',
     txt: '纯文本导出文件',
     md: 'Markdown文档',
@@ -839,6 +867,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
     pdf: '需要保留页码、标题层级和跨页段落，避免把页眉页脚写入正文。',
     docx: '需要识别标题样式、列表层级和表格段落，避免目录文字干扰正文。',
     xlsx: '需要把多列字段映射为问答候选，并过滤空行、合并单元格和说明行。',
+    csv: '需要识别编码与分隔符，保留表头并按完整数据行分片，同时保留每行对应的行列坐标。',
     pptx: '需要按页面抽取标题、正文和备注，避免把装饰性文字当成知识内容。',
     txt: '需要按工单边界和自然段落切分，避免把多条记录混在一个处理单元里。',
     md: '需要保留Markdown标题层级、列表和代码块边界，避免破坏原始结构。',
@@ -918,7 +947,7 @@ function demoChatMessages({ categoryName, formType, fileFormat, versionCount, sa
 }
 
 function ensureDemoPlanData() {
-  const demoVersion = 'workbench-plan-demo-v24';
+  const demoVersion = 'workbench-plan-demo-v26';
   if (read(keys.demoPlanSeedVersion, '') === demoVersion) return;
 
   const projects = read(keys.projects, []);
@@ -933,15 +962,19 @@ function ensureDemoPlanData() {
   const definitions = [
     { planScope: 'fallback', formType: '切片库', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
     { planScope: 'fallback', formType: '切片库', fileFormat: 'docx', versions: ['1.0', '1.1'], withFailedSample: true },
+    { planScope: 'fallback', formType: '切片库', fileFormat: 'csv', versions: ['1.0', '1.1'], withFailedSample: true },
     { planScope: 'fallback', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
+    { planScope: 'fallback', formType: 'QA库', fileFormat: 'csv', versions: ['1.0', '1.1'], withFailedSample: true },
     { planScope: 'fallback', formType: 'QA库', fileFormat: 'txt', versions: ['1.0', '1.1'], withFailedSample: true },
     { planScope: 'fallback', formType: '知识点', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
+    { planScope: 'fallback', formType: '知识点', fileFormat: 'csv', versions: ['1.0', '1.1'], withFailedSample: true },
     { planScope: 'fallback', formType: '知识点', fileFormat: 'md', versions: ['1.0', '1.1'], withFailedSample: true },
     { planScope: 'fallback', formType: '知识图谱', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
     { categoryId: 'cat-wealth-fund', formType: '切片库', fileFormat: 'pdf', versions: ['1.0', '1.1'], withFailedSample: true },
     { categoryId: 'cat-wealth-fund', formType: '切片库', fileFormat: 'docx', versions: ['1.0', '1.1'], withFailedSample: true },
     { categoryId: 'cat-wealth-fund', formType: 'QA库', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
     { categoryId: 'cat-wealth-fund', formType: 'QA库', fileFormat: 'xlsx', versions: ['1.0', '1.1'], withFailedSample: true },
+    { categoryId: 'cat-wealth-fund', formType: '切片库', fileFormat: 'csv', versions: ['1.0', '1.1'], withFailedSample: true },
     { categoryId: 'cat-wealth-fund', formType: '知识点', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
     { categoryId: 'cat-wealth-fund', formType: '知识图谱', fileFormat: 'pdf', versions: ['1.0', '1.1', '1.2'], withFailedSample: true },
     { categoryId: 'cat-wealth-fund-risk', formType: '切片库', fileFormat: 'pdf', versions: ['1.0', '1.1'], withFailedSample: true },
