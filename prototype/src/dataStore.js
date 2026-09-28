@@ -25,7 +25,14 @@ const arrayStorageKeys = new Set(Object.entries(keys)
   .map(([, key]) => key));
 
 const formTypes = ['切片库', 'QA库', '知识点', '知识图谱'];
-const supportedKnowledgePlanFormats = ['pdf', 'docx', 'xlsx', 'csv', 'pptx', 'txt', 'md'];
+// 知识加工方案支持的格式范围：与 App.jsx 的 workbenchFileFormats 保持同一口径
+// （线上白名单 13 种 + 本地已支持的 csv + 视频解析需求（R030）预留的音视频）。
+const supportedKnowledgePlanFormats = [
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'md',
+  'jpg', 'jpeg', 'png', 'html',
+  'mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg',
+  'mp4', 'mov', 'avi', 'mkv',
+];
 const formTypeDisplayNames = {
   切片库: '文本切片',
   QA库: '问答库',
@@ -1551,6 +1558,57 @@ export const dataStore = {
     };
     walk(categoryId);
     this.save('projectCategories', all.filter((item) => item.id !== categoryId && !children.has(item.id)));
+  },
+  // 类目路径：祖先链以「 / 」连接（对齐线上 occupancy.categoryPath）。
+  getProjectCategoryPath(categoryId) {
+    const all = this.list('projectCategories');
+    const byId = new Map(all.map((item) => [item.id, item]));
+    const chain = [];
+    let cursor = byId.get(categoryId);
+    while (cursor) {
+      chain.unshift(cursor.name);
+      cursor = cursor.parentId ? byId.get(cursor.parentId) : null;
+    }
+    return chain.join(' / ');
+  },
+  // 移动类目（对齐线上 moveCategory）：只改 parentId 与整棵子树的 level，
+  // 不动知识形态、方案与加工结果。
+  moveProjectCategory(categoryId, targetParentId) {
+    const all = this.list('projectCategories');
+    const byId = new Map(all.map((item) => [item.id, item]));
+    const current = byId.get(categoryId);
+    if (!current) return;
+    if (targetParentId === categoryId) return;
+    // 目标不能是自己或自己的后代（否则会形成环）。
+    const descendants = new Set();
+    const walk = (parentId) => all.filter((item) => item.parentId === parentId).forEach((item) => {
+      descendants.add(item.id);
+      walk(item.id);
+    });
+    walk(categoryId);
+    if (targetParentId && descendants.has(targetParentId)) return;
+    const target = targetParentId ? byId.get(targetParentId) : null;
+    const nextLevel = target ? target.level + 1 : 1;
+    const delta = nextLevel - current.level;
+    this.save('projectCategories', all.map((item) => {
+      if (item.id === categoryId) return { ...item, parentId: targetParentId || null, level: nextLevel };
+      if (descendants.has(item.id)) return { ...item, level: item.level + delta };
+      return item;
+    }));
+  },
+  // 类目占用校验（对齐线上 checkCategoryOccupancy）。
+  // ⚠️ 本地原型没有「文件 ↔ 类目」关联集合，故以子树中标记 hasContent 的类目数近似文件数；
+  // 线上真实实现走服务端接口，返回该子树下的真实文件数。
+  checkProjectCategoryOccupancy(categoryId) {
+    const all = this.list('projectCategories');
+    const subtree = new Set([categoryId]);
+    const walk = (parentId) => all.filter((item) => item.parentId === parentId).forEach((item) => {
+      subtree.add(item.id);
+      walk(item.id);
+    });
+    walk(categoryId);
+    const fileCount = all.filter((item) => subtree.has(item.id) && item.hasContent).length;
+    return { fileCount, categoryPath: this.getProjectCategoryPath(categoryId) };
   },
   getKnowledgePlans(projectId, formType) {
     return this.list('knowledgePlans')

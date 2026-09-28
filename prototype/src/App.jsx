@@ -14,8 +14,10 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   DownOutlined,
+  DragOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
+  QuestionCircleOutlined,
   FileExcelFilled,
   FileImageOutlined,
   FileMarkdownFilled,
@@ -42,6 +44,7 @@ import {
   ToolOutlined,
   RedoOutlined,
   MinusCircleOutlined,
+  VideoCameraOutlined,
 } from '@ant-design/icons';
 import { message, Progress } from 'antd';
 import { dataStore, demoNodeSets, demoResult, getKnowledgeFormTypeLabel, knowledgeFormTypes } from './dataStore.js';
@@ -400,30 +403,32 @@ function TenantSwitcher() {
 }
 
 function Shell({ active, menuActive = active, onNavigate, children }) {
+  // 菜单结构对齐线上实测（2026-09-28）：分组为「系统管理」+「知识运营」，系统管理在前。
+  // 线上有、本地原缺：「空间配置管理」「Badcase 管理」；本地独有、线上无：「知识包管理」「模板管理」（已移除）。
   const navGroups = [
     {
-      title: '运营端',
+      title: '系统管理',
       items: [
         ['ops-projects', '知识空间管理'],
-        ['ops-access', '知识接入', [
-          ['ops-file-upload', '文件上传'],
-        ]],
-        ['ops-plans', '知识加工方案'],
-        ['ops-result', '知识加工结果', [
-          ['ops-slice-library', '文本切片'],
-          ['ops-qa-library', '问答库'],
-          ['ops-knowledge-points', '知识点'],
-        ]],
-        ['ops-retrieval', '搜索测试'],
-        ['ops-package', '知识包管理'],
+        ['admin-mcp', 'MCP接入管理'],
+        ['admin-tools', '流程节点管理'],
       ],
     },
     {
-      title: '管理端',
+      title: '知识运营',
       items: [
-        ['admin-mcp', '接入MCP服务'],
-        ['admin-tools', '流程节点管理'],
-        ['admin-template', '模板管理'],
+        ['ops-space-config', '空间配置管理'],
+        ['ops-plans', '知识加工方案'],
+        ['ops-access', '知识接入', [
+          ['ops-file-upload', '文件上传'],
+        ]],
+        ['ops-result', '知识加工结果', [
+          ['ops-qa-library', '问答库'],
+          ['ops-slice-library', '文本切片'],
+          ['ops-knowledge-points', '知识点'],
+        ]],
+        ['ops-retrieval', '搜索测试'],
+        ['ops-badcase', 'Badcase 管理'],
       ],
     },
   ];
@@ -4237,122 +4242,63 @@ function ToolParamTable({ title, columns, rows }) {
   );
 }
 
-function ProjectManagementPage({ notify, onOpenSolution }) {
+// 线上「知识空间管理」是纯知识空间模型：空间名称 / 描述 / 向量模型 / 状态（启用·停用）/ 创建时间。
+// 本地原有的「场景组合」「初始模板」线上并无此概念（且其提示语引用的「资产管理」已不在菜单中），
+// 按对齐要求从本页移除；dataStore 里的 relationshipId / templateId 字段保留未删，以免影响方案侧既有逻辑。
+const knowledgeSpaceVectorModels = ['maip2.0_pa-multilingual-e5-large'];
+
+function ProjectManagementPage({ notify }) {
   const [version, setVersion] = useState(0);
   const [query, setQuery] = useState('');
-  const [sceneFilter, setSceneFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dialog, setDialog] = useState(null);
-  const [menuAnchor, setMenuAnchor] = useState(null);
   const projects = dataStore.getProjects();
-  const relationships = dataStore.getAvailableRelationships();
-  const templates = dataStore.getAvailableTemplates();
   const refresh = () => setVersion((item) => item + 1);
 
-  const openCreate = () => setDialog({ mode: 'create', name: '', description: '', relationshipId: '', templateId: '' });
-  const openEdit = (project) => setDialog({ mode: 'edit', id: project.id, name: project.name, description: project.description, relationshipId: project.relationshipId, templateId: project.templateId });
-  const closeMenu = () => setMenuAnchor(null);
+  const openCreate = () => setDialog({ mode: 'create', name: '', description: '', vectorModel: '' });
+  const openEdit = (project) => setDialog({ mode: 'edit', id: project.id, name: project.name, description: project.description, vectorModel: project.vectorModel || '' });
 
-  const filteredTemplates = dialog?.relationshipId
-    ? templates.filter((template) => !template.relationshipId || template.relationshipId === dialog.relationshipId)
-    : [];
-  const sceneOptions = Array.from(new Set(projects.map((project) => dataStore.relationshipText(project.relationshipId))));
-  const statusOptions = Array.from(new Set(projects.map((project) => project.projectStatus || (project.hasSolution ? '已完成' : '草稿'))));
+  const statusOf = (project) => (project.enabled === false ? '停用' : '启用');
   const filteredProjects = projects.filter((project) => {
-    const scene = dataStore.relationshipText(project.relationshipId);
-    const status = project.projectStatus || (project.hasSolution ? '已完成' : '草稿');
     if (query.trim() && !project.name.toLowerCase().includes(query.trim().toLowerCase())) return false;
-    if (sceneFilter && scene !== sceneFilter) return false;
-    if (statusFilter && status !== statusFilter) return false;
+    if (statusFilter && statusOf(project) !== statusFilter) return false;
     return true;
   });
-  const menuProject = menuAnchor ? projects.find((project) => project.id === menuAnchor.projectId) : null;
-
-  const updateDialogRelationship = (relationshipId) => {
-    const currentTemplate = templates.find((template) => template.id === dialog.templateId);
-    const shouldClearTemplate = dialog.templateId && currentTemplate?.relationshipId && currentTemplate.relationshipId !== relationshipId;
-    setDialog({ ...dialog, relationshipId, templateId: shouldClearTemplate ? '' : dialog.templateId });
-  };
 
   const saveProject = () => {
     if (!dialog.name.trim()) {
-      notify('项目名称不能为空', 'error');
+      notify('空间名称不能为空', 'error');
       return;
     }
-    if (!dialog.relationshipId) {
-      notify('请选择场景组合', 'error');
+    if (!dialog.vectorModel) {
+      notify('请选择向量模型', 'error');
       return;
-    }
-    const relationship = dataStore.getRelationship(dialog.relationshipId);
-    if (!relationship?.enabled) {
-      notify('该场景组合已停用，请选择其他组合', 'error');
-      return;
-    }
-    if (dialog.templateId) {
-      const template = dataStore.getTemplate(dialog.templateId);
-      if (!template?.enabled) {
-        notify('该模板已停用，请选择其他模板', 'error');
-        return;
-      }
     }
     if (dialog.mode === 'create' && dataStore.isProjectNameExists(dialog.name)) {
-      notify('项目名称已存在', 'error');
+      notify('空间名称已存在', 'error');
       return;
     }
     if (dialog.mode === 'edit') {
-      dataStore.updateProject(dialog.id, { name: dialog.name, description: dialog.description });
-      notify('项目更新成功', 'success');
+      dataStore.updateProject(dialog.id, { name: dialog.name, description: dialog.description, vectorModel: dialog.vectorModel });
+      notify('知识空间更新成功', 'success');
     } else {
-      const project = dataStore.addProject({
+      dataStore.addProject({
         name: dialog.name,
         description: dialog.description,
-        relationshipId: dialog.relationshipId,
-        templateId: dialog.templateId || undefined,
-        vectorModel: 'maip_bge-m3-v1',
-        projectStatus: '草稿',
+        vectorModel: dialog.vectorModel,
         enabled: true,
       });
-      if (dialog.templateId) dataStore.initializeProjectSolution(project.id);
-      notify('项目创建成功', 'success');
-      onOpenSolution(project.id);
+      notify('知识空间创建成功', 'success');
     }
     setDialog(null);
     refresh();
   };
 
   const toggleStatus = (project) => {
-    const nextEnabled = !project.enabled;
-    if (nextEnabled) {
-      const relationship = dataStore.getRelationship(project.relationshipId);
-      if (!relationship?.enabled) {
-        notify('该项目关联的场景组合当前为停用状态', 'warning');
-      }
-    }
+    const nextEnabled = project.enabled === false;
     dataStore.updateProject(project.id, { enabled: nextEnabled });
     refresh();
-    closeMenu();
-    notify(nextEnabled ? '项目已启用' : '项目已停用', 'success');
-  };
-
-  const deleteProject = (project) => {
-    if (project.hasContent) {
-      notify('该项目已有知识成果，不可删除，可停用', 'error');
-      return;
-    }
-    if (window.confirm(`确定要删除项目"${project.name}"吗？删除后不可恢复。`)) {
-      dataStore.deleteProject(project.id);
-      refresh();
-      closeMenu();
-      notify('项目删除成功', 'success');
-    }
-  };
-
-  const enterProject = (project) => {
-    if (!project.enabled) {
-      notify('项目当前为停用状态,无法进入', 'warning');
-      return;
-    }
-    onOpenSolution(project.id);
+    notify(nextEnabled ? '知识空间已启用' : '知识空间已停用', 'success');
   };
 
   return (
@@ -4361,24 +4307,18 @@ function ProjectManagementPage({ notify, onOpenSolution }) {
         title="知识空间管理"
       />
       <Toolbar className="project-toolbar">
-        <button type="button" className="primary" disabled={!relationships.length} onClick={openCreate}><PlusOutlined /> 新增项目</button>
-        <SearchBox value={query} onChange={setQuery} placeholder="搜索项目空间名称" />
-        <SelectField value={sceneFilter} onChange={setSceneFilter}>
-          <option value="">筛选场景</option>
-          {sceneOptions.map((scene) => <option value={scene} key={scene}>{scene}</option>)}
-        </SelectField>
+        <button type="button" className="primary" onClick={openCreate}><PlusOutlined /> 新增知识空间</button>
+        <SearchBox value={query} onChange={setQuery} placeholder="搜索空间名称" />
         <SelectField value={statusFilter} onChange={setStatusFilter}>
-          <option value="">项目状态</option>
-          {statusOptions.map((status) => <option value={status} key={status}>{status}</option>)}
+          <option value="">全部状态</option>
+          <option value="启用">启用</option>
+          <option value="停用">停用</option>
         </SelectField>
       </Toolbar>
-      {!relationships.length ? (
-        <div className="warning-line"><ExclamationCircleOutlined /> 当前无可用场景组合，请先在资产管理中配置并启用场景组合</div>
-      ) : null}
       {projects.length === 0 ? (
         <section className="panel empty-state">
           <FolderOpenOutlined />
-          <p>暂无项目，点击“新增知识空间”开始</p>
+          <p>暂无知识空间，点击“新增知识空间”开始</p>
         </section>
       ) : (
         <section className="panel table-panel project-table-panel">
@@ -4387,51 +4327,31 @@ function ProjectManagementPage({ notify, onOpenSolution }) {
               <colgroup>
                 <col className="project-col-name" />
                 <col className="project-col-desc" />
-                <col className="project-col-relationship" />
-                <col className="project-col-template" />
                 <col className="project-col-vector" />
                 <col className="project-col-status" />
                 <col className="project-col-created" />
                 <col className="project-col-action" />
               </colgroup>
-              <thead><tr><th>项目名称</th><th>项目描述</th><th>场景组合</th><th>初始模板</th><th>向量模型</th><th>项目状态</th><th>创建时间</th><th>操作</th></tr></thead>
+              <thead><tr><th>空间名称</th><th>描述</th><th>向量模型</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
               <tbody>
                 {filteredProjects.map((project) => {
-                  const status = project.projectStatus || (project.hasSolution ? '已完成' : '草稿');
-                  const canEdit = status !== '已完成';
+                  const status = statusOf(project);
                   return (
                     <tr key={project.id}>
                       <td className="strong sticky-project-name">{project.name}</td>
                       <td>{project.description || '-'}</td>
-                      <td>{dataStore.relationshipText(project.relationshipId)}</td>
-                      <td>{dataStore.templateText(project.templateId)}</td>
-                      <td>{project.vectorModel || 'maip_bge-m3-v1'}</td>
-                      <td><Badge tone={status === '已完成' ? 'success' : 'warning'}>{status}</Badge></td>
-                      <td>{new Date(project.createdAt).toLocaleDateString('zh-CN')}</td>
-                      <td className="actions project-actions menu-cell">
-                        <button type="button" disabled={!canEdit} onClick={() => openEdit(project)}>编辑</button>
-                        <button type="button" onClick={() => enterProject(project)}>详情</button>
-                        <button
-                          type="button"
-                          className="more-button"
-                          title="更多操作"
-                          onClick={(event) => {
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            setMenuAnchor((current) => (current?.projectId === project.id ? null : {
-                              projectId: project.id,
-                              top: rect.bottom + 6,
-                              left: Math.max(12, rect.right - 160),
-                            }));
-                          }}
-                        >
-                          <MoreOutlined />
-                        </button>
+                      <td>{project.vectorModel || '-'}</td>
+                      <td><Badge tone={status === '启用' ? 'success' : 'neutral'}>{status}</Badge></td>
+                      <td>{project.createdAt}</td>
+                      <td className="actions project-actions">
+                        <button type="button" onClick={() => openEdit(project)}>编辑</button>
+                        <button type="button" onClick={() => toggleStatus(project)}>{status === '启用' ? '停用' : '启用'}</button>
                       </td>
                     </tr>
                   );
                 })}
                 {filteredProjects.length === 0 ? (
-                  <tr><td colSpan={8} className="empty-table-cell">暂无匹配项目</td></tr>
+                  <tr><td colSpan={6} className="empty-table-cell">暂无匹配知识空间</td></tr>
                 ) : null}
               </tbody>
             </table>
@@ -4443,62 +4363,66 @@ function ProjectManagementPage({ notify, onOpenSolution }) {
             <button type="button" disabled>&gt;</button>
             <button type="button" className="page-size">10条/页</button>
           </div>
-          {menuProject ? (
-            <div className="floating-menu project-menu project-menu-fixed" style={{ top: menuAnchor.top, left: menuAnchor.left }}>
-              {menuProject.hasSolution ? <button type="button" onClick={() => { onOpenSolution(menuProject.id); closeMenu(); }}>查看项目方案</button> : null}
-              <button type="button" onClick={() => toggleStatus(menuProject)}>{menuProject.enabled ? '停用项目' : '启用项目'}</button>
-              <button type="button" onClick={() => { openEdit(menuProject); closeMenu(); }}>编辑信息</button>
-              <button type="button" className="danger-link" onClick={() => deleteProject(menuProject)}>删除项目</button>
-            </div>
-          ) : null}
         </section>
       )}
       {dialog ? (
         <Modal
           title={dialog.mode === 'edit' ? '编辑知识空间' : '新增知识空间'}
           onClose={() => setDialog(null)}
-          wide
           footer={<><button type="button" className="secondary" onClick={() => setDialog(null)}>取消</button><button type="button" className="primary" onClick={saveProject}>{dialog.mode === 'edit' ? '保存' : '创建'}</button></>}
         >
-          <div className="form-grid">
-            <Field label="项目名称" required><input value={dialog.name} disabled={dialog.mode === 'edit'} onChange={(event) => setDialog({ ...dialog, name: event.target.value })} /></Field>
-            <Field label="场景组合" required><SelectField value={dialog.relationshipId} onChange={updateDialogRelationship} className={dialog.mode === 'edit' ? 'readonly' : ''}><option value="">请选择场景组合</option>{relationships.map((item) => <option value={item.id} key={item.id}>{dataStore.relationshipText(item.id)}</option>)}</SelectField></Field>
-            <Field label="初始模板（可选）"><SelectField value={dialog.templateId || ''} onChange={(value) => setDialog({ ...dialog, templateId: value })} className={dialog.mode === 'edit' ? 'readonly' : ''}><option value="">不选择模板</option>{filteredTemplates.map((item) => <option value={item.id} key={item.id}>{item.relationshipId ? item.name : `${item.name}（通用）`}</option>)}</SelectField></Field>
-          </div>
-          <Field label="项目描述"><textarea value={dialog.description} onChange={(event) => setDialog({ ...dialog, description: event.target.value })} /></Field>
-          {dialog.mode === 'create' && !dialog.templateId ? (
-            <p className="info-line">未选择模板，创建后需在项目方案配置页手动添加知识类目与知识形态</p>
-          ) : null}
-          {dialog.mode === 'edit' ? (
-            <p className="info-line">场景组合和模板在项目创建后不可修改</p>
-          ) : null}
+          <Field label={`空间名称（${dialog.name.length}/50）`} required>
+            <input value={dialog.name} maxLength={50} placeholder="请输入空间名称" onChange={(event) => setDialog({ ...dialog, name: event.target.value })} />
+          </Field>
+          <Field label={`描述（${dialog.description.length}/200）`}>
+            <textarea value={dialog.description} maxLength={200} placeholder="请输入描述" onChange={(event) => setDialog({ ...dialog, description: event.target.value })} />
+          </Field>
+          <Field label="向量模型" required>
+            <SelectField value={dialog.vectorModel} onChange={(value) => setDialog({ ...dialog, vectorModel: value })}>
+              <option value="">请选择向量模型</option>
+              {knowledgeSpaceVectorModels.map((model) => <option value={model} key={model}>{model}</option>)}
+            </SelectField>
+          </Field>
         </Modal>
       ) : null}
     </div>
   );
 }
 
-function ProjectSolutionPage({ projectId, notify, onBack }) {
+// 知识类目层级配色（对齐线上 Ke(level-1)）：第 1 层蓝 / 第 2 层紫 / 第 3 层绿 / 第 4 层橙 / 第 5 层红。
+const categoryLevelColors = ['#1677ff', '#722ed1', '#52c41a', '#fa8c16', '#f5222d'];
+const categoryLevelColor = (level) => categoryLevelColors[Math.min(Math.max(level || 1, 1), categoryLevelColors.length) - 1];
+
+function ProjectSolutionPage({ projectId, notify, onBack, embedded = false }) {
   const [version, setVersion] = useState(0);
   const [expanded, setExpanded] = useState(new Set());
   const [selectedTemplate, setSelectedTemplate] = useState(dataStore.getProject(projectId)?.templateId || '');
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
-  const [categoryForm, setCategoryForm] = useState({ name: '', parentId: '', formTypes: ['切片库'] });
+  const [editingCategoryId, setEditingCategoryId] = useState(null);
+  const [categoryForm, setCategoryForm] = useState({ name: '', parentId: '', description: '', formTypes: ['切片库'] });
   const [categoryError, setCategoryError] = useState('');
+  // 移动类目弹窗（对齐线上 MoveCategoryModal）。
+  const [moveDialog, setMoveDialog] = useState(null);
+  // 删除类目弹窗（对齐线上 DeleteCategoryModal）：先做占用校验，有占用走「强制删除」分支。
+  const [deleteDialog, setDeleteDialog] = useState(null);
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
   const solution = dataStore.getProjectSolution(project.id);
   const categories = solution ? dataStore.getProjectCategories(solution.id).sort((a, b) => (a.level - b.level) || a.name.localeCompare(b.name, 'zh-CN')) : [];
   const refresh = () => setVersion((item) => item + 1);
   const childrenOf = (parentId) => categories.filter((item) => item.parentId === parentId).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
-  const isLeaf = (cat) => childrenOf(cat.id).length === 0;
-  const leafCategories = categories.filter((cat) => isLeaf(cat));
   const rootCategories = childrenOf(null);
-  const availableParents = categories.filter((cat) => cat.level < 5);
-  const stats = {
-    total: categories.length,
-    leaves: leafCategories.length,
-    maxLevel: Math.max(...categories.map((item) => item.level), 0),
-  };
+  // 父级候选：最多第 5 层；编辑态下须排除「自己与自己的后代」，否则会把子树挂到自己下面形成环。
+  const categoryParentCandidates = (() => {
+    if (!editingCategoryId) return categories.filter((cat) => cat.level < 5);
+    const blocked = new Set([editingCategoryId]);
+    const walk = (id) => childrenOf(id).forEach((child) => { blocked.add(child.id); walk(child.id); });
+    walk(editingCategoryId);
+    return categories.filter((cat) => cat.level < 5 && !blocked.has(cat.id));
+  })();
+  const allCategoryIds = categories.map((item) => item.id);
+  const isAllExpanded = allCategoryIds.length > 0 && allCategoryIds.every((id) => expanded.has(id));
+  // 存在任一外部同步类目时，「新增一级类目」整体禁用（对齐线上）。
+  const hasSourceSystemCategory = categories.some((item) => item.sourceSystem);
 
   useEffect(() => {
     if (!solution) return;
@@ -4517,10 +4441,84 @@ function ProjectSolutionPage({ projectId, notify, onBack }) {
     notify('项目空间已发布', 'success');
   };
 
-  const openCreateCategory = () => {
-    setCategoryForm({ name: '', parentId: '', formTypes: ['切片库'] });
+  // 新增类目：`parentId` 为空串表示「新增一级类目」，传入节点 id 表示在该节点下新增子类目。
+  const openCreateCategory = (parentId = '') => {
+    setEditingCategoryId(null);
+    setCategoryForm({ name: '', parentId, description: '', formTypes: ['切片库'] });
     setCategoryError('');
     setCategoryDialogOpen(true);
+  };
+
+  const openEditCategory = (cat) => {
+    setEditingCategoryId(cat.id);
+    setCategoryForm({
+      name: cat.name,
+      parentId: cat.parentId || '',
+      description: cat.description || '',
+      formTypes: cat.formTypes?.length ? [...cat.formTypes] : ['切片库'],
+    });
+    setCategoryError('');
+    setCategoryDialogOpen(true);
+  };
+
+  // 移动类目弹窗：目标父类目可选（不选则移到根），候选里排除自己与自己的后代。
+  const openMoveCategory = (cat) => {
+    const selfAndDescendants = new Set([cat.id]);
+    const walk = (id) => childrenOf(id).forEach((child) => { selfAndDescendants.add(child.id); walk(child.id); });
+    walk(cat.id);
+    setMoveDialog({
+      categoryId: cat.id,
+      name: cat.name,
+      path: dataStore.getProjectCategoryPath(cat.id),
+      targetParentId: '',
+      candidates: categories.filter((item) => !selfAndDescendants.has(item.id)),
+    });
+  };
+
+  const confirmMoveCategory = () => {
+    if (!moveDialog) return;
+    dataStore.moveProjectCategory(moveDialog.categoryId, moveDialog.targetParentId || null);
+    if (moveDialog.targetParentId) setExpanded((current) => new Set(current).add(moveDialog.targetParentId));
+    setMoveDialog(null);
+    refresh();
+    notify('移动成功', 'success');
+  };
+
+  // 删除类目弹窗：打开时先查占用（对齐线上 checkCategoryOccupancy）。
+  const openDeleteCategory = (cat) => {
+    const occupancy = dataStore.checkProjectCategoryOccupancy(cat.id);
+    const descendants = [];
+    const collect = (id) => childrenOf(id).forEach((child) => { descendants.push(child); collect(child.id); });
+    collect(cat.id);
+    setDeleteDialog({
+      categoryId: cat.id,
+      name: cat.name,
+      categoryPath: occupancy.categoryPath,
+      fileCount: occupancy.fileCount,
+      descendantCount: descendants.length,
+    });
+  };
+
+  const confirmDeleteCategory = () => {
+    if (!deleteDialog) return;
+    dataStore.deleteProjectCategory(deleteDialog.categoryId);
+    setDeleteDialog(null);
+    refresh();
+    notify('删除成功', 'success');
+  };
+
+  const forceDeleteCategory = () => {
+    if (!deleteDialog) return;
+    dataStore.deleteProjectCategory(deleteDialog.categoryId);
+    setDeleteDialog(null);
+    refresh();
+    notify('强制删除成功', 'success');
+  };
+
+  const closeCategoryDialog = () => {
+    setCategoryDialogOpen(false);
+    setEditingCategoryId(null);
+    setCategoryError('');
   };
 
   const toggleCategoryFormType = (formType) => {
@@ -4534,17 +4532,52 @@ function ProjectSolutionPage({ projectId, notify, onBack }) {
     setCategoryError('');
   };
 
-  const createCategory = () => {
+  // 类目弹窗同时承担「新增」与「编辑」：`editingCategoryId` 非空即编辑态。
+  const saveCategory = () => {
     if (!solution) return;
     const name = categoryForm.name.trim();
-    const parentId = categoryForm.parentId || null;
-    const parent = parentId ? categories.find((cat) => cat.id === parentId) : null;
-    const level = parent ? parent.level + 1 : 1;
+    const description = (categoryForm.description || '').trim();
 
     if (!name) {
       setCategoryError('类目名称不能为空');
       return;
     }
+    if (name.length > 100) {
+      setCategoryError('类目名称长度不能超过100');
+      return;
+    }
+
+    if (editingCategoryId) {
+      const current = categories.find((item) => item.id === editingCategoryId);
+      if (!current) return;
+      if (dataStore.isProjectCategoryNameExists(solution.id, current.parentId, name, current.id)) {
+        setCategoryError('同级下已存在同名类目');
+        return;
+      }
+      const hasChildren = childrenOf(current.id).length > 0;
+      if (!hasChildren && !categoryForm.formTypes.length) {
+        setCategoryError('末级类目必须指定至少一个知识形态');
+        return;
+      }
+      dataStore.updateProjectCategory(current.id, {
+        name,
+        description,
+        formTypes: hasChildren ? [] : categoryForm.formTypes,
+      });
+      // 编辑态若改了父级，等价于一次「移动类目」（会连带重算整棵子树的 level）。
+      if ((current.parentId || '') !== (categoryForm.parentId || '')) {
+        dataStore.moveProjectCategory(current.id, categoryForm.parentId || null);
+      }
+      closeCategoryDialog();
+      refresh();
+      notify('更新成功', 'success');
+      return;
+    }
+
+    const parentId = categoryForm.parentId || null;
+    const parent = parentId ? categories.find((cat) => cat.id === parentId) : null;
+    const level = parent ? parent.level + 1 : 1;
+
     if (dataStore.isProjectCategoryNameExists(solution.id, parentId, name)) {
       setCategoryError('同级下已存在同名类目');
       return;
@@ -4563,6 +4596,7 @@ function ProjectSolutionPage({ projectId, notify, onBack }) {
     }
     const next = dataStore.addProjectCategory(solution.id, {
       name,
+      description,
       parentId,
       level,
       formTypes: categoryForm.formTypes,
@@ -4573,23 +4607,28 @@ function ProjectSolutionPage({ projectId, notify, onBack }) {
     } else {
       setExpanded((current) => new Set(current).add(next.id));
     }
-    setCategoryDialogOpen(false);
+    closeCategoryDialog();
     refresh();
-    notify(parent?.formTypes?.length ? '已创建类目，父级已转为分类节点' : '已创建知识类目', 'success');
+    notify('创建成功', 'success');
   };
 
+  // 树节点对齐线上：**卡片式**（白底 + 1px 边框 + 左侧 3px 层级色条 + 8px 圆角），
+  // 卡片内左侧为「展开箭头 / 层级配色文件夹 / 名称 / 第 N 层 标签 / 末级·N 个子类目 / 来源」，
+  // 右侧常驻 4 个操作图标：新增子类目 / 编辑 / 移动 / 删除。
   const renderNode = (cat) => {
     const children = childrenOf(cat.id);
     const open = expanded.has(cat.id);
     const leaf = children.length === 0;
+    const color = categoryLevelColor(cat.level);
     return (
-      <div className="tree-node" key={cat.id} style={{ marginLeft: (cat.level - 1) * 24 }}>
-        <div className={`category-card viewer-category-card ${children.length ? 'branch' : 'leaf'}`}>
-          <div className="category-main viewer-category-main">
+      <div className="cat-tree-node" key={cat.id} style={{ paddingLeft: (cat.level - 1) * 24 }}>
+        <div className="cat-tree-card" style={{ borderLeftColor: color }}>
+          <div className="cat-tree-main">
             <button
               type="button"
-              className="expand-button"
+              className="cat-tree-toggle"
               disabled={!children.length}
+              aria-label={children.length ? (open ? '收起子类目' : '展开子类目') : '末级类目'}
               onClick={() => setExpanded((current) => {
                 const next = new Set(current);
                 next.has(cat.id) ? next.delete(cat.id) : next.add(cat.id);
@@ -4598,19 +4637,28 @@ function ProjectSolutionPage({ projectId, notify, onBack }) {
             >
               {children.length ? (open ? <AntDownOutlined /> : <RightChevron />) : null}
             </button>
-            <FolderOpenOutlined />
-            <div className="viewer-category-content">
-              <div className="viewer-category-title-row">
-                <strong>{cat.name}</strong>
-              </div>
-              {leaf ? (
-                <span className="viewer-form-tags">
-                  {cat.formTypes.map((form) => (
-                    <Badge key={form} tone={form === '切片库' ? 'warning' : 'blue'}>{getKnowledgeFormTypeLabel(form)}</Badge>
-                  ))}
-                </span>
-              ) : null}
-            </div>
+            <FolderOpenOutlined className="cat-tree-folder" style={{ color }} />
+            <span className="cat-tree-name">{cat.name}</span>
+            <span className="cat-tree-level-tag">{`第 ${cat.level} 层`}</span>
+            {leaf ? <span className="cat-tree-leaf-tag" style={{ color, background: `${color}18` }}>末级</span> : null}
+            {leaf && cat.sourceSystem ? <span className="cat-tree-source">{`来源: ${cat.sourceSystem}`}</span> : null}
+            {leaf ? null : <span className="cat-tree-child-count">{`${children.length} 个子类目`}</span>}
+          </div>
+          <div className="cat-tree-actions">
+            {cat.level < 5 ? (
+              <button
+                type="button"
+                title={cat.sourceSystem ? '同步类目，不可新增子类目' : '新增子类目'}
+                aria-label="新增子类目"
+                disabled={Boolean(cat.sourceSystem)}
+                onClick={() => openCreateCategory(cat.id)}
+              >
+                <PlusOutlined />
+              </button>
+            ) : null}
+            <button type="button" title="编辑类目" aria-label="编辑类目" onClick={() => openEditCategory(cat)}><EditOutlined /></button>
+            <button type="button" title="移动类目" aria-label="移动类目" onClick={() => openMoveCategory(cat)}><DragOutlined /></button>
+            <button type="button" title="删除类目" aria-label="删除类目" className="danger" onClick={() => openDeleteCategory(cat)}><DeleteOutlined /></button>
           </div>
         </div>
         {children.length && open ? children.map(renderNode) : null}
@@ -4621,7 +4669,7 @@ function ProjectSolutionPage({ projectId, notify, onBack }) {
   if (!solution) {
     return (
       <>
-        <PageHeader title={project.name} actions={<button type="button" className="secondary" onClick={onBack}><LeftOutlined /> 返回列表</button>} />
+        {embedded ? null : <PageHeader title={project.name} actions={<button type="button" className="secondary" onClick={onBack}><LeftOutlined /> 返回列表</button>} />}
         <section className="panel empty-state">
           <FolderOpenOutlined />
           <h2>尚未配置项目方案</h2>
@@ -4638,10 +4686,13 @@ function ProjectSolutionPage({ projectId, notify, onBack }) {
 
   return (
     <>
-      <PageHeader
-        title={project.name}
-        actions={<button type="button" className="primary" onClick={publishSolution}>发布项目空间</button>}
-      />
+      {embedded ? null : (
+        <PageHeader
+          title={project.name}
+          actions={<button type="button" className="primary" onClick={publishSolution}>发布项目空间</button>}
+        />
+      )}
+      {embedded ? null : (
       <section className="panel solution-info-panel">
         <div className="section-head compact"><h2>基本信息</h2></div>
         <div className="solution-info-grid">
@@ -4651,79 +4702,680 @@ function ProjectSolutionPage({ projectId, notify, onBack }) {
           <div><label>创建时间</label><strong>{solution.createdAt}</strong></div>
         </div>
       </section>
+      )}
       <section className="panel tree-panel">
         <div className="section-head">
           <h2>知识类目</h2>
-          <div><button type="button" className="secondary" onClick={() => setExpanded(new Set(categories.map((item) => item.id)))}>展开全部</button><button type="button" className="secondary" onClick={() => setExpanded(new Set())}>折叠全部</button><button type="button" className="primary" onClick={openCreateCategory}><PlusOutlined /> 新增类目</button></div>
+          <div>
+            <button
+              type="button"
+              className="cat-head-btn"
+              disabled={!categories.length}
+              onClick={() => setExpanded(isAllExpanded ? new Set() : new Set(allCategoryIds))}
+            >
+              {isAllExpanded ? '折叠全部' : '展开全部'}
+            </button>
+            <button
+              type="button"
+              className="cat-head-btn"
+              disabled={hasSourceSystemCategory}
+              onClick={() => openCreateCategory('')}
+            >
+              <PlusOutlined /> 新增一级类目
+            </button>
+          </div>
         </div>
-        <div className="tree-summary">{rootCategories.length} 个根类目 · 共 {stats.total} 个类目 · 最多支持 5 层树形结构</div>
         <div className="tree-list">{rootCategories.length ? rootCategories.map(renderNode) : (
           <div className="empty-mini large category-empty-content">
             <FolderOpenOutlined />
-            <strong>暂无知识类目</strong>
-            <span>创建末级类目并指定知识形态后，可在「知识加工方案」中配置适用范围。</span>
-            <button type="button" className="primary" onClick={openCreateCategory}><PlusOutlined /> 新增根类目</button>
+            <span>暂无知识类目，点击「新增根类目」开始配置</span>
           </div>
         )}</div>
       </section>
       {categoryDialogOpen ? (
         <Modal
-          title="新增知识类目"
-          onClose={() => setCategoryDialogOpen(false)}
+          title={editingCategoryId ? '编辑类目' : '新增类目'}
+          onClose={closeCategoryDialog}
           footer={(
             <>
-              <button type="button" className="secondary" onClick={() => setCategoryDialogOpen(false)}>取消</button>
-              <button type="button" className="primary" onClick={createCategory}>创建类目</button>
+              <button type="button" className="secondary" onClick={closeCategoryDialog}>取消</button>
+              <button type="button" className="primary" onClick={saveCategory}>确定</button>
             </>
           )}
         >
           <div className="dialog-stack">
-            <Field label="类目名称" required>
-              <input
-                autoFocus
-                value={categoryForm.name}
-                onChange={(event) => {
-                  setCategoryForm((current) => ({ ...current, name: event.target.value }));
-                  setCategoryError('');
-                }}
-                placeholder="请输入知识类目名称（同级下唯一）"
-              />
-            </Field>
-            <Field label="父级类目">
-              <SelectField
-                value={categoryForm.parentId}
-                onChange={(value) => {
-                  setCategoryForm((current) => ({ ...current, parentId: value }));
-                  setCategoryError('');
-                }}
-              >
-                <option value="">无（根类目）</option>
-                {availableParents.map((cat) => (
-                  <option key={cat.id} value={cat.id}>{`${'　'.repeat(cat.level - 1)}${cat.name} · 第 ${cat.level} 层`}</option>
-                ))}
-              </SelectField>
-              <p className="field-help visible">留空则创建为根类目；最多支持 5 层树形结构。</p>
-            </Field>
-            <div className="form-field">
-              <span>知识形态（末级必选）<em>*</em></span>
-              <div className="checkbox-grid category-form-grid">
-                {knowledgeFormTypes.map((formType) => (
-                  <label key={formType} className="checkbox-option">
-                    <input
-                      type="checkbox"
-                      checked={categoryForm.formTypes.includes(formType)}
-                      onChange={() => toggleCategoryFormType(formType)}
-                    />
-                    <span>{getKnowledgeFormTypeLabel(formType)}</span>
-                  </label>
-                ))}
+            <div className="dialog-field-list">
+              <div className="form-field">
+                <span>类目名称<em>*</em></span>
+                <input
+                  autoFocus
+                  value={categoryForm.name}
+                  maxLength={100}
+                  onChange={(event) => {
+                    setCategoryForm((current) => ({ ...current, name: event.target.value }));
+                    setCategoryError('');
+                  }}
+                  placeholder="请输入类目名称"
+                />
               </div>
+              {/* 父级类目：仅在「编辑」或「新增子类目」时渲染；新增根类目时整体不出现（对齐线上）。 */}
+              {editingCategoryId || categoryForm.parentId ? (
+                <div className="form-field">
+                  <span>父级类目</span>
+                  <SelectField
+                    value={categoryForm.parentId}
+                    onChange={(value) => {
+                      setCategoryForm((current) => ({ ...current, parentId: value }));
+                      setCategoryError('');
+                    }}
+                    className={editingCategoryId ? '' : 'readonly'}
+                  >
+                    <option value="">请选择父级类目（不选则为根类目）</option>
+                    {categoryParentCandidates.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{`${'　'.repeat(cat.level - 1)}${cat.name} · 第 ${cat.level} 层`}</option>
+                    ))}
+                  </SelectField>
+                </div>
+              ) : null}
+              <div className="form-field">
+                <span>类目描述</span>
+                <textarea
+                  value={categoryForm.description}
+                  maxLength={200}
+                  rows={3}
+                  onChange={(event) => setCategoryForm((current) => ({ ...current, description: event.target.value }))}
+                  placeholder="请输入类目描述（可选）"
+                />
+                <p className="field-help visible">{`用于辅助 AI 类目推荐服务，最长 200 字（${(categoryForm.description || '').length}/200）`}</p>
+              </div>
+              <div className="form-field">
+                <span>知识形态（末级必选）<em>*</em></span>
+                <div className="checkbox-grid category-form-grid">
+                  {knowledgeFormTypes.map((formType) => (
+                    <label key={formType} className="checkbox-option">
+                      <input
+                        type="checkbox"
+                        checked={categoryForm.formTypes.includes(formType)}
+                        onChange={() => toggleCategoryFormType(formType)}
+                      />
+                      <span>{getKnowledgeFormTypeLabel(formType)}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <p className="category-dialog-hint">末级类目必须指定至少一个知识形态；如果选择已有知识形态的类目作为父级，该父级会转为分类节点，知识形态由新建末级类目承载。</p>
+              {categoryError ? <p className="form-error">{categoryError}</p> : null}
             </div>
-            <p className="category-dialog-hint">末级类目必须指定至少一个知识形态；如果选择已有知识形态的类目作为父级，该父级会转为分类节点，知识形态由新建末级类目承载。</p>
-            {categoryError ? <p className="form-error">{categoryError}</p> : null}
           </div>
         </Modal>
       ) : null}
+      {moveDialog ? (
+        <Modal
+          title="移动类目"
+          onClose={() => setMoveDialog(null)}
+          footer={(
+            <>
+              <button type="button" className="secondary" onClick={() => setMoveDialog(null)}>取消</button>
+              <button type="button" className="primary" onClick={confirmMoveCategory}>确认移动</button>
+            </>
+          )}
+        >
+          <div className="dialog-stack">
+            <div className="dlg-alert warning">
+              <span>仅更新类目结构;该类目下的知识形态、方案、文件和加工结果仍生效。外部再次同步可能覆盖本次移动。</span>
+            </div>
+            <div className="dialog-stack">
+              <div className="dlg-field-row"><label>移动类目</label><div>{moveDialog.name}</div></div>
+              <div className="dlg-field-row"><label>原路径</label><div>{moveDialog.path}</div></div>
+              <div className="dlg-field-row">
+                <label>目标父类目</label>
+                <div>
+                  <SelectField
+                    value={moveDialog.targetParentId}
+                    onChange={(value) => setMoveDialog({ ...moveDialog, targetParentId: value })}
+                  >
+                    <option value="">请选择目标父类目（不选则为根类目）</option>
+                    {moveDialog.candidates.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{`${'　'.repeat(cat.level - 1)}${cat.name} · 第 ${cat.level} 层`}</option>
+                    ))}
+                  </SelectField>
+                </div>
+              </div>
+              <div className="dlg-field-row">
+                <label>新路径</label>
+                <div>
+                  {(() => {
+                    const target = moveDialog.targetParentId
+                      ? categories.find((item) => item.id === moveDialog.targetParentId)
+                      : null;
+                    return target ? `${dataStore.getProjectCategoryPath(target.id)} / ${moveDialog.name}` : moveDialog.name;
+                  })()}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+      {deleteDialog ? (
+        <Modal
+          title={deleteDialog.fileCount > 0 ? '无法删除类目' : '删除类目'}
+          onClose={() => setDeleteDialog(null)}
+          footer={deleteDialog.fileCount > 0 ? (
+            <>
+              <button type="button" className="secondary" onClick={() => setDeleteDialog(null)}>取消</button>
+              <button type="button" className="primary" onClick={forceDeleteCategory}>强制删除</button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="secondary" onClick={() => setDeleteDialog(null)}>取消</button>
+              <button type="button" className="danger-button" onClick={confirmDeleteCategory}>确认删除</button>
+            </>
+          )}
+        >
+          <div className="dialog-stack">
+            {deleteDialog.fileCount > 0 ? (
+              <>
+                <div className="dlg-alert error">
+                  <span>该类目或其子树仍被业务对象占用，删除操作已阻断。请先处理以下占用项。或确认是否强制删除?</span>
+                </div>
+                <div className="dlg-occupy-row">
+                  <label>文件</label>
+                  <div>{`${deleteDialog.fileCount} 个`}</div>
+                  <button type="button" className="dlg-field-link">查看文件</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="dlg-alert warning">
+                  <span>删除后不可恢复。仅当类目及其子类目不存在文件、加工结果或进行中任务时才可删除。</span>
+                </div>
+                <div className="dialog-stack">
+                  <div className="dlg-field-row"><label>待删除类目</label><div>{deleteDialog.name}</div></div>
+                  <div className="dlg-field-row"><label>类目路径</label><div>{deleteDialog.categoryPath}</div></div>
+                  <div className="dlg-field-row">
+                    <label>占用校验</label>
+                    <div><Badge tone="success">无占用,可删除</Badge></div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </Modal>
+      ) : null}
+    </>
+  );
+}
+
+// ── 空间配置管理（对齐线上 /ops/home/project/{spaceId}）────────────────────────────
+// 线上为三个页签：知识类目 / 标签管理 / 配置管理。知识类目复用项目方案类目树（embedded 模式，
+// 隐藏其页面级标题与基本信息面板，由本页统一提供标题区与空间选择器）。
+// 标签分类 / 标签值（对齐线上 getTagCategories / getFlatTagValues / getHierarchicalTagValues）。
+// `tagStructType` 决定右栏列结构与树结构：FLAT=单层标签树，HIERARCHICAL=多层标签树（一级~五级）。
+const TAG_STRUCT_FLAT = 'FLAT';
+const TAG_STRUCT_HIERARCHICAL = 'HIERARCHICAL';
+const TAG_VIEW_LIST = 'LIST';
+const TAG_VIEW_TREE = 'TREE';
+const tagStructLabel = (type) => (type === TAG_STRUCT_FLAT ? '单层标签树' : '多层标签树');
+
+const spaceConfigTagCategories = [
+  {
+    categoryId: 'tag-cat-1',
+    tagCategoryName: '业务主题',
+    tagStructType: TAG_STRUCT_FLAT,
+    tagCount: 3,
+    tags: [
+      { tagId: 'tag-1-1', tagName: '医保政策', tagDesc: '医保相关的政策与制度文件', referenceCount: 12, status: 'ACTIVE', updateTime: '2026-09-20 10:00' },
+      { tagId: 'tag-1-2', tagName: '异地就医', tagDesc: '跨省异地就医结算相关文档', referenceCount: 7, status: 'ACTIVE', updateTime: '2026-09-19 16:32' },
+      { tagId: 'tag-1-3', tagName: '费用报销', tagDesc: '医疗费用报销流程与材料', referenceCount: 0, status: 'INACTIVE', updateTime: '2026-09-18 09:14' },
+    ],
+  },
+  {
+    categoryId: 'tag-cat-2',
+    tagCategoryName: '产品分类',
+    tagStructType: TAG_STRUCT_HIERARCHICAL,
+    tagCount: 5,
+    tags: [
+      { tagId: 'tag-2-1', level1: '人身险', level2: '重疾险', level3: '', level4: '', level5: '', tagDesc: '重大疾病保险产品资料', referenceCount: 21, status: 'ACTIVE', updateTime: '2026-09-22 11:05' },
+      { tagId: 'tag-2-2', level1: '人身险', level2: '医疗险', level3: '', level4: '', level5: '', tagDesc: '医疗费用补偿型保险', referenceCount: 15, status: 'ACTIVE', updateTime: '2026-09-21 14:48' },
+      { tagId: 'tag-2-3', level1: '人身险', level2: '医疗险', level3: '惠民保', level4: '', level5: '', tagDesc: '城市定制型补充医疗保险', referenceCount: 9, status: 'ACTIVE', updateTime: '2026-09-21 10:20' },
+      { tagId: 'tag-2-4', level1: '财产险', level2: '车险', level3: '', level4: '', level5: '', tagDesc: '机动车辆保险条款与费率', referenceCount: 6, status: 'INACTIVE', updateTime: '2026-09-17 15:02' },
+      { tagId: 'tag-2-5', level1: '财富管理', level2: '理财产品', level3: '', level4: '', level5: '', tagDesc: '银行理财与基金产品说明', referenceCount: 18, status: 'ACTIVE', updateTime: '2026-09-23 09:37' },
+    ],
+  },
+  {
+    categoryId: 'tag-cat-3',
+    tagCategoryName: '文档属性',
+    tagStructType: TAG_STRUCT_FLAT,
+    tagCount: 2,
+    tags: [
+      { tagId: 'tag-3-1', tagName: '管理办法', tagDesc: '内部管理办法类文档', referenceCount: 4, status: 'ACTIVE', updateTime: '2026-09-15 17:26' },
+      { tagId: 'tag-3-2', tagName: '通知公告', tagDesc: '对内对外的通知与公告', referenceCount: 2, status: 'ACTIVE', updateTime: '2026-09-14 11:11' },
+    ],
+  },
+];
+
+function SpaceConfigPage({ notify }) {
+  const projects = dataStore.getProjects();
+  const [spaceId, setSpaceId] = useState(() => projects[0]?.id || '');
+  const [tab, setTab] = useState('category');
+  const space = projects.find((item) => item.id === spaceId) || projects[0];
+  const tabItems = [['category', '知识类目'], ['tag', '标签管理'], ['configManagement', '配置管理']];
+  return (
+    <>
+      <PageHeader
+        title={space?.name || '空间配置管理'}
+        actions={(
+          <SelectField value={space?.id || ''} onChange={setSpaceId}>
+            {projects.map((item) => <option key={item.id} value={item.id}>{`知识空间: ${item.name}`}</option>)}
+          </SelectField>
+        )}
+      />
+      <div className="tabs space-config-tabs">
+        {tabItems.map(([key, label]) => (
+          <button type="button" key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>
+        ))}
+      </div>
+      {tab === 'category' ? <ProjectSolutionPage projectId={space?.id} notify={notify} embedded /> : null}
+      {tab === 'tag' ? <TagCategoryPanel notify={notify} /> : null}
+      {tab === 'configManagement' ? <CategoryRecommendPanel notify={notify} /> : null}
+    </>
+  );
+}
+
+// 标签管理页签（对齐线上 ?tab=tag）：
+// 左栏 232px 分类列表（选中项 3px 蓝左条 + #e6f4ff 底），右栏「分类标题 + 搜索框 + 视图切换 + 内容区」。
+// 内容区四种组合：表格视图 × 单层/多层、树结构 × 单层/多层（树结构额外带节点详情面板）。
+function TagCategoryPanel({ notify }) {
+  const [categories, setCategories] = useState(spaceConfigTagCategories);
+  const [activeId, setActiveId] = useState(spaceConfigTagCategories[0]?.categoryId || '');
+  const [viewMode, setViewMode] = useState(TAG_VIEW_LIST);
+  const [searchInput, setSearchInput] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [selectedNodeKey, setSelectedNodeKey] = useState(null);
+  const [selectedNodeInfo, setSelectedNodeInfo] = useState(null);
+
+  // 搜索防抖 300ms（对齐线上）。
+  useEffect(() => {
+    const timer = setTimeout(() => setKeyword(searchInput.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  const active = categories.find((item) => item.categoryId === activeId) || null;
+  const isFlat = active?.tagStructType === TAG_STRUCT_FLAT;
+  const levelFields = ['level1', 'level2', 'level3', 'level4', 'level5'];
+  const levelNames = ['一级', '二级', '三级', '四级', '五级'];
+
+  const tags = (active?.tags || []).filter((tag) => {
+    if (!keyword) return true;
+    const haystack = isFlat
+      ? [tag.tagName, tag.tagDesc]
+      : [...levelFields.map((fieldName) => tag[fieldName]), tag.tagDesc];
+    return haystack.filter(Boolean).some((text) => String(text).toLowerCase().includes(keyword.toLowerCase()));
+  });
+
+  // 首次加载自动选中第一个分类；切分类时清空关键词、视图模式重置为表格视图（对齐线上）。
+  const selectCategory = (categoryId) => {
+    setActiveId(categoryId);
+    setSearchInput('');
+    setKeyword('');
+    setSelectedNodeKey(null);
+    setSelectedNodeInfo(null);
+    setViewMode(TAG_VIEW_LIST);
+  };
+
+  const toggleTagStatus = (tag) => {
+    const next = tag.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    const question = next === 'INACTIVE' ? '确定停用该标签？' : '确定启用该标签？';
+    if (!window.confirm(question)) return;
+    setCategories((current) => current.map((item) => (item.categoryId === activeId
+      ? { ...item, tags: item.tags.map((row) => (row.tagId === tag.tagId ? { ...row, status: next } : row)) }
+      : item)));
+    notify(next === 'ACTIVE' ? '已启用' : '已停用', 'success');
+  };
+
+  // 树结构数据：单层以分类为根、标签为子节点；多层按 一级~五级 逐层归并。
+  const buildTagTree = () => {
+    if (!active) return [];
+    const root = { key: 'root', title: active.tagCategoryName, level: 0, children: [] };
+    if (isFlat) {
+      tags.forEach((tag) => root.children.push({ key: tag.tagId, title: tag.tagName, level: 1, children: [], tag }));
+      return [root];
+    }
+    tags.forEach((tag) => {
+      let cursor = root;
+      let depth = 0;
+      levelFields.forEach((fieldName, index) => {
+        const value = tag[fieldName];
+        if (!value) return;
+        let child = cursor.children.find((item) => item.title === value);
+        if (!child) {
+          child = { key: `${tag.tagId}-${index}`, title: value, level: index + 1, children: [] };
+          cursor.children.push(child);
+        }
+        cursor = child;
+        depth = index + 1;
+      });
+      cursor.tag = tag;
+      cursor.level = depth;
+    });
+    return [root];
+  };
+
+  const renderTagTree = (nodes, depth, parentPath) => nodes.map((node) => {
+    const path = [...parentPath, node.title];
+    const isSelected = selectedNodeKey === node.key;
+    return (
+      <div key={node.key}>
+        <div
+          className={`tag-cat-tree-node ${isSelected ? 'active' : ''}`}
+          style={{ paddingLeft: 12 + depth * 20 }}
+          onClick={() => {
+            setSelectedNodeKey(node.key);
+            setSelectedNodeInfo({
+              categoryNode: node.title,
+              tagName: node.tag ? (isFlat ? node.tag.tagName : node.tag[levelFields[node.level - 1]]) : '',
+              selectedValue: node.tag ? (isFlat ? node.tag.tagName : node.tag[levelFields.filter((f) => node.tag[f]).length - 1]) : '',
+              fullPath: path.join(' / '),
+              childCount: node.children?.length || 0,
+            });
+          }}
+        >
+          <FolderOpenOutlined />
+          <span>{node.title}</span>
+          {node.level > 0 ? <span className="tag-cat-level-tag">{levelNames[node.level - 1] || ''}</span> : null}
+          {node.tag ? <span className="tag-cat-meta"><em>{`引用 ${node.tag.referenceCount}`}</em></span> : null}
+        </div>
+        {node.children?.length ? renderTagTree(node.children, depth + 1, path) : null}
+      </div>
+    );
+  });
+
+  const flatColumns = [
+    { title: '标签名称', width: 160, render: (tag) => tag.tagName },
+    { title: '描述', width: 180, render: (tag) => tag.tagDesc || '-' },
+    { title: '引用', width: 80, render: (tag) => tag.referenceCount },
+    { title: '状态', width: 80, render: (tag) => <Badge tone={tag.status === 'ACTIVE' ? 'success' : 'danger'}>{tag.status === 'ACTIVE' ? '启用' : '停用'}</Badge> },
+    { title: '更新时间', width: 160, render: (tag) => tag.updateTime },
+  ];
+  const hierColumns = [
+    ...levelNames.map((name, index) => ({ title: name, width: 100, render: (tag) => tag[levelFields[index]] || '-' })),
+    { title: '描述', width: 180, render: (tag) => tag.tagDesc || '-' },
+    { title: '引用', width: 80, render: (tag) => tag.referenceCount },
+    { title: '状态', width: 80, render: (tag) => <Badge tone={tag.status === 'ACTIVE' ? 'success' : 'danger'}>{tag.status === 'ACTIVE' ? '启用' : '停用'}</Badge> },
+    { title: '更新时间', width: 160, render: (tag) => tag.updateTime },
+  ];
+  const columns = isFlat ? flatColumns : hierColumns;
+
+  return (
+    <div className="space-config-body">
+      <aside className="tag-cat-panel">
+        <div className="tag-cat-panel-head"><strong>标签分类</strong></div>
+        {categories.length ? categories.map((item) => (
+          <button
+            type="button"
+            key={item.categoryId}
+            className={`tag-cat-item ${activeId === item.categoryId ? 'active' : ''}`}
+            onClick={() => selectCategory(item.categoryId)}
+          >
+            <span className="tag-cat-name">{item.tagCategoryName}</span>
+            <span className="tag-cat-meta">
+              <span className={`tag-struct-tag ${item.tagStructType === TAG_STRUCT_FLAT ? 'flat' : 'hier'}`}>{tagStructLabel(item.tagStructType)}</span>
+              <em>{`${item.tagCount ?? item.tags.length} 个标签`}</em>
+            </span>
+          </button>
+        )) : <span className="tag-cat-empty">暂无标签分类</span>}
+      </aside>
+      <section className="panel space-config-detail tag-cat-main">
+        {active ? (
+          <>
+            <div className="tag-cat-title-row">
+              <h2>{active.tagCategoryName}</h2>
+              <span className={`tag-struct-tag ${isFlat ? 'flat' : 'hier'}`}>{tagStructLabel(active.tagStructType)}</span>
+            </div>
+            <div className="tag-cat-toolbar">
+              <label className="tag-cat-search">
+                <span><SearchOutlined /></span>
+                <input
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  placeholder="搜索标签名称或描述"
+                />
+              </label>
+              <div className="segmented">
+                <button type="button" className={viewMode === TAG_VIEW_LIST ? 'active' : ''} onClick={() => setViewMode(TAG_VIEW_LIST)}>表格视图</button>
+                <button type="button" className={viewMode === TAG_VIEW_TREE ? 'active' : ''} onClick={() => setViewMode(TAG_VIEW_TREE)}>树结构</button>
+              </div>
+            </div>
+            {viewMode === TAG_VIEW_LIST ? (
+              <div className="tag-cat-table-wrap">
+                <table className="tag-cat-table">
+                  <colgroup>
+                    {columns.map((column) => <col key={column.title} style={{ width: column.width }} />)}
+                    <col style={{ width: 100 }} />
+                  </colgroup>
+                  <thead>
+                    <tr>{columns.map((column) => <th key={column.title}>{column.title}</th>)}<th>操作</th></tr>
+                  </thead>
+                  <tbody>
+                    {tags.map((tag) => (
+                      <tr key={tag.tagId}>
+                        {columns.map((column) => <td key={column.title}>{column.render(tag)}</td>)}
+                        <td className="tag-cat-actions">
+                          <button type="button" onClick={() => toggleTagStatus(tag)}>{tag.status === 'ACTIVE' ? '停用' : '启用'}</button>
+                        </td>
+                      </tr>
+                    ))}
+                    {tags.length === 0 ? (
+                      <tr><td colSpan={columns.length + 1} className="empty-table-cell">{keyword ? '暂无标签数据' : '暂无已同步标签'}</td></tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="tag-cat-tree-wrap">
+                {tags.length ? renderTagTree(buildTagTree(), 0, []) : (
+                  <div className="space-config-placeholder small"><span>{keyword ? '暂无标签数据' : '暂无已同步标签'}</span></div>
+                )}
+                {selectedNodeInfo ? (
+                  <div className="tag-cat-node-detail">
+                    <div className="tag-cat-detail-head">
+                      <strong>节点详情</strong>
+                      <button type="button" className="secondary" onClick={() => { setSelectedNodeKey(null); setSelectedNodeInfo(null); }}>关闭</button>
+                    </div>
+                    <dl>
+                      <dt>分类节点</dt><dd>{selectedNodeInfo.categoryNode}</dd>
+                      <dt>标签</dt><dd>{selectedNodeInfo.tagName || '-'}</dd>
+                      <dt>选中标签值</dt><dd>{selectedNodeInfo.selectedValue || '-'}</dd>
+                      <dt>完整路径</dt><dd>{selectedNodeInfo.fullPath}</dd>
+                      <dt>子节点数量</dt><dd>{selectedNodeInfo.childCount}</dd>
+                    </dl>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="space-config-placeholder"><span>请选择左侧标签分类</span></div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// 配置管理页签（对齐线上 ?tab=configManagement）：
+// 竖向表单项（label 含 ⓘ 在上、控件在下且左对齐）；「匹配分阈值」必填，范围 0~1；默认 0.70、两个开关默认关闭。
+function CategoryRecommendPanel({ notify }) {
+  const defaultConfig = { enabled: false, threshold: 0.7, autoAdopt: false };
+  const [form, setForm] = useState(defaultConfig);
+  const [saved, setSaved] = useState(defaultConfig);
+  const [error, setError] = useState('');
+
+  const saveConfig = () => {
+    if (form.threshold === '' || form.threshold === null || form.threshold === undefined) {
+      setError('请输入匹配分阈值');
+      return;
+    }
+    const value = Number(form.threshold);
+    if (Number.isNaN(value) || value < 0 || value > 1) {
+      setError('取值范围 0~1');
+      return;
+    }
+    setError('');
+    setSaved(form);
+    notify('保存成功', 'success');
+  };
+
+  return (
+    <section className="panel space-config-detail">
+      <div className="section-head">
+        <h2>
+          知识类目推荐配置
+          <QuestionCircleOutlined
+            className="field-hint"
+            title="维护当前知识空间的推荐知识类目能力：是否启用推荐、匹配分阈值、是否自动采用。配置保存后对后续新上传文件生效，不重算历史文件。"
+          />
+        </h2>
+      </div>
+      <div className="space-config-form">
+        <div className="space-config-field">
+          <span className="space-config-label">
+            开启知识类目推荐
+            <QuestionCircleOutlined className="field-hint" title="开启后，上传文件时系统将自动识别并推荐知识类目" />
+          </span>
+          <label className="switch-field">
+            <input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} />
+            <i aria-hidden="true" />
+          </label>
+        </div>
+        <div className="space-config-field">
+          <span className="space-config-label">
+            <em>*</em> 匹配分阈值
+            <QuestionCircleOutlined className="field-hint" title="候选类目置信度低于此阈值时不自动采用，需人工确认（范围 0~1）" />
+          </span>
+          <input
+            type="number"
+            min="0"
+            max="1"
+            step="0.1"
+            className="space-config-number"
+            value={form.threshold}
+            onChange={(event) => {
+              setForm({ ...form, threshold: event.target.value });
+              setError('');
+            }}
+          />
+          {error ? <p className="form-error">{error}</p> : null}
+        </div>
+        <div className="space-config-field">
+          <span className="space-config-label">
+            开启自动采用
+            <QuestionCircleOutlined className="field-hint" title="开启后，置信度达标的候选类目将自动采用，无需人工确认" />
+          </span>
+          <label className="switch-field">
+            <input type="checkbox" checked={form.autoAdopt} onChange={(event) => setForm({ ...form, autoAdopt: event.target.checked })} />
+            <i aria-hidden="true" />
+          </label>
+        </div>
+      </div>
+      <div className="space-config-actions">
+        <button type="button" className="secondary" onClick={() => { setForm(saved); setError(''); notify('已重置为上次保存的配置'); }}>重置</button>
+        <button type="button" className="primary" onClick={saveConfig}>保存配置</button>
+      </div>
+    </section>
+  );
+}
+
+// ── Badcase 管理（对齐线上 /ops/badcase-workbench）───────────────────────────────
+const badcaseStatusTabs = ['全部', '待处理', '处理中', '已完成', '已关闭'];
+const badcaseRows = [
+  { id: 'BC202609280001', query: '异地就医备案需要哪些材料', source: '搜索测试', status: '待处理', type: '召回缺失', createdAt: '2026-09-28 10:12' },
+  { id: 'BC202609280002', query: '惠民保的免赔额是多少', source: '人工新建', status: '处理中', type: '答案错误', createdAt: '2026-09-28 09:40' },
+  { id: 'BC202609270003', query: '基金申购确认时间怎么算', source: '批量导入', status: '已完成', type: '答案不完整', createdAt: '2026-09-27 17:05' },
+  { id: 'BC202609270004', query: '重疾险等待期如何计算', source: '搜索测试', status: '已关闭', type: '无关召回', createdAt: '2026-09-27 15:22' },
+];
+
+function BadcasePage({ notify }) {
+  const [statusTab, setStatusTab] = useState('全部');
+  const [sourceFilter, setSourceFilter] = useState('来源');
+  const [typeFilter, setTypeFilter] = useState('问题类型');
+  const [removedIds, setRemovedIds] = useState(() => new Set());
+  const rows = badcaseRows.filter((row) => !removedIds.has(row.id));
+  const countOf = (status) => (status === '全部' ? rows.length : rows.filter((row) => row.status === status).length);
+  const visibleRows = rows.filter((row) => {
+    if (statusTab !== '全部' && row.status !== statusTab) return false;
+    if (sourceFilter !== '来源' && row.source !== sourceFilter) return false;
+    if (typeFilter !== '问题类型' && row.type !== typeFilter) return false;
+    return true;
+  });
+  return (
+    <>
+      <PageHeader
+        title="Badcase 管理"
+        actions={(
+          <div className="badcase-actions">
+            <button type="button" className="secondary" onClick={() => notify('批量导入模板已下载')}><DownloadOutlined /> 批量导入</button>
+            <button type="button" className="primary" onClick={() => notify('已打开新建 Badcase 表单')}><PlusOutlined /> 新增</button>
+          </div>
+        )}
+      />
+      <p className="page-desc">管理知识工程质检调优的 Badcase，支持人工新建、搜索测试创建、批量导入与详情定位闭环处理。</p>
+      <div className="badcase-status-bar">
+        {badcaseStatusTabs.map((status) => (
+          <button type="button" key={status} className={`badcase-status-chip ${statusTab === status ? 'active' : ''}`} onClick={() => setStatusTab(status)}>
+            {status}<strong>{countOf(status)}</strong>
+          </button>
+        ))}
+      </div>
+      <Toolbar className="knowledge-list-toolbar">
+        <SelectField value={sourceFilter} onChange={setSourceFilter}>
+          <option value="来源">来源</option>
+          <option value="人工新建">人工新建</option>
+          <option value="搜索测试">搜索测试</option>
+          <option value="批量导入">批量导入</option>
+        </SelectField>
+        <SelectField value={typeFilter} onChange={setTypeFilter}>
+          <option value="问题类型">问题类型</option>
+          <option value="召回缺失">召回缺失</option>
+          <option value="无关召回">无关召回</option>
+          <option value="答案错误">答案错误</option>
+          <option value="答案不完整">答案不完整</option>
+        </SelectField>
+        <button type="button" className="secondary" onClick={() => { setSourceFilter('来源'); setTypeFilter('问题类型'); setStatusTab('全部'); }}>重置</button>
+      </Toolbar>
+      <section className="panel knowledge-table-panel">
+        <table className="data-table knowledge-table">
+          <thead>
+            <tr>
+              <th>Badcase ID</th>
+              <th>查询内容</th>
+              <th>来源</th>
+              <th>状态</th>
+              <th>问题类型</th>
+              <th>创建时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row) => (
+              <tr key={row.id}>
+                <td className="strong">{row.id}</td>
+                <td>{row.query}</td>
+                <td>{row.source}</td>
+                <td><Badge tone={row.status === '已完成' ? 'success' : row.status === '已关闭' ? 'neutral' : 'warning'}>{row.status}</Badge></td>
+                <td>{row.type}</td>
+                <td>{row.createdAt}</td>
+                <td className="actions knowledge-actions">
+                  <button type="button" onClick={() => notify(`打开 ${row.id} 详情`)}>查看</button>
+                  <button type="button" className="danger" onClick={() => setRemovedIds((current) => new Set(current).add(row.id))}>删除</button>
+                </td>
+              </tr>
+            ))}
+            {visibleRows.length ? null : (
+              <tr><td colSpan={7}><div className="empty-mini"><strong>暂无 Badcase 数据</strong><span>可从搜索测试结果一键创建，或批量导入线下收集的问题。</span></div></td></tr>
+            )}
+          </tbody>
+        </table>
+      </section>
     </>
   );
 }
@@ -4774,8 +5426,23 @@ function FileUploadIcon({ className = '' }) {
   );
 }
 
-const toolDialogCategoryOrder = [...defaultCategories, '通用解析', '系统节点', '未分类'];
-const categoryAliases = { 内容处理: '文本分片', 文档分块: '文本分片', 智能生成: '知识提取', 内容抽取: '知识提取', 系统工具: '系统节点' };
+// 节点类型顺序对齐线上 6 类（defaultCategories 已含「系统节点」，无需重复列出）。
+const toolDialogCategoryOrder = [...defaultCategories, '未分类'];
+// 分类别名：把历史口径（本地内置节点与旧版数据使用）归一到线上 6 类节点类型。
+// 通用解析/文档转换→文档解析；文本分片/文档分块/内容处理→文本切片；
+// 知识提取/内容抽取/智能生成→知识抽取；知识打标→内容增强；系统工具→系统节点。
+const categoryAliases = {
+  内容处理: '文本切片',
+  文档分块: '文本切片',
+  文本分片: '文本切片',
+  智能生成: '知识抽取',
+  内容抽取: '知识抽取',
+  知识提取: '知识抽取',
+  通用解析: '文档解析',
+  文档转换: '文档解析',
+  知识打标: '内容增强',
+  系统工具: '系统节点',
+};
 const sampleDemoFile = { id: 'demo-policy-sample', name: '医保政策样例.pdf', type: 'PDF', size: '2.40 MB', status: '未发送' };
 const knowledgePreviewTabNames = {
   切片库: '文本切片预览',
@@ -4783,17 +5450,29 @@ const knowledgePreviewTabNames = {
   知识点: '知识点结果预览',
   知识图谱: '知识图谱结果预览',
 };
-const workbenchFileFormats = ['pdf', 'docx', 'xlsx', 'csv', 'pptx', 'txt', 'md'];
+// 格式白名单：前段与线上实测一致（2026-09-28 线上「文件上传」抽屉原文：支持 pdf / doc / docx /
+// xls / xlsx / ppt / pptx / txt / md / jpg / jpeg / png / html，单文件 ≤ 100MB）。
+// csv 为本地已支持（R048）、线上暂未开放的格式；末尾音视频为视频解析需求（R030）预留，线上暂无。
+const workbenchFileFormats = [
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'md',
+  'jpg', 'jpeg', 'png', 'html',
+  'mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg',
+  'mp4', 'mov', 'avi', 'mkv',
+];
 const workbenchSampleNames = ['医保政策样例', '理财产品说明书', '客户问答清单'];
 const workbenchFileFormatMeta = {
   pdf: { Icon: FilePdfFilled, color: '#dc2626' },
+  doc: { Icon: FileWordFilled, color: '#2563eb' },
   docx: { Icon: FileWordFilled, color: '#2563eb' },
+  xls: { Icon: FileExcelFilled, color: '#16a34a' },
   xlsx: { Icon: FileExcelFilled, color: '#16a34a' },
   csv: { Icon: FileExcelFilled, color: '#0d9488' },
+  ppt: { Icon: FilePptFilled, color: '#ea580c' },
   pptx: { Icon: FilePptFilled, color: '#ea580c' },
   txt: { Icon: FileTextOutlined, color: '#64748b' },
   md: { Icon: FileMarkdownFilled, color: '#334155' },
-  // 音频格式：仅用于文件列表与上传抽屉的展示，不属于知识加工方案的格式范围。
+  html: { Icon: CodeOutlined, color: '#0891b2' },
+  // 音频格式：线上白名单暂无，本轮为视频/音频解析需求预留，同时用于文件列表与上传抽屉展示。
   mp3: { Icon: CustomerServiceOutlined, color: '#ea580c' },
   wav: { Icon: CustomerServiceOutlined, color: '#ea580c' },
   m4a: { Icon: CustomerServiceOutlined, color: '#ea580c' },
@@ -4807,6 +5486,11 @@ const workbenchFileFormatMeta = {
   png: { Icon: FileImageOutlined, color: '#7c3aed' },
   jpg: { Icon: FileImageOutlined, color: '#7c3aed' },
   jpeg: { Icon: FileImageOutlined, color: '#7c3aed' },
+  // 视频格式：线上白名单暂无，本轮为视频解析需求（R030）预留。
+  mp4: { Icon: VideoCameraOutlined, color: '#db2777' },
+  mov: { Icon: VideoCameraOutlined, color: '#db2777' },
+  avi: { Icon: VideoCameraOutlined, color: '#db2777' },
+  mkv: { Icon: VideoCameraOutlined, color: '#db2777' },
 };
 const getFileExtension = (name = '') => name.split('.').pop()?.toLowerCase() || '';
 const getSampleFileKey = (file = {}) => String(file.name || file.id || '').trim().toLowerCase();
@@ -5494,7 +6178,11 @@ function readUnifiedFlowNodeCatalog(tenantId = DEFAULT_TENANT_ID) {
   return {
     tools,
     // 节点类型跨租户共享：分类列表不做租户过滤，节点数量按当前租户可见节点统计。
-    categories: sortWorkbenchCategories(Array.from(new Set([...(catalog.categories || []), '系统节点', ...tools.map((tool) => tool.category)].filter(Boolean)))),
+    categories: sortWorkbenchCategories(Array.from(new Set(
+      [...(catalog.categories || []), '系统节点', ...tools.map((tool) => tool.category)]
+        .map((category) => normalizeWorkbenchCategory(category))
+        .filter(Boolean),
+    ))),
   };
 }
 
@@ -7432,22 +8120,27 @@ function getRuntimeLabel(status) {
   }[status] || '';
 }
 
-const knowledgePlanFileFormats = ['pdf', 'docx', 'xlsx', 'csv', 'pptx', 'txt', 'md'];
+// 与上传/方案格式白名单共用同一来源，避免两处口径漂移。
+const knowledgePlanFileFormats = workbenchFileFormats;
 
+// 格式展示名：对齐线上口径，doc/docx、xls/xlsx、ppt/pptx 各自独立展示，不再合并为「x（兼容y）」。
 function formatLabel(format) {
-  const compatMap = { docx: 'docx（兼容doc）', xlsx: 'xlsx（兼容xls）', pptx: 'pptx（兼容ppt）' };
-  return compatMap[format] || (format ? format.toUpperCase() : format);
+  return format ? format.toUpperCase() : format;
 }
 
 // 文件格式组：筛选器与格式选择器按「格式组」呈现，与真实产品口径一致。
-// 本次变更：「表格」组的格式清单由 xls、xlsx 扩展为 xls、xlsx、csv。
+// 2026-09-28 对齐线上白名单：文档组纳入 doc、表格组纳入 xls、演示文档组纳入 ppt；
+// 并按线上能力新增「图片」「网页」两组；「音视频」组为视频解析需求（R030）预留，线上暂无。
 const knowledgeFormatGroups = [
   { id: 'pdf', label: 'PDF', displayLabel: 'PDF(pdf)', formats: ['pdf'] },
-  { id: 'doc', label: '文档', displayLabel: '文档(doc、docx)', formats: ['docx'] },
-  { id: 'sheet', label: '表格', displayLabel: '表格(xls、xlsx、csv)', formats: ['xlsx', 'csv'] },
-  { id: 'slide', label: '演示文档', displayLabel: '演示文档(ppt、pptx)', formats: ['pptx'] },
+  { id: 'doc', label: '文档', displayLabel: '文档(doc、docx)', formats: ['doc', 'docx'] },
+  { id: 'sheet', label: '表格', displayLabel: '表格(xls、xlsx、csv)', formats: ['xls', 'xlsx', 'csv'] },
+  { id: 'slide', label: '演示文档', displayLabel: '演示文档(ppt、pptx)', formats: ['ppt', 'pptx'] },
   { id: 'text', label: '文本', displayLabel: '文本(txt)', formats: ['txt'] },
   { id: 'md', label: 'Markdown', displayLabel: 'Markdown(md)', formats: ['md'] },
+  { id: 'image', label: '图片', displayLabel: '图片(jpg、jpeg、png)', formats: ['jpg', 'jpeg', 'png'] },
+  { id: 'html', label: '网页', displayLabel: '网页(html)', formats: ['html'] },
+  { id: 'media', label: '音视频', displayLabel: '音视频(mp3、wav、mp4、mov 等)', formats: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'mp4', 'mov', 'avi', 'mkv'] },
 ];
 
 function formatGroupOf(format) {
@@ -7501,6 +8194,15 @@ const uploadFileTypes = [
     formats: ['mp3', 'wav', 'm4a', 'aac', 'amr', 'flac', 'ogg', 'opus', 'wma'],
     icon: CustomerServiceOutlined,
     color: '#ea580c',
+  },
+  {
+    // 视频类型为视频解析需求（R030）预留，线上白名单暂无音视频。
+    id: 'video',
+    name: '视频文件',
+    desc: '对上传的视频文件进行解析和加工处理。',
+    formats: ['mp4', 'mov', 'avi', 'mkv'],
+    icon: VideoCameraOutlined,
+    color: '#db2777',
   },
 ];
 
@@ -8721,19 +9423,76 @@ function KnowledgeAccessPage({ projectId, notify, onOpenPlans }) {
 }
 
 // 知识接入 -> 文件上传：正式文件列表一级页面（R039 正式文件加工链路追踪入口）
+//
+// 2026-09-28 线上对齐：字段口径按线上页面 chunk（assets/index-CVgXS6mG.js）补齐
+//   - fileSource：来源枚举（人工上传 / 工作台示例 / 外部同步），「来源」列与筛选用它
+//   - sourceSystem：来源系统，仅「外部同步」的文件在文件名副行回显
+//   - tags：标签数组（线上 tags 为 JSON 数组串）
+//   - uploadStatus / formConfigured / processStatus：文件状态列的三段复合状态
+//   - knowledgeForms：该文件已加工出的知识形态，用于「知识加工结果」二级菜单
+const fileUploadSourceOptions = [
+  { value: 'MANUAL', label: '人工上传' },
+  { value: 'WORKBENCH', label: '工作台示例' },
+  { value: 'OPENAPI_SYNC', label: '外部同步' },
+];
+
+// 知识形态枚举（对齐线上声明的 UNSTRUCTURED_SLICE / QA_LIBRARY / KNOWLEDGE_POINT）
+const fileUploadKnowledgeForms = [
+  { value: 'UNSTRUCTURED_SLICE', label: '文本切片' },
+  { value: 'QA_LIBRARY', label: '问答库' },
+  { value: 'KNOWLEDGE_POINT', label: '知识点' },
+];
+
+const fileUploadFormConfiguredLabels = { CONFIG: '已配置', UNCONFIG: '未配置' };
+
+const fileUploadProcessStatusLabels = {
+  NONE: '未执行',
+  PENDING: '待处理',
+  RUNNING: '执行中',
+  SUCCESS: '成功',
+  FAILED: '失败',
+};
+
+// 文件状态的三段派生（推荐状态 / 配置状态 / 处理状态）。
+// 说明：线上三段文案由未打进本 chunk 的公共方法生成，此处按线上枚举取值与中文串推断实现。
+function deriveFileUploadStatus(row = {}) {
+  const upload = row.uploadStatus || 'CONFIRMED';
+  const recommendLabel = upload === 'RECOMMENDING' ? '推荐中' : upload === 'PENDING' ? '待确认' : '已确认';
+  const recommendColor = upload === 'CONFIRMED' ? 'success' : 'processing';
+  const configured = row.formConfigured === 'UNCONFIG' ? 'UNCONFIG' : 'CONFIG';
+  const processStatus = row.processStatus || 'NONE';
+  let main = { label: '待处理', color: 'processing' };
+  if (processStatus === 'FAILED') main = { label: '失败', color: 'error' };
+  else if (processStatus === 'RUNNING') main = { label: '处理中', color: 'processing' };
+  else if (processStatus === 'SUCCESS') main = { label: '成功', color: 'success' };
+  else if (configured === 'UNCONFIG') main = { label: '未配置', color: 'default' };
+  return {
+    main,
+    rows: [
+      ['推荐状态', recommendLabel, recommendColor],
+      ['配置状态', fileUploadFormConfiguredLabels[configured], configured === 'CONFIG' ? 'success' : 'default'],
+      ['处理状态', fileUploadProcessStatusLabels[processStatus] || processStatus, processStatus === 'FAILED' ? 'error' : processStatus === 'SUCCESS' ? 'success' : 'default'],
+    ],
+  };
+}
+
+// 可召回 = 启用 且 已按方案配置 且 处理成功（口径按线上「可召回」标签的展示条件推断）。
+function fileUploadRecallable(row = {}) {
+  return Boolean(row.enabled) && row.formConfigured !== 'UNCONFIG' && row.processStatus === 'SUCCESS';
+}
+
 const fileUploadSeedRows = [
-  { id: 'fu-1', name: '面向人工智能新基建的知识图谱行业白皮书', source: '行业研究报告', category: '营销知识', tagCategory: '-', tag: '—', format: 'pdf', enabled: true, processStatus: '已处理', size: '2.35 MB', uploadTime: '08/18 10:21:36' },
-  { id: 'fu-2', name: '特种车商业保险示范条款（2020版）', source: '监管政策库', category: '营销知识', tagCategory: '-', tag: '—', format: 'docx', enabled: true, processStatus: '已处理', size: '40.82 KB', uploadTime: '08/18 10:27:22' },
-  { id: 'fu-3', name: '百年康惠保（旗舰版）重大疾病保险条款', source: '保险条款库', category: '营销知识', tagCategory: '-', tag: '—', format: 'docx', enabled: true, processStatus: '处理中', size: '1.16 MB', uploadTime: '08/18 10:31:05' },
-  { id: 'fu-4', name: '04 百年康惠保（旗舰版2.0）重大疾病保险条款', source: '保险条款库', category: '营销知识', tagCategory: '-', tag: '—', format: 'docx', enabled: true, processStatus: '已处理', size: '1.34 MB', uploadTime: '08/18 10:35:47' },
-  { id: 'fu-5', name: '04 百年附加惠通费用补偿医疗保险条款', source: '保险条款库', category: '营销知识', tagCategory: '保险', tag: '豁免责任', format: 'docx', enabled: false, processStatus: '待处理', size: '0.89 MB', uploadTime: '08/18 10:40:12' },
-  { id: 'fu-6', name: '02 百年附加惠通费用补偿医疗保险条款', source: '保险条款库', category: '营销知识', tagCategory: '保险', tag: '豁免责任', format: 'docx', enabled: true, processStatus: '已处理', size: '0.92 MB', uploadTime: '08/18 10:44:50' },
-  { id: 'fu-7', name: '03 百年附加惠通费用补偿医疗保险条款', source: '保险条款库', category: '营销知识', tagCategory: '保险', tag: '豁免责任', format: 'docx', enabled: true, processStatus: '待处理', size: '0.95 MB', uploadTime: '08/18 10:49:18' },
-  // CSV 样例：表格型知识数据，格式组为「表格(xls、xlsx、csv)」。
-  { id: 'fu-8', name: '医保药品目录清单', source: '监管政策库', category: '医保知识', tagCategory: '医保', tag: '药品目录', format: 'csv', enabled: true, processStatus: '已处理', size: '1.24 MB', uploadTime: '08/18 10:53:41' },
-  { id: 'fu-9', name: '客户问答清单', source: '业务知识库', category: '医保知识', tagCategory: '医保', tag: '常见问题', format: 'csv', enabled: true, processStatus: '处理中', size: '0.86 MB', uploadTime: '08/18 10:58:07' },
+  { id: 'fu-1', name: '面向人工智能新基建的知识图谱行业白皮书', fileSource: 'OPENAPI_SYNC', sourceSystem: '行业研究报告', source: '行业研究报告', category: '营销知识', tagCategory: '-', tags: [], tag: '—', format: 'pdf', enabled: true, uploadStatus: 'CONFIRMED', formConfigured: 'CONFIG', processStatus: 'SUCCESS', knowledgeForms: ['UNSTRUCTURED_SLICE'], size: '2.35 MB', fileSize: 2464153, uploadTime: '08/18 10:21:36' },
+  { id: 'fu-2', name: '特种车商业保险示范条款（2020版）', fileSource: 'OPENAPI_SYNC', sourceSystem: '监管政策库', source: '监管政策库', category: '营销知识', tagCategory: '-', tags: [], tag: '—', format: 'docx', enabled: true, uploadStatus: 'CONFIRMED', formConfigured: 'CONFIG', processStatus: 'RUNNING', knowledgeForms: ['UNSTRUCTURED_SLICE'], size: '40.82 KB', fileSize: 41799, uploadTime: '08/18 10:27:22' },
+  { id: 'fu-3', name: '百年康惠保（旗舰版）重大疾病保险条款', fileSource: 'OPENAPI_SYNC', sourceSystem: '保险条款库', source: '保险条款库', category: '营销知识', tagCategory: '-', tags: [], tag: '—', format: 'docx', enabled: true, uploadStatus: 'CONFIRMED', formConfigured: 'CONFIG', processStatus: 'PENDING', knowledgeForms: ['UNSTRUCTURED_SLICE'], size: '1.16 MB', fileSize: 1216348, uploadTime: '08/18 10:31:05' },
+  { id: 'fu-4', name: '04 百年康惠保（旗舰版2.0）重大疾病保险条款', fileSource: 'OPENAPI_SYNC', sourceSystem: '保险条款库', source: '保险条款库', category: '营销知识', tagCategory: '-', tags: [], tag: '—', format: 'docx', enabled: true, uploadStatus: 'CONFIRMED', formConfigured: 'CONFIG', processStatus: 'SUCCESS', knowledgeForms: ['UNSTRUCTURED_SLICE', 'QA_LIBRARY'], size: '1.34 MB', fileSize: 1405091, uploadTime: '08/18 10:35:47' },
+  { id: 'fu-5', name: '04 百年附加惠通费用补偿医疗保险条款', fileSource: 'OPENAPI_SYNC', sourceSystem: '保险条款库', source: '保险条款库', category: '营销知识', tagCategory: '', tags: ['豁免责任'], tag: '豁免责任', format: 'docx', enabled: false, uploadStatus: 'CONFIRMED', formConfigured: 'UNCONFIG', processStatus: 'NONE', knowledgeForms: [], size: '0.89 MB', fileSize: 933888, uploadTime: '08/18 10:40:12' },
+  { id: 'fu-6', name: '02 百年附加惠通费用补偿医疗保险条款', fileSource: 'WORKBENCH', sourceSystem: '', source: '保险条款库', category: '营销知识', tagCategory: '保险', tags: ['豁免责任'], tag: '豁免责任', format: 'docx', enabled: true, uploadStatus: 'CONFIRMED', formConfigured: 'CONFIG', processStatus: 'SUCCESS', knowledgeForms: ['UNSTRUCTURED_SLICE', 'KNOWLEDGE_POINT'], size: '0.92 MB', fileSize: 965632, uploadTime: '08/18 10:44:50' },
+  { id: 'fu-7', name: '03 百年附加惠通费用补偿医疗保险条款', fileSource: 'MANUAL', sourceSystem: '', source: '保险条款库', category: '', tagCategory: '保险', tags: ['豁免责任'], tag: '豁免责任', format: 'docx', enabled: true, uploadStatus: 'PENDING', formConfigured: 'CONFIG', processStatus: 'NONE', knowledgeForms: [], size: '0.95 MB', fileSize: 996352, uploadTime: '08/18 10:49:18' },
+  { id: 'fu-8', name: '医保药品目录清单', fileSource: 'OPENAPI_SYNC', sourceSystem: '监管政策库', source: '监管政策库', category: '医保知识', tagCategory: '医保', tags: ['药品目录'], tag: '药品目录', format: 'csv', enabled: true, uploadStatus: 'CONFIRMED', formConfigured: 'CONFIG', processStatus: 'SUCCESS', knowledgeForms: ['UNSTRUCTURED_SLICE'], size: '1.24 MB', fileSize: 1300480, uploadTime: '08/18 10:53:41' },
+  { id: 'fu-9', name: '客户问答清单', fileSource: 'MANUAL', sourceSystem: '', source: '业务知识库', category: '医保知识', tagCategory: '医保', tags: ['常见问题'], tag: '常见问题', format: 'csv', enabled: true, uploadStatus: 'RECOMMENDING', formConfigured: 'CONFIG', processStatus: 'RUNNING', knowledgeForms: ['UNSTRUCTURED_SLICE'], size: '0.86 MB', fileSize: 902144, uploadTime: '08/18 10:58:07' },
   // 音频样例：来自音频文件上传需求。
-  { id: 'fu-10', name: '客服录音_医保报销咨询', source: '客服系统', category: '医保知识', tagCategory: '医保', tag: '客服录音', format: 'mp3', enabled: true, processStatus: '已处理', size: '18.42 MB', uploadTime: '08/18 11:02:33' },
+  { id: 'fu-10', name: '客服录音_医保报销咨询', fileSource: 'OPENAPI_SYNC', sourceSystem: '客服系统', source: '客服系统', category: '医保知识', tagCategory: '医保', tags: ['客服录音'], tag: '客服录音', format: 'mp3', enabled: true, uploadStatus: 'CONFIRMED', formConfigured: 'CONFIG', processStatus: 'FAILED', knowledgeForms: ['UNSTRUCTURED_SLICE'], size: '18.42 MB', fileSize: 19314770, uploadTime: '08/18 11:02:33' },
 ];
 
 // 上传文件抽屉：先选文件类型与知识类目，再上传文件，下一步勾选知识加工方案。
@@ -8837,7 +9596,7 @@ const uploadTagOptions = ['医保', '药品目录', '常见问题', '营销知�
 // 上传 / 更新文件抽屉「勾选方案」步骤共用的方案列表。
 function UploadPlanList({ plans, planId, onSelect }) {
   if (!plans.length) {
-    return <div className="upload-picked-empty">没有可加工已选文件格式的启用中方案，请先在「知识加工方案」中新建或调整方案。</div>;
+    return <div className="upload-picked-empty">暂无可用方案，未选择加工方案将无法加工，请移除该格式文件后再确认。</div>;
   }
   return (
     <div className="upload-plan-list">
@@ -8952,7 +9711,7 @@ function UploadFileDrawer({ project, plans, onClose, onSubmit }) {
         <>
           <button type="button" className="secondary" onClick={() => { setError(''); setStep('files'); }}>上一步</button>
           <button type="button" className="secondary" onClick={onClose}>取消</button>
-          <button type="button" className="primary" onClick={confirmUpload}>确定上传</button>
+          <button type="button" className="primary" onClick={confirmUpload}>确认上传并开始加工</button>
         </>
       )}
     >
@@ -9005,7 +9764,7 @@ function UploadFileDrawer({ project, plans, onClose, onSubmit }) {
               <PickedFileTable files={files} emptyText="尚未选择文件。" />
             </Field>
             <Field label="勾选方案" required group>
-              <p className="upload-plan-hint">仅展示可加工已选文件格式的启用中方案，方案名称右侧为适用格式组。</p>
+              <p className="upload-plan-hint">已按 知识形态 × 本次上传的格式组 匹配候选方案。每个格式组至少选择一个形态；同一“格式组 × 形态”至多选择一个方案，未选择的形态不生成。</p>
               <UploadPlanList plans={matchedPlans} planId={planId} onSelect={setPlanId} />
             </Field>
           </>
@@ -9085,7 +9844,7 @@ function UpdateFileDrawer({ row, project, plans = [], onClose, onSubmit }) {
         <>
           <button type="button" className="secondary" onClick={() => { setError(''); setStep('files'); }}>上一步</button>
           <button type="button" className="secondary" onClick={onClose}>取消</button>
-          <button type="button" className="primary" onClick={confirmUpdate}>确定更新</button>
+          <button type="button" className="primary" onClick={confirmUpdate}>确认更新</button>
         </>
       )}
     >
@@ -9148,7 +9907,7 @@ function UpdateFileDrawer({ row, project, plans = [], onClose, onSubmit }) {
               <PickedFileTable files={file ? [{ ...file, sizeText: formatFileSize(file.size) }] : []} emptyText="尚未选择新文件。" />
             </Field>
             <Field label="勾选方案" required group>
-              <p className="upload-plan-hint">仅展示可加工已选文件格式的启用中方案，方案名称右侧为适用格式组。</p>
+              <p className="upload-plan-hint">已按 知识形态 × 本次上传的格式组 匹配候选方案。每个格式组至少选择一个形态；同一“格式组 × 形态”至多选择一个方案，未选择的形态不生成。</p>
               <UploadPlanList plans={matchedPlans} planId={planId} onSelect={setPlanId} />
             </Field>
           </>
@@ -9164,22 +9923,26 @@ function FileUploadPage({ projectId, notify }) {
   const [keyword, setKeyword] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('知识类目');
   const [enabledFilter, setEnabledFilter] = useState('启用状态');
-  const [processFilter, setProcessFilter] = useState('文件状态');
+  const [statusFilter, setStatusFilter] = useState('文件状态');
   const [sourceFilter, setSourceFilter] = useState('来源');
-  const [tagFilter, setTagFilter] = useState('标签');
+  const [tagFilter, setTagFilter] = useState('选择标签');
   const [selectedIds, setSelectedIds] = useState([]);
   const [detailFile, setDetailFile] = useState(null);
   const [chainFile, setChainFile] = useState(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [updateFile, setUpdateFile] = useState(null);
+  const [moreMenuId, setMoreMenuId] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [categoryDialog, setCategoryDialog] = useState(null);
+  const [pageNum, setPageNum] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [extraRows, setExtraRows] = useState([]);
-  const [formatGroupFilter, setFormatGroupFilter] = useState('');
   const fileInputRef = useRef(null);
 
   const project = dataStore.getProject(projectId) || dataStore.getProjects()[0];
-  const categoryOptions = ['知识类目', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.category)))];
-  const sourceOptions = ['来源', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.source)))];
-  const tagOptions = ['标签', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.tag).filter((tag) => tag !== '—')))];
+  const categoryOptions = ['知识类目', ...Array.from(new Set(fileUploadSeedRows.map((row) => row.category).filter(Boolean)))];
+  const sourceOptions = ['来源', ...fileUploadSourceOptions.map((option) => option.label)];
+  const tagOptions = ['选择标签', ...Array.from(new Set(fileUploadSeedRows.flatMap((row) => row.tags || []).filter(Boolean)))];
   const resolveCategoryId = (categoryName) => {
     const solution = dataStore.getProjectSolution(project.id);
     const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
@@ -9199,16 +9962,30 @@ function FileUploadPage({ projectId, notify }) {
     if (kw && !row.name.toLowerCase().includes(kw)) return false;
     if (categoryFilter !== '知识类目' && row.category !== categoryFilter) return false;
     if (enabledFilter !== '启用状态' && (enabledFilter === '启用' ? !row.enabled : row.enabled)) return false;
-    if (processFilter !== '文件状态' && row.processStatus !== processFilter) return false;
-    if (sourceFilter !== '来源' && row.source !== sourceFilter) return false;
-    if (tagFilter !== '标签' && row.tag !== tagFilter) return false;
-    // 格式筛选按「格式组」匹配：表格(xls、xlsx、csv) 选中时 xlsx 与 csv 都命中。
-    if (formatGroupFilter) {
-      const group = knowledgeFormatGroups.find((item) => item.id === formatGroupFilter);
-      if (group && !group.formats.includes(normalizeUploadFormat(row.format))) return false;
+    if (statusFilter !== '文件状态' && deriveFileUploadStatus(row).main.label !== statusFilter) return false;
+    if (sourceFilter !== '来源') {
+      const option = fileUploadSourceOptions.find((item) => item.label === sourceFilter);
+      if (!option || row.fileSource !== option.value) return false;
     }
+    if (tagFilter !== '选择标签' && !(row.tags || []).includes(tagFilter)) return false;
     return true;
   });
+
+  // 分页：线上为「共 N 条 / 页码 / 10 条每页（可切换 20、50）」，本地按同一口径分页。
+  const totalRows = rows.length;
+  const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
+  const currentPage = Math.min(pageNum, pageCount);
+  const pagedRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  // 批量操作按线上口径分组：可停用 / 可启用 / 可开始处理 / 待确认类目 / 已确认类目。
+  const selectedRows = rows.filter((row) => selectedIds.includes(row.id));
+  const batchDisableIds = selectedRows.filter((row) => row.enabled).map((row) => row.id);
+  const batchEnableIds = selectedRows.filter((row) => !row.enabled).map((row) => row.id);
+  const batchBuildableIds = selectedRows
+    .filter((row) => row.formConfigured === 'CONFIG' && row.processStatus !== 'SUCCESS' && row.processStatus !== 'RUNNING')
+    .map((row) => row.id);
+  const batchConfirmIds = selectedRows.filter((row) => row.uploadStatus !== 'CONFIRMED').map((row) => row.id);
+  const batchEditIds = selectedRows.filter((row) => row.uploadStatus === 'CONFIRMED').map((row) => row.id);
 
   const toggleRow = (id) => {
     setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
@@ -9216,10 +9993,79 @@ function FileUploadPage({ projectId, notify }) {
   const toggleAll = () => {
     setSelectedIds((current) => (rows.every((row) => current.includes(row.id)) ? [] : rows.map((row) => row.id)));
   };
-  const batchAction = (label) => {
+  // 行内/批量的启用状态与删除：沿用线上的二次确认文案。
+  const patchRow = (id, patch) => {
+    setExtraRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+    const seed = fileUploadSeedRows.find((row) => row.id === id);
+    if (seed) Object.assign(seed, patch);
+  };
+  const toggleRowEnabled = (row, nextEnabled) => {
+    setConfirmDialog({
+      title: nextEnabled ? '确认启用' : '确认停用',
+      content: `确定要${nextEnabled ? '启用' : '停用'}文件「${row.name}」吗？${nextEnabled ? '启用后文件将参与知识生成。' : '停用后文件将不再参与知识生成。'}`,
+      okText: nextEnabled ? '确认启用' : '确认停用',
+      onOk: () => {
+        patchRow(row.id, { enabled: nextEnabled });
+        notify(nextEnabled ? '已启用' : '已停用', 'success');
+        setConfirmDialog(null);
+      },
+    });
+  };
+  const removeRow = (row) => {
+    setConfirmDialog({
+      title: '删除文件',
+      content: `确定要删除文件「${row.name}」吗？此操作不可撤销，关联的切片/问答对/知识点等派生内容也将被清理。`,
+      okText: '删除',
+      danger: true,
+      onOk: () => {
+        setExtraRows((current) => current.filter((item) => item.id !== row.id));
+        notify('已删除', 'success');
+        setConfirmDialog(null);
+      },
+    });
+  };
+  const batchSetEnabled = (ids, nextEnabled) => {
+    if (!ids.length) return;
+    setConfirmDialog({
+      title: nextEnabled ? '确认启用' : '确认停用',
+      content: `确定要${nextEnabled ? '启用' : '停用'}选中的 ${ids.length} 个文件吗？${nextEnabled ? '启用后文件将参与知识生成。' : '停用后文件将不再参与知识生成。'}`,
+      okText: nextEnabled ? '确认启用' : '确认停用',
+      onOk: () => {
+        ids.forEach((id) => patchRow(id, { enabled: nextEnabled }));
+        notify(nextEnabled ? '启用成功' : '停用成功', 'success');
+        setSelectedIds([]);
+        setConfirmDialog(null);
+      },
+    });
+  };
+  const batchDelete = () => {
     if (!selectedIds.length) return;
-    notify(`已对 ${selectedIds.length} 个文件执行「${label}」`, 'success');
-    setSelectedIds([]);
+    setConfirmDialog({
+      title: '删除文件',
+      content: `确定要删除选中的 ${selectedIds.length} 个文件吗？此操作不可撤销，关联的切片/问答对/知识点等派生内容也将被清理。`,
+      okText: '删除',
+      danger: true,
+      onOk: () => {
+        setExtraRows((current) => current.filter((item) => !selectedIds.includes(item.id)));
+        notify('删除成功', 'success');
+        setSelectedIds([]);
+        setConfirmDialog(null);
+      },
+    });
+  };
+  const batchReprocess = () => {
+    if (!selectedIds.length) return;
+    setConfirmDialog({
+      title: '确认批量重处理',
+      content: `将对选中的 ${selectedIds.length} 个文件按最新方案重新加工。是否继续？`,
+      okText: '批量重处理',
+      onOk: () => {
+        selectedIds.forEach((id) => patchRow(id, { processStatus: 'RUNNING' }));
+        notify(`已对 ${selectedIds.length} 个文件触发重处理`, 'success');
+        setSelectedIds([]);
+        setConfirmDialog(null);
+      },
+    });
   };
   const onPickFiles = () => {
     if (!fileInputRef.current) return;
@@ -9231,35 +10077,60 @@ function FileUploadPage({ projectId, notify }) {
     if (!fileList.length) return;
     notify(`已选择 ${fileList.length} 个文件，上传执行不在本期原型范围内`, 'success');
   };
-  // 上传抽屉「确定上传」：把文件落到列表顶部，状态为待处理，并回带所选方案。
+  // 上传抽屉「确认上传并开始加工」：把文件落到列表顶部，类目已指定则直接进入待处理。
   const submitUpload = ({ files, categoryIds, tagCategory, tag, plan, typeName }) => {
     const now = new Date();
-    const categoryText = categoryIds.length ? categoryIds.map((id) => resolveCategoryName(id)).join('、') : '未指定类目';
+    const categoryText = categoryIds.length ? categoryIds.map((id) => resolveCategoryName(id)).join('、') : '';
     setExtraRows((current) => [
       ...files.map((file, index) => ({
         id: `fu-new-${file.key}-${index}`,
         name: file.name.replace(/\.[^.]+$/, ''),
-        source: `手动上传 · ${typeName}`,
+        fileSource: 'MANUAL',
+        sourceSystem: '',
+        source: `人工上传 · ${typeName}`,
         category: categoryText,
-        tagCategory: tagCategory || '-',
+        tagCategory: tagCategory || '',
+        tags: tag ? [tag] : [],
         tag: tag || '—',
         format: normalizeUploadFormat(file.extension),
         enabled: true,
-        processStatus: '待处理',
+        uploadStatus: categoryIds.length ? 'CONFIRMED' : 'RECOMMENDING',
+        formConfigured: plan ? 'CONFIG' : 'UNCONFIG',
+        processStatus: 'PENDING',
+        knowledgeForms: [],
         size: formatFileSize(file.size),
+        fileSize: file.size,
         uploadTime: `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`,
       })),
       ...current,
     ]);
-    notify(`已上传 ${files.length} 个文件，将按方案「${plan?.name || '-'}」进行知识加工`, 'success');
+    notify(categoryIds.length
+      ? `已上传 ${files.length} 个文件，已开始加工。`
+      : `已上传 ${files.length} 个文件，等待知识类目确认后可开始处理。`, 'success');
     setUploadOpen(false);
   };
   const submitUpdate = (file) => {
     setExtraRows((current) => current.map((row) => (row.id === updateFile.id
-      ? { ...row, name: file.name.replace(/\.[^.]+$/, ''), size: formatFileSize(file.size), processStatus: '待处理', enabled: true }
+      ? {
+        ...row,
+        name: file.name.replace(/\.[^.]+$/, ''),
+        size: formatFileSize(file.size),
+        fileSize: file.size,
+        processStatus: 'PENDING',
+        enabled: true,
+      }
       : row)));
-    notify(`已更新文件「${file.name}」，将重新走一遍知识加工流程`, 'success');
+    notify('文件已更新，正在重新加工', 'success');
     setUpdateFile(null);
+  };
+  // 行操作：确认知识类目 / 开始处理 / 知识加工结果跳转。
+  const confirmCategoryRow = (row) => {
+    patchRow(row.id, { uploadStatus: 'CONFIRMED', category: row.category || '营销知识' });
+    notify('知识类目确认成功', 'success');
+  };
+  const startProcessRow = (row) => {
+    patchRow(row.id, { processStatus: 'RUNNING', formConfigured: 'CONFIG' });
+    notify('已开始处理', 'success');
   };
 
   const formatMeta = (format) => workbenchFileFormatMeta[format];
@@ -9280,6 +10151,7 @@ function FileUploadPage({ projectId, notify }) {
       <Toolbar className="file-upload-toolbar">
         <button type="button" className="primary" onClick={() => setUploadOpen(true)}><FileUploadIcon /> 上传文件</button>
         <input ref={fileInputRef} type="file" multiple hidden onChange={onFilesChosen} />
+        <SearchBox value={keyword} onChange={setKeyword} placeholder="搜索文件名" />
         <SelectField value={categoryFilter} onChange={setCategoryFilter} dropdownMinWidth={120}>
           {categoryOptions.map((option) => <option value={option} key={option}>{option}</option>)}
         </SelectField>
@@ -9288,23 +10160,20 @@ function FileUploadPage({ projectId, notify }) {
           <option value="启用">启用</option>
           <option value="停用">停用</option>
         </SelectField>
-        <SelectField value={processFilter} onChange={setProcessFilter} dropdownMinWidth={120}>
+        <SelectField value={statusFilter} onChange={setStatusFilter} dropdownMinWidth={120}>
           <option value="文件状态">文件状态</option>
           <option value="待处理">待处理</option>
           <option value="处理中">处理中</option>
-          <option value="已处理">已处理</option>
-        </SelectField>
-        <SelectField value={formatGroupFilter} onChange={setFormatGroupFilter} dropdownMinWidth={200}>
-          <option value="">文件格式</option>
-          {knowledgeFormatGroups.map((group) => <option value={group.id} key={group.id}>{group.displayLabel}</option>)}
+          <option value="成功">成功</option>
+          <option value="失败">失败</option>
+          <option value="未配置">未配置</option>
         </SelectField>
         <SelectField value={sourceFilter} onChange={setSourceFilter} dropdownMinWidth={110}>
           {sourceOptions.map((option) => <option value={option} key={option}>{option}</option>)}
         </SelectField>
-        <SelectField value={tagFilter} onChange={setTagFilter} dropdownMinWidth={110}>
+        <SelectField value={tagFilter} onChange={setTagFilter} dropdownMinWidth={120}>
           {tagOptions.map((option) => <option value={option} key={option}>{option}</option>)}
         </SelectField>
-        <SearchBox value={keyword} onChange={setKeyword} placeholder="搜索文件名" />
       </Toolbar>
       <section className="panel file-upload-table-panel">
         <table className="data-table file-upload-table">
@@ -9315,80 +10184,140 @@ function FileUploadPage({ projectId, notify }) {
             <col className="file-upload-col-tagcat" />
             <col className="file-upload-col-tag" />
             <col className="file-upload-col-format" />
+            <col className="file-upload-col-size" />
+            <col className="file-upload-col-time" />
+            <col className="file-upload-col-source" />
+            <col className="file-upload-col-status" />
+            <col className="file-upload-col-enabled" />
             <col className="file-upload-col-action" />
           </colgroup>
           <thead>
             <tr>
-              <th><TreeCheckbox checked={rows.length > 0 && rows.every((row) => selectedIds.includes(row.id))} indeterminate={selectedIds.length > 0 && !rows.every((row) => selectedIds.includes(row.id))} onChange={toggleAll} /></th>
+              <th><TreeCheckbox checked={pagedRows.length > 0 && pagedRows.every((row) => selectedIds.includes(row.id))} indeterminate={selectedIds.length > 0 && !pagedRows.every((row) => selectedIds.includes(row.id))} onChange={toggleAll} /></th>
               <th>文件名称</th>
               <th>知识类目</th>
               <th>标签分类</th>
               <th>标签</th>
               <th>格式</th>
+              <th>大小</th>
+              <th>上传时间</th>
+              <th>来源</th>
+              <th>文件状态</th>
+              <th>启用状态</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => {
+            {pagedRows.map((row) => {
               const meta = formatMeta(row.format);
               const FormatIcon = meta?.Icon;
+              const status = deriveFileUploadStatus(row);
+              const sourceLabel = (fileUploadSourceOptions.find((item) => item.value === row.fileSource) || {}).label || '-';
+              const moreOpen = moreMenuId === row.id;
+              const confirmed = row.uploadStatus === 'CONFIRMED';
+              const canUpdate = row.enabled && row.processStatus !== 'RUNNING' && row.uploadStatus !== 'RECOMMENDING';
+              const canViewResult = row.processStatus === 'SUCCESS';
+              const resultForms = fileUploadKnowledgeForms.filter((form) => (row.knowledgeForms || []).includes(form.value));
               return (
                 <tr key={row.id}>
                   <td><TreeCheckbox checked={selectedIds.includes(row.id)} onChange={() => toggleRow(row.id)} /></td>
                   <td>
                     <div className="file-upload-name">
                       <span className="strong">{row.name}</span>
-                      <small>来源：{row.source}</small>
+                      <small>来源: {row.fileSource === 'OPENAPI_SYNC' && row.sourceSystem ? row.sourceSystem : '-'}</small>
                     </div>
                   </td>
-                  <td>{row.category}</td>
-                  <td>{row.tagCategory}</td>
-                  <td>{row.tag}</td>
+                  <td>
+                    {row.category
+                      ? <span className="fu-tag fu-tag-blue">{row.category}</span>
+                      : <span className="fu-tag fu-tag-warning">类目待确认</span>}
+                  </td>
+                  <td>{row.tagCategory || '-'}</td>
+                  <td>{(row.tags || []).length ? (row.tags || []).map((tag) => <span className="fu-tag" key={tag}>{tag}</span>) : '-'}</td>
                   <td>
                     <span className="file-upload-format" style={meta?.color ? { color: meta.color } : undefined}>
                       {FormatIcon ? <FormatIcon /> : null}
                       {row.format.toUpperCase()}
                     </span>
                   </td>
-                  <td className="actions">
+                  <td>{row.size}</td>
+                  <td>{row.uploadTime}</td>
+                  <td>{sourceLabel}</td>
+                  <td>
+                    <span className={`fu-tag fu-tag-${status.main.color}`} title={status.rows.map(([label, value]) => `${label}：${value}`).join('\n')}>
+                      {status.main.label}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`fu-tag ${row.enabled ? 'fu-tag-success' : 'fu-tag-default'}`}>{row.enabled ? '启用' : '停用'}</span>
+                  </td>
+                  <td className="actions file-upload-actions">
                     <button type="button" onClick={() => setDetailFile(row)}>文件详情</button>
                     <button type="button" onClick={() => openChain(row)}>处理链路</button>
-                    <button type="button" onClick={() => setUpdateFile(row)}>更新文件</button>
+                    <span className="file-upload-more">
+                      <button type="button" onClick={() => setMoreMenuId(moreOpen ? null : row.id)}>
+                        更多 <DownOutlined />
+                      </button>
+                      {moreOpen ? (
+                        <div className="file-upload-more-menu">
+                          {confirmed ? (
+                            <button type="button" onClick={() => { setCategoryDialog({ mode: 'edit', rows: [row] }); setMoreMenuId(null); }}>编辑知识类目</button>
+                          ) : (
+                            <button type="button" onClick={() => { confirmCategoryRow(row); setMoreMenuId(null); }}>确认知识类目</button>
+                          )}
+                          <button type="button" disabled={!canUpdate} onClick={() => { setUpdateFile(row); setMoreMenuId(null); }}>更新文件</button>
+                          <div className="file-upload-more-sub">
+                            <span className={canViewResult ? '' : 'disabled'}>知识加工结果 <i>›</i></span>
+                            {canViewResult ? (
+                              <div className="file-upload-more-submenu">
+                                {resultForms.length ? resultForms.map((form) => (
+                                  <button
+                                    type="button"
+                                    key={form.value}
+                                    onClick={() => { notify(`已跳转至「${form.label}」，并按文件「${row.name}」过滤`, 'success'); setMoreMenuId(null); }}
+                                  >
+                                    {form.label}
+                                  </button>
+                                )) : <span className="file-upload-more-empty">暂无可查看的知识形态</span>}
+                              </div>
+                            ) : null}
+                          </div>
+                          <button type="button" onClick={() => { toggleRowEnabled(row, !row.enabled); setMoreMenuId(null); }}>{row.enabled ? '停用' : '启用'}</button>
+                          <button type="button" onClick={() => { removeRow(row); setMoreMenuId(null); }}>删除</button>
+                        </div>
+                      ) : null}
+                    </span>
                   </td>
                 </tr>
               );
             })}
-            {rows.length === 0 ? <tr><td colSpan={7} className="empty-table-cell">暂无匹配文件</td></tr> : null}
+            {pagedRows.length === 0 ? <tr><td colSpan={12} className="empty-table-cell">暂无匹配文件</td></tr> : null}
           </tbody>
         </table>
+        <div className="file-upload-pagination">
+          <span>共 {totalRows} 条</span>
+          <button type="button" disabled={currentPage <= 1} onClick={() => setPageNum(currentPage - 1)}>‹</button>
+          <span className="file-upload-pagination-current">{currentPage}</span>
+          <button type="button" disabled={currentPage >= pageCount} onClick={() => setPageNum(currentPage + 1)}>›</button>
+          <SelectField value={String(pageSize)} onChange={(value) => { setPageSize(Number(value)); setPageNum(1); }} dropdownMinWidth={90}>
+            {[10, 20, 50].map((size) => <option value={String(size)} key={size}>{size} 条/页</option>)}
+          </SelectField>
+        </div>
         {selectedIds.length ? (
           <div className="file-upload-batchbar">
             <span className="file-upload-batchbar-count">已选 {selectedIds.length} 项</span>
-            <button type="button" onClick={() => batchAction('停用')}>停用</button>
-            <button type="button" onClick={() => batchAction('启用')}>启用</button>
-            <button type="button" onClick={() => batchAction('开始处理')}>开始处理</button>
-            <button type="button" onClick={() => batchAction('批量确认类目')}>批量确认类目</button>
-            <button type="button" onClick={() => batchAction('批量编辑类目')}>批量编辑类目</button>
-            <button type="button" className="danger-link" onClick={() => batchAction('删除')}>删除</button>
+            <button type="button" disabled={!batchDisableIds.length} onClick={() => batchSetEnabled(batchDisableIds, false)}>停用 ({batchDisableIds.length})</button>
+            <button type="button" disabled={!batchEnableIds.length} onClick={() => batchSetEnabled(batchEnableIds, true)}>启用 ({batchEnableIds.length})</button>
+            <button type="button" disabled={!batchBuildableIds.length} onClick={() => { batchBuildableIds.forEach((id) => patchRow(id, { processStatus: 'RUNNING' })); notify('已开始处理', 'success'); setSelectedIds([]); }}>开始处理 ({batchBuildableIds.length})</button>
+            <button type="button" disabled={!batchConfirmIds.length} onClick={() => { batchConfirmIds.forEach((id) => patchRow(id, { uploadStatus: 'CONFIRMED' })); notify(`已确认 ${batchConfirmIds.length} 个文件的知识类目。`, 'success'); setSelectedIds([]); }}>批量确认类目 ({batchConfirmIds.length})</button>
+            <button type="button" disabled={!batchEditIds.length} onClick={() => setCategoryDialog({ mode: 'edit', rows: selectedRows.filter((row) => row.uploadStatus === 'CONFIRMED') })}>批量编辑类目 ({batchEditIds.length})</button>
+            <button type="button" onClick={batchReprocess}>批量重处理 ({selectedIds.length})</button>
+            <button type="button" className="danger-link" onClick={batchDelete}>删除 ({selectedIds.length})</button>
           </div>
         ) : null}
       </section>
       {detailFile ? (
-        <Drawer title="文件详情" onClose={() => setDetailFile(null)}>
-          <div className="file-upload-detail">
-            <h3>{detailFile.name}</h3>
-            <div className="file-upload-detail-grid">
-              <div><label>知识类目</label><strong>{detailFile.category}</strong></div>
-              <div><label>来源</label><strong>{detailFile.source}</strong></div>
-              <div><label>格式</label><strong>{detailFile.format.toUpperCase()}</strong></div>
-              <div><label>标签分类</label><strong>{detailFile.tagCategory}</strong></div>
-              <div><label>标签</label><strong>{detailFile.tag}</strong></div>
-              <div><label>启用状态</label><strong>{detailFile.enabled ? '启用' : '停用'}</strong></div>
-              <div><label>文件状态</label><strong>{detailFile.processStatus}</strong></div>
-            </div>
-            <p className="file-upload-detail-tip">展示文件的类目、来源、格式与状态等基础信息。</p>
-          </div>
-        </Drawer>
+        <FileDetailDrawer file={detailFile} onClose={() => setDetailFile(null)} />
       ) : null}
       {chainFile ? (
         <Drawer title="处理链路 · 过程追踪" onClose={() => setChainFile(null)} className="file-upload-chain-drawer">
@@ -9412,6 +10341,175 @@ function FileUploadPage({ projectId, notify }) {
           onSubmit={submitUpdate}
         />
       ) : null}
+      {confirmDialog ? (
+        <div className="fu-modal-mask" onClick={() => setConfirmDialog(null)}>
+          <div className="fu-modal" onClick={(event) => event.stopPropagation()}>
+            <h3>{confirmDialog.title}</h3>
+            <p>{confirmDialog.content}</p>
+            <div className="fu-modal-actions">
+              <button type="button" className="secondary" onClick={() => setConfirmDialog(null)}>取消</button>
+              <button type="button" className={confirmDialog.danger ? 'danger' : 'primary'} onClick={confirmDialog.onOk}>{confirmDialog.okText}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {categoryDialog ? (
+        <CategoryEditModal
+          mode={categoryDialog.mode}
+          rows={categoryDialog.rows}
+          categoryOptions={categoryOptions.filter((option) => option !== '知识类目')}
+          onClose={() => setCategoryDialog(null)}
+          onConfirm={(targets) => {
+            targets.forEach((item) => patchRow(item.id, { category: item.category, uploadStatus: 'CONFIRMED' }));
+            notify(categoryDialog.mode === 'edit' ? '类目与方案已保存。' : '知识类目确认成功', 'success');
+            setSelectedIds([]);
+            setCategoryDialog(null);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+// 文件详情：线上为三页签（基础信息 / 内容摘要 / 解析内容），弹窗与抽屉内标题为文件名。
+function FileDetailDrawer({ file, onClose }) {
+  const [tab, setTab] = useState('basic');
+  const forms = fileUploadKnowledgeForms.filter((item) => (file.knowledgeForms || []).includes(item.value));
+  const [formValue, setFormValue] = useState(forms[0]?.value || '');
+  const status = deriveFileUploadStatus(file);
+  const sourceLabel = (fileUploadSourceOptions.find((item) => item.value === file.fileSource) || {}).label || '-';
+  const recallable = fileUploadRecallable(file);
+  const tabs = [
+    { id: 'basic', label: '基础信息' },
+    { id: 'summary', label: '内容摘要' },
+    { id: 'parse', label: '解析内容' },
+  ];
+  return (
+    <Drawer title={`${file.name}.${file.format}`} onClose={onClose} className="file-detail-drawer">
+      <div className="file-detail-tabs">
+        {tabs.map((item) => (
+          <button type="button" key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>{item.label}</button>
+        ))}
+      </div>
+      {tab === 'basic' ? (
+        <div className="file-detail-grid">
+          <div className="file-detail-cell span-2"><label>文件名称</label><strong>{file.name}.{file.format}</strong></div>
+          <div className="file-detail-cell"><label>文件格式</label><strong>{file.format.toUpperCase()}</strong></div>
+          <div className="file-detail-cell"><label>文件大小</label><strong>{file.size}</strong></div>
+          <div className="file-detail-cell"><label>知识类目</label><strong>{file.category || '-'}</strong></div>
+          <div className="file-detail-cell span-2"><label>标签</label><strong>{(file.tags || []).join('、') || '-'}</strong></div>
+          <div className="file-detail-cell"><label>知识形态</label><strong>{forms.map((item) => item.label).join('、') || '-'}</strong></div>
+          <div className="file-detail-cell"><label>文件状态</label><strong>{status.main.label}</strong></div>
+          <div className="file-detail-cell"><label>可召回</label><strong>{recallable ? '可召回' : '不可召回'}</strong></div>
+          <div className="file-detail-cell"><label>启用状态</label><strong>{file.enabled ? '启用' : '停用'}</strong></div>
+          <div className="file-detail-cell"><label>创建时间</label><strong>{file.uploadTime}</strong></div>
+          <div className="file-detail-cell"><label>文件来源</label><strong>{sourceLabel}</strong></div>
+          <div className="file-detail-cell"><label>来源系统</label><strong>{file.sourceSystem || '-'}</strong></div>
+        </div>
+      ) : null}
+      {tab === 'summary' ? (
+        <div className="file-detail-summary">
+          <div className="file-detail-summary-block">
+            <label>内容摘要</label>
+            <p>{file.summary || '暂无内容摘要'}</p>
+          </div>
+          <div className="file-detail-summary-block">
+            <label>处理方式</label>
+            <p>{forms.length ? `${forms.map((item) => item.label).join('、')} 自动加工` : '—'}</p>
+          </div>
+          <div className="file-detail-summary-block">
+            <label>文字量</label>
+            <p>{file.wordsCount ? `${file.wordsCount} 字` : '—'}</p>
+          </div>
+        </div>
+      ) : null}
+      {tab === 'parse' ? (
+        <div className="file-detail-parse">
+          <Field label="知识形态" group>
+            <SelectField value={formValue} onChange={setFormValue} missingLabel="暂无知识形态">
+              {forms.length
+                ? forms.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)
+                : <option value="">暂无知识形态</option>}
+            </SelectField>
+          </Field>
+          <div className="file-detail-parse-meta">
+            <div><label>解析方式</label><strong>{file.parseMethod || '自动识别'}</strong></div>
+            <div><label>解析工具</label><strong>{file.parseTool || '-'}</strong></div>
+            <div><label>启用能力</label><strong>{forms.length ? '文本抽取、结构还原' : '-'}</strong></div>
+          </div>
+          <div className="file-detail-parse-preview">
+            <label>解析内容预览</label>
+            <pre>{file.parsePreview || '暂无解析内容预览'}</pre>
+          </div>
+        </div>
+      ) : null}
+    </Drawer>
+  );
+}
+
+// 编辑 / 确认知识类目弹窗：线上列为「文件名称 / 当前知识类目 / 确认知识类目」，支持统一设置后应用到全部。
+function CategoryEditModal({ mode, rows, categoryOptions, onClose, onConfirm }) {
+  const [target, setTarget] = useState({});
+  const [unified, setUnified] = useState('');
+  const single = rows.length <= 1;
+  const title = single
+    ? (mode === 'edit' ? '编辑知识类目' : '确认知识类目')
+    : (mode === 'edit' ? '批量编辑知识类目' : '批量确认知识类目');
+  const applyAll = () => {
+    if (!unified) return;
+    const next = {};
+    rows.forEach((row) => { next[row.id] = unified; });
+    setTarget(next);
+  };
+  return (
+    <div className="fu-modal-mask" onClick={onClose}>
+      <div className="fu-modal fu-modal-wide" onClick={(event) => event.stopPropagation()}>
+        <h3>{title}</h3>
+        {single ? null : (
+          <div className="fu-modal-unified">
+            <span>统一设置知识类目</span>
+            <SelectField value={unified} onChange={setUnified} missingLabel="请选择知识类目" dropdownMinWidth={200}>
+              <option value="">请选择知识类目</option>
+              {categoryOptions.map((option) => <option value={option} key={option}>{option}</option>)}
+            </SelectField>
+            <button type="button" onClick={applyAll}>应用到全部</button>
+          </div>
+        )}
+        <table className="data-table fu-modal-table">
+          <thead>
+            <tr><th>文件名称</th><th>当前知识类目</th><th>确认知识类目</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td>{row.name}</td>
+                <td>{row.category || <span className="fu-tag fu-tag-warning">未确认</span>}</td>
+                <td>
+                  <SelectField
+                    value={target[row.id] ?? row.category ?? ''}
+                    onChange={(value) => setTarget((current) => ({ ...current, [row.id]: value }))}
+                    missingLabel="请选择知识类目"
+                    dropdownMinWidth={200}
+                  >
+                    <option value="">请选择知识类目</option>
+                    {categoryOptions.map((option) => <option value={option} key={option}>{option}</option>)}
+                  </SelectField>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="fu-modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => onConfirm(rows.map((row) => ({ id: row.id, category: target[row.id] ?? row.category ?? '' })))}
+          >
+            {mode === 'edit' ? '保存' : '确认'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -9464,9 +10562,11 @@ function formatChainTimeRange(startedAt, endedAt) {
 }
 
 function mapFileProcessStatus(status) {
-  if (status === '已处理') return '处理成功';
-  if (status === '处理中') return '处理中';
-  if (status === '待处理') return '待处理';
+  // 兼容英文枚举（线上口径）与原型早期中文取值。
+  if (status === 'SUCCESS' || status === '已处理') return '处理成功';
+  if (status === 'RUNNING' || status === '处理中') return '处理中';
+  if (status === 'FAILED') return '处理失败';
+  if (status === 'NONE' || status === 'PENDING' || status === '待处理') return '待处理';
   return status || '-';
 }
 
@@ -9542,7 +10642,7 @@ function buildChainForRun(file, formType, run) {
   }));
   const result = demoResult(fileLike, nodes, formType, file.category || '', run.version, file.categoryId || '');
   const failIndex = run.status === '失败' ? Math.min(2, nodes.length - 1) : -1;
-  const isRunning = file.processStatus === '处理中' || run.status === '执行中';
+  const isRunning = file.processStatus === 'RUNNING' || file.processStatus === '处理中' || run.status === '执行中';
   result.nodeExecutions.forEach((nodeRun, index) => {
     if (isRunning) {
       nodeRun.status = '执行中';
@@ -9659,6 +10759,11 @@ function FileChainView({ file }) {
   const version = plan.versions.find((item) => item.id === versionId) || plan.versions[0];
   const [runId, setRunId] = useState(() => version.runs[0].id);
   const run = version.runs.find((item) => item.id === runId) || version.runs[0];
+  // 日志查询条（对齐线上「日志级别 / MCP 工具 / 按日志内容搜索 / 查询日志」）
+  const [logLevel, setLogLevel] = useState('');
+  const [logTool, setLogTool] = useState('');
+  const [logKeyword, setLogKeyword] = useState('');
+  const [logQueried, setLogQueried] = useState(false);
 
   const switchForm = (form) => {
     const nextCatalog = buildRunCatalog(file, form);
@@ -9686,7 +10791,7 @@ function FileChainView({ file }) {
   const statusText = mapFileProcessStatus(file.processStatus);
   const chainNodes = nodes.filter((node) => node.enabled !== false);
   const executions = result.nodeExecutions || result.toolRuns || [];
-  const isRunning = file.processStatus === '处理中';
+  const isRunning = file.processStatus === 'RUNNING' || file.processStatus === '处理中';
   const runStatusMeta = getExecutionStatusMeta(
     isRunning ? '执行中' : run.status,
     run ? (run.status === '失败' ? 'failed' : 'success') : 'notRun',
@@ -9694,8 +10799,8 @@ function FileChainView({ file }) {
   const timeRange = formatChainTimeRange(run.startedAt, isRunning ? null : run.endedAt);
   const durationText = isRunning ? '—' : run.durationText;
 
-  const content = statusText === '待处理'
-    ? <div className="empty-mini large">该文件尚未处理，暂无可追踪的处理链路。</div>
+  const content = file.formConfigured === 'UNCONFIG'
+    ? <div className="empty-mini large">处理方案未就绪，文件尚未进入处理流程</div>
     : (
       <>
         <h3 className="drawer-section-title file-chain-section-title">标准化处理流程</h3>
@@ -9703,9 +10808,23 @@ function FileChainView({ file }) {
           {forms.map((form) => (
             <button key={form} type="button" className={activeForm === form ? 'active' : ''} onClick={() => switchForm(form)}>
               {getKnowledgeFormTypeLabel(form)}
+              {form === activeForm ? <Badge tone={runStatusMeta.tone}>{runStatusMeta.label}</Badge> : null}
             </button>
           ))}
         </div>
+        <div className="file-chain-logbar">
+          <SelectField value={logLevel} onChange={setLogLevel} dropdownMinWidth={120}>
+            <option value="">日志级别</option>
+            {['DEBUG', 'INFO', 'WARN', 'ERROR'].map((level) => <option value={level} key={level}>{level}</option>)}
+          </SelectField>
+          <SelectField value={logTool} onChange={setLogTool} dropdownMinWidth={160}>
+            <option value="">MCP 工具</option>
+            {chainNodes.map((node) => <option value={node.toolName} key={node.nodeId || node.toolName}>{node.toolName}</option>)}
+          </SelectField>
+          <SearchBox value={logKeyword} onChange={setLogKeyword} placeholder="按日志内容搜索" />
+          <button type="button" className="primary" onClick={() => setLogQueried(true)}>查询日志</button>
+        </div>
+        {logQueried ? <p className="file-chain-loghint">已按条件查询日志，命中 {Math.max(1, chainNodes.length)} 条记录。</p> : null}
         <section className="file-chain-record">
           <div className="file-chain-record-selects">
             <label>
@@ -9752,13 +10871,17 @@ function FileChainView({ file }) {
   return (
     <div className="file-chain">
       <div className="file-chain-info">
-        <div><label>知识类目</label><strong>{file.category}</strong></div>
-        <div><label>文件格式</label><strong>{file.format.toUpperCase()}</strong></div>
-        <div><label>文件大小</label><strong>{file.size}</strong></div>
-        <div><label>文件状态</label><strong>{statusText}</strong></div>
-        <div><label>启用状态</label><strong>{file.enabled ? '启用' : '停用'}</strong></div>
-        <div><label>上传时间</label><strong>{formatUploadDate(file.uploadTime)}</strong></div>
-        <div><label>标签</label><strong>{file.tag}</strong></div>
+        <div className="file-chain-info-name"><strong>{file.name}.{file.format}</strong></div>
+        <div><label>知识类目：</label><strong>{file.category || '-'}</strong></div>
+        <div><label>文件格式：</label><strong>{file.format.toUpperCase()}</strong></div>
+        <div><label>文件大小：</label><strong>{file.size}</strong></div>
+        <div><label>文件状态：</label><strong>{deriveFileUploadStatus(file).main.label}</strong></div>
+        <div><label>启用状态：</label><strong>{file.enabled ? '启用' : '停用'}</strong></div>
+        <div><label>标签：</label><strong>{(file.tags || []).join('、') || '-'}</strong></div>
+        <div><label>上传时间：</label><strong>{formatUploadDate(file.uploadTime)}</strong></div>
+        {file.fileSource === 'OPENAPI_SYNC' && file.sourceSystem ? (
+          <div><label>来源：</label><strong>{file.sourceSystem}同步</strong></div>
+        ) : null}
       </div>
       {content}
     </div>
@@ -9774,10 +10897,16 @@ function buildResultSnapshot(row, formType) {
     category: '营销知识',
     format: 'docx',
     size: '1.16 MB',
-    processStatus: '已处理',
+    processStatus: 'SUCCESS',
     enabled: true,
     uploadTime: '2026-08-18 10:31:05',
     tag: '-',
+    tags: [],
+    fileSource: 'MANUAL',
+    sourceSystem: '',
+    uploadStatus: 'CONFIRMED',
+    formConfigured: 'CONFIG',
+    knowledgeForms: ['UNSTRUCTURED_SLICE'],
     categoryId: '',
   };
   const catalog = buildRunCatalog(file, formType);
@@ -15918,7 +17047,7 @@ function SamplePreview({ files, results = [] }) {
 }
 
 // 导航状态与 URL 同步：刷新后停留在当前页面（含方案配置工作台等深层位置）
-const NAVIGABLE_SCREENS = new Set(['ops-projects', 'ops-category', 'ops-plans', 'ops-access', 'ops-file-upload', 'ops-workbench', 'ops-knowledge-points', 'admin-mcp', 'admin-tools', 'ops-slice-library', 'ops-qa-library', 'ops-retrieval']);
+const NAVIGABLE_SCREENS = new Set(['ops-projects', 'ops-category', 'ops-plans', 'ops-access', 'ops-file-upload', 'ops-workbench', 'ops-knowledge-points', 'admin-mcp', 'admin-tools', 'ops-slice-library', 'ops-qa-library', 'ops-retrieval', 'ops-space-config', 'ops-badcase']);
 
 function serializeNavigation(active, projectId, workbenchTarget) {
   const query = new URLSearchParams(window.location.search);
@@ -16001,7 +17130,8 @@ export function App() {
   useEffect(() => {
     serializeNavigation(active, projectId, workbenchTarget);
   }, [active, projectId, workbenchTarget]);
-  const openSolution = (id) => { setProjectId(id); setActive('ops-category'); };
+  // 「知识空间管理」行内不再提供「详情」入口（对齐线上只有 编辑 / 停用）。
+  // `ops-category` 因此不再由本页进入，仅作为工作台的返回目标保留。
   const openWorkbench = (id, categoryId = null, formType = '切片库', fileFormat = workbenchFileFormats[0], focusVersion = null, knowledgePlanId = null, returnScreen = 'ops-category') => {
     setWorkbenchTarget({ projectId: id, categoryId, formType, fileFormat, focusVersion, knowledgePlanId, returnScreen, entryNonce: Date.now() });
     setActive('ops-workbench');
@@ -16010,7 +17140,7 @@ export function App() {
   let content;
   if (active === 'admin-mcp') content = <McpServicePage />;
   else if (active === 'admin-tools') content = <ToolManagementPage notify={notify} />;
-  else if (active === 'ops-projects') content = <ProjectManagementPage notify={notify} onOpenSolution={openSolution} />;
+  else if (active === 'ops-projects') content = <ProjectManagementPage notify={notify} />;
   else if (active === 'ops-category') content = <ProjectSolutionPage projectId={projectId} notify={notify} onBack={() => setActive('ops-projects')} />;
   else if (active === 'ops-plans') content = <KnowledgePlanPage projectId={projectId} notify={notify} onOpenWorkbench={openWorkbench} />;
   else if (active === 'ops-access') content = <KnowledgeAccessPage projectId={projectId} notify={notify} onOpenPlans={(id) => { setProjectId(id); setActive('ops-plans'); }} />;
@@ -16020,6 +17150,8 @@ export function App() {
   else if (active === 'ops-slice-library') content = <SliceLibraryPage />;
   else if (active === 'ops-qa-library') content = <QaLibraryPage />;
   else if (active === 'ops-retrieval') content = <RetrievalTestPage notify={notify} />;
+  else if (active === 'ops-space-config') content = <SpaceConfigPage notify={notify} />;
+  else if (active === 'ops-badcase') content = <BadcasePage notify={notify} />;
   else content = <EmptyPage title={active} />;
 
   // 方案配置页（工作台）没有独立菜单项：左侧菜单按来源页面保持高亮（从「知识加工方案」进入则继续选中「知识加工方案」）

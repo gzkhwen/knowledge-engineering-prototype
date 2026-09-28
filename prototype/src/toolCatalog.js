@@ -212,7 +212,10 @@ const LEGACY_KEYS = [
   'knowledge-engineering-demo-higress-managed-tool-categories-v22',
 ];
 
-export const defaultCategories = ['文档转换', '文档解析', '文档分块', '内容抽取', '知识打标', '知识提取'];
+// 节点类型对齐线上（2026-09-28 实测线上「流程节点管理」左栏：文档解析 / 文本切片 / 知识抽取 /
+// 系统节点 / 网页解析 / 内容增强）。本地原分类映射：文档转换→文档解析、文档分块→文本切片、
+// 内容抽取→知识抽取、知识打标→内容增强、知识提取→知识抽取。
+export const defaultCategories = ['文档解析', '文本切片', '知识抽取', '系统节点', '网页解析', '内容增强'];
 
 function nowText() {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -739,7 +742,7 @@ const idpDocumentTools = [
     name: 'knowledge_extract_text',
     capability: 'agent.knowledge_extract.text',
     description: '根据输入文本、抽取要求和知识 Schema 返回结构化知识内容。',
-    category: '知识提取',
+    category: '知识抽取',
     enabled: true,
     inputs: [
       createInput('content', 'string', true, '需要执行知识抽取的文本内容。'),
@@ -766,7 +769,7 @@ const idpDocumentTools = [
     slug: 'extract_document_knowledge_graph',
     name: '文档知识图谱抽取',
     description: '基于文本分片抽取实体/关系图谱片段，返回带证据与覆盖统计。',
-    category: '知识提取',
+    category: '知识抽取',
     enabled: true,
     endpoint: 'api/knowledge_graph/extract_document_knowledge_graph',
     method: 'POST',
@@ -782,12 +785,24 @@ const idpDocumentTools = [
     slug: 'document-to-pdf',
     name: '转pdf接口',
     description: '将 Word、图片或其他文档批量转换为 PDF 文件。',
-    category: '文档转换',
+    category: '文档解析',
     enabled: true,
     endpoint: 'api/general/document_to_pdf',
     method: 'POST',
     inputs: [createFilesInput('待转换的文档文件列表。'), createUserIdInput()],
     outputs: createResponseOutputs('转换后的 PDF 文件列表。', { dataDescription: '转换后的 PDF 文件列表。', dataFileType: 'pdf', dataItems: 'string' }),
+  },
+  {
+    // 对齐线上「流程节点管理」中已有的 html_parse 节点（节点名「网页文件解析」，分类「网页解析」）。
+    slug: 'html_parse',
+    name: '网页文件解析',
+    description: '解析 HTML 网页文件，输出保留正文层级与表格结构的 Markdown 内容。',
+    category: '网页解析',
+    enabled: true,
+    endpoint: 'api/document_parser/html_parse',
+    method: 'POST',
+    inputs: [createFilesInput('待解析的 HTML 网页文件列表。'), createUserIdInput()],
+    outputs: createResponseOutputs('解析后的 Markdown 文件列表。', { dataDescription: '解析后的 Markdown 文件列表。', dataFileType: 'md' }),
   },
   {
     slug: 'mx-ocr',
@@ -826,7 +841,7 @@ const idpDocumentTools = [
     slug: 'markdown-chunk',
     name: 'makdown结构化分块接口',
     description: '将 Markdown 文档按指定模式进行结构化分块。',
-    category: '文档分块',
+    category: '文本切片',
     enabled: true,
     endpoint: 'api/general/markdown_chunk',
     method: 'POST',
@@ -840,7 +855,7 @@ const idpDocumentTools = [
     slug: 'extract-md-content-by-title',
     name: 'makdown根据输入标题抽取内容接口',
     description: '根据输入标题从 Markdown 文档中抽取指定段落内容。',
-    category: '内容抽取',
+    category: '知识抽取',
     enabled: true,
     endpoint: 'api/document_content_analysis/extract_md_content_by_titile',
     method: 'POST',
@@ -879,7 +894,7 @@ const idpDocumentTools = [
     slug: 'ofd-to-pdf',
     name: 'OFD文档转PDF文档接口',
     description: '将 OFD 文档批量转换为 PDF 文档。',
-    category: '文档转换',
+    category: '文档解析',
     enabled: true,
     endpoint: 'api/general/ofd_to_pdf',
     method: 'POST',
@@ -890,7 +905,7 @@ const idpDocumentTools = [
     slug: 'extract-footnote',
     name: '保险类条款文档脚注提取api',
     description: '提取保险类条款文档中的脚注内容，输出 Markdown 结果。',
-    category: '内容抽取',
+    category: '知识抽取',
     enabled: true,
     endpoint: 'api/document_content_analysis/extract_footnote',
     method: 'POST',
@@ -901,7 +916,7 @@ const idpDocumentTools = [
     slug: 'knowledge-point-extraction',
     name: '知识点提取接口',
     description: '基于文本分片提取结构化知识点，输出知识点标题、正文和来源分片引用。',
-    category: '内容抽取',
+    category: '知识抽取',
     enabled: true,
     endpoint: 'api/knowledge/point_extract',
     method: 'POST',
@@ -921,7 +936,7 @@ const idpDocumentTools = [
     slug: 'qa-extraction',
     name: 'QA提取接口',
     description: '基于文本分片抽取标准问答对，输出问题、答案和来源片段引用。',
-    category: '内容抽取',
+    category: '知识抽取',
     enabled: true,
     endpoint: 'api/knowledge/qa_extract',
     method: 'POST',
@@ -979,7 +994,7 @@ const knowledgeTaggingTools = [
     slug: 'knowledge-point-tagging',
     name: '知识点打标接口',
     description: '针对单个知识点生成标签、分类和置信度，保留来源分片引用。',
-    category: '知识打标',
+    category: '内容增强',
     enabled: true,
     endpoint: 'api/knowledge/point_tagging',
     method: 'POST',
@@ -1095,7 +1110,7 @@ export const initialServices = [
     name: 'IDP 文档处理 MCP',
     serviceType: '标准 MCP Server',
     endpoint: 'https://mcp.internal.com/idp-document/sse',
-    transport: 'SSE',
+    transport: 'sse',
     authType: 'Bearer Token',
     version: 'V1.0.0',
     status: '连接正常',
@@ -1111,7 +1126,7 @@ export const initialServices = [
     name: '知识图谱抽取 MCP',
     serviceType: '标准 MCP Server',
     endpoint: 'https://mcp.internal.com/knowledge-graph/sse',
-    transport: 'SSE',
+    transport: 'sse',
     authType: 'Bearer Token',
     version: 'V1.0.0',
     status: '连接正常',
@@ -1127,7 +1142,7 @@ export const initialServices = [
     name: '知识加工 MCP',
     serviceType: '标准 MCP Server',
     endpoint: 'https://mcp.internal.com/knowledge-processing/sse',
-    transport: 'SSE',
+    transport: 'sse',
     authType: 'Bearer Token',
     version: 'V1.0.0',
     status: '连接正常',
@@ -1208,21 +1223,21 @@ function getRawSource(services, toolName) {
 }
 
 const managedToolDefinitions = {
-  'knowledge_extract_text': { name: '分片关键词提取', category: '知识提取', description: '对单个文本分片提取指定数量的关键词，并将关键词返回给下游节点或写入当前文本切片。' },
-  'extract_document_knowledge_graph': { name: '单文档图谱抽取', category: '知识提取', description: '基于单份文档的分片和 Schema 抽取可追溯图谱片段。' },
-  'document-to-pdf': { name: '文档转PDF', category: '文档转换', description: '将常见办公文档、图片等材料转换为 PDF 文件，便于后续解析、归档和人工核验。' },
+  'knowledge_extract_text': { name: '分片关键词提取', category: '知识抽取', description: '对单个文本分片提取指定数量的关键词，并将关键词返回给下游节点或写入当前文本切片。' },
+  'extract_document_knowledge_graph': { name: '单文档图谱抽取', category: '知识抽取', description: '基于单份文档的分片和 Schema 抽取可追溯图谱片段。' },
+  'document-to-pdf': { name: '文档转PDF', category: '文档解析', description: '将常见办公文档、图片等材料转换为 PDF 文件，便于后续解析、归档和人工核验。' },
   'mx-ocr': { name: '通用OCR解析', category: '文档解析', description: '对扫描件、图片型 PDF 等文件进行通用 OCR 识别，输出可用于后续加工的 Markdown 文本。' },
   'dots-ocr': { name: '多模态OCR解析', category: '文档解析', description: '面向图文混排、版面复杂的文件进行多模态 OCR 解析，输出结构化 Markdown 文本。' },
   'mineru-ocr': { name: 'MinerU版面解析', category: '文档解析', description: '使用 MinerU 能力解析文档版面与文本内容，适合复杂 PDF 的结构化解析。' },
-  'markdown-chunk': { name: 'Markdown结构化分块', category: '文档分块', description: '按标题层级或自适应策略对 Markdown 文档进行结构化分块。' },
-  'extract-md-content-by-title': { name: '按标题抽取内容', category: '内容抽取', description: '根据指定标题从 Markdown 文档中抽取对应章节或区间内容。' },
-  'knowledge-point-extraction': { name: '知识点提取', category: '内容抽取', description: '基于文本分片结果提取知识点、适用对象和关键规则。' },
-  'qa-extraction': { name: 'QA提取', category: '内容抽取', description: '基于文本分片结果抽取标准问答对，并保留答案来源片段。' },
-  'knowledge-point-tagging': { name: '知识点打标', category: '知识打标', description: '针对单个知识点生成标签、分类和规则命中结果。' },
+  'markdown-chunk': { name: 'Markdown结构化分块', category: '文本切片', description: '按标题层级或自适应策略对 Markdown 文档进行结构化分块。' },
+  'extract-md-content-by-title': { name: '按标题抽取内容', category: '知识抽取', description: '根据指定标题从 Markdown 文档中抽取对应章节或区间内容。' },
+  'knowledge-point-extraction': { name: '知识点提取', category: '知识抽取', description: '基于文本分片结果提取知识点、适用对象和关键规则。' },
+  'qa-extraction': { name: 'QA提取', category: '知识抽取', description: '基于文本分片结果抽取标准问答对，并保留答案来源片段。' },
+  'knowledge-point-tagging': { name: '知识点打标', category: '内容增强', description: '针对单个知识点生成标签、分类和规则命中结果。' },
   'paddle-ocr': { name: 'PaddleOCR解析', category: '文档解析', description: '使用 Paddle 多模态 OCR 能力解析文档，适合多版式文件的文本抽取。' },
   'deepseek-ocr': { name: 'DeepSeek文档解析', category: '文档解析', description: '使用 DeepSeek 多模态能力解析文档内容，支持通过提示词补充解析要求。' },
-  'ofd-to-pdf': { name: 'OFD转PDF', category: '文档转换', description: '将 OFD 文档转换为 PDF，便于进入统一解析和存储流程。' },
-  'extract-footnote': { name: '条款脚注提取', category: '内容抽取', description: '从保险条款类文档中提取脚注内容，形成可进一步加工的文本结果。' },
+  'ofd-to-pdf': { name: 'OFD转PDF', category: '文档解析', description: '将 OFD 文档转换为 PDF，便于进入统一解析和存储流程。' },
+  'extract-footnote': { name: '条款脚注提取', category: '知识抽取', description: '从保险条款类文档中提取脚注内容，形成可进一步加工的文本结果。' },
   'hunyuan-ocr': { name: 'Hunyuan文档解析', category: '文档解析', description: '使用 Hunyuan 多模态 OCR 能力解析文档，适合定位、解析和信息抽取类任务。' },
   'glm-ocr': { name: 'GLM文档解析', category: '文档解析', description: '使用智谱 GLM 多模态 OCR 能力解析文档，输出 Markdown 文本结果。' },
 };
@@ -1245,7 +1260,7 @@ function getPrimaryStorageOutputName(rawTool) {
 }
 
 function managedToolStorageFor(rawTool, index) {
-  const isConverter = rawTool.category === '文档转换';
+  const isConverter = rawTool.category === '文档解析';
   if (rawTool.slug === 'knowledge_extract_text') {
     const persistenceParseCode = `function parsePersistenceResult(mcpResult, context) {
   const limit = Math.min(Math.max(Number(context.config.keyword_count) || 5, 1), 30);
@@ -1354,21 +1369,21 @@ function createManagedNodeInputArtifacts(rawTool, definition) {
   if (rawTool.slug === 'knowledge_extract_text') {
     return [createManagedNodeArtifact('chunk', '分片', 'string', 'text', '当前需要提取关键词的文本分片。')];
   }
-  if (definition.category === '文档转换') {
+  if (definition.category === '文档解析') {
     return [createManagedNodeArtifact('source_files', '待转换文件', 'array<object>', 'file_object', '待转换的原始文件，可来自人工上传或上游节点输出。')];
   }
-  if (definition.category === '知识提取' && rawTool.slug === 'extract_document_knowledge_graph') {
+  if (definition.category === '知识抽取' && rawTool.slug === 'extract_document_knowledge_graph') {
     return [
       createManagedNodeArtifact('chunks', '文本分片', 'array<object>', 'text_chunks', '有序文本分片，用于图谱抽取。'),
     ];
   }
-  if (definition.category === '文档分块') {
+  if (definition.category === '文本切片') {
     return [createManagedNodeArtifact('markdown_documents', 'Markdown文档', 'array<object>', 'text_blocks', '待分块的 Markdown 文档或解析后的结构化文本。')];
   }
-  if (definition.category === '内容抽取') {
+  if (definition.category === '知识抽取') {
     return [createManagedNodeArtifact('source_documents', '待抽取内容', 'array<object>', 'text_blocks', '待抽取的 Markdown 文档、文本切片或结构化章节内容。')];
   }
-  if (definition.category === '知识打标') {
+  if (definition.category === '内容增强') {
     return [createManagedNodeArtifact('knowledge_point', '待打标知识点', 'object', 'knowledge_point', '待打标的单个知识点，可来自迭代执行的当前元素。')];
   }
   const isFootnote = rawTool.slug === 'extract-footnote';
@@ -1459,28 +1474,28 @@ function createManagedNodeConfigParams(rawTool, definition) {
       createManagedNodeParam('keyword_count', '关键词数量', 'integer', true, '希望从当前分片中提取的关键词数量上限，取值范围 1～30。', 5, { min: 1, max: 30 }),
     ];
   }
-  if (definition.category === '文档转换') {
+  if (definition.category === '文档解析') {
     return [
       createManagedNodeParam('target_format', '目标格式', 'string', true, '转换后的目标文件格式。', 'pdf'),
       createManagedNodeParam('retain_layout', '保留版式', 'boolean', false, '是否尽量保留原文件版式。', true),
       createManagedNodeParam('output_naming_rule', '输出命名规则', 'string', false, '转换结果文件的命名规则。', '{original_name}.pdf'),
     ];
   }
-  if (definition.category === '知识提取' && rawTool.slug === 'extract_document_knowledge_graph') {
+  if (definition.category === '知识抽取' && rawTool.slug === 'extract_document_knowledge_graph') {
     return [
       createManagedNodeParam('graph_schema', '图谱结构定义', 'string', true, '选择当前知识空间下已创建的三元组管理 Schema；抽取时按该 Schema 定义实体、属性与关系类型。', ''),
       createManagedNodeParam('include_isolated_entities', '保留孤立实体', 'boolean', false, '是否保留无关系实体。', true),
       createManagedNodeParam('extraction_instruction', '补充抽取说明', 'string', false, '可选的抽取提示词。', ''),
     ];
   }
-  if (definition.category === '文档分块') {
+  if (definition.category === '文本切片') {
     return [
       createManagedNodeParam('chunk_strategy', '分块策略', 'string', true, '按标题、段落或语义边界进行分块。', 'heading'),
       createManagedNodeParam('max_chunk_size', '最大切片长度', 'number', true, '单个切片允许的最大字符数。', 1200),
       createManagedNodeParam('overlap_size', '重叠长度', 'number', false, '相邻切片之间保留的重叠字符数。', 120),
     ];
   }
-  if (definition.category === '内容抽取') {
+  if (definition.category === '知识抽取') {
     if (rawTool.slug === 'knowledge-point-extraction') {
       return [
         createManagedNodeParam('summary_type', '提取类型', 'string', true, '控制知识点提取的目标类型。', '政策摘要'),
@@ -1493,7 +1508,7 @@ function createManagedNodeConfigParams(rawTool, definition) {
       createManagedNodeParam('include_context', '包含上下文', 'boolean', false, '是否在抽取结果中保留前后文。', true),
     ];
   }
-  if (definition.category === '知识打标') {
+  if (definition.category === '内容增强') {
     return [
       createManagedNodeParam('tag_strategy', '打标策略', 'string', true, '控制知识点打标时采用的标签生成策略。', '结构感知打标'),
       createManagedNodeParam('label_pool', '标签范围', 'array<string>', false, '本次打标可使用的标签范围。', ['适用对象', '办理条件', '材料要求']),
@@ -1533,7 +1548,7 @@ function createManagedNodeParameterMappingCode(rawTool, definition, artifacts, p
   };
 }`;
   }
-  if (definition.category === '知识提取' && rawTool.slug === 'extract_document_knowledge_graph') {
+  if (definition.category === '知识抽取' && rawTool.slug === 'extract_document_knowledge_graph') {
     return `function mapParams(context) {
   const graphSchema = context.config.graph_schema || {};
   const schemaStructure = graphSchema && typeof graphSchema === 'object' && graphSchema.structure
@@ -1566,7 +1581,7 @@ function createManagedNodeParameterMappingCode(rawTool, definition, artifacts, p
       return `    ${input.name}: context.nodeInput.${artifactName}`;
     }
     if (input.name === 'prompt') {
-      const fallbackConfig = definition.category === '内容抽取' ? 'extract_scope' : 'parse_mode';
+      const fallbackConfig = definition.category === '知识抽取' ? 'extract_scope' : 'parse_mode';
       return `    ${input.name}: context.config.${fallbackConfig}`;
     }
     const fallback = input.defaultValue !== undefined && input.defaultValue !== '' ? ` ?? ${JSON.stringify(input.defaultValue)}` : '';
@@ -1592,7 +1607,7 @@ function createEntityRelationExtractionManagedTool() {
     id: 'ke-platform-entity-relation-extraction',
     name: '实体关系抽取',
     description: '从单份文档中识别实体、关系与来源证据，输出待建图候选；不进行跨文档归一化。',
-    category: '知识提取',
+    category: '知识抽取',
     kind: '内置工具',
     sourceType: '平台内置',
     sourceServiceId: 'knowledge-engineering-platform',
@@ -1758,7 +1773,7 @@ function createSelfDevelopedGraphExtractionManagedTool() {
       id: 'ke-platform-self-dev-graph-extraction',
       name: '自研图谱抽取',
       description: '自研的单文档图谱抽取节点：按所选 Schema 抽取实体、属性与关系，输出可建图的图谱片段。当前为停用状态的示例节点，仅用于讲解节点注册与 Schema 动态引用逻辑。',
-      category: '知识提取',
+      category: '知识抽取',
       kind: '内置工具',
       sourceType: '平台内置',
       sourceServiceId: 'knowledge-engineering-platform',
@@ -1932,7 +1947,7 @@ function createQaExpansionManagedTool(service, rawTool) {
     id: 'ke-idp-knowledge_extract_text-qa-expansion',
     name: 'QA提取-支持问法扩写',
     description: '基于输入文本提取标准问答对，并为每个标准问题生成指定数量的相似问。',
-    category: '知识提取',
+    category: '知识抽取',
     sourceServiceId: service.id,
     sourceServiceName: service.name,
     sourceToolName: rawTool.name,
@@ -2084,7 +2099,7 @@ function normalizeStoredTools(tools) {
       ...rawTool,
       id: normalizedId,
       name: normalizedName,
-      category: rawTool.category || (isLegacyKnowledgeGraph ? '知识提取' : '未分类'),
+      category: rawTool.category || (isLegacyKnowledgeGraph ? '知识抽取' : '未分类'),
       status: isLegacyKnowledgeGraph ? '可用' : rawTool.status || (rawTool.enabled === false ? '不可用' : '可用'),
       lifecycleStatus: isLegacyKnowledgeGraph ? '已发布' : rawTool.lifecycleStatus || '已发布',
       kind: rawTool.kind || (rawTool.sourceType === '平台内置' ? '内置工具' : '外部工具'),
@@ -2319,7 +2334,7 @@ export function createEmptyServiceDraft() {
   return {
     name: '',
     serviceType: '标准 MCP Server',
-    transport: 'SSE',
+    transport: 'sse',
     endpoint: '',
     authType: '无鉴权',
     authHeader: 'Authorization',

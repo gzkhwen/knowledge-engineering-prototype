@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { PlusOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons';
+import { PlusOutlined, QuestionCircleOutlined, SearchOutlined, SyncOutlined } from '@ant-design/icons';
 import {
   App,
   Button,
@@ -301,7 +301,7 @@ export function McpServicePage() {
       ),
     },
     {
-      title: '最近检查/同步',
+      title: '最近检查·同步',
       dataIndex: 'lastSyncedAt',
       render: (_, service) => (service.status === '连接中' ? '检查中' : service.lastSyncedAt),
     },
@@ -372,32 +372,39 @@ export function McpServicePage() {
 
   return (
     <>
-      <Card
-        title={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 600 }}>MCP服务管理</div>
-              <div style={{ fontSize: 13, color: '#8c8c8c', marginTop: 4 }}>集中接入、检查和管理平台可用的 MCP 服务。</div>
-            </div>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>接入MCP服务</Button>
-          </div>
-        }
-        style={{ margin: 24 }}
-      >
-        <Table
-          columns={columns}
-          dataSource={services}
-          rowKey="id"
-          pagination={false}
-          scroll={{ x: 1080 }}
-          locale={{ emptyText: <Empty description="暂无 MCP 服务，请先接入一个服务。" /> }}
-        />
-      </Card>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 20, fontWeight: 600 }}>MCP 服务管理</span>
+        <Tooltip title="集中接入、检查和管理平台可用的 MCP 服务。">
+          <QuestionCircleOutlined style={{ fontSize: 14, color: '#8c8c8c' }} />
+        </Tooltip>
+      </div>
+      <div style={{ marginTop: 20 }}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>接入 MCP 服务</Button>
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <Card styles={{ body: { padding: '16px 24px' } }}>
+          <Table
+            columns={columns}
+            dataSource={services}
+            rowKey="id"
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: true,
+              pageSizeOptions: ['10', '20', '50'],
+              showTotal: (total) => `共 ${total} 条`,
+              size: 'small',
+            }}
+            scroll={{ x: 1080 }}
+            locale={{ emptyText: <Empty description="暂无 MCP 服务，请先接入一个服务。" /> }}
+          />
+        </Card>
+      </div>
 
       <ModalForm
         form={form}
         open={dialogOpen}
-        title={editingId ? '编辑MCP服务' : '接入MCP服务'}
+        title={editingId ? '编辑 MCP 服务' : '接入 MCP 服务'}
         onOpenChange={(open) => {
           if (!open && dialogOpen) requestCloseDialog();
         }}
@@ -435,8 +442,8 @@ export function McpServicePage() {
           name="transport"
           label="MCP连接协议类型"
           options={[
-            { value: 'SSE', label: 'SSE' },
-            { value: 'Streamable HTTP', label: 'Streamable HTTP' },
+            { value: 'sse', label: 'SSE' },
+            { value: 'streamable_http', label: 'Streamable HTTP' },
           ]}
           rules={[{ required: true, message: '请选择 MCP 连接协议类型' }]}
         />
