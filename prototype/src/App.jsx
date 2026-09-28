@@ -267,7 +267,7 @@ function Modal({ title, children, footer, onClose, wide = false, className = '' 
   );
 }
 
-function Drawer({ title, children, onClose, wide = false, width = null, className = '', footer = null, darkHead = false }) {
+function Drawer({ title, children, onClose, wide = false, width = null, className = '', footer = null, darkHead = false, extra = null }) {
   return (
     <div className="drawer-layer">
       <div className="drawer-mask" onClick={onClose} />
@@ -278,6 +278,7 @@ function Drawer({ title, children, onClose, wide = false, width = null, classNam
         <div className="drawer-head">
           {darkHead ? <button type="button" className="icon-button" onClick={onClose}><CloseOutlined /></button> : null}
           <h2>{title}</h2>
+          {extra}
           {darkHead ? null : <button type="button" className="icon-button" onClick={onClose}><CloseOutlined /></button>}
         </div>
         <div className="drawer-body">{children}</div>
@@ -301,6 +302,622 @@ function ConfirmDialog({ title, message, danger, cancelText = '取消', confirmT
     >
       <p className="confirm-copy">{message}</p>
     </Modal>
+  );
+}
+
+/* ── 检索测试 / Badcase 对齐线上（2026-09-28）新增的基础控件 ─────────────── */
+
+// 配置卡片：标题 + 可选右上角说明 pill（线上「临时配置，不保存」橙色 tag）。
+function ConfigCard({ title, notice, extra, children, className = '' }) {
+  return (
+    <section className={`config-card ${className}`.trim()}>
+      {title || notice || extra ? (
+        <div className="config-card-head">
+          {title ? <strong className="config-card-title">{title}</strong> : null}
+          {notice ? <span className="config-card-pill">{notice}</span> : null}
+          <span className="config-card-extra">{extra}</span>
+        </div>
+      ) : null}
+      <div className="config-card-body">{children}</div>
+    </section>
+  );
+}
+
+// 开关（对齐 antd Switch 样式，复用已有 .switch-control）。
+function Switch({ active, onChange, label, ariaLabel }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-pressed={Boolean(active)}
+      aria-label={ariaLabel || label}
+      className={`switch-control ${active ? 'active' : ''}`}
+      onClick={() => onChange(!active)}
+    >
+      <span />
+    </button>
+  );
+}
+
+// 分段控件（单路/多路等）。options 可为 string[] 或 {value,label}[]。
+function Segmented({ options, value, onChange, className = '' }) {
+  return (
+    <div className={`segmented ${className}`.trim()}>
+      {options.map((opt) => {
+        const val = typeof opt === 'string' ? opt : opt.value;
+        const lbl = typeof opt === 'string' ? opt : opt.label;
+        return (
+          <button key={val} type="button" className={value === val ? 'active' : ''} onClick={() => onChange(val)}>
+            {lbl}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// 0-1 滑杆：原生 range + 当前值。
+function RangeSlider({ value, onChange, min = 0, max = 1, step = 0.01, label }) {
+  return (
+    <label className={`range-slider ${label ? 'has-label' : ''}`.trim()}>
+      {label ? <span className="range-slider-label">{label}</span> : null}
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+      <span className="range-slider-value">{value}</span>
+    </label>
+  );
+}
+
+// 配置区内固定宽度的下拉（复用 SelectField 渲染，仅固定外层宽度便于布局）。
+function ConfigSelect({ className = '', ...rest }) {
+  return <span className={`config-select-wrap ${className}`.trim()}><SelectField {...rest} /></span>;
+}
+
+// 多选下拉（标签多选 / 多路知识形态）。value 为数组；portap 定位复用 SelectField 思路。
+function MultiSelectField({ value = [], onChange, options, placeholder = '请选择', maxCount, className = '' }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const dropRef = useRef(null);
+  const [dropStyle, setDropStyle] = useState(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const handlePointerDown = (event) => {
+      if (!rootRef.current?.contains(event.target) && !dropRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [open]);
+  const openDrop = () => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect) return setOpen((c) => !c);
+    const viewportPadding = 16;
+    const gap = 6;
+    const minHeight = 60;
+    const preferredHeight = Math.min(280, options.length * 34 + 16 || 220);
+    const below = window.innerHeight - rect.bottom - viewportPadding - gap;
+    const openUpward = below < minHeight;
+    const panelTop = openUpward ? Math.max(viewportPadding, rect.top - preferredHeight - gap) : rect.bottom + gap;
+    const width = Math.max(rect.width, 220);
+    const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - width - viewportPadding);
+    setDropStyle({ position: 'fixed', top: panelTop, left, width, zIndex: 300 });
+    setOpen((c) => !c);
+  };
+  const toggle = (key) => {
+    let next;
+    if (value.includes(key)) next = value.filter((k) => k !== key);
+    else next = [...value, key];
+    if (maxCount && next.length > maxCount) next = next.slice(0, maxCount);
+    onChange(next);
+  };
+  const selected = options.filter((o) => value.includes(o.value));
+  return (
+    <span ref={rootRef} className={`multi-select ${className}`.trim()}>
+      <button type="button" className={`multi-select-trigger ${open ? 'open' : ''}`} onClick={openDrop}>
+        {selected.length ? (
+          <span className="multi-select-value">
+            {selected.slice(0, maxCount || selected.length).map((s) => (
+              <span className="multi-tag" key={s.value}>
+                <em>{s.label}</em>
+                <b onClick={(e) => { e.stopPropagation(); toggle(s.value); }}>×</b>
+              </span>
+            ))}
+            {maxCount && selected.length > maxCount ? <span className="multi-more">+{selected.length - maxCount}</span> : null}
+          </span>
+        ) : <span className="multi-placeholder">{placeholder}</span>}
+        <AntDownOutlined />
+      </button>
+      {open && dropStyle ? createPortal(
+        <span ref={dropRef} className="multi-select-drop" style={dropStyle}>
+          {options.length ? options.map((o) => (
+            <label key={o.value} className={`multi-option ${value.includes(o.value) ? 'checked' : ''}`} onClick={(e) => e.stopPropagation()}>
+              <input type="checkbox" checked={value.includes(o.value)} onChange={() => toggle(o.value)} />
+              <span>{o.label}</span>
+            </label>
+          )) : <span className="multi-select-empty">暂无可选</span>}
+        </span>,
+        document.body,
+      ) : null}
+    </span>
+  );
+}
+
+// Badcase 结果 Tabs（实际结果 / 期望结果）。
+function BadcaseTabs({ tabs, active, onChange }) {
+  return (
+    <div className="badcase-tabs">
+      {tabs.map((tab) => (
+        <button key={tab.key} type="button" className={active === tab.key ? 'active' : ''} onClick={() => onChange(tab.key)}>
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ── 检索参数配置：检索服务与新建 Badcase 共用同一套控件（对齐线上 Vo 组件） ── */
+const RETRIEVAL_FORM_OPTIONS = [
+  { value: '文本切片', form: '切片库' },
+  { value: '问答对', form: 'QA库' },
+  { value: '知识点', form: '知识点' },
+];
+const RETRIEVAL_RECALL_CONTENT = {
+  文本切片: ['切片内容'],
+  问答对: ['问题', '答案', '问题+答案'],
+  知识点: ['标题', '内容', '标题+内容'],
+};
+const RETRIEVAL_TAG_CATEGORIES = [
+  { name: '医保', tags: ['药品目录', '报销比例', '异地就医'] },
+  { name: '基金', tags: ['基金申购', '赎回规则'] },
+  { name: '保险', tags: ['重疾险', '医疗险'] },
+];
+const RETRIEVAL_RERANK_MODELS = ['bge-reranker-v2-m3', 'qwen3-reranker-base', 'gpt-rerank-2'];
+
+function formToHitForm(form) {
+  return RETRIEVAL_FORM_OPTIONS.find((option) => option.value === form)?.form || form;
+}
+
+function defaultRetrievalConfig() {
+  return {
+    recallMode: 'SINGLE',
+    singleForm: '问答对',
+    singleRecallContent: '问题+答案',
+    singleRetrievalMode: '混合检索',
+    semanticWeight: 0.5,
+    fullWeight: 0.5,
+    multiForms: ['文本切片', '问答对', '知识点'],
+    multiRecallContent: { 文本切片: '切片内容', 问答对: '问题+答案', 知识点: '标题+内容' },
+    fusionStrategy: 'RRF 融合',
+    weightMode: '等权融合',
+    formWeights: { 文本切片: 0.4, 问答对: 0.35, 知识点: 0.25 },
+    topK: 10,
+    thresholdEnabled: false,
+    threshold: 0.5,
+    rerankEnabled: false,
+    rerankModel: '',
+  };
+}
+
+// 参数项右侧的蓝色小字提示（线上 label 旁的说明文案）。
+function ParamHint({ text }) {
+  if (!text) return null;
+  return <Tooltip title={text}><span className="retrieval-param-hint">{text}</span></Tooltip>;
+}
+
+// 标签级联多选：对齐线上「标签分类 / 一级…五级」多列弹层，已选超过 1 个折叠为 +N。
+function TagCascadeSelect({ value = [], onChange, categories = RETRIEVAL_TAG_CATEGORIES, placeholder = '选择标签', disabled = false }) {
+  const [open, setOpen] = useState(false);
+  const [activeCategory, setActiveCategory] = useState(categories[0]?.name || '');
+  const rootRef = useRef(null);
+  const dropRef = useRef(null);
+  const [dropStyle, setDropStyle] = useState(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (event) => {
+      if (!rootRef.current?.contains(event.target) && !dropRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+  const openDrop = () => {
+    if (disabled) return;
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (rect) {
+      const width = 360;
+      const left = Math.min(Math.max(16, rect.left), window.innerWidth - width - 16);
+      setDropStyle({ position: 'fixed', top: rect.bottom + 6, left, width, zIndex: 300 });
+    }
+    setOpen((current) => !current);
+  };
+  const toggle = (tag) => onChange(value.includes(tag) ? value.filter((item) => item !== tag) : [...value, tag]);
+  const tags = categories.find((category) => category.name === activeCategory)?.tags || [];
+  return (
+    <span ref={rootRef} className={`multi-select tag-cascade ${disabled ? 'disabled' : ''}`.trim()}>
+      <button type="button" className={`multi-select-trigger ${open ? 'open' : ''}`} disabled={disabled} onClick={openDrop}>
+        {value.length ? (
+          <span className="multi-select-value">
+            <span className="multi-tag">
+              <em>{value[0]}</em>
+              <b onClick={(event) => { event.stopPropagation(); toggle(value[0]); }}>×</b>
+            </span>
+            {value.length > 1 ? <Tooltip title={value.join('、')}><span className="multi-more">+{value.length - 1}</span></Tooltip> : null}
+          </span>
+        ) : <span className="multi-placeholder">{placeholder}</span>}
+        <AntDownOutlined />
+      </button>
+      {open && dropStyle ? createPortal(
+        <span ref={dropRef} className="tag-cascade-panel" style={dropStyle}>
+          <span className="tag-cascade-col tag-cascade-col-cat">
+            {categories.map((category) => (
+              <button
+                type="button"
+                key={category.name}
+                className={`tag-cascade-cat ${activeCategory === category.name ? 'active' : ''}`}
+                onClick={() => setActiveCategory(category.name)}
+              >
+                {category.name}
+              </button>
+            ))}
+          </span>
+          <span className="tag-cascade-col">
+            {tags.map((tag) => (
+              <label key={tag} className={`tag-cascade-tag ${value.includes(tag) ? 'checked' : ''}`} onClick={(event) => event.stopPropagation()}>
+                <input type="checkbox" checked={value.includes(tag)} onChange={() => toggle(tag)} />
+                <span>{tag}</span>
+              </label>
+            ))}
+          </span>
+        </span>,
+        document.body,
+      ) : null}
+    </span>
+  );
+}
+
+// 检索参数配置表单：字段顺序、禁用态与联动逻辑对齐线上。
+function RetrievalConfigForm({ config, onChange, disabled = false, rerankModels = RETRIEVAL_RERANK_MODELS }) {
+  const set = (patch) => onChange({ ...config, ...patch });
+  const isSingle = config.recallMode === 'SINGLE';
+  const activeForms = isSingle ? [config.singleForm] : config.multiForms;
+  const hybrid = config.singleRetrievalMode === '混合检索';
+  const weightsSum = activeForms.reduce((sum, form) => sum + (config.formWeights[form] ?? 0), 0);
+  const perFormWeight = config.fusionStrategy === '加权分数融合' || config.weightMode === '自定义权重';
+  const singleFormFusionDisabled = config.multiForms.length <= 1;
+  const noRerankModel = !rerankModels.length;
+  return (
+    <div className={`retrieval-param-form ${disabled ? 'disabled' : ''}`.trim()}>
+      <div className="retrieval-param-block">
+        <Segmented
+          options={['单路召回', '多路召回']}
+          value={isSingle ? '单路召回' : '多路召回'}
+          onChange={(value) => set({ recallMode: value === '单路召回' ? 'SINGLE' : 'MULTI' })}
+        />
+      </div>
+      {isSingle ? (
+        <>
+          <div className="retrieval-param-block">
+            <span className="retrieval-param-label">知识形态</span>
+            <ConfigSelect
+              value={config.singleForm}
+              disabled={disabled}
+              onChange={(value) => set({ singleForm: value, singleRecallContent: RETRIEVAL_RECALL_CONTENT[value][0] })}
+              dropdownMinWidth={160}
+            >
+              {RETRIEVAL_FORM_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.value}</option>)}
+            </ConfigSelect>
+          </div>
+          <div className="retrieval-param-block">
+            <span className="retrieval-param-label">召回内容</span>
+            {RETRIEVAL_RECALL_CONTENT[config.singleForm].length === 1 ? (
+              <div className="retrieval-param-static">{RETRIEVAL_RECALL_CONTENT[config.singleForm][0]}</div>
+            ) : (
+              <ConfigSelect value={config.singleRecallContent} disabled={disabled} onChange={(value) => set({ singleRecallContent: value })} dropdownMinWidth={160}>
+                {RETRIEVAL_RECALL_CONTENT[config.singleForm].map((item) => <option value={item} key={item}>{item}</option>)}
+              </ConfigSelect>
+            )}
+          </div>
+          <div className="retrieval-param-block">
+            <span className="retrieval-param-label">检索方式</span>
+            <ConfigSelect
+              value={config.singleRetrievalMode}
+              disabled={disabled}
+              onChange={(value) => set({
+                singleRetrievalMode: value,
+                threshold: value === '语义检索' ? 0.7 : 0.5,
+              })}
+              dropdownMinWidth={160}
+            >
+              {['语义检索', '全文检索', '混合检索'].map((mode) => <option value={mode} key={mode}>{mode}</option>)}
+            </ConfigSelect>
+          </div>
+          {hybrid ? (
+            <>
+              <div className="retrieval-param-block">
+                <span className="retrieval-param-label">语义权重</span>
+                <RangeSlider value={config.semanticWeight} onChange={(value) => set({ semanticWeight: value, fullWeight: Number((1 - value).toFixed(2)) })} />
+              </div>
+              <div className="retrieval-param-block">
+                <span className="retrieval-param-label">全文权重</span>
+                <RangeSlider value={config.fullWeight} onChange={(value) => set({ fullWeight: value })} />
+              </div>
+              {Number((config.semanticWeight + config.fullWeight).toFixed(2)) !== 1 ? <p className="retrieval-param-tip">系统将按比例自动归一化权重</p> : null}
+            </>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <div className="retrieval-param-block">
+            <span className="retrieval-param-label">知识形态</span>
+            <MultiSelectField
+              value={config.multiForms}
+              onChange={(value) => set({ multiForms: value })}
+              options={RETRIEVAL_FORM_OPTIONS.map((option) => ({ value: option.value, label: option.value }))}
+              placeholder="选择知识形态"
+            />
+          </div>
+          {activeForms.map((form) => (
+            <div className="retrieval-param-block" key={form}>
+              <span className="retrieval-param-label">{form}召回内容</span>
+              <ConfigSelect
+                value={config.multiRecallContent[form]}
+                disabled={disabled}
+                onChange={(value) => set({ multiRecallContent: { ...config.multiRecallContent, [form]: value } })}
+                dropdownMinWidth={160}
+              >
+                {RETRIEVAL_RECALL_CONTENT[form].map((item) => <option value={item} key={item}>{item}</option>)}
+              </ConfigSelect>
+            </div>
+          ))}
+          <div className="retrieval-param-block">
+            <span className="retrieval-param-label">
+              融合策略
+              {singleFormFusionDisabled ? <ParamHint text="仅一种知识形态参与召回时，不执行跨形态融合" /> : null}
+              {config.fusionStrategy === '加权分数融合' ? <ParamHint text="加权分数融合会在系统内部对不同召回来源的分数归一化后，再按知识形态权重进行融合排序。" /> : null}
+            </span>
+            <ConfigSelect
+              value={config.fusionStrategy}
+              disabled={disabled || singleFormFusionDisabled}
+              onChange={(value) => set({ fusionStrategy: value, weightMode: value === '加权分数融合' ? '自定义权重' : '等权融合' })}
+              dropdownMinWidth={180}
+            >
+              <option value="RRF 融合">RRF 融合</option>
+              <option value="加权分数融合">加权分数融合</option>
+            </ConfigSelect>
+          </div>
+          {!singleFormFusionDisabled && config.fusionStrategy !== '加权分数融合' ? (
+            <div className="retrieval-param-block-inline">
+              <span className="retrieval-param-label">
+                权重模式
+                {config.weightMode === '自定义权重' && Number(weightsSum.toFixed(2)) !== 1 ? <ParamHint text="系统将按比例自动归一化权重" /> : null}
+              </span>
+              <Segmented options={['等权融合', '自定义权重']} value={config.weightMode} onChange={(value) => set({ weightMode: value })} />
+            </div>
+          ) : null}
+          {!singleFormFusionDisabled && perFormWeight ? activeForms.map((form) => (
+            <div className="retrieval-param-block" key={`w-${form}`}>
+              <span className="retrieval-param-label">{form}权重</span>
+              <RangeSlider value={config.formWeights[form] ?? 0} onChange={(value) => set({ formWeights: { ...config.formWeights, [form]: value } })} />
+            </div>
+          )) : null}
+        </>
+      )}
+      <div className="retrieval-param-block">
+        <span className="retrieval-param-label">返回条数（Top-K）</span>
+        <input
+          type="number"
+          min={1}
+          max={50}
+          className="retrieval-number-input"
+          value={config.topK}
+          disabled={disabled}
+          onChange={(event) => set({ topK: event.target.value === '' ? '' : Number(event.target.value) })}
+        />
+      </div>
+      {config.topK === '' || Number(config.topK) < 1 || Number(config.topK) > 50 ? <p className="retrieval-param-error">返回条数需在 1-50 之间</p> : null}
+      {!(isSingle && config.singleRetrievalMode === '全文检索') ? (
+        <>
+          <div className="retrieval-param-block-inline">
+            <span className="retrieval-param-label">启用 Score 阈值</span>
+            <Switch active={config.thresholdEnabled} onChange={(value) => set({ thresholdEnabled: value })} label="启用 Score 阈值" />
+          </div>
+          {config.thresholdEnabled ? (
+            <div className="retrieval-param-block">
+              <span className="retrieval-param-label">Score 阈值</span>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.01}
+                className="retrieval-number-input"
+                value={config.threshold}
+                disabled={disabled}
+                onChange={(event) => set({ threshold: Number(event.target.value) })}
+              />
+            </div>
+          ) : null}
+          {config.thresholdEnabled && (Number(config.threshold) < 0 || Number(config.threshold) > 1) ? (
+            <p className="retrieval-param-error">Score 阈值需在 0-1 之间</p>
+          ) : null}
+        </>
+      ) : null}
+      <div className="retrieval-param-block-inline">
+        <span className="retrieval-param-label">
+          开启重排
+          {noRerankModel ? <ParamHint text="暂无可用重排模型" /> : null}
+        </span>
+        <Switch active={config.rerankEnabled} onChange={(value) => set({ rerankEnabled: value })} label="开启重排" />
+      </div>
+      {config.rerankEnabled && !noRerankModel ? (
+        <div className="retrieval-param-block">
+          <span className="retrieval-param-label">重排模型</span>
+          <ConfigSelect value={config.rerankModel} disabled={disabled} onChange={(value) => set({ rerankModel: value })} placeholder="请选择重排模型" dropdownMinWidth={200}>
+            <option value="">请选择重排模型</option>
+            {rerankModels.map((model) => <option value={model} key={model}>{model}</option>)}
+          </ConfigSelect>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// 检索结果反馈（线上「问题记录」弹窗）。
+const FEEDBACK_REASONS = ['完全不相关', '排名过低', '答案过时', '信息不全', '其他'];
+function FeedbackFormModal({ content, onCancel, onSubmit }) {
+  const [reason, setReason] = useState('');
+  const [description, setDescription] = useState('');
+  const [error, setError] = useState('');
+  const submit = () => {
+    if (!reason) { setError('请选择反馈原因'); return; }
+    onSubmit({ reason, description });
+  };
+  return (
+    <Modal
+      title="问题记录"
+      className="feedback-modal"
+      onClose={onCancel}
+      footer={(
+        <>
+          <button type="button" className="secondary" onClick={onCancel}>取消</button>
+          <button type="button" className="primary" onClick={submit}>提交</button>
+        </>
+      )}
+    >
+      <div className="feedback-form">
+        {content ? (
+          <div className="feedback-target">
+            <strong>检索结果：</strong>
+            <span>{content}</span>
+          </div>
+        ) : null}
+        <div className="form-field">
+          <span className="field-label-text"><em>*</em>反馈原因</span>
+          <div className="feedback-reasons">
+            {FEEDBACK_REASONS.map((item) => (
+              <label key={item} className={`feedback-reason ${reason === item ? 'checked' : ''}`}>
+                <input type="radio" name="feedback-reason" checked={reason === item} onChange={() => { setReason(item); setError(''); }} />
+                <span>{item}</span>
+              </label>
+            ))}
+          </div>
+          {error ? <p className="retrieval-param-error">{error}</p> : null}
+        </div>
+        <label className="form-field">
+          <span className="field-label-text">问题描述</span>
+          <textarea
+            className="feedback-desc"
+            rows={4}
+            maxLength={500}
+            value={description}
+            placeholder="请详细描述该结果为何不符合预期..."
+            onChange={(event) => setDescription(event.target.value)}
+          />
+          <span className="feedback-count">{description.length}/500</span>
+        </label>
+      </div>
+    </Modal>
+  );
+}
+
+// 反馈历史（线上「反馈历史」弹窗）。
+function FeedbackHistoryModal({ records, onClose }) {
+  return (
+    <Modal
+      title="反馈历史"
+      className="feedback-modal"
+      onClose={onClose}
+      footer={<button type="button" className="secondary" onClick={onClose}>关闭</button>}
+    >
+      {records.length ? (
+        <div className="feedback-history">
+          {records.map((record) => (
+            <div className="feedback-history-item" key={record.id}>
+              <span><em>反馈原因</em>{record.reason}</span>
+              <span><em>问题描述</em>{record.description || '-'}</span>
+              <span><em>反馈人</em>{record.createBy}</span>
+              <span><em>反馈时间</em>{record.createTime}</span>
+            </div>
+          ))}
+        </div>
+      ) : <p className="feedback-empty">暂无反馈记录</p>}
+    </Modal>
+  );
+}
+
+// 查看原文：对齐线上居中弹窗（左源文档预览 + 右来源切片）。
+function CitationPreviewModal({ seed, chunkId, onClose }) {
+  const chunk = (seed?.chunks || []).find((item) => item.id === chunkId) || (seed?.chunks || [])[0] || null;
+  const activeTextIds = chunk?.textIds || [];
+  return (
+    <Modal
+      title="查看原文"
+      className="citation-modal"
+      onClose={onClose}
+      footer={<button type="button" className="secondary" onClick={onClose}>关闭</button>}
+    >
+      <div className="citation-body">
+        <div className="citation-preview">
+          <div className="citation-col-head">源文档预览</div>
+          <div className="citation-col-body">{seed ? <ResultFilePreview seed={seed} activeTextIds={activeTextIds} /> : <p className="feedback-empty">暂无原文</p>}</div>
+        </div>
+        <div className="citation-slices">
+          <div className="citation-col-head">来源切片</div>
+          <div className="citation-col-body">
+            {chunk && seed ? (
+              <RelatedChunkList
+                seed={seed}
+                chunks={[chunk]}
+                activeChunkIds={[chunk.id]}
+                onLocate={() => {}}
+              />
+            ) : <p className="feedback-empty">暂无来源切片</p>}
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// 父子切片命中聚合卡（线上 ParentChildRetrievalCard）。
+function ParentChildHitCard({ hit, expandedSet, onToggle, onFeedback, feedbackState, onViewSource }) {
+  const children = hit.children || [];
+  const expanded = expandedSet.has(hit.id);
+  return (
+    <div className="retrieval-hit retrieval-parent-hit">
+      <div className="retrieval-parent-head">
+        <div className="retrieval-parent-meta">
+          <span className="retrieval-parent-no">{hit.parentSliceNo}</span>
+          <span className="retrieval-parent-source">来源：{hit.source}</span>
+          <span className="retrieval-parent-score">最高得分 {Number(hit.score).toFixed(2)}</span>
+        </div>
+        {hit.titlePath ? <div className="retrieval-parent-path">{hit.titlePath}</div> : null}
+        <div className={`retrieval-parent-content ${expanded ? '' : 'clamped'}`}>{hit.parentContent}</div>
+        <button type="button" className="link-btn" onClick={() => onToggle(hit.id)}>{expanded ? '收起详情' : '显示详情'}</button>
+      </div>
+      <div className="retrieval-child-list">
+        {children.length ? children.map((child) => (
+          (() => {
+            const key = `${hit.id}:${child.id}`;
+            const childExpanded = expandedSet.has(key);
+            return (
+              <div className="retrieval-child" key={child.id}>
+                <div className="retrieval-child-head">
+                  <span className="retrieval-child-no">{child.no}</span>
+                  <span className="retrieval-child-score">{Number(child.score).toFixed(2)}</span>
+                  <button type="button" className="link-btn" onClick={() => onViewSource(child)}>查看原文</button>
+                  <button
+                    type="button"
+                    className={`link-btn ${feedbackState[key] ? 'recorded' : ''}`}
+                    onClick={() => onFeedback(child)}
+                  >
+                    {feedbackState[key] ? '已反馈' : '反馈问题'}
+                  </button>
+                </div>
+                <div className={`retrieval-child-content ${childExpanded ? '' : 'clamped'}`}>{child.content}</div>
+                <button type="button" className="link-btn" onClick={() => onToggle(key)}>{childExpanded ? '收起详情' : '展开详情'}</button>
+              </div>
+            );
+          })()
+        )) : <p className="feedback-empty">暂无命中子切片</p>}
+      </div>
+    </div>
   );
 }
 
@@ -425,11 +1042,11 @@ function Shell({ active, menuActive = active, onNavigate, children }) {
           ['ops-file-upload', '文件上传'],
         ]],
         ['ops-result', '知识加工结果', [
-          ['ops-qa-library', '问答库'],
           ['ops-slice-library', '文本切片'],
+          ['ops-qa-library', '问答库'],
           ['ops-knowledge-points', '知识点'],
         ]],
-        ['ops-retrieval', '搜索测试'],
+        ['ops-retrieval', '检索服务'],
         ['ops-badcase', 'Badcase 管理'],
       ],
     },
@@ -591,42 +1208,46 @@ const knowledgeResultCategories = [
   { id: 'eval-v2', name: '806版本评测 > 产品知识库', count: '99+' },
 ];
 
+// 知识加工结果示例数据统一使用音频文件的切片：文件名与时长在此定义，列表与详情共用。
+const sliceAudioFileName = '百年附加医惠通费用补偿医疗保险.mp3';
+const sliceAudioDuration = '02:06';
+
 const knowledgePointRows = [
   {
     id: 'kp-4',
-    title: '甲类药品报销比例',
-    content: '甲类药品按参保地政策全额纳入报销范围，样例中阿莫西林胶囊、二甲双胍片、奥美拉唑肠溶胶囊的报销比例分别为 90%、95%、92%。',
-    source: '医保药品目录清单.csv',
+    title: '基层药品供应保障要求',
+    content: '健全县（市、区）、乡镇（街道）、村（社区）用药衔接联动机制，适度放宽乡村两级用药品种和数量限制；加快建设医共体中心药房，实现县乡村处方规范流转、用药需求精准匹配。',
+    source: sliceAudioFileName,
     sourceFileStatus: '处理成功',
-    tags: ['医保', '药品目录', '报销比例'],
+    tags: ['营销资料', '公开资料'],
     status: '启用',
     updatedAt: '2026-09-02 15:20',
   },
   {
     id: 'kp-1',
-    title: '喜茶门店标准服务',
-    content: '围绕门店接待、点单、出杯与客诉处理沉淀...',
-    source: '喜茶.docx',
+    title: '保险期间与续保规则',
+    content: '保险期间为一年，续保需经本公司审核同意；首次投保或非连续投保的，按投保时的费率表与投保年龄确定保费。',
+    source: sliceAudioFileName,
     sourceFileStatus: '处理成功',
-    tags: ['产品'],
+    tags: ['产品条款'],
     status: '启用',
     updatedAt: '2026-05-27 10:18',
   },
   {
     id: 'kp-2',
-    title: '瑞幸咖啡产品卖点',
-    content: '提炼生椰拿铁、轻乳茶等产品的核心卖点...',
-    source: '瑞幸.docx',
+    title: '健康告知与犹豫期',
+    content: '投保人应如实告知被保险人健康状况；犹豫期为签收保单之日起十五日内，犹豫期内退保可全额退还已交保费。',
+    source: sliceAudioFileName,
     sourceFileStatus: '处理中',
-    tags: ['营销'],
+    tags: ['投保规则'],
     status: '启用',
     updatedAt: '2026-05-26 18:42',
   },
   {
     id: 'kp-3',
-    title: '奶茶品牌合规话术',
-    content: '用于培训员工识别营销宣传中的合规风险...',
-    source: '合规手册.md',
+    title: '费率表适用说明',
+    content: '本费率表仅供参考，具体以保险条款为准；一般医疗保险金与重大疾病医疗保险金保险金额均为 200 万元。',
+    source: sliceAudioFileName,
     sourceFileStatus: '状态异常',
     tags: [],
     status: '停用',
@@ -635,30 +1256,28 @@ const knowledgePointRows = [
 ];
 
 const standardSliceRows = [
-  { id: 'slice-7', content: '医保药品目录清单：阿莫西林胶囊（胶囊，90%，甲类）、布洛芬缓释胶囊（缓释胶囊，85%，乙类）、二甲双胍片（片剂，95%，甲类）。', source: '医保药品目录清单.csv', sourceFileStatus: '处理成功', length: 96, tags: ['医保', '药品目录'], status: '启用', updatedAt: '2026-09-02 15:20' },
-  { id: 'slice-1', content: '百年人寿保险股份有限公司 百年附加医惠通医疗保险产品责任说明，包含保险责任、责任免除、投保规则与犹豫期约定。', source: '03 百年附加医惠通医疗保险产品介绍', sourceFileStatus: '处理成功', length: 2617, tags: ['保险', '条款'], status: '启用', updatedAt: '2026-09-02 15:18' },
-  { id: 'slice-2', content: '# 交银人寿意外骨折医疗保险 20 版 保障方案与投保须知', source: '交银人寿意外骨折医疗保险条款', sourceFileStatus: '处理成功', length: 46, tags: ['保险'], status: '启用', updatedAt: '2026-09-02 15:12' },
-  { id: 'slice-3', content: '个险新人专属会课程（2020版）——新人首月经营动作与拜访要点', source: '44-新人培训-新人专属课程', sourceFileStatus: '处理中', length: 16, tags: ['培训'], status: '启用', updatedAt: '2026-09-02 15:06' },
-  { id: 'slice-4', content: '【卓越新人60天成长训练系列】第一课：读懂产品，建立专业信任', source: '1-新人培训-读懂产品', sourceFileStatus: '待处理', length: 21, tags: [], status: '停用', updatedAt: '2026-09-02 14:58' },
-  { id: 'slice-5', content: '<table><tr><th colspan="6"><p>百年臻爱人生终身寿险 保险利益演示表</p>', source: '百年臻爱人生终身寿险条款', sourceFileStatus: '处理成功', length: 2999, tags: ['保险', '演示表'], status: '启用', updatedAt: '2026-09-02 14:47' },
-  { id: 'slice-6', content: '<table><tr><th colspan="4"><p>银保+保全规则+117规则 业务处理指引', source: '银保+保全规则+117.pdf', sourceFileStatus: '状态异常', length: 3017, tags: ['规则'], status: '启用', updatedAt: '2026-09-02 14:31' },
+  { id: 'slice-1', chunkId: 'audio-chunk-001', content: '百年人寿保险股份有限公司 百年附加医惠通费用补偿医疗保险费率表 一般医疗保险金保险金额200万元 重大疾病医疗保险金保险金额200万元', source: sliceAudioFileName, sourceFileStatus: '处理成功', length: 96, tags: ['保险', '费率表'], status: '启用', updatedAt: '2026-09-02 15:20' },
+  { id: 'slice-2', chunkId: 'audio-chunk-002', content: '首次投保或非连续投保 投保年龄', source: sliceAudioFileName, sourceFileStatus: '处理成功', length: 42, tags: ['保险', '投保规则'], status: '启用', updatedAt: '2026-09-02 15:18' },
+  { id: 'slice-3', chunkId: 'audio-chunk-003', content: '保险期间为一年，续保需经本公司审核同意', source: sliceAudioFileName, sourceFileStatus: '处理成功', length: 36, tags: ['保险', '续保'], status: '启用', updatedAt: '2026-09-02 15:12' },
+  { id: 'slice-4', chunkId: 'audio-chunk-004', content: '投保人应如实告知被保险人健康状况，未如实告知可能影响理赔结论。', source: sliceAudioFileName, sourceFileStatus: '处理中', length: 38, tags: ['保险', '健康告知'], status: '启用', updatedAt: '2026-09-02 15:06' },
+  { id: 'slice-5', chunkId: 'audio-chunk-005', content: '犹豫期为签收保单之日起十五日内，犹豫期内退保可全额退还已交保费。', source: sliceAudioFileName, sourceFileStatus: '待处理', length: 32, tags: ['保险', '犹豫期'], status: '停用', updatedAt: '2026-09-02 14:58' },
+  { id: 'slice-6', chunkId: 'audio-chunk-006', content: '本费率表仅供参考，具体以保险条款为准。', source: sliceAudioFileName, sourceFileStatus: '状态异常', length: 26, tags: ['保险'], status: '启用', updatedAt: '2026-09-02 14:31' },
 ];
 
 const parentSliceRows = [
-  { id: 'pslice-1', parentSliceNo: 'PS202608180001', content: '百年人寿保险股份有限公司 百年附加医惠通医疗保险产品责任说明（父切片）：包含保险责任、责任免除、投保规则与犹豫期约定，子切片按条款逐条拆分。', source: '03 百年附加医惠通医疗保险产品介绍', length: 2617, vectorDimension: 1024, children: 4, status: '启用' },
-  { id: 'pslice-2', parentSliceNo: 'PS202608180002', content: '个险新人专属会课程（2020版）——新人首月经营动作与拜访要点（父切片）：覆盖首月拜访量、客户画像与跟进节奏。', source: '44-新人培训-新人专属课程', length: 320, vectorDimension: 1024, children: 8, status: '启用' },
-  { id: 'pslice-3', parentSliceNo: 'PS202608180003', content: '【卓越新人60天成长训练系列】第一课：读懂产品，建立专业信任（父切片）：产品条款解读与话术演练。', source: '1-新人培训-读懂产品', length: 420, vectorDimension: 768, children: 6, status: '停用' },
-  { id: 'pslice-4', parentSliceNo: 'PS202608180004', content: '<table><tr><th colspan="6"><p>百年臻爱人生终身寿险 保险利益演示表（父切片）：按保障期间拆分演示表。', source: '百年臻爱人生终身寿险条款', length: 2999, vectorDimension: 1024, children: 12, status: '启用' },
+  { id: 'pslice-1', parentSliceNo: 'PS202608180001', content: '百年附加医惠通费用补偿医疗保险费率表（父切片）：包含一般医疗保险金、重大疾病医疗保险金、首次投保与投保年龄等条款，子切片按条款逐条拆分。', source: sliceAudioFileName, length: 96, vectorDimension: 1024, children: 4, status: '启用' },
+  { id: 'pslice-2', parentSliceNo: 'PS202608180002', content: '投保规则说明（父切片）：包含保险期间、续保审核、健康告知与犹豫期约定。', source: sliceAudioFileName, length: 74, vectorDimension: 1024, children: 3, status: '启用' },
+  { id: 'pslice-3', parentSliceNo: 'PS202608180003', content: '费率表附注（父切片）：覆盖费率适用说明与条款优先关系。', source: sliceAudioFileName, length: 26, vectorDimension: 768, children: 1, status: '停用' },
 ];
 
 const qaRows = [
-  { id: 'qa-7', question: '阿莫西林胶囊的报销比例是多少？', answer: '阿莫西林胶囊（胶囊剂型）的报销比例为 90%，属于甲类药品。', source: '客户问答清单.csv', sourceFileStatus: '处理成功', similarQuestions: ['阿莫西林报销多少', '阿莫西林胶囊能报销吗'], paraphraseQuestions: ['阿莫西林胶囊报销比例'], tags: ['医保', '药品目录'], status: '启用', updatedAt: '2026-09-02 15:20' },
-  { id: 'qa-1', question: '知识图谱与认知智能是什么关系？', answer: '知识图谱是认知智能的底层基础设施之一，通过结构化知识表达支撑推理、问答与决策。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '处理成功', similarQuestions: ['知识图谱和认知智能有什么联系'], paraphraseQuestions: [], tags: ['知识图谱', '人工智能'], status: '启用', updatedAt: '2026-09-02 15:16' },
-  { id: 'qa-2', question: '图计算核心算法有哪些？', answer: '图计算核心算法包括：1. 遍历类算法（BFS/DFS）；2. 路径与可达性算法；3. 社区发现与中心性算法。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '处理成功', similarQuestions: [], paraphraseQuestions: ['图计算有哪些常用算法'], tags: ['知识图谱', '图计算'], status: '启用', updatedAt: '2026-09-02 15:11' },
-  { id: 'qa-3', question: '人工智能在新基建中扮演什么角色？', answer: '在新基建的三大规划领域中，人工智能既是基础设施的组成部分，也是赋能其他领域的关键技术。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '处理中', similarQuestions: [], paraphraseQuestions: [], tags: ['人工智能', '新基建'], status: '启用', updatedAt: '2026-09-02 15:05' },
-  { id: 'qa-4', question: '知识图谱的基本构建流程是什么？', answer: '知识图谱的构建遵循知识抽取、知识融合、知识加工与知识应用四个环节。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '处理成功', similarQuestions: ['知识图谱怎么构建'], paraphraseQuestions: [], tags: ['知识图谱'], status: '启用', updatedAt: '2026-09-02 14:59' },
-  { id: 'qa-5', question: '公安知识图谱的应用场景有哪些？', answer: '公安知识图谱重点解决数据关联、线索挖掘与案情推演等问题，提升研判效率。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '待处理', similarQuestions: [], paraphraseQuestions: [], tags: [], status: '停用', updatedAt: '2026-09-02 14:52' },
-  { id: 'qa-6', question: '智慧建筑知识图谱如何构建？', answer: '集合构建以BIM数据与规范为基础，抽取建筑构件、空间关系与运维规则形成图谱。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '状态异常', similarQuestions: [], paraphraseQuestions: [], tags: ['知识图谱'], status: '启用', updatedAt: '2026-09-02 14:45' },
+  { id: 'qa-7', question: '如何支持基层提高药品供应保障能力？', answer: '健全县（市、区）、乡镇（街道）、村（社区）用药衔接联动机制，适度放宽乡村两级用药品种和数量限制；加快建设医共体中心药房，实现县乡村处方规范流转、用药需求精准匹配；加快推进“医保药品云平台”建设，进一步扩大集采政策覆盖面，促进集采药品进基层医疗机构。', source: sliceAudioFileName, sourceFileStatus: '处理成功', similarQuestions: [], paraphraseQuestions: [], tags: ['医保', '药品供应保障'], status: '启用', updatedAt: '2026-09-02 15:20' },
+  { id: 'qa-1', question: '知识图谱与认知智能是什么关系？', answer: '知识图谱是认知智能的底层基础设施之一，通过结构化知识表达支撑推理、问答与决策。', source: sliceAudioFileName, sourceFileStatus: '处理成功', similarQuestions: ['知识图谱和认知智能有什么联系'], paraphraseQuestions: [], tags: ['知识图谱', '人工智能'], status: '启用', updatedAt: '2026-09-02 15:16' },
+  { id: 'qa-2', question: '图计算核心算法有哪些？', answer: '图计算核心算法包括：1. 遍历类算法（BFS/DFS）；2. 路径与可达性算法；3. 社区发现与中心性算法。', source: sliceAudioFileName, sourceFileStatus: '处理成功', similarQuestions: [], paraphraseQuestions: ['图计算有哪些常用算法'], tags: ['知识图谱', '图计算'], status: '启用', updatedAt: '2026-09-02 15:11' },
+  { id: 'qa-3', question: '人工智能在新基建中扮演什么角色？', answer: '在新基建的三大规划领域中，人工智能既是基础设施的组成部分，也是赋能其他领域的关键技术。', source: sliceAudioFileName, sourceFileStatus: '处理中', similarQuestions: [], paraphraseQuestions: [], tags: ['人工智能', '新基建'], status: '启用', updatedAt: '2026-09-02 15:05' },
+  { id: 'qa-4', question: '知识图谱的基本构建流程是什么？', answer: '知识图谱的构建遵循知识抽取、知识融合、知识加工与知识应用四个环节。', source: sliceAudioFileName, sourceFileStatus: '处理成功', similarQuestions: ['知识图谱怎么构建'], paraphraseQuestions: [], tags: ['知识图谱'], status: '启用', updatedAt: '2026-09-02 14:59' },
+  { id: 'qa-5', question: '公安知识图谱的应用场景有哪些？', answer: '公安知识图谱重点解决数据关联、线索挖掘与案情推演等问题，提升研判效率。', source: sliceAudioFileName, sourceFileStatus: '待处理', similarQuestions: [], paraphraseQuestions: [], tags: [], status: '停用', updatedAt: '2026-09-02 14:52' },
+  { id: 'qa-6', question: '智慧建筑知识图谱如何构建？', answer: '集合构建以BIM数据与规范为基础，抽取建筑构件、空间关系与运维规则形成图谱。', source: sliceAudioFileName, sourceFileStatus: '状态异常', similarQuestions: [], paraphraseQuestions: [], tags: ['知识图谱'], status: '启用', updatedAt: '2026-09-02 14:45' },
 ];
 
 function KnowledgePointsPage() {
@@ -793,6 +1412,7 @@ function KnowledgePointsPage() {
             </SelectField>
           </Toolbar>
           <section className="panel knowledge-table-panel">
+            <div className="knowledge-table-scroll">
             <table className="data-table knowledge-table kr-table-kp">
               <colgroup>
                 <col className="kp-col-name" />
@@ -855,6 +1475,7 @@ function KnowledgePointsPage() {
                 ) : null}
               </tbody>
             </table>
+            </div>
             <div className="knowledge-pagination">
               <span>共 38 条</span>
               <button type="button">&lt;</button>
@@ -991,6 +1612,7 @@ function SliceLibraryPage() {
           ) : null}
         </Toolbar>
         <section className="panel knowledge-table-panel">
+          <div className="knowledge-table-scroll">
           {isStandard ? (
             <table className="data-table knowledge-table kr-table-slice">
               <colgroup>
@@ -1102,6 +1724,7 @@ function SliceLibraryPage() {
               </tbody>
             </table>
           )}
+          </div>
           <div className="knowledge-pagination">
             <span>共 4341 条</span>
             <button type="button">&lt;</button>
@@ -1126,6 +1749,7 @@ function SliceLibraryPage() {
     {detailRow ? (
       <KnowledgeResultDetailDrawer
         seed={resolveResultDetailSeed('切片库', detailRow)}
+        initialItemId={detailRow.chunkId}
         onClose={() => setDetailRow(null)}
       />
     ) : null}
@@ -1208,6 +1832,7 @@ function QaLibraryPage() {
           </SelectField>
         </Toolbar>
         <section className="panel knowledge-table-panel">
+          <div className="knowledge-table-scroll">
           <table className="data-table knowledge-table kr-table-qa">
             <colgroup>
               <col className="qa-col-question" />
@@ -1273,6 +1898,7 @@ function QaLibraryPage() {
               ) : null}
             </tbody>
           </table>
+          </div>
           <div className="knowledge-pagination">
             <span>共 988 条</span>
             <button type="button">&lt;</button>
@@ -5447,96 +6073,903 @@ function CategoryRecommendPanel({ notify }) {
 }
 
 // ── Badcase 管理（对齐线上 /ops/badcase-workbench）───────────────────────────────
-const badcaseStatusTabs = ['全部', '待处理', '处理中', '已完成', '已关闭'];
-const badcaseRows = [
-  { id: 'BC202609280001', query: '异地就医备案需要哪些材料', source: '搜索测试', status: '待处理', type: '召回缺失', createdAt: '2026-09-28 10:12' },
-  { id: 'BC202609280002', query: '惠民保的免赔额是多少', source: '人工新建', status: '处理中', type: '答案错误', createdAt: '2026-09-28 09:40' },
-  { id: 'BC202609270003', query: '基金申购确认时间怎么算', source: '批量导入', status: '已完成', type: '答案不完整', createdAt: '2026-09-27 17:05' },
-  { id: 'BC202609270004', query: '重疾险等待期如何计算', source: '搜索测试', status: '已关闭', type: '无关召回', createdAt: '2026-09-27 15:22' },
+const BAD_CASE_STATUS = ['待处理', '处理中', '已完成', '已关闭'];
+const BAD_CASE_SOURCES = ['人工录入', '搜索测试', '批量导入', '公共评测模块'];
+const BAD_CASE_PROBLEM_TYPES = ['解析问题', '切片及抽取问题', '检索召回重排问题', '缺少知识源', '其他问题'];
+// 结果卡「问题原因」定位选项（线上 rt）。
+const BAD_CASE_ISSUE_OPTIONS = ['解析问题', '切片及抽取问题', '检索召回重排问题', '其他问题'];
+// 检索参数快照展示字段（详情内只读回显，对齐线上 ue）。
+// 检索参数快照字段：线上单路 / 多路展示的字段不同（单路才有检索方式与语义·全文权重，多路才有融合策略与形态权重）。
+const RETRIEVAL_SNAPSHOT_FIELDS = [
+  { key: 'tagLabel', label: '标签过滤', scope: 'always' },
+  { key: 'recallModeLabel', label: '召回方式', scope: 'always' },
+  { key: 'formLabel', label: '知识形态', scope: 'always' },
+  { key: 'recallContentLabel', label: '召回内容', scope: 'always' },
+  { key: 'retrievalModeLabel', label: '检索方式', scope: 'single' },
+  { key: 'semanticWeightLabel', label: '语义权重', scope: 'single-hybrid' },
+  { key: 'fullWeightLabel', label: '全文权重', scope: 'single-hybrid' },
+  { key: 'fusionLabel', label: '融合策略', scope: 'multi' },
+  { key: 'formWeightLabel', label: '形态权重', scope: 'multi' },
+  { key: 'topK', label: '返回条数（Top-K）', scope: 'always' },
+  { key: 'scoreThresholdLabel', label: 'Score 阈值', scope: 'always' },
+  { key: 'rerankLabel', label: '重排', scope: 'always' },
 ];
 
-function BadcasePage({ notify }) {
-  const [statusTab, setStatusTab] = useState('全部');
-  const [sourceFilter, setSourceFilter] = useState('来源');
-  const [typeFilter, setTypeFilter] = useState('问题类型');
-  const [removedIds, setRemovedIds] = useState(() => new Set());
-  const rows = badcaseRows.filter((row) => !removedIds.has(row.id));
-  const countOf = (status) => (status === '全部' ? rows.length : rows.filter((row) => row.status === status).length);
-  const visibleRows = rows.filter((row) => {
-    if (statusTab !== '全部' && row.status !== statusTab) return false;
-    if (sourceFilter !== '来源' && row.source !== sourceFilter) return false;
-    if (typeFilter !== '问题类型' && row.type !== typeFilter) return false;
+function retrievalSnapshotRows(snapshot) {
+  const isMulti = snapshot?.recallMode === 'MULTI';
+  const hybrid = Boolean(snapshot?.hybrid);
+  return RETRIEVAL_SNAPSHOT_FIELDS.filter((field) => {
+    if (field.scope === 'always') return true;
+    if (field.scope === 'single') return !isMulti;
+    if (field.scope === 'single-hybrid') return !isMulti && hybrid;
+    if (field.scope === 'multi') return isMulti && Boolean(snapshot?.[field.key]);
     return true;
   });
+}
+
+// 由当前检索配置生成「检索参数快照」（检索服务 → 创建 Badcase / Badcase 详情回显共用）。
+function buildRetrievalSnapshot(config, tagLabels = []) {
+  const isSingle = config.recallMode === 'SINGLE';
+  const activeForms = isSingle ? [config.singleForm] : config.multiForms;
+  const hybrid = isSingle && config.singleRetrievalMode === '混合检索';
+  const formWeightLabel = (!isSingle && (config.fusionStrategy === '加权分数融合' || config.weightMode === '自定义权重'))
+    ? activeForms.map((form) => `${form} ${config.formWeights[form] ?? 0}`).join('；')
+    : '';
+  return {
+    tagLabel: tagLabels.length ? tagLabels.join('、') : '无',
+    recallMode: config.recallMode,
+    recallModeLabel: isSingle ? '单路召回' : '多路召回',
+    formLabel: activeForms.join('、'),
+    recallContentLabel: isSingle
+      ? config.singleRecallContent
+      : activeForms.map((form) => `${form}：${config.multiRecallContent[form]}`).join('；'),
+    retrievalModeLabel: isSingle
+      ? (hybrid ? `混合检索（语义 ${config.semanticWeight} · 全文 ${config.fullWeight}）` : config.singleRetrievalMode)
+      : '',
+    hybrid,
+    semanticWeightLabel: hybrid ? String(config.semanticWeight) : '',
+    fullWeightLabel: hybrid ? String(config.fullWeight) : '',
+    fusionLabel: isSingle ? '' : config.fusionStrategy,
+    formWeightLabel,
+    topK: String(config.topK ?? ''),
+    scoreThresholdLabel: config.thresholdEnabled ? String(config.threshold) : '未启用',
+    rerankLabel: config.rerankEnabled ? (config.rerankModel || '已启用') : '未启用',
+  };
+}
+
+let _badcaseSeq = 1000;
+function nowBadcaseStamp(date = new Date()) {
+  const pad = (v) => String(v).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function newBadcaseId() {
+  _badcaseSeq += 1;
+  const d = new Date();
+  const pad = (v) => String(v).padStart(2, '0');
+  return `BC${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${String(_badcaseSeq)}`;
+}
+
+// 由搜索测试/新增表单/批量导入统一创建 Badcase 对象。
+function makeBadcase({ id, query, source, status = '待处理', problemTypes = [], createBy = '系统用户', sourceRefId = '-', retrievalParam = null, actualResults = [], expectedResults = [], wholeIssueType = '', createTime }) {
+  return {
+    id: id || newBadcaseId(),
+    query,
+    source,
+    status,
+    problemTypes, // 待定位列表（线上列表展示首个类型）
+    createBy,
+    sourceRefId,
+    retrievalParam, // 检索参数快照
+    actualResults,
+    expectedResults,
+    wholeIssueType,
+    createTime: createTime || nowBadcaseStamp(),
+    closedAt: '',
+  };
+}
+
+// 默认检索参数快照（演示数据使用多路召回，字段与线上「多路」快照一致）。
+function defaultRetrievalSnapshot() {
+  return buildRetrievalSnapshot({
+    ...defaultRetrievalConfig(),
+    recallMode: 'MULTI',
+    fusionStrategy: '加权分数融合',
+    weightMode: '自定义权重',
+  }, ['药品目录', '报销比例']);
+}
+
+// 模块级可变 store：搜索测试/新增表单可追加，Badcase 页同模块闭包读取，页面切换不丢失。
+const badcaseStore = [
+  makeBadcase({
+    id: 'BC202609280001', query: '异地就医备案需要哪些材料', source: '搜索测试', status: '待处理',
+    problemTypes: ['解析问题'], createBy: '张伟', sourceRefId: 'SRC-20260928-001', retrievalParam: defaultRetrievalSnapshot(),
+    wholeIssueType: '解析问题',
+  }),
+  makeBadcase({
+    id: 'BC202609280002', query: '惠民保的免赔额是多少', source: '人工录入', status: '处理中',
+    problemTypes: ['切片及抽取问题'], createBy: '李娜', sourceRefId: '-', retrievalParam: defaultRetrievalSnapshot(),
+    wholeIssueType: '',
+  }),
+  makeBadcase({
+    id: 'BC202609270003', query: '基金申购确认时间怎么算', source: '批量导入', status: '已完成',
+    problemTypes: ['检索召回重排问题'], createBy: '批量导入', sourceRefId: 'BATCH-0901.xlsx', retrievalParam: defaultRetrievalSnapshot(),
+    wholeIssueType: '检索召回重排问题',
+  }),
+  makeBadcase({
+    id: 'BC202609270004', query: '重疾险等待期如何计算', source: '搜索测试', status: '已关闭',
+    problemTypes: ['缺少知识源'], createBy: '王芳', sourceRefId: 'SRC-20260927-004', retrievalParam: defaultRetrievalSnapshot(),
+    wholeIssueType: '缺少知识源',
+  }),
+];
+
+// Badcase 行多选辅助（表头全选）。
+function BadcaseRowSelection({ checked, indeterminate, onChange }) {
   return (
-    <>
-      <PageHeader
-        title="Badcase 管理"
-        actions={(
-          <div className="badcase-actions">
-            <button type="button" className="secondary" onClick={() => notify('批量导入模板已下载')}><DownloadOutlined /> 批量导入</button>
-            <button type="button" className="primary" onClick={() => notify('已打开新建 Badcase 表单')}><PlusOutlined /> 新增</button>
+    <label className="badcase-check-wrap" onClick={(e) => e.stopPropagation()}>
+      <input type="checkbox" checked={checked} ref={(node) => { if (node) node.indeterminate = indeterminate; }} onChange={onChange} />
+    </label>
+  );
+}
+
+// 知识加工结果候选（新建 Badcase 时从已有结果选择实际/期望结果）。
+function knowledgeResultCandidates() {
+  const out = [];
+  qaRows.forEach((row, i) => out.push({ id: `c-qa-${i}`, formType: 'QA库', q: row.question, a: row.answer, content: `问：${row.question}\n答：${row.answer}`, source: row.source, resultId: row.id, score: 0.9 }));
+  standardSliceRows.forEach((row, i) => out.push({ id: `c-slice-${i}`, formType: '切片库', content: row.content, source: row.source, resultId: row.id, score: 0.85 }));
+  knowledgePointRows.forEach((row, i) => out.push({ id: `c-kp-${i}`, formType: '知识点', content: row.content, source: row.source, resultId: row.id, score: 0.8 }));
+  return out;
+}
+
+// 结果卡（Badcase 详情 / 新建共用）：对齐线上卡片信息（排名、形态、得分、来源文件、结果ID、类目）与拖拽排序。
+function BadcaseResultList({ results, onRemove, onReorder, readOnly = false, emptyText = '尚未添加结果，可从右侧知识加工结果中选取或手动添加。' }) {
+  const [dragIndex, setDragIndex] = useState(null);
+  if (!results.length) return <div className="badcase-results-empty">{emptyText}</div>;
+  return (
+    <div className="badcase-results">
+      {results.map((res, index) => (
+        <div
+          className={`badcase-result-card ${dragIndex === index ? 'dragging' : ''}`.trim()}
+          key={res.id || `${res.formType}-${index}`}
+          draggable={!readOnly}
+          onDragStart={() => setDragIndex(index)}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={() => {
+            if (dragIndex != null && dragIndex !== index && onReorder) onReorder(dragIndex, index);
+            setDragIndex(null);
+          }}
+          onDragEnd={() => setDragIndex(null)}
+        >
+          <div className="badcase-result-head">
+            {readOnly ? null : <span className="badcase-drag-handle" aria-label="拖拽排序"><DragOutlined /></span>}
+            <span className="badcase-result-rank">#{res.rank ?? index + 1}</span>
+            <Badge tone={res.formType === 'QA库' ? 'info' : res.formType === '切片库' ? 'purple' : 'teal'}>{getKnowledgeFormTypeLabel(res.formType)}</Badge>
+            <span className="badcase-result-score">得分 {Number(res.score).toFixed(2)}</span>
+            {readOnly ? null : <button type="button" className="badcase-result-remove" onClick={() => onRemove(index)}>移除</button>}
           </div>
-        )}
-      />
-      <p className="page-desc">管理知识工程质检调优的 Badcase，支持人工新建、搜索测试创建、批量导入与详情定位闭环处理。</p>
-      <div className="badcase-status-bar">
-        {badcaseStatusTabs.map((status) => (
-          <button type="button" key={status} className={`badcase-status-chip ${statusTab === status ? 'active' : ''}`} onClick={() => setStatusTab(status)}>
-            {status}<strong>{countOf(status)}</strong>
+          <div className="badcase-result-meta">
+            <span>来源文件：{res.source || '-'}</span>
+            <span>结果ID：{res.resultId || '-'}</span>
+            <span>类目：{res.category || '-'}</span>
+          </div>
+          <div className="badcase-result-body">
+            {res.q ? (
+              <div className="badcase-result-qa">
+                <div><em>问：</em><span>{res.q}</span></div>
+                <div><em>答：</em><span>{res.a}</span></div>
+              </div>
+            ) : <pre className="badcase-result-pre">{res.content}</pre>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 手动添加期望结果（线上同名校验弹窗：按知识形态录入标题/内容、问题/答案、切片内容）。
+function ManualExpectedModal({ onClose, onConfirm }) {
+  const [form, setForm] = useState('问答对');
+  const [content, setContent] = useState({ q: '', a: '', title: '', body: '' });
+  const [error, setError] = useState('');
+  const submit = () => {
+    if (form === '问答对' && (!content.q.trim() || !content.a.trim())) { setError('请输入问题与答案'); return; }
+    if (form === '知识点' && (!content.title.trim() || !content.body.trim())) { setError('请输入标题与内容'); return; }
+    if (form === '文本切片' && !content.body.trim()) { setError('请输入切片内容'); return; }
+    const payload = form === '问答对'
+      ? { formType: 'QA库', q: content.q.trim(), a: content.a.trim(), content: `问：${content.q.trim()}\n答：${content.a.trim()}` }
+      : form === '知识点'
+        ? { formType: '知识点', content: `${content.title.trim()}\n${content.body.trim()}` }
+        : { formType: '切片库', content: content.body.trim() };
+    onConfirm({ ...payload, id: `manual-${Date.now()}`, source: '手动添加', resultId: '', score: 0, category: '' });
+  };
+  return (
+    <Modal
+      title="手动添加期望结果"
+      onClose={onClose}
+      footer={(
+        <>
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button type="button" className="primary" onClick={submit}>确认添加</button>
+        </>
+      )}
+    >
+      <label className="form-field">
+        <span className="field-label-text">知识形态</span>
+        <ConfigSelect value={form} onChange={(value) => { setForm(value); setError(''); }} dropdownMinWidth={160}>
+          {RETRIEVAL_FORM_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.value}</option>)}
+        </ConfigSelect>
+      </label>
+      {form === '问答对' ? (
+        <>
+          <label className="form-field">
+            <span className="field-label-text">问题</span>
+            <textarea className="create-query-input" rows={2} value={content.q} placeholder="请输入问题" onChange={(event) => setContent({ ...content, q: event.target.value })} />
+          </label>
+          <label className="form-field">
+            <span className="field-label-text">答案</span>
+            <textarea className="create-query-input" rows={4} value={content.a} placeholder="请输入答案" onChange={(event) => setContent({ ...content, a: event.target.value })} />
+          </label>
+        </>
+      ) : null}
+      {form === '知识点' ? (
+        <>
+          <label className="form-field">
+            <span className="field-label-text">标题</span>
+            <input className="create-query-input" value={content.title} placeholder="请输入标题" onChange={(event) => setContent({ ...content, title: event.target.value })} />
+          </label>
+          <label className="form-field">
+            <span className="field-label-text">内容</span>
+            <textarea className="create-query-input" rows={4} value={content.body} placeholder="请输入内容" onChange={(event) => setContent({ ...content, body: event.target.value })} />
+          </label>
+        </>
+      ) : null}
+      {form === '文本切片' ? (
+        <label className="form-field">
+          <span className="field-label-text">切片内容</span>
+          <textarea className="create-query-input" rows={4} value={content.body} placeholder="请输入切片内容" onChange={(event) => setContent({ ...content, body: event.target.value })} />
+        </label>
+      ) : null}
+      {error ? <p className="retrieval-param-error">{error}</p> : null}
+    </Modal>
+  );
+}
+
+// 新建 Badcase 弹窗（线上 1080）。initial 来自搜索测试快照时 source 为「搜索测试」。
+function CreateBadcaseModal({ initial, source = '人工录入', onClose, notify, onChanged }) {
+  // 由「检索服务」进入时，实际结果按线上规则以搜索测试快照只读预填。
+  const snapshotMode = Boolean(initial?.snapshot);
+  const [query, setQuery] = useState(initial?.query || '');
+  const [problemType, setProblemType] = useState('');
+  const [tagIds, setTagIds] = useState([]);
+  const [config, setConfig] = useState(() => initial?.config || defaultRetrievalConfig());
+  const [tab, setTab] = useState('actual');
+  const [actualResults, setActualResults] = useState(initial?.actualResults || []);
+  const [expectedResults, setExpectedResults] = useState(initial?.expectedResults || []);
+  const [pickOpen, setPickOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const candidates = useMemo(() => knowledgeResultCandidates(), []);
+  const assignRank = (list) => list.map((r, i) => ({ ...r, rank: i + 1 }));
+  const listOf = (kind) => (kind === 'actual' ? actualResults : expectedResults);
+  const setListOf = (kind, next) => { if (kind === 'actual') setActualResults(next); else setExpectedResults(next); };
+
+  const addFromCandidates = (kind, candidate) => {
+    const list = listOf(kind);
+    if (list.some((r) => r.resultId === candidate.resultId)) { notify('该结果已在列表中', 'error'); return; }
+    const next = assignRank([...list, { ...candidate, category: '保险知识', issueType: '' }]);
+    setListOf(kind, next);
+    setPickOpen(false);
+  };
+  const reorder = (kind, from, to) => {
+    const list = [...listOf(kind)];
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    setListOf(kind, assignRank(list));
+  };
+  const remove = (kind, index) => {
+    const list = listOf(kind);
+    const next = assignRank(list.filter((_, i) => i !== index));
+    setListOf(kind, next);
+  };
+  const handleCreate = () => {
+    if (!query.trim()) { notify('请填写 Query', 'error'); return; }
+    const tagLabels = tagIds;
+    const row = makeBadcase({
+      query: query.trim(), source, status: '待处理',
+      problemTypes: problemType ? [problemType] : [],
+      retrievalParam: initial?.retrievalParam || buildRetrievalSnapshot(config, tagLabels),
+      actualResults, expectedResults, wholeIssueType: problemType || '',
+    });
+    badcaseStore.unshift(row);
+    notify('创建成功', 'success');
+    onChanged && onChanged();
+    onClose();
+  };
+  const tabs = [
+    { key: 'actual', label: `实际结果（${actualResults.length}）` },
+    { key: 'expected', label: `期望结果（${expectedResults.length}）` },
+  ];
+  const results = tab === 'actual' ? actualResults : expectedResults;
+  const tabHint = tab === 'actual'
+    ? (snapshotMode ? '实际结果已预填搜索测试快照，仅供参考（只读）' : '从知识加工结果中选择实际命中结果')
+    : '添加期望结果作为标准参考';
+  return (
+    <Modal
+      title="新建 Badcase"
+      className="new-badcase-modal"
+      onClose={onClose}
+      footer={(
+        <>
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button type="button" className="primary" onClick={handleCreate}>创建</button>
+        </>
+      )}
+    >
+      <div className="badcase-create">
+        <div className="badcase-create-left">
+          <ConfigCard title="基本信息" className="create-basic">
+            <label className="form-field">
+              <span className="field-label-text"><em>*</em>Query</span>
+              <textarea className="create-query-input" rows={3} maxLength={500} placeholder="请输入 Query" value={query} onChange={(e) => setQuery(e.target.value)} />
+            </label>
+            <label className="form-field">
+              <span className="field-label-text">问题类型</span>
+              <ConfigSelect value={problemType} onChange={setProblemType} placeholder="请选择问题类型">
+                <option value="">请选择问题类型</option>
+                {BAD_CASE_PROBLEM_TYPES.map((t) => <option value={t} key={t}>{t}</option>)}
+              </ConfigSelect>
+            </label>
+          </ConfigCard>
+          <ConfigCard title="标签过滤">
+            <TagCascadeSelect value={tagIds} onChange={setTagIds} placeholder="选择标签" disabled={snapshotMode} />
+          </ConfigCard>
+          <ConfigCard title="检索参数配置" notice="临时配置，不保存" className="create-retrieval">
+            <RetrievalConfigForm config={config} onChange={setConfig} disabled={snapshotMode} />
+          </ConfigCard>
+        </div>
+        <div className="badcase-create-right">
+          <div className="badcase-tabs-bar">
+            <BadcaseTabs tabs={tabs} active={tab} onChange={setTab} />
+            <div className="badcase-add-ops">
+              {tab === 'actual' && !snapshotMode ? (
+                <button type="button" className="secondary" onClick={() => setPickOpen(true)}>选择实际结果</button>
+              ) : null}
+              {tab === 'expected' ? (
+                <span className="badcase-add-menu-wrap">
+                  <button type="button" className="secondary" onClick={() => setAddMenuOpen((open) => !open)}>添加期望结果</button>
+                  {addMenuOpen ? (
+                    <div className="badcase-add-menu" onMouseLeave={() => setAddMenuOpen(false)}>
+                      <button type="button" onClick={() => { setAddMenuOpen(false); setPickOpen(true); }}>从已有知识加工结果选择</button>
+                      <button type="button" onClick={() => { setAddMenuOpen(false); setManualOpen(true); }}>手动添加</button>
+                    </div>
+                  ) : null}
+                </span>
+              ) : null}
+            </div>
+          </div>
+          <p className="badcase-tab-hint">{tabHint}</p>
+          {pickOpen ? (
+            <div className="badcase-pick-menu">
+              <span className="badcase-pick-title">从知识加工结果选择（点击加入当前「{tab === 'actual' ? '实际结果' : '期望结果'}」）</span>
+              <div className="badcase-pick-list">
+                {candidates.map((c) => (
+                  <button type="button" key={c.id} className="badcase-pick-item" onClick={() => addFromCandidates(tab, c)}>
+                    <Badge tone={c.formType === 'QA库' ? 'info' : c.formType === '切片库' ? 'purple' : 'teal'}>{getKnowledgeFormTypeLabel(c.formType)}</Badge>
+                    <span className="badcase-pick-content">{c.content.slice(0, 40)}…</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <BadcaseResultList
+            results={results}
+            readOnly={tab === 'actual' && snapshotMode}
+            onRemove={(index) => remove(tab, index)}
+            onReorder={(from, to) => reorder(tab, from, to)}
+          />
+        </div>
+      </div>
+      {manualOpen ? (
+        <ManualExpectedModal
+          onClose={() => setManualOpen(false)}
+          onConfirm={(item) => {
+            setExpectedResults((list) => assignRank([...list, item]));
+            setManualOpen(false);
+          }}
+        />
+      ) : null}
+    </Modal>
+  );
+}
+
+// Badcase 详情弹窗（线上 720）：基本信息 + 检索参数快照 + 实际/期望结果定位 + 补充定位 + 闭环操作。
+function BadcaseDetailModal({ row, onClose, notify, onChanged }) {
+  const readOnly = row.status === '已完成' || row.status === '已关闭';
+  const [tab, setTab] = useState('actual');
+  const [issues, setIssues] = useState(() => Object.fromEntries((row.actualResults || []).map((r) => [r.resultId, r.issueType || ''])));
+  const [wholeIssueType, setWholeIssueType] = useState(row.wholeIssueType || '');
+  const [editing, setEditing] = useState(null); // {id, content}
+  const [closeOpen, setCloseOpen] = useState(false);
+  const resolvedCount = Object.values(issues).filter(Boolean).length + (wholeIssueType ? 1 : 0);
+
+  const tabs = [
+    { key: 'actual', label: `实际结果（${(row.actualResults || []).length}）` },
+    { key: 'expected', label: `期望结果（${(row.expectedResults || []).length}）` },
+  ];
+  const results = tab === 'actual' ? row.actualResults || [] : row.expectedResults || [];
+
+  const updateRow = (mut) => {
+    const idx = badcaseStore.findIndex((b) => b.id === row.id);
+    if (idx >= 0) { badcaseStore[idx] = { ...badcaseStore[idx], ...mut }; onChanged(); }
+  };
+  // 线上为「改一项即保存」，这里同样即时落库并给出保存提示。
+  const saveIssue = (resultId, value) => {
+    setIssues((map) => ({ ...map, [resultId]: value }));
+    updateRow({
+      actualResults: (row.actualResults || []).map((item) => (item.resultId === resultId ? { ...item, issueType: value } : item)),
+    });
+    notify(value ? '问题定位已保存' : '已清除问题定位', 'success');
+  };
+  const saveWholeIssue = (value) => {
+    setWholeIssueType(value);
+    updateRow({ wholeIssueType: value, problemTypes: value ? [value] : [] });
+    notify('整体定位已保存', 'success');
+  };
+  const handleMarkDone = () => {
+    if (!resolvedCount) { notify('请先至少完成一项问题定位后再标记完成', 'error'); return; }
+    updateRow({ status: '已完成' });
+    notify('已标记完成', 'success');
+  };
+  const handleClose = () => updateRow({ status: '已关闭' });
+
+  return (
+    <Drawer
+      title="Badcase 详情"
+      width={720}
+      className="badcase-detail-drawer"
+      onClose={onClose}
+      footer={readOnly ? (
+        <button type="button" className="secondary" onClick={onClose}>关闭</button>
+      ) : (
+        <>
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button type="button" className="secondary" onClick={() => { setCloseOpen(true); }}>关闭</button>
+          <button
+            type="button"
+            className="primary"
+            disabled={!resolvedCount}
+            title={resolvedCount ? '' : '请先至少完成一项问题定位后再标记完成'}
+            onClick={handleMarkDone}
+          >
+            标记已完成
           </button>
+        </>
+      )}
+    >
+      <div className="badcase-detail">
+        <ConfigCard title="基本信息">
+          <div className="badcase-detail-info">
+            <span><em>Badcase ID</em><strong>{row.id}</strong></span>
+            <span><em>状态</em><Badge tone={row.status === '已完成' ? 'success' : row.status === '已关闭' ? 'neutral' : 'warning'}>{row.status}</Badge></span>
+            <span><em>来源</em><strong>{row.source}</strong></span>
+            <span><em>来源引用ID</em><strong>{row.sourceRefId || '-'}</strong></span>
+            <span><em>创建人</em><strong>{row.createBy || '-'}</strong></span>
+            <span><em>创建时间</em><strong>{row.createTime}</strong></span>
+            <span className="wide"><em>Query</em><strong>{row.query}</strong></span>
+          </div>
+        </ConfigCard>
+        <ConfigCard title="检索参数快照">
+          <div className="badcase-detail-param">
+            {retrievalSnapshotRows(row.retrievalParam).map((f) => (
+              <span key={f.key}><em>{f.label}</em><strong>{row.retrievalParam?.[f.key] || '-'}</strong></span>
+            ))}
+          </div>
+        </ConfigCard>
+        <div className="badcase-detail-results">
+          <BadcaseTabs tabs={tabs} active={tab} onChange={setTab} />
+          <div className="badcase-detail-results-body">
+            {results.map((res) => (
+              <div className="badcase-detail-result" key={res.resultId || res.id}>
+                <div className="badcase-detail-result-main">
+                  <div className="badcase-detail-result-head">
+                    <span className="badcase-result-rank">#{res.rank ?? 1}</span>
+                    <Badge tone={res.formType === 'QA库' ? 'info' : res.formType === '切片库' ? 'purple' : 'teal'}>{getKnowledgeFormTypeLabel(res.formType)}</Badge>
+                    <span className="badcase-result-score">得分 {Number(res.score).toFixed(2)}</span>
+                  </div>
+                  <div className="badcase-detail-result-file">
+                    <span>来源文件：{res.source || '-'}</span>
+                    <span>结果ID：{res.resultId || '-'}</span>
+                    {res.category ? <span>类目：{res.category}</span> : null}
+                  </div>
+                  <div className="badcase-result-body">{res.q ? <div className="badcase-result-qa"><div><em>问：</em><span>{res.q}</span></div><div><em>答：</em><span>{res.a}</span></div></div> : <pre className="badcase-result-pre">{res.content}</pre>}</div>
+                </div>
+                {tab === 'actual' ? (
+                  <div className="badcase-detail-problem-pane">
+                    <span className="badcase-problem-title">问题原因</span>
+                    {readOnly ? (
+                      issues[res.resultId]
+                        ? <Badge tone="warning">{issues[res.resultId]}</Badge>
+                        : <span className="badcase-problem-empty">-</span>
+                    ) : (
+                      <>
+                        <select className="badcase-problem-select" value={issues[res.resultId] || ''} onChange={(e) => saveIssue(res.resultId, e.target.value)}>
+                          <option value="">请选择问题原因</option>
+                          {BAD_CASE_ISSUE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                        {(issues[res.resultId] || '') === '切片及抽取问题' ? (
+                          <button type="button" className="link-btn" onClick={() => setEditing({ id: res.resultId, content: res.content })}>编辑知识加工结果</button>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="badcase-detail-whole">
+          <div className="badcase-whole-title">未命中正确结果时的补充定位</div>
+          {readOnly ? (
+            <div className="badcase-whole-types">
+              {wholeIssueType ? <Badge tone="warning">{wholeIssueType}</Badge> : <span className="badcase-problem-empty">-</span>}
+            </div>
+          ) : (
+            <div className="badcase-whole-types">
+              {BAD_CASE_PROBLEM_TYPES.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className={`badcase-whole-chip ${wholeIssueType === t ? 'active' : ''}`}
+                  onClick={() => saveWholeIssue(wholeIssueType === t ? '' : t)}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      {closeOpen ? (
+        <ConfirmDialog
+          title="关闭 Badcase"
+          message="请确认是否关闭该badcase，关闭后该badcase不支持进行后续处理流程且该操作不可恢复"
+          danger
+          cancelText="取消"
+          confirmText="关闭"
+          onCancel={() => setCloseOpen(false)}
+          onConfirm={() => { setCloseOpen(false); handleClose(); notify('关闭成功', 'success'); }}
+        />
+      ) : null}
+      {editing ? (
+        <EditBadcaseResultModal
+          initial={editing.content}
+          onClose={() => setEditing(null)}
+          onSave={(content) => {
+            updateRow({
+              actualResults: (row.actualResults || []).map((r) => (r.resultId === editing.id ? { ...r, content } : r)),
+            });
+            setEditing(null);
+            notify('已保存编辑', 'success');
+          }}
+        />
+      ) : null}
+    </Drawer>
+  );
+}
+
+// 编辑知识加工结果（Badcase 定位闭环里的 SLICE_ISSUE 编辑）。
+function EditBadcaseResultModal({ initial, onClose, onSave }) {
+  const [content, setContent] = useState(initial || '');
+  return (
+    <Modal
+      title="编辑知识加工结果"
+      onClose={onClose}
+      footer={(
+        <>
+          <button type="button" className="secondary" onClick={onClose}>取消</button>
+          <button type="button" className="primary" onClick={() => onSave(content)}>保存</button>
+        </>
+      )}
+    >
+      <textarea className="edit-result-textarea" rows={10} value={content} onChange={(e) => setContent(e.target.value)} />
+    </Modal>
+  );
+}
+
+// 批量导入 Badcase（线上 720 两步向导：上传文件 → 数据校验）。
+function ImportBadcaseModal({ onClose, notify, onChanged }) {
+  const [step, setStep] = useState(1);
+  const [fileName, setFileName] = useState('');
+  const [stats, setStats] = useState(null);
+  const [imported, setImported] = useState(false);
+
+  const pickFile = () => {
+    setFileName('Badcase_批量导入_0901.xlsx');
+    setStats({ total: 3, success: 2, failed: 1 });
+    setTimeout(() => setStep(2), 400);
+  };
+  // 线上「确认导入」在有校验失败或成功数为 0 时不可用。
+  const canConfirm = Boolean(stats) && stats.failed === 0 && stats.success > 0;
+  const confirmImport = () => {
+    const rows = [
+      makeBadcase({ query: '重疾险与医疗险可以叠加理赔吗', source: '批量导入', problemTypes: ['检索召回重排问题'], retrievalParam: defaultRetrievalSnapshot() }),
+      makeBadcase({ query: '异地安置人员备案有效期多久', source: '批量导入', problemTypes: ['缺少知识源'], retrievalParam: defaultRetrievalSnapshot() }),
+    ];
+    badcaseStore.unshift(...rows);
+    setImported(true);
+    onChanged();
+    notify('导入成功', 'success');
+    onClose();
+  };
+  return (
+    <Modal
+      title="批量导入 Badcase"
+      className="import-badcase-modal"
+      onClose={onClose}
+      footer={step === 1 ? (
+        <button type="button" className="secondary" onClick={onClose}>取消</button>
+      ) : (
+        <>
+          <button type="button" className="secondary" onClick={() => setStep(1)}>上一步</button>
+          <button
+            type="button"
+            className="primary"
+            onClick={confirmImport}
+            disabled={imported || !canConfirm}
+            title={canConfirm ? '' : '存在校验失败明细，请修正后重新上传'}
+          >
+            确认导入
+          </button>
+        </>
+      )}
+    >
+      <div className="import-steps">
+        {['上传文件', '数据校验'].map((label, i) => (
+          <Fragment key={label}>
+            {i > 0 ? <span className={`import-step-line ${step > i ? 'done' : ''}`} /> : null}
+            <span className={`import-step ${step === i + 1 ? 'active' : ''} ${step > i + 1 ? 'done' : ''}`}><b>{i + 1}</b>{label}</span>
+          </Fragment>
         ))}
       </div>
-      <Toolbar className="knowledge-list-toolbar">
+      {step === 1 ? (
+        <div className="import-upload">
+          <button type="button" className="import-dragger" onClick={pickFile}>
+            <CloudUploadOutlined />
+            <strong>{fileName || '点击或拖拽文件上传'}</strong>
+            <span>支持文件格式有.xlsx文件，请参考模板中的文档说明，严格按照格式填写，最多支持1个文件，单个文件大小不超过30MB</span>
+          </button>
+          <button type="button" className="link-btn" onClick={() => notify('模板下载中...')}><DownloadOutlined /> 下载导入模板</button>
+        </div>
+      ) : stats ? (
+        <div className="import-validate">
+          <div className="import-stat-cards">
+            <span className="imp-stat"><em>{stats.total}</em><b>总数</b></span>
+            <span className="imp-stat ok"><em>{stats.success}</em><b>成功导入数</b></span>
+            <span className="imp-stat fail"><em>{stats.failed}</em><b>跳过失败数</b></span>
+          </div>
+          <div className="import-validate-sec">
+            <div className="import-sec-head">校验失败明细</div>
+            <table className="data-table import-table">
+              <thead><tr><th>Sheet</th><th>行号</th><th>字段</th><th>原因</th></tr></thead>
+              <tbody>
+                <tr><td>Badcase</td><td>12</td><td>Query</td><td>必填字段为空</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div className="import-validate-sec">
+            <div className="import-sec-head">导入跳过明细（共 2 条，知识对象被删/停用）</div>
+            <table className="data-table import-table">
+              <thead><tr><th>Query</th><th>跳过的结果项</th><th>原因</th></tr></thead>
+              <tbody>
+                <tr><td>惠民保的免赔额是多少</td><td>切片 S-20092</td><td>切片已停用</td></tr>
+                <tr><td>基金申购确认时间怎么算</td><td>问答对 Q-8301</td><td>问答对已删除</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+function BadcasePage({ notify }) {
+  const [statusFilter, setStatusFilter] = useState('全部');
+  const [sourceFilter, setSourceFilter] = useState('来源');
+  const [typeFilter, setTypeFilter] = useState('问题类型');
+  const [keyword, setKeyword] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const [detailRow, setDetailRow] = useState(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [confirmState, setConfirmState] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const rows = badcaseStore.slice();
+  const matches = rows.filter((row) => {
+    if (statusFilter !== '全部' && row.status !== statusFilter) return false;
+    if (sourceFilter !== '来源' && row.source !== sourceFilter) return false;
+    if (typeFilter !== '问题类型' && !(row.problemTypes || []).includes(typeFilter)) return false;
+    if (keyword.trim() && !(row.id + row.query + row.source).toLowerCase().includes(keyword.trim().toLowerCase())) return false;
+    return true;
+  });
+  const countOf = (status) => (status === '全部' ? rows.length : rows.filter((r) => r.status === status).length);
+  const pageCount = Math.max(1, Math.ceil(matches.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const visibleRows = matches.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const selectedArr = rows.filter((r) => selected.has(r.id));
+  const selectedAll = matches.length > 0 && matches.every((r) => selected.has(r.id));
+  const selectedSome = selectedArr.length > 0 && !selectedAll;
+
+  const toggleSelected = (id) => {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    if (selectedAll) setSelected(new Set());
+    else setSelected((cur) => new Set([...cur, ...matches.map((r) => r.id)]));
+  };
+  const markStatus = (ids, status) => {
+    badcaseStore.forEach((b) => { if (ids.includes(b.id)) b.status = status; });
+    setSelected(new Set());
+    setRefresh((n) => n + 1);
+  };
+  // 线上：选中项里只要有一条不是「处理中」，批量完成整体不执行。
+  const batchComplete = () => {
+    if (selectedArr.some((r) => r.status !== '处理中')) { notify('仅支持批量完成状态为“处理中”的 badcase', 'error'); return; }
+    markStatus(selectedArr.map((r) => r.id), '已完成');
+    notify('批量完成成功', 'success');
+  };
+  const batchClose = () => {
+    if (selectedArr.some((r) => r.status === '已完成' || r.status === '已关闭')) { notify('含「已完成/已关闭」的 Badcase 不能批量关闭', 'error'); return; }
+    setConfirmState({
+      message: `关闭选中的 ${selectedArr.length} 条 badcase？请确认是否关闭该badcase，关闭后该badcase不支持进行后续处理流程且该操作不可恢复`,
+      onConfirm: () => {
+        markStatus(selectedArr.map((r) => r.id), '已关闭');
+        notify('关闭成功', 'success');
+      },
+    });
+  };
+  const closeSingle = (row) => {
+    setConfirmState({
+      message: '请确认是否关闭该badcase，关闭后该badcase不支持进行后续处理流程且该操作不可恢复',
+      onConfirm: () => {
+        markStatus([row.id], '已关闭');
+        notify('关闭成功', 'success');
+      },
+    });
+  };
+  const reset = () => { setStatusFilter('全部'); setSourceFilter('来源'); setTypeFilter('问题类型'); setKeyword(''); setPage(1); };
+
+  return (
+    <>
+      <PageHeader title="Badcase 管理" />
+      <p className="page-desc">管理知识工程质检调优的 Badcase，支持人工新建、搜索测试创建、批量导入与详情定位闭环处理。</p>
+      <div className="badcase-stat-bar">
+        {[{ status: '全部' }, ...BAD_CASE_STATUS.map((s) => ({ status: s }))].map(({ status }) => (
+          <span key={status} className={`badcase-stat badcase-stat-${status}`}>
+            <b>{countOf(status)}</b><span>{status}</span>
+          </span>
+        ))}
+      </div>
+      <Toolbar className="knowledge-list-toolbar badcase-toolbar">
+        <button type="button" className="primary" onClick={() => setCreateOpen(true)}><PlusOutlined /> 新增</button>
+        <button type="button" className="secondary" onClick={() => setImportOpen(true)}><CloudUploadOutlined /> 批量导入</button>
+        <SearchBox value={keyword} onChange={setKeyword} placeholder="搜索 Badcase 问题" />
         <SelectField value={sourceFilter} onChange={setSourceFilter}>
           <option value="来源">来源</option>
-          <option value="人工新建">人工新建</option>
-          <option value="搜索测试">搜索测试</option>
-          <option value="批量导入">批量导入</option>
+          {BAD_CASE_SOURCES.map((s) => <option value={s} key={s}>{s}</option>)}
+        </SelectField>
+        <SelectField value={statusFilter} onChange={(s) => { setStatusFilter(s); setPage(1); }}>
+          <option value="全部">状态</option>
+          {BAD_CASE_STATUS.map((s) => <option value={s} key={s}>{s}</option>)}
         </SelectField>
         <SelectField value={typeFilter} onChange={setTypeFilter}>
           <option value="问题类型">问题类型</option>
-          <option value="召回缺失">召回缺失</option>
-          <option value="无关召回">无关召回</option>
-          <option value="答案错误">答案错误</option>
-          <option value="答案不完整">答案不完整</option>
+          {BAD_CASE_PROBLEM_TYPES.map((t) => <option value={t} key={t}>{t}</option>)}
         </SelectField>
-        <button type="button" className="secondary" onClick={() => { setSourceFilter('来源'); setTypeFilter('问题类型'); setStatusTab('全部'); }}>重置</button>
+        <button type="button" className="secondary" onClick={reset}>重置</button>
       </Toolbar>
       <section className="panel knowledge-table-panel">
-        <table className="data-table knowledge-table">
+        <table className="data-table knowledge-table badcase-table">
           <thead>
             <tr>
+              <th className="badcase-check-col"><BadcaseRowSelection checked={selectedAll} indeterminate={selectedSome} onChange={toggleAll} /></th>
               <th>Badcase ID</th>
-              <th>查询内容</th>
+              <th className="badcase-query-col">查询内容</th>
               <th>来源</th>
               <th>状态</th>
               <th>问题类型</th>
               <th>创建时间</th>
-              <th>操作</th>
+              <th className="badcase-action-col">操作</th>
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((row) => (
-              <tr key={row.id}>
-                <td className="strong">{row.id}</td>
-                <td>{row.query}</td>
-                <td>{row.source}</td>
-                <td><Badge tone={row.status === '已完成' ? 'success' : row.status === '已关闭' ? 'neutral' : 'warning'}>{row.status}</Badge></td>
-                <td>{row.type}</td>
-                <td>{row.createdAt}</td>
-                <td className="actions knowledge-actions">
-                  <button type="button" onClick={() => notify(`打开 ${row.id} 详情`)}>查看</button>
-                  <button type="button" className="danger" onClick={() => setRemovedIds((current) => new Set(current).add(row.id))}>删除</button>
-                </td>
-              </tr>
-            ))}
+            {visibleRows.map((row) => {
+              const closedOrDone = row.status === '已完成' || row.status === '已关闭';
+              return (
+                <tr key={row.id} className={`badcase-row ${selected.has(row.id) ? 'row-selected' : ''}`.trim()} onClick={() => setDetailRow(row.id)}>
+                  <td><BadcaseRowSelection checked={selected.has(row.id)} indeterminate={false} onChange={() => toggleSelected(row.id)} /></td>
+                  <td className="strong">{row.id}</td>
+                  <td className="cell-ellipsis" title={row.query}>{row.query}</td>
+                  <td>{row.source}</td>
+                  <td><Badge tone={row.status === '已完成' ? 'success' : row.status === '已关闭' ? 'neutral' : 'warning'}>{row.status}</Badge></td>
+                  <td>
+                    {(row.problemTypes || []).length ? (
+                      <span className="badcase-type-tags">
+                        {(row.problemTypes || []).slice(0, 2).map((type) => <span className="result-tag-chip" key={type}>{type}</span>)}
+                        {(row.problemTypes || []).length > 2 ? (
+                          <Tooltip title={(row.problemTypes || []).join('、')}>
+                            <span className="result-tag-rest">+{(row.problemTypes || []).length - 2}</span>
+                          </Tooltip>
+                        ) : null}
+                      </span>
+                    ) : '—'}
+                  </td>
+                  <td>{row.createTime}</td>
+                  <td className="actions knowledge-actions">
+                    <button type="button" onClick={(event) => { event.stopPropagation(); setDetailRow(row.id); }}>查看详情</button>
+                    <button type="button" className="danger" disabled={closedOrDone} onClick={(event) => { event.stopPropagation(); closeSingle(row); }}>关闭</button>
+                  </td>
+                </tr>
+              );
+            })}
             {visibleRows.length ? null : (
-              <tr><td colSpan={7}><div className="empty-mini"><strong>暂无 Badcase 数据</strong><span>可从搜索测试结果一键创建，或批量导入线下收集的问题。</span></div></td></tr>
+              <tr><td colSpan={8}><div className="empty-mini"><strong>暂无 Badcase 数据</strong><span>可从搜索测试结果一键创建，或批量导入线下收集的问题。</span></div></td></tr>
             )}
           </tbody>
         </table>
+        <div className="knowledge-pagination badcase-pagination">
+          <span>共 {matches.length} 条</span>
+          <button type="button" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}> &lt; </button>
+          {Array.from({ length: pageCount }, (_, i) => i + 1).slice(0, Math.min(pageCount, 7)).map((p) => (
+            <button key={p} type="button" className={safePage === p ? 'active' : ''} onClick={() => setPage(p)}>{p}</button>
+          ))}
+          {pageCount > 7 ? <span className="page-ellipsis">…</span> : null}
+          <button type="button" disabled={safePage >= pageCount} onClick={() => setPage(safePage + 1)}> &gt; </button>
+          <SelectField className="badcase-page-size" value={String(pageSize)} onChange={(value) => { setPageSize(Number(value)); setPage(1); }} dropdownMinWidth={110}>
+            <option value="10">10 条/页</option>
+            <option value="20">20 条/页</option>
+            <option value="50">50 条/页</option>
+          </SelectField>
+          <span className="badcase-jumper"><input type="number" min={1} max={pageCount} value={safePage} onChange={(e) => setPage(Number(e.target.value) || 1)} /> 页 / 共 {pageCount} 页</span>
+        </div>
       </section>
+      {selectedArr.length ? (
+        <div className="badcase-batch-bar">
+          <span>已选 {selectedArr.length} 条</span>
+          <button type="button" className="primary batch-complete" onClick={batchComplete}>批量完成</button>
+          <button type="button" className="danger-button" onClick={batchClose}>批量关闭</button>
+        </div>
+      ) : null}
+      {detailRow ? (
+        <BadcaseDetailModal
+          row={badcaseStore.find((item) => item.id === detailRow) || badcaseStore[0]}
+          notify={notify}
+          onClose={() => setDetailRow(null)}
+          onChanged={() => setRefresh((n) => n + 1)}
+        />
+      ) : null}
+      {createOpen ? (
+        <CreateBadcaseModal notify={notify} onClose={() => setCreateOpen(false)} onChanged={() => setRefresh((n) => n + 1)} />
+      ) : null}
+      {importOpen ? (
+        <ImportBadcaseModal notify={notify} onClose={() => setImportOpen(false)} onChanged={() => setRefresh((n) => n + 1)} />
+      ) : null}
+      {confirmState ? (
+        <ConfirmDialog
+          title="确认关闭"
+          message={confirmState.message}
+          danger
+          cancelText="取消"
+          confirmText="确认"
+          onCancel={() => setConfirmState(null)}
+          onConfirm={() => { const action = confirmState.onConfirm; setConfirmState(null); action(); }}
+        />
+      ) : null}
     </>
   );
 }
@@ -8304,6 +9737,24 @@ const knowledgeFormatGroups = [
   { id: 'media', label: '音视频', displayLabel: '音视频(mp3、wav、mp4、mov 等)', formats: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'mp4', 'mov', 'avi', 'mkv'] },
 ];
 
+// 视频格式（mp4、mov、avi、mkv）为视频解析需求（R030）预留、线上暂无：
+// 「知识加工方案」的格式筛选器与新建/编辑方案弹窗的「适用格式」暂时隐藏视频，音频格式保留。
+const planHiddenVideoFormats = ['mp4', 'mov', 'avi', 'mkv'];
+const knowledgePlanFormatGroups = knowledgeFormatGroups
+  .map((group) => {
+    const formats = group.formats.filter((format) => !planHiddenVideoFormats.includes(format));
+    if (!formats.length) return null;
+    if (formats.length === group.formats.length) return group;
+    const audioOnly = group.id === 'media';
+    return {
+      ...group,
+      formats,
+      label: audioOnly ? '音频' : group.label,
+      displayLabel: audioOnly ? `音频(${formats.slice(0, 3).join('、')} 等)` : group.displayLabel,
+    };
+  })
+  .filter(Boolean);
+
 function formatGroupOf(format) {
   return knowledgeFormatGroups.find((group) => group.formats.includes(format)) || null;
 }
@@ -8378,6 +9829,9 @@ const uploadTypeLimits = {
 function getUploadFileType(typeId) {
   return uploadFileTypes.find((item) => item.id === typeId) || uploadFileTypes[0];
 }
+
+// 「视频文件」为视频解析需求（R030）预留、线上白名单暂无，文件上传与更新抽屉暂时隐藏该类型。
+const visibleUploadFileTypes = uploadFileTypes.filter((type) => type.id !== 'video');
 
 function uploadTypeAccept(type) {
   return (type?.formats || []).map((format) => `.${format}`).join(',');
@@ -8541,7 +9995,7 @@ function CategoryTreeMultiSelect({ categories, selectedIds, onChange, placeholde
 // 已选格式的展示标签：整个格式组被选中时按组展示，只选中组内部分格式时按具体格式展示。
 function selectedFormatTags(selectedFormats = []) {
   const tags = [];
-  knowledgeFormatGroups.forEach((group) => {
+  knowledgePlanFormatGroups.forEach((group) => {
     const hits = group.formats.filter((format) => selectedFormats.includes(format));
     if (!hits.length) return;
     if (hits.length === group.formats.length && group.formats.length > 1) {
@@ -8552,7 +10006,7 @@ function selectedFormatTags(selectedFormats = []) {
   });
   // 兜底：未归入任何格式组的格式仍然展示出来。
   selectedFormats
-    .filter((format) => !formatGroupOf(format))
+    .filter((format) => !knowledgePlanFormatGroups.some((group) => group.formats.includes(format)))
     .forEach((format) => tags.push({ key: format, label: formatLabel(format), formats: [format] }));
   return tags;
 }
@@ -8612,7 +10066,7 @@ function FormatMultiSelect({ selectedFormats, onChange }) {
       {open ? (
         <div className="plan-format-panel" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
           <div className="plan-format-options">
-            {knowledgeFormatGroups.map((group) => {
+            {knowledgePlanFormatGroups.map((group) => {
               const { Icon, color } = workbenchFileFormatMeta[group.formats[0]] || { Icon: FileOutlined, color: '#64748b' };
               const checked = group.formats.every((format) => selectedFormats.includes(format));
               return (
@@ -8853,10 +10307,10 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
     const formatText = plan.scopeFormats?.length
       ? (() => {
           const labels = [];
-          knowledgeFormatGroups.forEach((group) => {
+          knowledgePlanFormatGroups.forEach((group) => {
             if (group.formats.some((format) => plan.scopeFormats.includes(format))) labels.push(group.displayLabel);
           });
-          plan.scopeFormats.filter((format) => !formatGroupOf(format)).forEach((format) => labels.push(formatLabel(format)));
+          plan.scopeFormats.filter((format) => !knowledgePlanFormatGroups.some((group) => group.formats.includes(format))).forEach((format) => labels.push(formatLabel(format)));
           return labels.length ? labels.join('、') : '不限格式';
         })()
       : '不限格式';
@@ -8867,7 +10321,7 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
     if (statusFilter && plan.status !== statusFilter) return false;
     // 格式筛选按「格式组」匹配：方案范围与该组任一格式相交即命中。
     if (formatFilter) {
-      const group = knowledgeFormatGroups.find((item) => item.id === formatFilter);
+      const group = knowledgePlanFormatGroups.find((item) => item.id === formatFilter);
       const groupFormats = group ? group.formats : [formatFilter];
       if (plan.scopeFormats?.length && !plan.scopeFormats.some((format) => groupFormats.includes(format))) return false;
     }
@@ -8955,7 +10409,7 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
             </SelectField>
             <SelectField value={formatFilter} onChange={setFormatFilter}>
               <option value="">全部格式</option>
-              {knowledgeFormatGroups.map((group) => (
+              {knowledgePlanFormatGroups.map((group) => (
                 <option value={group.id} key={group.id}>{group.displayLabel}</option>
               ))}
             </SelectField>
@@ -9718,7 +11172,7 @@ function PickedFileTable({ files, emptyText, onRemove }) {
 function UploadTypeCards({ value, onChange }) {
   return (
     <div className="upload-type-cards">
-      {uploadFileTypes.map((type) => {
+      {visibleUploadFileTypes.map((type) => {
         const TypeIcon = type.icon;
         const active = value === type.id;
         return (
@@ -11194,6 +12648,29 @@ const detailPdfTextUnits = [
   { id: 'P3', page: '第 3 页', section: '第 1 段', text: '备案成功后，在备案地定点医疗机构就医，可直接结算。' },
 ];
 
+/* 文本切片的示例数据统一使用音频文件的切片：下面是该音频文件的解析文本单元与切片，
+   详情页据此展示「文件预览 + 解析文本预览」与「切片内容」（文件名与时长在列表示例数据上方定义）。 */
+const sliceAudioTextUnits = [
+  { id: '01', start: '00:00', end: '00:03', text: '百年人寿保险股份有限公司' },
+  { id: '02', start: '00:04', end: '00:15', text: '百年附加医惠通费用补偿医疗保险费率表' },
+  { id: '03', start: '00:16', end: '00:45', text: '一般医疗保险金保险金额200万元' },
+  { id: '04', start: '00:46', end: '00:58', text: '重大疾病医疗保险金保险金额200万元' },
+  { id: '05', start: '00:59', end: '01:07', text: '首次投保或非连续投保' },
+  { id: '06', start: '01:08', end: '01:13', text: '投保年龄' },
+  { id: '07', start: '01:14', end: '01:32', text: '保险期间为一年，续保需经本公司审核同意' },
+  { id: '08', start: '01:33', end: '01:50', text: '投保人应如实告知被保险人健康状况' },
+  { id: '09', start: '01:51', end: '02:00', text: '犹豫期为签收保单之日起十五日内' },
+  { id: '10', start: '02:01', end: '02:06', text: '本费率表仅供参考，具体以保险条款为准' },
+];
+const sliceAudioChunks = [
+  { id: 'audio-chunk-001', index: 0, rowRange: '00:00–00:58', textIds: ['01', '02', '03', '04'], length: 96, content: '百年人寿保险股份有限公司\n百年附加医惠通费用补偿医疗保险费率表\n一般医疗保险金保险金额200万元\n重大疾病医疗保险金保险金额200万元' },
+  { id: 'audio-chunk-002', index: 1, rowRange: '00:59–01:13', textIds: ['05', '06'], length: 42, content: '首次投保或非连续投保\n投保年龄' },
+  { id: 'audio-chunk-003', index: 2, rowRange: '01:14–01:32', textIds: ['07'], length: 36, content: '保险期间为一年，续保需经本公司审核同意' },
+  { id: 'audio-chunk-004', index: 3, rowRange: '01:33–01:50', textIds: ['08'], length: 38, content: '投保人应如实告知被保险人健康状况，未如实告知可能影响理赔结论。' },
+  { id: 'audio-chunk-005', index: 4, rowRange: '01:51–02:00', textIds: ['09'], length: 32, content: '犹豫期为签收保单之日起十五日内，犹豫期内退保可全额退还已交保费。' },
+  { id: 'audio-chunk-006', index: 5, rowRange: '02:01–02:06', textIds: ['10'], length: 26, content: '本费率表仅供参考，具体以保险条款为准。' },
+];
+
 // 切片：每个切片携带关联文本 ID 与行列坐标（CSV）或时间轴（音频），表头随分片重复。
 const detailCsvChunks = [
   { id: 'csv-chunk-001', index: 1, rowRange: '第 2–4 行', colRange: '第 1–4 列', textIds: ['T2', 'T3', 'T4'], length: 96, content: '| 药品名称 | 剂型 | 报销比例 | 备注 |\n| --- | --- | --- | --- |\n| 阿莫西林胶囊 | 胶囊 | 90% | 甲类 |\n| 布洛芬缓释胶囊 | 缓释胶囊 | 85% | 乙类 |\n| 二甲双胍片 | 片剂 | 95% | 甲类 |' },
@@ -11229,13 +12706,13 @@ const resultDetailSeeds = {
     id: 'slice-audio',
     formType: '切片库',
     format: 'mp3',
-    fileName: '客服录音_医保报销咨询.mp3',
-    categoryName: '医保知识',
-    planName: '医保知识切片库mp3处理方案',
+    fileName: sliceAudioFileName,
+    categoryName: '产品知识',
+    planName: '产品资料切片库mp3处理方案',
     version: '1.0',
-    textUnits: detailAudioTextUnits,
-    audio: { duration: '03:12', urlLabel: '客服录音_医保报销咨询.mp3' },
-    chunks: detailAudioChunks,
+    textUnits: sliceAudioTextUnits,
+    audio: { duration: sliceAudioDuration, urlLabel: sliceAudioFileName },
+    chunks: sliceAudioChunks,
   },
   'slice-pdf': {
     id: 'slice-pdf',
@@ -11270,16 +12747,35 @@ const resultDetailSeeds = {
     id: 'qa-audio',
     formType: 'QA库',
     format: 'mp3',
-    fileName: '客服录音_医保报销咨询.mp3',
-    categoryName: '医保知识',
-    planName: '医保知识QA库mp3处理方案',
+    fileName: sliceAudioFileName,
+    categoryName: '产品知识',
+    planName: '产品资料QA库mp3处理方案',
     version: '1.0',
-    textUnits: detailAudioTextUnits,
-    audio: { duration: '03:12', urlLabel: '客服录音_医保报销咨询.mp3' },
-    chunks: detailAudioChunks,
+    textUnits: sliceAudioTextUnits,
+    audio: { duration: sliceAudioDuration, urlLabel: sliceAudioFileName },
+    chunks: sliceAudioChunks,
     qaPairs: [
-      { id: 'qa-audio-1', index: 1, question: '异地就医备案后报销比例和本地一样吗？', answer: '备案成功后，在备案地定点医疗机构就医，报销比例按参保地政策执行，具体比例以参保地目录为准。', similarQuestions: ['异地就医备案后报销比例是否一致'], paraphraseQuestions: [], textIds: ['A2', 'A3'], chunkIds: ['audio-chunk-001'] },
-      { id: 'qa-audio-2', index: 2, question: '急诊住院没有提前备案还能报销吗？', answer: '急诊抢救视同已备案，出院后按参保地规定补办备案手续即可，不影响本次报销。', textIds: ['A4', 'A5'], chunkIds: ['audio-chunk-002'] },
+      {
+        id: 'qa-audio-1', index: 1,
+        question: '如何支持基层提高药品供应保障能力？',
+        answer: '健全县（市、区）、乡镇（街道）、村（社区）用药衔接联动机制，适度放宽乡村两级用药品种和数量限制；加快建设医共体中心药房，依托牵头医院健全医共体内药品采购、配送、使用一体化管理机制，实现县乡村处方规范流转、用药需求精准匹配；医共体内部基层医疗机构与牵头医院用药目录统一，纳入乡村一体化管理、配备执业（助理）医师的村卫生室与乡镇卫生院用药目录统一；加快推进“医保药品云平台”建设，进一步扩大集采政策覆盖面，促进集采药品进基层医疗机构，配备基层医疗卫生机构优先配备使用集采中选药品。',
+        similarQuestions: [], paraphraseQuestions: [],
+        textIds: ['01', '02', '03', '04'], chunkIds: ['audio-chunk-001', 'audio-chunk-002'],
+      },
+      {
+        id: 'qa-audio-2', index: 2,
+        question: '本产品的保险期间与续保规则是什么？',
+        answer: '保险期间为一年，续保需经本公司审核同意；首次投保或非连续投保的，按投保时的费率表与投保年龄确定保费。',
+        similarQuestions: ['保险期间多久，可以续保吗'], paraphraseQuestions: [],
+        textIds: ['05', '06', '07'], chunkIds: ['audio-chunk-002', 'audio-chunk-003'],
+      },
+      {
+        id: 'qa-audio-3', index: 3,
+        question: '投保时的健康告知与犹豫期是怎么规定的？',
+        answer: '投保人应如实告知被保险人健康状况，未如实告知可能影响理赔结论；犹豫期为签收保单之日起十五日内，犹豫期内退保可全额退还已交保费。',
+        similarQuestions: [], paraphraseQuestions: ['犹豫期可以退保吗'],
+        textIds: ['08', '09'], chunkIds: ['audio-chunk-004', 'audio-chunk-005'],
+      },
     ],
   },
   'kp-csv': {
@@ -11322,35 +12818,46 @@ const resultDetailSeeds = {
     id: 'kp-audio',
     formType: '知识点',
     format: 'mp3',
-    fileName: '客服录音_医保报销咨询.mp3',
-    categoryName: '医保知识',
-    planName: '医保知识知识点mp3处理方案',
+    fileName: sliceAudioFileName,
+    categoryName: '产品知识',
+    planName: '产品资料知识点mp3处理方案',
     version: '1.0',
-    textUnits: detailAudioTextUnits,
-    audio: { duration: '03:12', urlLabel: '客服录音_医保报销咨询.mp3' },
-    chunks: detailAudioChunks,
+    textUnits: sliceAudioTextUnits,
+    audio: { duration: sliceAudioDuration, urlLabel: sliceAudioFileName },
+    chunks: sliceAudioChunks,
     knowledgePoints: [
       {
         id: 'kp-audio-1',
         index: 1,
-        title: '异地就医备案后的报销口径',
-        content: '备案成功后，在备案地定点医疗机构就医，报销比例按参保地政策执行，具体比例以参保地目录为准。',
-        applicableUsers: ['参保人员', '客服人员'],
-        keyRules: ['按参保地政策执行', '比例以参保地目录为准'],
-        tags: ['医保', '异地就医', '备案'],
-        textIds: ['A2', 'A3'],
-        chunkIds: ['audio-chunk-001'],
+        title: '基层药品供应保障要求',
+        content: '健全县（市、区）、乡镇（街道）、村（社区）用药衔接联动机制，适度放宽乡村两级用药品种和数量限制；加快建设医共体中心药房，依托牵头医院健全医共体内药品采购、配送、使用一体化管理机制，实现县乡村处方规范流转、用药需求精准匹配；医共体内部基层医疗机构与牵头医院用药目录统一，纳入乡村一体化管理、配备执业（助理）医师的村卫生室与乡镇卫生院用药目录统一；加快推进“医保药品云平台”建设，进一步扩大集采政策覆盖面，促进集采药品进基层医疗机构，配备基层医疗卫生机构优先配备使用集采中选药品。',
+        applicableUsers: ['参保人员', '医保经办人员'],
+        keyRules: ['用药衔接联动机制', '医共体用药目录统一', '集采药品进基层'],
+        tags: ['营销资料', '公开资料'],
+        textIds: ['01', '02', '03', '04'],
+        chunkIds: ['audio-chunk-001', 'audio-chunk-002'],
       },
       {
         id: 'kp-audio-2',
         index: 2,
-        title: '急诊抢救的备案补办',
-        content: '急诊抢救视同已备案，出院后按参保地规定补办备案手续即可，不影响本次报销。',
+        title: '保险期间与续保规则',
+        content: '保险期间为一年，续保需经本公司审核同意；首次投保或非连续投保的，按投保时的费率表与投保年龄确定保费。',
         applicableUsers: ['参保人员'],
-        keyRules: ['急诊视同已备案', '出院后补办备案手续'],
-        tags: ['医保', '急诊', '备案'],
-        textIds: ['A4', 'A5'],
-        chunkIds: ['audio-chunk-002'],
+        keyRules: ['保险期间一年', '续保需审核同意'],
+        tags: ['产品条款'],
+        textIds: ['05', '06', '07'],
+        chunkIds: ['audio-chunk-002', 'audio-chunk-003'],
+      },
+      {
+        id: 'kp-audio-3',
+        index: 3,
+        title: '健康告知与犹豫期',
+        content: '投保人应如实告知被保险人健康状况，未如实告知可能影响理赔结论；犹豫期为签收保单之日起十五日内，犹豫期内退保可全额退还已交保费。',
+        applicableUsers: ['投保人', '客服人员'],
+        keyRules: ['如实告知健康状况', '犹豫期十五日'],
+        tags: ['投保规则'],
+        textIds: ['08', '09'],
+        chunkIds: ['audio-chunk-004', 'audio-chunk-005'],
       },
     ],
   },
@@ -11378,16 +12885,11 @@ function getLocatorValue(seed, item) {
   return `${chunks[0].rowRange.split('–')[0]}–${chunks[chunks.length - 1].rowRange.split('–').pop()}`;
 }
 
-// 列表页「查看」入口按行映射到详情样例：CSV / 音频 / PDF 各有一条样例。
+// 列表页「查看」入口映射到详情样例：示例数据统一使用音频文件的切片，因此详情固定取音频样例。
 function resolveResultDetailSeed(formType, row) {
   if (!row) return null;
-  const text = `${row.source || ''}${row.content || ''}${row.title || ''}${row.question || ''}`;
-  const isCsv = /csv|药品目录|客户问答清单/i.test(text);
-  const isAudio = /mp3|录音|音频/i.test(text);
-  const format = isAudio ? 'mp3' : isCsv ? 'csv' : 'pdf';
   const prefix = formType === 'QA库' ? 'qa' : formType === '知识点' ? 'kp' : 'slice';
-  const key = `${prefix}-${isAudio ? 'audio' : isCsv ? 'csv' : 'pdf'}`;
-  return resultDetailSeeds[key] || resultDetailSeeds['slice-pdf'];
+  return resultDetailSeeds[`${prefix}-audio`] || resultDetailSeeds['slice-audio'];
 }
 
 function MarkdownTablePreview({ content }) {
@@ -11494,6 +12996,161 @@ function ResultFilePreview({ seed, activeTextIds }) {
   );
 }
 
+// 音频时间轴：与解析文本单元一致，统一用 mm:ss。
+function clockToSeconds(value) {
+  const parts = String(value || '0:0').split(':');
+  return (Number(parts[0]) || 0) * 60 + (Number(parts[1]) || 0);
+}
+function secondsToClock(total) {
+  const value = Math.max(0, Math.round(total));
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+}
+
+// 音频结果详情（切片 / 问答 / 知识点共用，对齐设计稿）：
+//   左栏 = 文件预览（音频播放器）+ 解析文本预览（ID / 文本 / 开始时间 / 结束时间 / 播放）
+//   中栏 = 切片区：切片详情为「切片内容」（只有两栏），问答 / 知识点为「来源切片」
+//   右栏 = 可选详情字段（问答对 / 知识点）；定位标签统一显示「时间轴」
+// 点击任意「播放」，左侧播放器会播放该时间轴区间的音频（原型以进度条推进模拟）。
+function AudioDetailLayout({ seed, chunks, activeChunkId, middleTitle = '切片内容', fields = null }) {
+  const textUnits = seed.textUnits || [];
+  const durationText = seed.audio?.duration || '00:00';
+  const durationSeconds = clockToSeconds(durationText);
+  const [player, setPlayer] = useState({ start: 0, at: 0, end: 0, playing: false, unitId: null, chunkId: null });
+  // 来源切片可选中：默认选中第一个，选中项决定左侧解析文本预览里高亮的文本。
+  const [selectedChunkId, setSelectedChunkId] = useState(() => (chunks.find((chunk) => chunk.id === activeChunkId) || chunks[0] || {}).id || null);
+  useEffect(() => {
+    const next = chunks.find((chunk) => chunk.id === activeChunkId) || chunks[0] || null;
+    setSelectedChunkId(next ? next.id : null);
+    // 切换形态内容（切片 / 问答 / 知识点）时重置选中项。
+  }, [seed.id, activeChunkId, chunks.length]);
+
+  const playRange = (range, meta) => {
+    const [startText, endText] = String(range || '').split('–');
+    const start = clockToSeconds(startText);
+    const end = clockToSeconds(endText || startText);
+    setPlayer({ start, at: start, end, playing: true, ...meta });
+  };
+  const togglePlayer = () => {
+    setPlayer((current) => {
+      if (current.playing) return { ...current, playing: false };
+      const start = current.end ? current.start : 0;
+      return { ...current, at: start, playing: true };
+    });
+  };
+  useEffect(() => {
+    if (!player.playing) return undefined;
+    const timer = window.setInterval(() => {
+      setPlayer((current) => {
+        if (!current.playing) return current;
+        const next = current.at + 0.5;
+        if (current.end && next >= current.end) return { ...current, at: current.end, playing: false };
+        if (!current.end && next >= durationSeconds) return { ...current, at: durationSeconds, playing: false };
+        return { ...current, at: next };
+      });
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [player.playing, player.end, durationSeconds]);
+
+  const percent = durationSeconds ? Math.min(100, Math.max(0, (player.at / durationSeconds) * 100)) : 0;
+  const selectedChunk = chunks.find((chunk) => chunk.id === selectedChunkId) || chunks[0] || null;
+  // 高亮规则：始终高亮「选中的来源切片」对应的文本；正在播放的单条文本再额外高亮。
+  const highlightedTextIds = new Set([
+    ...((selectedChunk?.textIds) || []),
+    ...(player.unitId ? [player.unitId] : []),
+  ]);
+
+  return (
+    <div className={`kr-audio-detail ${fields ? 'has-fields' : ''}`.trim()}>
+      <section className="kr-audio-left">
+        <div className="kr-audio-title">文件预览</div>
+        <div className="kr-audio-file">{seed.fileName}</div>
+        <div className="kr-audio-player">
+          <button type="button" className="kr-audio-play" aria-label={player.playing ? '暂停' : '播放'} onClick={togglePlayer}>
+            {player.playing ? <span className="kr-audio-pause" /> : <span className="kr-audio-triangle" />}
+          </button>
+          <div className="kr-audio-bar">
+            <span className="kr-audio-bar-fill" style={{ width: `${percent}%` }} />
+            <i className="kr-audio-bar-knob" style={{ left: `${percent}%` }} />
+          </div>
+          <span className="kr-audio-time">{secondsToClock(player.at)} / {durationText}</span>
+        </div>
+        <div className="kr-audio-title kr-audio-title-gap">解析文本预览</div>
+        <div className="kr-audio-table-wrap">
+          <table className="kr-audio-table">
+            <thead>
+              <tr>
+                <th className="kr-audio-col-id">ID</th>
+                <th>文本</th>
+                <th className="kr-audio-col-time">开始时间</th>
+                <th className="kr-audio-col-time">结束时间</th>
+                <th className="kr-audio-col-op">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {textUnits.map((unit) => (
+                <tr key={unit.id} className={highlightedTextIds.has(unit.id) ? 'active' : ''}>
+                  <td className="kr-audio-col-id">{unit.id}</td>
+                  <td className="kr-audio-cell-text" title={unit.text}>{unit.text}</td>
+                  <td className="kr-audio-col-time">{unit.start}</td>
+                  <td className="kr-audio-col-time">{unit.end}</td>
+                  <td className="kr-audio-col-op">
+                    <button type="button" className="link-btn" onClick={() => playRange(`${unit.start}–${unit.end}`, { unitId: unit.id })}>播放</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className="kr-audio-middle">
+        <div className="kr-audio-title kr-audio-title-split">
+          <span>{middleTitle}</span>
+          <span className="kr-locate-tag">时间轴</span>
+        </div>
+        {chunks.length ? chunks.map((chunk) => (
+          <div
+            className={`kr-slice-card ${chunk.id === selectedChunkId ? 'active' : ''}`}
+            key={chunk.id}
+            role="button"
+            tabIndex={0}
+            aria-pressed={chunk.id === selectedChunkId}
+            onClick={() => setSelectedChunkId(chunk.id)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                setSelectedChunkId(chunk.id);
+              }
+            }}
+          >
+            <div className="kr-slice-card-head">
+              <span className="kr-slice-card-no">#{chunk.index}</span>
+              <span className="kr-slice-card-file" title={seed.fileName}>{seed.fileName}</span>
+              <button
+                type="button"
+                className="kr-audio-play kr-audio-play-sm"
+                aria-label="播放该切片音频"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setSelectedChunkId(chunk.id);
+                  playRange(chunk.rowRange, { chunkId: chunk.id });
+                }}
+              >
+                <span className="kr-audio-triangle" />
+              </button>
+            </div>
+            <div className="kr-slice-card-meta">
+              <span>关联文本：{(chunk.textIds || []).join('、')}</span>
+              <span>音频时间轴：{String(chunk.rowRange || '').replace('–', ' ~ ')}</span>
+            </div>
+            <div className="kr-slice-card-content">{chunk.content}</div>
+          </div>
+        )) : <div className="kr-empty">暂无切片数据</div>}
+      </section>
+      {fields ? <section className="kr-audio-fields">{fields}</section> : null}
+    </div>
+  );
+}
+
 // 关联切片列表：一个问答对 / 知识点对应多个切片时，中间栏展示切片列表。
 function RelatedChunkList({ seed, chunks, activeChunkIds, onLocate }) {
   const locatorLabel = seed.format === 'mp3' ? '时间轴' : seed.format === 'csv' ? '行列坐标' : '页码';
@@ -11554,6 +13211,64 @@ function KnowledgeResultDetailPage({ seed, initialItemId }) {
   const locatorValue = seed.format === 'mp3'
     ? relatedTextIds.map((id) => seed.textUnits.find((unit) => unit.id === id)).filter(Boolean).map((unit) => `${unit.start}–${unit.end}`).join('、')
     : getLocatorValue(seed, activeItem);
+
+  // 音频详情（切片 / 问答 / 知识点）：左「文件预览 + 解析文本预览」，中「切片内容 / 来源切片」，右「详情字段」。
+  if (seed.format === 'mp3') {
+    const audioFields = (
+      <div className="kr-audio-field-list">
+        {seed.formType === 'QA库' ? (
+          <>
+            <div className="kr-audio-field">
+              <span className="kr-audio-field-label">问题</span>
+              <div className="kr-readonly-box">{activeItem.question}</div>
+            </div>
+            <div className="kr-audio-field">
+              <span className="kr-audio-field-label">标准答案</span>
+              <div className="kr-readonly-box kr-readonly-box-lg">{activeItem.answer}</div>
+            </div>
+            <div className="kr-audio-field">
+              <span className="kr-audio-field-label">相似问法</span>
+              {(activeItem.similarQuestions || []).length
+                ? (activeItem.similarQuestions || []).map((item, index) => <div className="kr-readonly-box" key={`sq-${index}`}>{item}</div>)
+                : <div className="kr-readonly-box kr-readonly-box-empty">暂无相似问法</div>}
+            </div>
+            <div className="kr-audio-field">
+              <span className="kr-audio-field-label">问法扩展</span>
+              {(activeItem.paraphraseQuestions || []).length
+                ? (activeItem.paraphraseQuestions || []).map((item, index) => <div className="kr-readonly-box" key={`pq-${index}`}>{item}</div>)
+                : <div className="kr-readonly-box kr-readonly-box-empty">暂无问法扩展</div>}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="kr-audio-field">
+              <span className="kr-audio-field-label">知识点名称/标题</span>
+              <div className="kr-readonly-box">{activeItem.title}</div>
+            </div>
+            <div className="kr-audio-field">
+              <span className="kr-audio-field-label">知识点内容</span>
+              <div className="kr-readonly-box kr-readonly-box-lg">{activeItem.content}</div>
+            </div>
+            {(activeItem.tags || []).length ? (
+              <div className="kr-audio-field">
+                <span className="kr-audio-field-label">标签</span>
+                <div className="kr-chip-row">{(activeItem.tags || []).map((tag) => <span className="detail-chip" key={tag}>{tag}</span>)}</div>
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    );
+    return (
+      <AudioDetailLayout
+        seed={seed}
+        chunks={sourceSlices}
+        activeChunkId={activeItem?.id}
+        middleTitle={isSlice ? '切片内容' : '来源切片'}
+        fields={isSlice ? null : audioFields}
+      />
+    );
+  }
 
   return (
     <div className="kr-detail">
@@ -11630,8 +13345,25 @@ function KnowledgeResultDetailDrawer({ seed, initialItemId, onClose }) {
   const title = seed.formType === 'QA库' ? '问答详情' : seed.formType === '知识点' ? '知识点详情' : '切片详情';
   // 线上详情抽屉宽度：问答 / 知识点 1682，切片 1122。
   const width = seed.formType === '切片库' ? 1122 : 1682;
+  // 抽屉右上角「文件信息」：展示来源文件的状态、类目、处理方案与版本。
+  const fileInfo = (
+    <Tooltip
+      placement="bottomRight"
+      title={(
+        <div className="kr-file-info-tip">
+          <span><em>来源文件</em>{seed.fileName}</span>
+          <span><em>文件状态</em>处理成功</span>
+          <span><em>知识类目</em>{seed.categoryName || '-'}</span>
+          <span><em>处理方案</em>{seed.planName || '-'}</span>
+          <span><em>方案版本</em>{seed.version || '-'}</span>
+        </div>
+      )}
+    >
+      <button type="button" className="kr-file-info-btn"><FileOutlined /> 文件信息</button>
+    </Tooltip>
+  );
   return (
-    <Drawer title={title} onClose={onClose} className="result-detail-drawer" darkHead width={width}>
+    <Drawer title={title} onClose={onClose} className="result-detail-drawer" darkHead width={width} extra={fileInfo}>
       <KnowledgeResultDetailPage seed={seed} initialItemId={initialItemId} />
     </Drawer>
   );
@@ -11641,121 +13373,251 @@ function buildResultDetailSeedByKey(key) {
   return resultDetailSeeds[key] || resultDetailSeeds['slice-pdf'];
 }
 
-// 搜索测试：面向已入库知识做检索效果验证，命中结果可跳转到对应详情页定位原文。
-// 页面层级为「搜索测试 → 检索测试 → 检索结果」。
-const retrievalFormTypeOptions = ['全部形态', '切片库', 'QA库', '知识点'];
+// 检索服务：临时配置检索参数、验证知识对象召回，命中结果可查看原文、反馈问题并创建 Badcase。
 const retrievalHitSeeds = [
-  { id: 'hit-1', formType: '切片库', score: 0.92, content: '| 药品名称 | 剂型 | 报销比例 | 备注 |\n| --- | --- | --- | --- |\n| 阿莫西林胶囊 | 胶囊 | 90% | 甲类 |', source: '医保药品目录清单.csv', seedKey: 'slice-csv', itemId: 'csv-chunk-001', locator: '第 2–4 行 · 第 1–4 列' },
-  { id: 'hit-2', formType: '切片库', score: 0.88, content: '| 药品名称 | 剂型 | 报销比例 | 备注 |\n| --- | --- | --- | --- |\n| 阿托伐他汀钙片 | 片剂 | 80% | 乙类 |', source: '医保药品目录清单.csv', seedKey: 'slice-csv', itemId: 'csv-chunk-002', locator: '第 5–7 行 · 第 1–4 列' },
-  { id: 'hit-3', formType: 'QA库', score: 0.85, content: '问：阿莫西林胶囊的报销比例是多少？\n答：阿莫西林胶囊（胶囊剂型）的报销比例为 90%，属于甲类药品。', source: '客户问答清单.csv', seedKey: 'qa-csv', itemId: 'qa-csv-1', locator: '第 2 行 · 第 1–4 列' },
-  { id: 'hit-4', formType: '知识点', score: 0.81, content: '甲类药品报销比例：甲类药品按参保地政策全额纳入报销范围，样例中阿莫西林胶囊、二甲双胍片、奥美拉唑肠溶胶囊的报销比例分别为 90%、95%、92%。', source: '医保药品目录清单.csv', seedKey: 'kp-csv', itemId: 'kp-csv-1', locator: '第 2–7 行 · 第 1–4 列' },
-  { id: 'hit-5', formType: '切片库', score: 0.79, content: '我想咨询一下，异地就医备案之后，报销比例和本地一样吗？备案成功后，在备案地定点医疗机构就医，报销比例按参保地政策执行。', source: '客服录音_医保报销咨询.mp3', seedKey: 'slice-audio', itemId: 'audio-chunk-001', locator: '00:18–01:40 · 第 2–3 段' },
-  { id: 'hit-6', formType: 'QA库', score: 0.74, content: '问：急诊住院没有提前备案还能报销吗？\n答：急诊抢救视同已备案，出院后按参保地规定补办备案手续即可，不影响本次报销。', source: '客服录音_医保报销咨询.mp3', seedKey: 'qa-audio', itemId: 'qa-audio-2', locator: '01:40–03:12 · 第 4–5 段' },
+  {
+    id: 'hit-1', formType: '切片库', score: 0.92,
+    content: '百年人寿保险股份有限公司\n百年附加医惠通费用补偿医疗保险费率表\n一般医疗保险金保险金额200万元\n重大疾病医疗保险金保险金额200万元',
+    source: sliceAudioFileName, seedKey: 'slice-audio', itemId: 'audio-chunk-001',
+    projectSpace: '806版本评测V2', planCategory: '产品知识库', tags: ['保险', '费率表'],
+  },
+  {
+    id: 'hit-2', formType: '切片库', score: 0.88,
+    content: '首次投保或非连续投保\n投保年龄',
+    source: sliceAudioFileName, seedKey: 'slice-audio', itemId: 'audio-chunk-002',
+    projectSpace: '806版本评测V2', planCategory: '产品知识库', tags: ['保险', '投保规则'],
+  },
+  {
+    id: 'hit-3', formType: 'QA库', score: 0.85,
+    content: '问：如何支持基层提高药品供应保障能力？\n答：健全县（市、区）、乡镇（街道）、村（社区）用药衔接联动机制，适度放宽乡村两级用药品种和数量限制；加快建设医共体中心药房，推进“医保药品云平台”建设，扩大集采政策覆盖面。',
+    source: sliceAudioFileName, seedKey: 'qa-audio', itemId: 'audio-chunk-001',
+    projectSpace: '806版本评测V2', planCategory: '产品知识库', tags: ['医保', '药品供应保障'],
+  },
+  {
+    id: 'hit-4', formType: '知识点', score: 0.81,
+    content: '基层药品供应保障要求：健全县（市、区）、乡镇（街道）、村（社区）用药衔接联动机制，适度放宽乡村两级用药品种和数量限制；加快建设医共体中心药房，推进“医保药品云平台”建设。',
+    source: sliceAudioFileName, seedKey: 'kp-audio', itemId: 'audio-chunk-001', pointName: '基层药品供应保障要求',
+    projectSpace: '806版本评测V2', planCategory: '产品知识库', tags: ['营销资料', '公开资料'],
+  },
+  {
+    id: 'hit-5', formType: '切片库', score: 0.79,
+    source: sliceAudioFileName, seedKey: 'slice-audio',
+    parentSliceNo: 'PS202608180005', titlePath: '第三章 / 异地就医 / 备案与报销',
+    parentContent: '产品费率与投保规则说明（父切片）：包含费率表、保险金额、首次投保与连续投保、投保年龄等条款。',
+    projectSpace: '806版本评测V2', planCategory: '产品知识库', tags: ['保险', '投保规则'],
+    children: [
+      { id: 'audio-chunk-001', no: '#1', score: 0.79, content: '百年人寿保险股份有限公司 百年附加医惠通费用补偿医疗保险费率表 一般医疗保险金保险金额200万元' },
+      { id: 'audio-chunk-002', no: '#2', score: 0.74, content: '首次投保或非连续投保 投保年龄' },
+    ],
+  },
+  {
+    id: 'hit-6', formType: 'QA库', score: 0.74,
+    content: '问：本产品的保险期间与续保规则是什么？\n答：保险期间为一年，续保需经本公司审核同意；首次投保或非连续投保的，按投保时的费率表与投保年龄确定保费。',
+    source: sliceAudioFileName, seedKey: 'qa-audio', itemId: 'audio-chunk-002',
+    projectSpace: '806版本评测V2', planCategory: '产品知识库', tags: ['保险', '续保'],
+  },
 ];
 
 function RetrievalTestPage({ notify }) {
-  const [tagCategory, setTagCategory] = useState('全部标签分类');
-  const [tag, setTag] = useState('全部标签');
-  const [formType, setFormType] = useState('全部形态');
-  const [topK, setTopK] = useState('5');
-  const [threshold, setThreshold] = useState('0.5');
+  const [config, setConfig] = useState(() => defaultRetrievalConfig());
+  const [tagIds, setTagIds] = useState([]);
   const [query, setQuery] = useState('阿莫西林胶囊的报销比例是多少');
-  const [searched, setSearched] = useState(true);
-  const [elapsed, setElapsed] = useState('128ms');
-  const [detailTarget, setDetailTarget] = useState(null);
+  const [searched, setSearched] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [elapsed, setElapsed] = useState('');
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const [feedbackRecords, setFeedbackRecords] = useState({});
+  const [feedbackTarget, setFeedbackTarget] = useState(null);
+  const [historyRecords, setHistoryRecords] = useState(null);
+  const [citationTarget, setCitationTarget] = useState(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const searchTimerRef = useRef(null);
+  useEffect(() => () => { if (searchTimerRef.current) window.clearTimeout(searchTimerRef.current); }, []);
+  const toggleExpand = (key) => setExpandedIds((current) => {
+    const next = new Set(current);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  });
 
+  const isSingle = config.recallMode === 'SINGLE';
+  const activeForms = isSingle ? [config.singleForm] : config.multiForms;
+  // 命中的形态过滤：单路只看当前形态，多路看多选形态。
+  const formFilterSet = new Set(activeForms.map(formToHitForm));
   const hits = retrievalHitSeeds
-    .filter((hit) => formType === '全部形态' || hit.formType === formType)
-    .filter((hit) => Number(hit.score) >= Number(threshold || 0))
-    .slice(0, Number(topK) || 5);
+    .filter((hit) => formFilterSet.has(hit.formType))
+    .filter((hit) => (config.thresholdEnabled ? Number(hit.score) >= Number(config.threshold) : true))
+    .slice(0, Math.max(1, Number(config.topK) || 10));
 
   const runSearch = () => {
-    if (!query.trim()) {
-      notify('请输入检索内容', 'error');
-      return;
-    }
-    setSearched(true);
-    setElapsed(`${Math.round(96 + Math.random() * 84)}ms`);
+    if (!query.trim()) { notify('请输入测试问题', 'error'); return; }
+    if (searchTimerRef.current) window.clearTimeout(searchTimerRef.current);
+    setSearched(false);
+    setSearching(true);
+    searchTimerRef.current = window.setTimeout(() => {
+      setElapsed(`${Math.round(90 + Math.random() * 160)}ms`);
+      setSearching(false);
+      setSearched(true);
+    }, 500);
   };
+
+  // 反馈按结果条目（父子切片按子切片）分别记录，行为对齐线上「问题记录 / 反馈历史」。
+  const submitFeedback = ({ reason, description }) => {
+    const key = feedbackTarget?.key;
+    if (!key) return;
+    const record = { id: `fb-${Date.now()}`, reason, description, createBy: '当前用户', createTime: nowBadcaseStamp() };
+    setFeedbackRecords((map) => ({ ...map, [key]: [record, ...(map[key] || [])] }));
+    setFeedbackTarget(null);
+    notify('反馈提交成功', 'success');
+  };
+  const openCreateBadcase = () => {
+    const results = hits.map((hit, i) => ({
+      id: `r-${i}`, rank: i + 1, formType: hit.formType,
+      q: hit.formType === 'QA库' ? hit.content.split('\n答：')[0] : '',
+      a: hit.formType === 'QA库' ? hit.content.split('答：')[1] || '' : '',
+      content: hit.content, source: hit.source, resultId: `${hit.id}`, score: hit.score, issueType: '',
+    }));
+    setCreateOpen({
+      query,
+      config,
+      snapshot: true,
+      retrievalParam: buildRetrievalSnapshot(config, tagIds),
+      actualResults: results,
+      expectedResults: [],
+    });
+  };
+
+  const formBadgeTone = (ft) => (ft === 'QA库' ? 'info' : ft === '切片库' ? 'purple' : 'teal');
+  const formBadgeLabel = (ft) => (ft === 'QA库' ? '问答对' : ft === '切片库' ? '切片' : '知识点');
 
   return (
     <div className="retrieval-test-page">
-      <PageHeader title="搜索测试" />
-      <div className="retrieval-breadcrumb">
-        <span>检索测试</span>
-        <em>/</em>
-        <span className="active">检索结果</span>
-      </div>
-      <section className="panel retrieval-config-panel">
-        <div className="retrieval-panel-title">检索测试</div>
-        <div className="retrieval-config-row">
-          <label>标签过滤</label>
-          <SelectField value={tagCategory} onChange={setTagCategory} dropdownMinWidth={160}>
-            <option>全部标签分类</option>
-            <option>医保</option>
-            <option>基金</option>
-            <option>保险</option>
-          </SelectField>
-          <SelectField value={tag} onChange={setTag} dropdownMinWidth={140}>
-            <option>全部标签</option>
-            <option>药品目录</option>
-            <option>报销比例</option>
-            <option>异地就医</option>
-          </SelectField>
-        </div>
-        <div className="retrieval-config-row">
-          <label>检索参数</label>
-          <SelectField value={formType} onChange={setFormType} dropdownMinWidth={140}>
-            {retrievalFormTypeOptions.map((option) => <option key={option}>{option}</option>)}
-          </SelectField>
-          <SelectField value={topK} onChange={setTopK} dropdownMinWidth={120}>
-            <option value="3">返回 3 条</option>
-            <option value="5">返回 5 条</option>
-            <option value="10">返回 10 条</option>
-          </SelectField>
-          <SelectField value={threshold} onChange={setThreshold} dropdownMinWidth={140}>
-            <option value="0">相似度不限</option>
-            <option value="0.5">相似度 ≥ 0.5</option>
-            <option value="0.8">相似度 ≥ 0.8</option>
-          </SelectField>
-        </div>
-        <div className="retrieval-query-row">
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入检索内容，验证知识加工结果能否被召回" />
-          <button type="button" className="primary" onClick={runSearch}><SearchOutlined /> 测试检索</button>
-        </div>
-      </section>
-      <section className="panel retrieval-result-panel">
-        <div className="retrieval-result-head">
-          <span>检索结果</span>
-          {searched ? <span className="retrieval-result-meta">响应耗时 {elapsed} · 命中 {hits.length} 条</span> : null}
-        </div>
-        {searched && hits.length ? (
-          <div className="retrieval-hit-list">
-            {hits.map((hit, index) => (
-              <div className="retrieval-hit" key={hit.id}>
-                <div className="retrieval-hit-head">
-                  <span className="retrieval-hit-index">#{index + 1}</span>
-                  <span className="badge neutral">{getKnowledgeFormTypeLabel(hit.formType)}</span>
-                  <span className="retrieval-hit-score">得分 {hit.score.toFixed(2)}</span>
-                  <span className="retrieval-hit-locator">{hit.locator}</span>
-                </div>
-                <pre className="retrieval-hit-content">{hit.content}</pre>
-                <div className="retrieval-hit-foot">
-                  <span>来源文件：{hit.source}</span>
-                  <button type="button" onClick={() => setDetailTarget({ seedKey: hit.seedKey, itemId: hit.itemId })}>查看原文</button>
-                </div>
+      <PageHeader title="检索服务" description="临时配置检索参数、测试知识对象召回效果并形成可追溯记录" />
+      <div className="retrieval-layout">
+        <aside className="retrieval-config-col">
+          <ConfigCard title="标签过滤">
+            <TagCascadeSelect value={tagIds} onChange={setTagIds} placeholder="选择标签" />
+          </ConfigCard>
+          <ConfigCard title="检索参数配置" notice="临时配置，不保存">
+            <RetrievalConfigForm config={config} onChange={setConfig} />
+          </ConfigCard>
+        </aside>
+        <section className="retrieval-main">
+          <ConfigCard title="测试检索" className="retrieval-search-card">
+            <div className="retrieval-search-row">
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="请输入测试问题或关键词..."
+                disabled={searching}
+                onKeyDown={(e) => { if (e.key === 'Enter') runSearch(); }}
+              />
+              <button type="button" className="primary" disabled={!query.trim() || searching} onClick={runSearch}>
+                <SearchOutlined /> {searching ? '检索中...' : '测试检索'}
+              </button>
+            </div>
+          </ConfigCard>
+          <section className="panel retrieval-result-panel">
+            {searched ? (
+              <div className="retrieval-result-head">
+                <span className="retrieval-result-meta">
+                  响应耗时：<strong>{elapsed}</strong>
+                  <i className="retrieval-result-sep" />
+                  命中总数：<strong>共 {hits.length} 条</strong>
+                </span>
+                <button type="button" className="primary retrieval-create-btn" onClick={openCreateBadcase}><PlusOutlined /> 创建 Badcase</button>
               </div>
-            ))}
-          </div>
-        ) : (
-          <div className="retrieval-empty">{searched ? '没有命中结果，请调整检索内容或降低相似度阈值。' : '输入检索内容后点击「测试检索」。'}</div>
-        )}
-      </section>
-      {detailTarget ? (
-        <KnowledgeResultDetailDrawer
-          seed={buildResultDetailSeedByKey(detailTarget.seedKey)}
-          initialItemId={detailTarget.itemId}
-          onClose={() => setDetailTarget(null)}
+            ) : null}
+            {searching ? (
+              <div className="retrieval-state"><SyncOutlined spin /> 检索中...</div>
+            ) : !searched ? (
+              <div className="retrieval-state"><SearchOutlined /><span>输入查询词后执行检索，结果将在此处展示</span></div>
+            ) : hits.length ? (
+              <div className="retrieval-hit-list">
+                {hits.map((hit, index) => {
+                  if (hit.children) {
+                    return (
+                      <ParentChildHitCard
+                        key={hit.id}
+                        hit={hit}
+                        expandedSet={expandedIds}
+                        onToggle={toggleExpand}
+                        feedbackState={Object.fromEntries((hit.children || []).map((child) => [`${hit.id}:${child.id}`, (feedbackRecords[`${hit.id}:${child.id}`] || []).length > 0]))}
+                        onFeedback={(child) => setFeedbackTarget({ key: `${hit.id}:${child.id}`, content: child.content })}
+                        onViewSource={(child) => setCitationTarget({ seedKey: hit.seedKey, itemId: child.id })}
+                      />
+                    );
+                  }
+                  const expanded = expandedIds.has(hit.id);
+                  const isQa = hit.formType === 'QA库';
+                  const question = isQa ? hit.content.split('\n答：')[0].replace(/^问：/, '') : '';
+                  const answer = isQa ? hit.content.split('\n答：')[1] || '' : hit.content;
+                  const foldable = isQa ? answer.length > 90 : (hit.content?.length || 0) > 120;
+                  const records = feedbackRecords[hit.id] || [];
+                  return (
+                    <div className="retrieval-hit" key={hit.id}>
+                      <div className="retrieval-hit-head">
+                        <span className="retrieval-hit-index">#{index + 1}</span>
+                        <span className={`retrieval-hit-badge ${formBadgeTone(hit.formType)}`}>{formBadgeLabel(hit.formType)}</span>
+                        <span className="retrieval-hit-score">得分：{Number(hit.score).toFixed(2)}</span>
+                        <span className="retrieval-hit-feedback">
+                          {records.length ? (
+                            <button type="button" className="recorded" onClick={() => setHistoryRecords(records)}>已反馈</button>
+                          ) : (
+                            <button type="button" onClick={() => setFeedbackTarget({ key: hit.id, content: hit.content })}>问题记录</button>
+                          )}
+                        </span>
+                      </div>
+                      {isQa ? (
+                        <div className="retrieval-hit-qa">
+                          <div><em>Q：</em><span>{question}</span></div>
+                          <div><em>A：</em><span className={expanded ? '' : 'clamped'}>{answer}</span></div>
+                        </div>
+                      ) : (
+                        <pre className={`retrieval-hit-content ${expanded ? '' : 'folded'}`}>{hit.content}</pre>
+                      )}
+                      {foldable ? <button type="button" className="link-btn" onClick={() => toggleExpand(hit.id)}>{expanded ? '收起详情' : '展开详情'}</button> : null}
+                      <div className="retrieval-hit-foot">
+                        <span><FileTextOutlined /> <em>{hit.source}</em></span>
+                        <button type="button" onClick={() => setCitationTarget({ seedKey: hit.seedKey, itemId: hit.itemId })}>查看原文</button>
+                      </div>
+                      <div className="retrieval-hit-chips">
+                        {hit.projectSpace ? <span>{hit.projectSpace}</span> : null}
+                        {hit.planCategory ? <span>{hit.planCategory}</span> : null}
+                        {hit.formType === '知识点' && hit.pointName ? <span>{hit.pointName}</span> : null}
+                        {(hit.tags || []).map((tag) => <span key={tag}>{tag}</span>)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="retrieval-state"><span>未找到相关结果，请尝试降低阈值或修改查询词</span></div>
+            )}
+          </section>
+        </section>
+      </div>
+      {feedbackTarget ? (
+        <FeedbackFormModal
+          content={feedbackTarget.content}
+          onCancel={() => setFeedbackTarget(null)}
+          onSubmit={submitFeedback}
+        />
+      ) : null}
+      {historyRecords ? <FeedbackHistoryModal records={historyRecords} onClose={() => setHistoryRecords(null)} /> : null}
+      {citationTarget ? (
+        <CitationPreviewModal
+          seed={buildResultDetailSeedByKey(citationTarget.seedKey)}
+          chunkId={citationTarget.itemId}
+          onClose={() => setCitationTarget(null)}
+        />
+      ) : null}
+      {createOpen ? (
+        <CreateBadcaseModal
+          initial={createOpen}
+          source="搜索测试"
+          notify={notify}
+          onClose={() => setCreateOpen(null)}
         />
       ) : null}
     </div>
