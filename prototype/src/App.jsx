@@ -28,7 +28,6 @@ import {
   FileWordFilled,
   FolderOpenOutlined,
   HomeOutlined,
-  InfoCircleOutlined,
   MenuFoldOutlined,
   MoreOutlined,
   PaperClipOutlined,
@@ -46,7 +45,7 @@ import {
   MinusCircleOutlined,
   VideoCameraOutlined,
 } from '@ant-design/icons';
-import { message, Progress } from 'antd';
+import { message, Progress, Tooltip } from 'antd';
 import { dataStore, demoNodeSets, demoResult, getKnowledgeFormTypeLabel, knowledgeFormTypes } from './dataStore.js';
 import { McpServicePage } from './pages/McpServicePage.jsx';
 import {
@@ -268,11 +267,14 @@ function Modal({ title, children, footer, onClose, wide = false, className = '' 
   );
 }
 
-function Drawer({ title, children, onClose, wide = false, className = '', footer = null, darkHead = false }) {
+function Drawer({ title, children, onClose, wide = false, width = null, className = '', footer = null, darkHead = false }) {
   return (
     <div className="drawer-layer">
       <div className="drawer-mask" onClick={onClose} />
-      <aside className={`drawer ${wide ? 'wide' : ''} ${footer ? 'has-footer' : ''} ${darkHead ? 'dark-head' : ''} ${className}`.trim()}>
+      <aside
+        className={`drawer ${wide ? 'wide' : ''} ${footer ? 'has-footer' : ''} ${darkHead ? 'dark-head' : ''} ${className}`.trim()}
+        style={width ? { width: `min(${width}px, calc(100vw - 64px))` } : undefined}
+      >
         <div className="drawer-head">
           {darkHead ? <button type="button" className="icon-button" onClick={onClose}><CloseOutlined /></button> : null}
           <h2>{title}</h2>
@@ -484,11 +486,64 @@ function Shell({ active, menuActive = active, onNavigate, children }) {
   );
 }
 
-function PageHeader({ title, actions }) {
+// 列表空态：线上区分「无数据」（给引导语）与「无匹配」（给「清空筛选」动作）。
+function ResultEmptyBlock({ matched, emptyText, onClear }) {
+  return (
+    <div className="result-empty-block">
+      <strong>{matched ? '暂无匹配数据' : emptyText}</strong>
+      {matched && onClear ? <button type="button" className="link-btn" onClick={onClear}>清空筛选</button> : null}
+      {matched && !onClear ? <span>可清空筛选条件后重新查看</span> : null}
+    </div>
+  );
+}
+
+// 详情字段行：左侧固定宽度标签 + 右侧取值（线上为 Descriptions 两列）。
+function KrField({ label, children }) {
+  return (
+    <div className="kr-field">
+      <div className="kr-field-label">{label}</div>
+      <div className="kr-field-value">{children}</div>
+    </div>
+  );
+}
+
+// 可复制字段值：点击复制，文案在 复制 / 已复制 间切换（对应线上 copyable.tooltips）。
+function KrCopyValue({ value }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    try {
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(value);
+    } catch (error) { /* 剪贴板不可用时静默降级 */ }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <span className="kr-copy-value">
+      <span className="kr-copy-text">{value}</span>
+      <button type="button" className="kr-copy-btn" onClick={copy}>{copied ? '已复制' : '复制'}</button>
+    </span>
+  );
+}
+
+// 来源文件状态列：线上为带色状态标签，无取值时显示 "-"。
+function FileSourceStatusTag({ status }) {
+  if (!status) return <span className="muted">-</span>;
+  return <Badge tone={resultFileStatusMeta[status] || 'neutral'}>{status}</Badge>;
+}
+
+// 页头：线上为「标题 + 描述」两段，描述以标题右侧 ⓘ 的 Tooltip 呈现（placement: right）。
+function PageHeader({ title, description, actions }) {
   return (
     <div className="page-header">
       <div>
-        <h1>{title}</h1>
+        <h1>
+          {title}
+          {description ? (
+            <Tooltip title={description} placement="right">
+              <QuestionCircleOutlined className="page-header-hint" />
+            </Tooltip>
+          ) : null}
+        </h1>
       </div>
       {actions ? <div className="page-actions">{actions}</div> : null}
     </div>
@@ -505,9 +560,35 @@ function EmptyPage({ title }) {
   );
 }
 
-const knowledgePointCategories = [
+// 来源文件状态：线上「来源文件状态」列的标签色映射（取值口径见文件上传模块）。
+const resultFileStatusMeta = {
+  上传成功: 'success',
+  上传失败: 'danger',
+  未配置: 'warning',
+  待处理: 'neutral',
+  处理中: 'blue',
+  处理成功: 'success',
+  处理失败: 'danger',
+  状态异常: 'danger',
+};
+
+// 三种知识形态共用：启用状态下拉选项与状态列文案（线上为 启用 / 停用，列上显示 已启用 / 已停用）。
+const resultEnableStatusOptions = ['全部状态', '启用', '停用'];
+const resultEnableLabel = (status) => (status === '停用' ? '已停用' : '已启用');
+const resultVisibleTags = (tags) => {
+  const list = Array.isArray(tags) ? tags : [];
+  if (!list.length) return <span className="muted">—</span>;
+  return (
+    <>
+      <span className="result-tag-chip">{list[0]}</span>
+      {list.length > 1 ? <span className="result-tag-rest">+{list.length - 1}</span> : null}
+    </>
+  );
+};
+
+const knowledgeResultCategories = [
   { id: 'all', name: '全部类目', count: '99+' },
-  { id: 'mixue-ruixing', name: '奶茶 > 瑞幸', count: '99+' },
+  { id: 'eval-v2', name: '806版本评测 > 产品知识库', count: '99+' },
 ];
 
 const knowledgePointRows = [
@@ -516,7 +597,8 @@ const knowledgePointRows = [
     title: '甲类药品报销比例',
     content: '甲类药品按参保地政策全额纳入报销范围，样例中阿莫西林胶囊、二甲双胍片、奥美拉唑肠溶胶囊的报销比例分别为 90%、95%、92%。',
     source: '医保药品目录清单.csv',
-    tag: '医保',
+    sourceFileStatus: '处理成功',
+    tags: ['医保', '药品目录', '报销比例'],
     status: '启用',
     updatedAt: '2026-09-02 15:20',
   },
@@ -525,7 +607,8 @@ const knowledgePointRows = [
     title: '喜茶门店标准服务',
     content: '围绕门店接待、点单、出杯与客诉处理沉淀...',
     source: '喜茶.docx',
-    tag: '产品',
+    sourceFileStatus: '处理成功',
+    tags: ['产品'],
     status: '启用',
     updatedAt: '2026-05-27 10:18',
   },
@@ -534,7 +617,8 @@ const knowledgePointRows = [
     title: '瑞幸咖啡产品卖点',
     content: '提炼生椰拿铁、轻乳茶等产品的核心卖点...',
     source: '瑞幸.docx',
-    tag: '营销',
+    sourceFileStatus: '处理中',
+    tags: ['营销'],
     status: '启用',
     updatedAt: '2026-05-26 18:42',
   },
@@ -543,42 +627,38 @@ const knowledgePointRows = [
     title: '奶茶品牌合规话术',
     content: '用于培训员工识别营销宣传中的合规风险...',
     source: '合规手册.md',
-    tag: '风控',
+    sourceFileStatus: '状态异常',
+    tags: [],
     status: '停用',
     updatedAt: '2026-05-25 16:30',
   },
 ];
 
-const knowledgeResultCategories = [
-  { id: 'all', name: '全部类目', count: '99+' },
-  { id: 'eval-v2', name: '806版本评测 > 产品知识库', count: '99+' },
-];
-
 const standardSliceRows = [
-  { id: 'slice-7', content: '医保药品目录清单：阿莫西林胶囊（胶囊，90%，甲类）、布洛芬缓释胶囊（缓释胶囊，85%，乙类）、二甲双胍片（片剂，95%，甲类）。', source: '医保药品目录清单.csv', status: '-', length: 96 },
-  { id: 'slice-1', content: '百年人寿保险股份有限公司 百年附加医惠通医疗保险产品责任说明，包含保险责任、责任免除、投保规则与犹豫期约定。', source: '03 百年附加医惠通医疗保险产品介绍', status: '-', length: 2617 },
-  { id: 'slice-2', content: '# 交银人寿意外骨折医疗保险 20 版 保障方案与投保须知', source: '交银人寿意外骨折医疗保险条款', status: '-', length: 46 },
-  { id: 'slice-3', content: '个险新人专属会课程（2020版）——新人首月经营动作与拜访要点', source: '44-新人培训-新人专属课程', status: '-', length: 16 },
-  { id: 'slice-4', content: '【卓越新人60天成长训练系列】第一课：读懂产品，建立专业信任', source: '1-新人培训-读懂产品', status: '-', length: 21 },
-  { id: 'slice-5', content: '<table><tr><th colspan="6"><p>百年臻爱人生终身寿险 保险利益演示表</p>', source: '百年臻爱人生终身寿险条款', status: '-', length: 2999 },
-  { id: 'slice-6', content: '<table><tr><th colspan="4"><p>银保+保全规则+117规则 业务处理指引', source: '银保+保全规则+117.pdf', status: '-', length: 3017 },
+  { id: 'slice-7', content: '医保药品目录清单：阿莫西林胶囊（胶囊，90%，甲类）、布洛芬缓释胶囊（缓释胶囊，85%，乙类）、二甲双胍片（片剂，95%，甲类）。', source: '医保药品目录清单.csv', sourceFileStatus: '处理成功', length: 96, tags: ['医保', '药品目录'], status: '启用', updatedAt: '2026-09-02 15:20' },
+  { id: 'slice-1', content: '百年人寿保险股份有限公司 百年附加医惠通医疗保险产品责任说明，包含保险责任、责任免除、投保规则与犹豫期约定。', source: '03 百年附加医惠通医疗保险产品介绍', sourceFileStatus: '处理成功', length: 2617, tags: ['保险', '条款'], status: '启用', updatedAt: '2026-09-02 15:18' },
+  { id: 'slice-2', content: '# 交银人寿意外骨折医疗保险 20 版 保障方案与投保须知', source: '交银人寿意外骨折医疗保险条款', sourceFileStatus: '处理成功', length: 46, tags: ['保险'], status: '启用', updatedAt: '2026-09-02 15:12' },
+  { id: 'slice-3', content: '个险新人专属会课程（2020版）——新人首月经营动作与拜访要点', source: '44-新人培训-新人专属课程', sourceFileStatus: '处理中', length: 16, tags: ['培训'], status: '启用', updatedAt: '2026-09-02 15:06' },
+  { id: 'slice-4', content: '【卓越新人60天成长训练系列】第一课：读懂产品，建立专业信任', source: '1-新人培训-读懂产品', sourceFileStatus: '待处理', length: 21, tags: [], status: '停用', updatedAt: '2026-09-02 14:58' },
+  { id: 'slice-5', content: '<table><tr><th colspan="6"><p>百年臻爱人生终身寿险 保险利益演示表</p>', source: '百年臻爱人生终身寿险条款', sourceFileStatus: '处理成功', length: 2999, tags: ['保险', '演示表'], status: '启用', updatedAt: '2026-09-02 14:47' },
+  { id: 'slice-6', content: '<table><tr><th colspan="4"><p>银保+保全规则+117规则 业务处理指引', source: '银保+保全规则+117.pdf', sourceFileStatus: '状态异常', length: 3017, tags: ['规则'], status: '启用', updatedAt: '2026-09-02 14:31' },
 ];
 
 const parentSliceRows = [
-  { id: 'pslice-1', content: '百年人寿保险股份有限公司 百年附加医惠通医疗保险产品责任说明（父切片）', source: '03 百年附加医惠通医疗保险产品介绍', status: '-', length: 2617, children: 4 },
-  { id: 'pslice-2', content: '个险新人专属会课程（2020版）——新人首月经营动作与拜访要点（父切片）', source: '44-新人培训-新人专属课程', status: '-', length: 320, children: 8 },
-  { id: 'pslice-3', content: '【卓越新人60天成长训练系列】第一课：读懂产品，建立专业信任（父切片）', source: '1-新人培训-读懂产品', status: '-', length: 420, children: 6 },
-  { id: 'pslice-4', content: '<table><tr><th colspan="6"><p>百年臻爱人生终身寿险 保险利益演示表（父切片）', source: '百年臻爱人生终身寿险条款', status: '-', length: 2999, children: 12 },
+  { id: 'pslice-1', parentSliceNo: 'PS202608180001', content: '百年人寿保险股份有限公司 百年附加医惠通医疗保险产品责任说明（父切片）：包含保险责任、责任免除、投保规则与犹豫期约定，子切片按条款逐条拆分。', source: '03 百年附加医惠通医疗保险产品介绍', length: 2617, vectorDimension: 1024, children: 4, status: '启用' },
+  { id: 'pslice-2', parentSliceNo: 'PS202608180002', content: '个险新人专属会课程（2020版）——新人首月经营动作与拜访要点（父切片）：覆盖首月拜访量、客户画像与跟进节奏。', source: '44-新人培训-新人专属课程', length: 320, vectorDimension: 1024, children: 8, status: '启用' },
+  { id: 'pslice-3', parentSliceNo: 'PS202608180003', content: '【卓越新人60天成长训练系列】第一课：读懂产品，建立专业信任（父切片）：产品条款解读与话术演练。', source: '1-新人培训-读懂产品', length: 420, vectorDimension: 768, children: 6, status: '停用' },
+  { id: 'pslice-4', parentSliceNo: 'PS202608180004', content: '<table><tr><th colspan="6"><p>百年臻爱人生终身寿险 保险利益演示表（父切片）：按保障期间拆分演示表。', source: '百年臻爱人生终身寿险条款', length: 2999, vectorDimension: 1024, children: 12, status: '启用' },
 ];
 
 const qaRows = [
-  { id: 'qa-7', question: '阿莫西林胶囊的报销比例是多少？', answer: '阿莫西林胶囊（胶囊剂型）的报销比例为 90%，属于甲类药品。', status: '-', source: '客户问答清单.csv' },
-  { id: 'qa-1', question: '知识图谱与认知智能是什么关系？', answer: '知识图谱是认知智能的底层基础设施之一，通过结构化知识表达支撑推理、问答与决策。', status: '-', source: '面向人工智能新基建知识图谱应用' },
-  { id: 'qa-2', question: '图计算核心算法有哪些？', answer: '图计算核心算法包括：1. 遍历类算法（BFS/DFS）；2. 路径与可达性算法；3. 社区发现与中心性算法。', status: '-', source: '面向人工智能新基建知识图谱应用' },
-  { id: 'qa-3', question: '人工智能在新基建中扮演什么角色？', answer: '在新基建的三大规划领域中，人工智能既是基础设施的组成部分，也是赋能其他领域的关键技术。', status: '-', source: '面向人工智能新基建知识图谱应用' },
-  { id: 'qa-4', question: '知识图谱的基本构建流程是什么？', answer: '知识图谱的构建遵循知识抽取、知识融合、知识加工与知识应用四个环节。', status: '-', source: '面向人工智能新基建知识图谱应用' },
-  { id: 'qa-5', question: '公安知识图谱的应用场景有哪些？', answer: '公安知识图谱重点解决数据关联、线索挖掘与案情推演等问题，提升研判效率。', status: '-', source: '面向人工智能新基建知识图谱应用' },
-  { id: 'qa-6', question: '智慧建筑知识图谱如何构建？', answer: '集合构建以BIM数据与规范为基础，抽取建筑构件、空间关系与运维规则形成图谱。', status: '-', source: '面向人工智能新基建知识图谱应用' },
+  { id: 'qa-7', question: '阿莫西林胶囊的报销比例是多少？', answer: '阿莫西林胶囊（胶囊剂型）的报销比例为 90%，属于甲类药品。', source: '客户问答清单.csv', sourceFileStatus: '处理成功', similarQuestions: ['阿莫西林报销多少', '阿莫西林胶囊能报销吗'], paraphraseQuestions: ['阿莫西林胶囊报销比例'], tags: ['医保', '药品目录'], status: '启用', updatedAt: '2026-09-02 15:20' },
+  { id: 'qa-1', question: '知识图谱与认知智能是什么关系？', answer: '知识图谱是认知智能的底层基础设施之一，通过结构化知识表达支撑推理、问答与决策。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '处理成功', similarQuestions: ['知识图谱和认知智能有什么联系'], paraphraseQuestions: [], tags: ['知识图谱', '人工智能'], status: '启用', updatedAt: '2026-09-02 15:16' },
+  { id: 'qa-2', question: '图计算核心算法有哪些？', answer: '图计算核心算法包括：1. 遍历类算法（BFS/DFS）；2. 路径与可达性算法；3. 社区发现与中心性算法。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '处理成功', similarQuestions: [], paraphraseQuestions: ['图计算有哪些常用算法'], tags: ['知识图谱', '图计算'], status: '启用', updatedAt: '2026-09-02 15:11' },
+  { id: 'qa-3', question: '人工智能在新基建中扮演什么角色？', answer: '在新基建的三大规划领域中，人工智能既是基础设施的组成部分，也是赋能其他领域的关键技术。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '处理中', similarQuestions: [], paraphraseQuestions: [], tags: ['人工智能', '新基建'], status: '启用', updatedAt: '2026-09-02 15:05' },
+  { id: 'qa-4', question: '知识图谱的基本构建流程是什么？', answer: '知识图谱的构建遵循知识抽取、知识融合、知识加工与知识应用四个环节。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '处理成功', similarQuestions: ['知识图谱怎么构建'], paraphraseQuestions: [], tags: ['知识图谱'], status: '启用', updatedAt: '2026-09-02 14:59' },
+  { id: 'qa-5', question: '公安知识图谱的应用场景有哪些？', answer: '公安知识图谱重点解决数据关联、线索挖掘与案情推演等问题，提升研判效率。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '待处理', similarQuestions: [], paraphraseQuestions: [], tags: [], status: '停用', updatedAt: '2026-09-02 14:52' },
+  { id: 'qa-6', question: '智慧建筑知识图谱如何构建？', answer: '集合构建以BIM数据与规范为基础，抽取建筑构件、空间关系与运维规则形成图谱。', source: '面向人工智能新基建知识图谱应用', sourceFileStatus: '状态异常', similarQuestions: [], paraphraseQuestions: [], tags: ['知识图谱'], status: '启用', updatedAt: '2026-09-02 14:45' },
 ];
 
 function KnowledgePointsPage() {
@@ -586,7 +666,7 @@ function KnowledgePointsPage() {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('全部状态');
   const [sourceFilter, setSourceFilter] = useState('来源文件');
-  const [tagFilter, setTagFilter] = useState('标签');
+  const [tagFilter, setTagFilter] = useState('选择标签');
   const [taggingDialog, setTaggingDialog] = useState(null);
   const [taggingStatus, setTaggingStatus] = useState('idle');
   const [taggingStats, setTaggingStats] = useState({ success: 0, failed: 0, remaining: 0 });
@@ -602,17 +682,19 @@ function KnowledgePointsPage() {
   const [removedIds, setRemovedIds] = useState(() => new Set());
   const [detailRow, setDetailRow] = useState(null);
   const [snapshotRow, setSnapshotRow] = useState(null);
+  const sourceOptions = ['来源文件', ...Array.from(new Set(knowledgePointRows.map((row) => row.source)))];
+  const tagOptions = ['选择标签', ...Array.from(new Set(knowledgePointRows.flatMap((row) => row.tags || [])))];
   const filteredRows = knowledgePointRows.filter((row) => {
     const keyword = query.trim().toLowerCase();
     const queryMatched = !keyword
       || row.title.toLowerCase().includes(keyword)
       || row.content.toLowerCase().includes(keyword)
       || row.source.toLowerCase().includes(keyword)
-      || row.tag.toLowerCase().includes(keyword);
+      || (row.tags || []).join(' ').toLowerCase().includes(keyword);
     if (!queryMatched) return false;
     if (statusFilter !== '全部状态' && row.status !== statusFilter) return false;
     if (sourceFilter !== '来源文件' && row.source !== sourceFilter) return false;
-    if (tagFilter !== '标签' && row.tag !== tagFilter) return false;
+    if (tagFilter !== '选择标签' && !(row.tags || []).includes(tagFilter)) return false;
     return true;
   });
   const visibleRows = filteredRows.filter((row) => !removedIds.has(row.id));
@@ -661,7 +743,7 @@ function KnowledgePointsPage() {
       <div className="knowledge-result-page" onClick={() => setOpenMenuId(null)}>
         <aside className="knowledge-category-panel panel">
           <div className="knowledge-category-title">知识类目</div>
-          {knowledgePointCategories.map((category) => (
+          {knowledgeResultCategories.map((category) => (
             <button
               type="button"
               key={category.id}
@@ -676,7 +758,8 @@ function KnowledgePointsPage() {
         <section className="knowledge-main">
           <PageHeader
             title="知识点"
-            actions={<span className="project-space-label">项目空间：奶茶品牌</span>}
+            description="管理由文本切片生成的知识点资产，可查看来源、编辑、反馈问题、启用/停用"
+            actions={<span className="project-space-label">知识空间：806版本评测V2</span>}
           />
           <Toolbar className="knowledge-toolbar">
             <button type="button" className="primary"><PlusOutlined /> 新增知识点</button>
@@ -689,54 +772,46 @@ function KnowledgePointsPage() {
               {taggingStatus === 'running' ? (
                 <>
                   <span>打标中</span>
-                  <em>成功{taggingStats.success}、失败{taggingStats.failed}、剩余{taggingStats.remaining}</em>
+                  <em>成功：{taggingStats.success} 失败：{taggingStats.failed} 剩余：{taggingStats.remaining}</em>
                 </>
               ) : taggingStatus === 'completed' ? (
                 <>
                   <span>打标完成</span>
-                  <em>成功{taggingStats.success}、失败{taggingStats.failed}</em>
+                  <em>成功：{taggingStats.success} 失败：{taggingStats.failed}</em>
                 </>
               ) : <span>知识点打标</span>}
             </button>
-            <SearchBox value={query} onChange={setQuery} placeholder="搜索知识点名称/内容" />
+            <SearchBox value={query} onChange={setQuery} placeholder="搜索知识点" />
             <SelectField value={statusFilter} onChange={setStatusFilter}>
-              <option>全部状态</option>
-              <option>启用</option>
-              <option>停用</option>
+              {resultEnableStatusOptions.map((option) => <option value={option} key={option}>{option}</option>)}
             </SelectField>
             <SelectField value={sourceFilter} onChange={setSourceFilter}>
-              <option>来源文件</option>
-              <option>喜茶.docx</option>
-              <option>瑞幸.docx</option>
-              <option>合规手册.md</option>
+              {sourceOptions.map((option) => <option value={option} key={option}>{option}</option>)}
             </SelectField>
             <SelectField value={tagFilter} onChange={setTagFilter}>
-              <option>标签</option>
-              <option>产品</option>
-              <option>营销</option>
-              <option>风控</option>
+              {tagOptions.map((option) => <option value={option} key={option}>{option}</option>)}
             </SelectField>
           </Toolbar>
           <section className="panel knowledge-table-panel">
-            <table className="data-table knowledge-table">
+            <table className="data-table knowledge-table kr-table-kp">
               <colgroup>
-                <col className="knowledge-col-expand" />
-                <col className="knowledge-col-title" />
-                <col className="knowledge-col-content" />
-                <col className="knowledge-col-source" />
-                <col className="knowledge-col-tag" />
-                <col className="knowledge-col-status" />
-                <col className="knowledge-col-time" />
-                <col className="knowledge-col-action" />
+                <col className="kp-col-name" />
+                <col className="kp-col-summary" />
+                <col className="kp-col-filestatus" />
+                <col className="kp-col-source" />
+                <col className="kp-col-tag" />
+                <col className="kp-col-enable" />
+                <col className="kp-col-time" />
+                <col className="kp-col-action" />
               </colgroup>
               <thead>
                 <tr>
-                  <th />
-                  <th>知识点名称/标题</th>
-                  <th>知识点内容</th>
+                  <th>知识点名称</th>
+                  <th>内容摘要</th>
+                  <th>来源文件状态</th>
                   <th>来源文件</th>
                   <th>标签</th>
-                  <th>状态</th>
+                  <th>启用状态</th>
                   <th>更新时间</th>
                   <th>操作</th>
                 </tr>
@@ -744,23 +819,23 @@ function KnowledgePointsPage() {
               <tbody>
                 {visibleRows.map((row) => (
                   <tr key={row.id} className={stoppedIds.has(row.id) ? 'row-disabled' : ''}>
-                    <td className="knowledge-expand-cell"><RightChevron /></td>
                     <td className="strong">{row.title}</td>
-                    <td>{row.content}</td>
-                    <td>{row.source}</td>
-                    <td>{row.tag}</td>
-                    <td><Badge tone={row.status === '启用' ? 'success' : 'neutral'}>{row.status}</Badge></td>
+                    <td className="cell-ellipsis" title={row.content}>{row.content}</td>
+                    <td><FileSourceStatusTag status={row.sourceFileStatus} /></td>
+                    <td className="cell-ellipsis" title={row.source}>{row.source}</td>
+                    <td>{resultVisibleTags(row.tags)}</td>
+                    <td><Badge tone={row.status === '启用' ? 'success' : 'neutral'}>{resultEnableLabel(row.status)}</Badge></td>
                     <td>{row.updatedAt}</td>
                     <td className="actions knowledge-actions">
                       <button type="button" onClick={() => setDetailRow(row)}>查看</button>
                       <button type="button">编辑</button>
                       <div className="more-menu-wrap">
-                        <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多"><MoreOutlined /></button>
+                        <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多操作" aria-label="更多操作"><MoreOutlined /></button>
                         {openMenuId === row.id ? (
                           <div className="more-menu-panel" onClick={(e) => e.stopPropagation()}>
-                            <button type="button" onClick={() => toggleStop(row.id)}>{stoppedIds.has(row.id) ? '启用' : '停用'}</button>
                             <button type="button" onClick={() => { setOpenMenuId(null); setSnapshotRow(buildResultSnapshot(row, '知识点')); }}>查看处理方案</button>
                             <button type="button" onClick={() => setOpenMenuId(null)}>问题记录</button>
+                            <button type="button" onClick={() => toggleStop(row.id)}>{stoppedIds.has(row.id) ? '启用' : '停用'}</button>
                             <button type="button" className="danger" onClick={() => { setOpenMenuId(null); setRemovedIds((current) => new Set(current).add(row.id)); }}>删除</button>
                           </div>
                         ) : null}
@@ -768,7 +843,16 @@ function KnowledgePointsPage() {
                     </td>
                   </tr>
                 ))}
-                {visibleRows.length === 0 ? <tr><td colSpan={8} className="empty-table-cell">暂无匹配知识点</td></tr> : null}
+                {visibleRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="empty-table-cell">
+                      <div className="result-empty-block">
+                        <strong>{knowledgePointRows.length ? '暂无匹配知识点' : '暂无知识点，请先配置知识点生成方案并处理文件'}</strong>
+                        {knowledgePointRows.length ? <span>可清空筛选条件后重新查看</span> : null}
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
             <div className="knowledge-pagination">
@@ -830,19 +914,25 @@ function SliceLibraryPage() {
   const [statusFilter, setStatusFilter] = useState('全部状态');
   const [sourceFilter, setSourceFilter] = useState('来源文件');
   const [tagFilter, setTagFilter] = useState('选择标签');
-  const [expandedId, setExpandedId] = useState(null);
   const [openMenuId, setOpenMenuId] = useState(null);
   const [stoppedIds, setStoppedIds] = useState(() => new Set());
   const [removedIds, setRemovedIds] = useState(() => new Set());
   const [snapshotRow, setSnapshotRow] = useState(null);
   const [detailRow, setDetailRow] = useState(null);
-  const rows = sliceTab === '标准切片' ? standardSliceRows : parentSliceRows;
+  // 线上两个页签是两套独立表格：标准切片 8 列、父子切片 8 列且字段完全不同。
+  const isStandard = sliceTab === '标准切片';
+  const rows = isStandard ? standardSliceRows : parentSliceRows;
+  const sourceOptions = ['来源文件', ...Array.from(new Set(rows.map((row) => row.source)))];
+  const tagOptions = ['选择标签', ...Array.from(new Set(standardSliceRows.flatMap((row) => row.tags || [])))];
   const filteredRows = rows.filter((row) => {
     const keyword = query.trim().toLowerCase();
-    const queryMatched = !keyword || row.content.toLowerCase().includes(keyword);
+    const queryMatched = !keyword
+      || row.content.toLowerCase().includes(keyword)
+      || String(row.parentSliceNo || '').toLowerCase().includes(keyword);
     if (!queryMatched) return false;
     if (statusFilter !== '全部状态' && row.status !== statusFilter) return false;
     if (sourceFilter !== '来源文件' && row.source !== sourceFilter) return false;
+    if (isStandard && tagFilter !== '选择标签' && !(row.tags || []).includes(tagFilter)) return false;
     return true;
   });
   const visibleRows = filteredRows.filter((row) => !removedIds.has(row.id));
@@ -852,6 +942,12 @@ function SliceLibraryPage() {
     else next.add(rowId);
     return next;
   });
+  const clearFilters = () => {
+    setQuery('');
+    setStatusFilter('全部状态');
+    setSourceFilter('来源文件');
+    setTagFilter('选择标签');
+  };
   return (
     <Fragment>
     <div className="knowledge-result-page" onClick={() => setOpenMenuId(null)}>
@@ -870,94 +966,142 @@ function SliceLibraryPage() {
         ))}
       </aside>
       <section className="knowledge-main">
-        <PageHeader title={<>文本切片 <InfoCircleOutlined className="page-header-hint" /></>} actions={<span className="project-space-label">知识空间：806版本评测V2</span>} />
+        <PageHeader
+          title="文本切片"
+          description="将标准化后的长文本切分为适合检索的片段，支持混合搜索模式"
+          actions={<span className="project-space-label">知识空间：806版本评测V2</span>}
+        />
         <div className="knowledge-content-tabs">
-          <button type="button" className={sliceTab === '标准切片' ? 'active' : ''} onClick={() => { setSliceTab('标准切片'); setExpandedId(null); }}>标准切片</button>
-          <button type="button" className={sliceTab === '父子切片' ? 'active' : ''} onClick={() => { setSliceTab('父子切片'); setExpandedId(null); }}>父子切片</button>
+          <button type="button" className={sliceTab === '标准切片' ? 'active' : ''} onClick={() => setSliceTab('标准切片')}>标准切片</button>
+          <button type="button" className={sliceTab === '父子切片' ? 'active' : ''} onClick={() => setSliceTab('父子切片')}>父子切片</button>
         </div>
         <Toolbar className="knowledge-list-toolbar">
-          <button type="button" className="primary"><PlusOutlined /> 新增切片</button>
-          <SearchBox value={query} onChange={setQuery} placeholder="切片内容关键词" />
+          <button type="button" className="primary"><PlusOutlined /> {isStandard ? '新增切片' : '新增父子切片'}</button>
+          <SearchBox value={query} onChange={setQuery} placeholder={isStandard ? '切片内容关键词' : '父/子切片内容关键词'} />
           <SelectField value={statusFilter} onChange={setStatusFilter}>
-            <option>全部状态</option>
-            <option>已校验</option>
-            <option>待校验</option>
+            {resultEnableStatusOptions.map((option) => <option value={option} key={option}>{option}</option>)}
           </SelectField>
           <SelectField value={sourceFilter} onChange={setSourceFilter}>
-            <option>来源文件</option>
-            <option>03 百年附加医惠通医疗保险产品介绍</option>
-            <option>交银人寿意外骨折医疗保险条款</option>
-            <option>44-新人培训-新人专属课程</option>
-            <option>1-新人培训-读懂产品</option>
-            <option>百年臻爱人生终身寿险条款</option>
-            <option>银保+保全规则+117.pdf</option>
+            {sourceOptions.map((option) => <option value={option} key={option}>{option}</option>)}
           </SelectField>
-          <SelectField value={tagFilter} onChange={setTagFilter}>
-            <option>选择标签</option>
-            <option>产品</option>
-            <option>培训</option>
-            <option>条款</option>
-            <option>规则</option>
-          </SelectField>
+          {isStandard ? (
+            <SelectField value={tagFilter} onChange={setTagFilter}>
+              {tagOptions.map((option) => <option value={option} key={option}>{option}</option>)}
+            </SelectField>
+          ) : null}
         </Toolbar>
         <section className="panel knowledge-table-panel">
-          <table className="data-table knowledge-table slice-table">
-            <colgroup>
-              <col className="slice-col-expand" />
-              <col className="slice-col-content" />
-              <col className="slice-col-source" />
-              <col className="slice-col-status" />
-              <col className="slice-col-length" />
-              <col className="slice-col-action" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th />
-                <th>切片内容</th>
-                <th>来源文件</th>
-                <th>来源文件状态</th>
-                <th>切片长度</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRows.map((row) => (
-                <Fragment key={row.id}>
-                  <tr className={stoppedIds.has(row.id) ? 'row-disabled' : ''}>
-                    <td className="knowledge-expand-cell"><button type="button" className={`slice-expand-toggle ${expandedId === row.id ? 'expanded' : ''}`} onClick={() => setExpandedId(expandedId === row.id ? null : row.id)} aria-label="展开详情"><RightChevron /></button></td>
-                    <td className="strong">{row.content}</td>
-                    <td>{row.source}</td>
-                    <td>{row.status}</td>
+          {isStandard ? (
+            <table className="data-table knowledge-table kr-table-slice">
+              <colgroup>
+                <col className="slice-col-content" />
+                <col className="slice-col-source" />
+                <col className="slice-col-filestatus" />
+                <col className="slice-col-length" />
+                <col className="slice-col-tag" />
+                <col className="slice-col-enable" />
+                <col className="slice-col-time" />
+                <col className="slice-col-action" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>切片内容</th>
+                  <th>来源文件</th>
+                  <th>来源文件状态</th>
+                  <th>切片长度</th>
+                  <th>标签</th>
+                  <th>启用状态</th>
+                  <th>最后更新时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((row) => (
+                  <tr key={row.id} className={stoppedIds.has(row.id) ? 'row-disabled' : ''}>
+                    <td className="strong cell-ellipsis" title={row.content}>{String(row.content).slice(0, 150)}</td>
+                    <td className="cell-ellipsis" title={row.source}>{row.source}</td>
+                    <td><FileSourceStatusTag status={row.sourceFileStatus} /></td>
                     <td>{row.length}</td>
+                    <td>{resultVisibleTags(row.tags)}</td>
+                    <td><Badge tone={row.status === '启用' ? 'success' : 'neutral'}>{resultEnableLabel(row.status)}</Badge></td>
+                    <td>{row.updatedAt}</td>
                     <td className="actions knowledge-actions">
                       <button type="button" onClick={() => setDetailRow(row)}>查看</button>
                       <button type="button">编辑</button>
                       <div className="more-menu-wrap">
-                        <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多"><MoreOutlined /></button>
+                        <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多操作" aria-label="更多操作"><MoreOutlined /></button>
                         {openMenuId === row.id ? (
                           <div className="more-menu-panel" onClick={(e) => e.stopPropagation()}>
-                            <button type="button" onClick={() => toggleStop(row.id)}>{stoppedIds.has(row.id) ? '启用' : '停用'}</button>
                             <button type="button" onClick={() => { setOpenMenuId(null); setSnapshotRow(buildResultSnapshot(row, '切片库')); }}>查看处理方案</button>
-                            <button type="button" onClick={() => setOpenMenuId(null)}>问题记录</button>
+                            <button type="button" onClick={() => setOpenMenuId(null)}>{row.hasFeedback ? '已记录' : '问题记录'}</button>
+                            <button type="button" onClick={() => toggleStop(row.id)}>{stoppedIds.has(row.id) ? '启用' : '停用'}</button>
                             <button type="button" className="danger" onClick={() => { setOpenMenuId(null); setRemovedIds((current) => new Set(current).add(row.id)); }}>删除</button>
                           </div>
                         ) : null}
                       </div>
                     </td>
                   </tr>
-                  {expandedId === row.id ? (
-                    <tr className="slice-detail-row">
-                      <td colSpan={6}>
-                        <div className="slice-detail-content">切片内容：{row.content}</div>
-                        {row.children ? <div className="slice-detail-sub">包含 {row.children} 个子切片</div> : null}
-                      </td>
-                    </tr>
-                  ) : null}
-                </Fragment>
-              ))}
-              {visibleRows.length === 0 ? <tr><td colSpan={6} className="empty-table-cell">暂无匹配切片</td></tr> : null}
-            </tbody>
-          </table>
+                ))}
+                {visibleRows.length === 0 ? (
+                  <tr><td colSpan={8} className="empty-table-cell"><ResultEmptyBlock matched={standardSliceRows.length > 0} emptyText="暂无切片数据，构建完成后自动展示" onClear={clearFilters} /></td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          ) : (
+            <table className="data-table knowledge-table kr-table-ps">
+              <colgroup>
+                <col className="ps-col-no" />
+                <col className="ps-col-content" />
+                <col className="ps-col-source" />
+                <col className="ps-col-length" />
+                <col className="ps-col-dim" />
+                <col className="ps-col-children" />
+                <col className="ps-col-enable" />
+                <col className="ps-col-action" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>父切片编号</th>
+                  <th>正文</th>
+                  <th>来源文件</th>
+                  <th>字符数</th>
+                  <th>向量维度</th>
+                  <th>子切片数</th>
+                  <th>启用状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((row) => (
+                  <tr key={row.id} className={stoppedIds.has(row.id) ? 'row-disabled' : ''}>
+                    <td className="mono">{row.parentSliceNo}</td>
+                    <td className="cell-ellipsis" title={row.content}>{String(row.content).slice(0, 60)}…</td>
+                    <td className="cell-ellipsis" title={row.source}>{row.source}</td>
+                    <td className="num-cell">{row.length}</td>
+                    <td className="num-cell">{row.vectorDimension}</td>
+                    <td className="num-cell">{row.children}</td>
+                    <td><Badge tone={row.status === '启用' ? 'success' : 'neutral'}>{resultEnableLabel(row.status)}</Badge></td>
+                    <td className="actions knowledge-actions">
+                      <button type="button" onClick={() => setDetailRow(row)}>查看</button>
+                      <button type="button">编辑</button>
+                      <div className="more-menu-wrap">
+                        <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多操作" aria-label="更多操作"><MoreOutlined /></button>
+                        {openMenuId === row.id ? (
+                          <div className="more-menu-panel" onClick={(e) => e.stopPropagation()}>
+                            <button type="button" onClick={() => { setOpenMenuId(null); setSnapshotRow(buildResultSnapshot(row, '切片库')); }}>查看处理方案</button>
+                            <button type="button" onClick={() => toggleStop(row.id)}>{stoppedIds.has(row.id) ? '启用' : '停用'}</button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {visibleRows.length === 0 ? (
+                  <tr><td colSpan={8} className="empty-table-cell"><ResultEmptyBlock matched emptyText="暂无匹配数据" /></td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          )}
           <div className="knowledge-pagination">
             <span>共 4341 条</span>
             <button type="button">&lt;</button>
@@ -995,20 +1139,23 @@ function QaLibraryPage() {
   const [statusFilter, setStatusFilter] = useState('全部状态');
   const [sourceFilter, setSourceFilter] = useState('来源文件');
   const [tagFilter, setTagFilter] = useState('选择标签');
-  const [expandedId, setExpandedId] = useState(null);
   const [openMenuId, setOpenMenuId] = useState(null);
   const [stoppedIds, setStoppedIds] = useState(() => new Set());
   const [removedIds, setRemovedIds] = useState(() => new Set());
   const [detailRow, setDetailRow] = useState(null);
   const [snapshotRow, setSnapshotRow] = useState(null);
+  const sourceOptions = ['来源文件', ...Array.from(new Set(qaRows.map((row) => row.source)))];
+  const tagOptions = ['选择标签', ...Array.from(new Set(qaRows.flatMap((row) => row.tags || [])))];
   const filteredRows = qaRows.filter((row) => {
     const keyword = query.trim().toLowerCase();
     const queryMatched = !keyword
       || row.question.toLowerCase().includes(keyword)
-      || row.answer.toLowerCase().includes(keyword);
+      || row.answer.toLowerCase().includes(keyword)
+      || (row.tags || []).join(' ').toLowerCase().includes(keyword);
     if (!queryMatched) return false;
     if (statusFilter !== '全部状态' && row.status !== statusFilter) return false;
     if (sourceFilter !== '来源文件' && row.source !== sourceFilter) return false;
+    if (tagFilter !== '选择标签' && !(row.tags || []).includes(tagFilter)) return false;
     return true;
   });
   const visibleRows = filteredRows.filter((row) => !removedIds.has(row.id));
@@ -1018,6 +1165,12 @@ function QaLibraryPage() {
     else next.add(rowId);
     return next;
   });
+  const clearFilters = () => {
+    setQuery('');
+    setStatusFilter('全部状态');
+    setSourceFilter('来源文件');
+    setTagFilter('选择标签');
+  };
   return (
     <Fragment>
     <div className="knowledge-result-page" onClick={() => setOpenMenuId(null)}>
@@ -1036,80 +1189,88 @@ function QaLibraryPage() {
         ))}
       </aside>
       <section className="knowledge-main">
-        <PageHeader title={<>问答库 <InfoCircleOutlined className="page-header-hint" /></>} actions={<span className="project-space-label">知识空间：806版本评测V2</span>} />
+        <PageHeader
+          title="问答库"
+          description="从标准化内容中自动抽取问题与答案对，构建问答库知识对象"
+          actions={<span className="project-space-label">知识空间：806版本评测V2</span>}
+        />
         <Toolbar className="knowledge-list-toolbar">
           <button type="button" className="primary"><PlusOutlined /> 新增问答</button>
           <SearchBox value={query} onChange={setQuery} placeholder="搜索问题/答案" />
           <SelectField value={statusFilter} onChange={setStatusFilter}>
-            <option>全部状态</option>
-            <option>已发布</option>
-            <option>草稿</option>
+            {resultEnableStatusOptions.map((option) => <option value={option} key={option}>{option}</option>)}
           </SelectField>
           <SelectField value={sourceFilter} onChange={setSourceFilter}>
-            <option>来源文件</option>
-            <option>面向人工智能新基建知识图谱应用</option>
-            <option>知识图谱标准与规范</option>
+            {sourceOptions.map((option) => <option value={option} key={option}>{option}</option>)}
           </SelectField>
           <SelectField value={tagFilter} onChange={setTagFilter}>
-            <option>选择标签</option>
-            <option>知识图谱</option>
-            <option>人工智能</option>
-            <option>新基建</option>
+            {tagOptions.map((option) => <option value={option} key={option}>{option}</option>)}
           </SelectField>
         </Toolbar>
         <section className="panel knowledge-table-panel">
-          <table className="data-table knowledge-table qa-table">
+          <table className="data-table knowledge-table kr-table-qa">
             <colgroup>
-              <col className="qa-col-expand" />
               <col className="qa-col-question" />
               <col className="qa-col-answer" />
-              <col className="qa-col-status" />
+              <col className="qa-col-filestatus" />
               <col className="qa-col-source" />
+              <col className="qa-col-similar" />
+              <col className="qa-col-paraphrase" />
+              <col className="qa-col-tag" />
+              <col className="qa-col-enable" />
+              <col className="qa-col-time" />
               <col className="qa-col-action" />
             </colgroup>
             <thead>
               <tr>
-                <th />
                 <th>问题</th>
                 <th>标准答案</th>
                 <th>来源文件状态</th>
                 <th>来源文件</th>
+                <th>相似问法数量</th>
+                <th>问法扩写数量</th>
+                <th>标签</th>
+                <th>启用状态</th>
+                <th>最后更新时间</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
               {visibleRows.map((row) => (
-                <Fragment key={row.id}>
-                  <tr className={stoppedIds.has(row.id) ? 'row-disabled' : ''}>
-                    <td className="knowledge-expand-cell"><button type="button" className={`slice-expand-toggle ${expandedId === row.id ? 'expanded' : ''}`} onClick={() => setExpandedId(expandedId === row.id ? null : row.id)} aria-label="展开详情"><RightChevron /></button></td>
-                    <td className="strong">{row.question}</td>
-                    <td>{row.answer}</td>
-                    <td>{row.status}</td>
-                    <td>{row.source}</td>
-                    <td className="actions knowledge-actions">
-                      <button type="button" onClick={() => setDetailRow(row)}>查看</button>
-                      <button type="button">编辑</button>
-                      <div className="more-menu-wrap">
-                        <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多"><MoreOutlined /></button>
-                        {openMenuId === row.id ? (
-                          <div className="more-menu-panel" onClick={(e) => e.stopPropagation()}>
-                            <button type="button" onClick={() => toggleStop(row.id)}>{stoppedIds.has(row.id) ? '启用' : '停用'}</button>
-                            <button type="button" onClick={() => { setOpenMenuId(null); setSnapshotRow(buildResultSnapshot(row, 'QA库')); }}>查看处理方案</button>
-                            <button type="button" onClick={() => setOpenMenuId(null)}>问题记录</button>
-                            <button type="button" className="danger" onClick={() => { setOpenMenuId(null); setRemovedIds((current) => new Set(current).add(row.id)); }}>删除</button>
-                          </div>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                  {expandedId === row.id ? (
-                    <tr className="slice-detail-row">
-                      <td colSpan={6}><div className="slice-detail-content">问题：{row.question}</div><div className="slice-detail-sub">标准答案：{row.answer}</div></td>
-                    </tr>
-                  ) : null}
-                </Fragment>
+                <tr key={row.id} className={stoppedIds.has(row.id) ? 'row-disabled' : ''}>
+                  <td className="strong cell-ellipsis" title={row.question}>{row.question}</td>
+                  <td className="cell-ellipsis" title={row.answer}>{row.answer}</td>
+                  <td><FileSourceStatusTag status={row.sourceFileStatus} /></td>
+                  <td className="cell-ellipsis" title={row.source}>{row.source}</td>
+                  <td>{(row.similarQuestions || []).length || '—'}</td>
+                  <td>{(row.paraphraseQuestions || []).length || '—'}</td>
+                  <td>{resultVisibleTags(row.tags)}</td>
+                  <td><Badge tone={row.status === '启用' ? 'success' : 'neutral'}>{resultEnableLabel(row.status)}</Badge></td>
+                  <td>{row.updatedAt}</td>
+                  <td className="actions knowledge-actions">
+                    <button type="button" onClick={() => setDetailRow(row)}>查看</button>
+                    <button type="button">编辑</button>
+                    <div className="more-menu-wrap">
+                      <button type="button" className={openMenuId === row.id ? 'menu-open' : ''} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === row.id ? null : row.id); }} title="更多操作" aria-label="更多操作"><MoreOutlined /></button>
+                      {openMenuId === row.id ? (
+                        <div className="more-menu-panel" onClick={(e) => e.stopPropagation()}>
+                          <button type="button" onClick={() => { setOpenMenuId(null); setSnapshotRow(buildResultSnapshot(row, 'QA库')); }}>查看处理方案</button>
+                          <button type="button" onClick={() => setOpenMenuId(null)}>{row.hasFeedback ? '已记录' : '问题记录'}</button>
+                          <button type="button" onClick={() => toggleStop(row.id)}>{stoppedIds.has(row.id) ? '启用' : '停用'}</button>
+                          <button type="button" className="danger" onClick={() => { setOpenMenuId(null); setRemovedIds((current) => new Set(current).add(row.id)); }}>删除</button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
               ))}
-              {visibleRows.length === 0 ? <tr><td colSpan={6} className="empty-table-cell">暂无匹配问答</td></tr> : null}
+              {visibleRows.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="empty-table-cell">
+                    <ResultEmptyBlock matched={qaRows.length > 0} emptyText="暂无问答数据" onClear={clearFilters} />
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
           <div className="knowledge-pagination">
@@ -10982,11 +11143,13 @@ function expandGraphSchemaSnapshot(node) {
 }
 
 /* ============================================================================
- * 知识加工结果详情（048 需求新增）
- * 切片详情 / 问答详情 / 知识点详情共用一套「原文对照 + 形态内容」三栏结构：
- *   左栏 文件预览：CSV 走表格预览（表头行 + 数据行，命中行高亮），音频走播放器 + 时间轴
- *   中栏 解析文本预览：按文本单元列出 ID、行号 / 时间轴、文本、列范围，支持定位
- *   右栏 形态内容：切片 / 问答对 / 知识点，携带关联文本与行列范围或时间轴
+ * 知识加工结果详情（048 需求新增；2026-09-28 按线上实现重排）
+ * 切片详情 / 问答详情 / 知识点详情共用一套「源文档预览 | 来源切片 | 详情字段」三栏结构：
+ *   左栏 源文档预览：CSV 走表格预览（表头行 + 数据行，命中行高亮），音频走播放器 + 时间轴
+ *   中栏 来源切片：当前形态内容关联的切片列表，携带关联文本与行列范围或时间轴
+ *   右栏 详情字段：问答对（问答对ID / 问题 / 标准答案 / 相似问法 / 问法扩展）、
+ *                  知识点（知识点ID / 名称 / 内容 / 标签）；切片详情只有两栏
+ * 抽屉宽度对齐线上：问答 / 知识点 1682，切片 1122。
  * ========================================================================== */
 
 // CSV 原文表格：第 1 行为表头，数据行从第 2 行开始，列范围为第 1–4 列。
@@ -11097,7 +11260,7 @@ const resultDetailSeeds = {
     table: detailCsvTable,
     chunks: detailCsvChunks,
     qaPairs: [
-      { id: 'qa-csv-1', index: 1, question: '阿莫西林胶囊的报销比例是多少？', answer: '阿莫西林胶囊（胶囊剂型）的报销比例为 90%，属于甲类药品。', textIds: ['T2'], chunkIds: ['csv-chunk-001'] },
+      { id: 'qa-csv-1', index: 1, question: '阿莫西林胶囊的报销比例是多少？', answer: '阿莫西林胶囊（胶囊剂型）的报销比例为 90%，属于甲类药品。', similarQuestions: ['阿莫西林报销多少', '阿莫西林胶囊能报销吗'], paraphraseQuestions: ['阿莫西林胶囊的报销比例'], textIds: ['T2'], chunkIds: ['csv-chunk-001'] },
       { id: 'qa-csv-2', index: 2, question: '乙类药品的报销比例一般是多少？', answer: '乙类药品的报销比例在 78%–88% 之间，如阿托伐他汀钙片 80%、缬沙坦胶囊 88%。', textIds: ['T5', 'T6'], chunkIds: ['csv-chunk-002'] },
       // 一个问答对应多个切片：中间栏展示切片列表，每个切片带关联文本与行列坐标。
       { id: 'qa-csv-3', index: 3, question: '甲类药品和乙类药品的报销比例有什么差别？', answer: '甲类药品按参保地政策全额纳入报销范围，报销比例 90%–95%；乙类药品需个人先行自付一定比例，报销比例 78%–88%。', textIds: ['T2', 'T4', 'T5', 'T6'], chunkIds: ['csv-chunk-001', 'csv-chunk-002'] },
@@ -11115,7 +11278,7 @@ const resultDetailSeeds = {
     audio: { duration: '03:12', urlLabel: '客服录音_医保报销咨询.mp3' },
     chunks: detailAudioChunks,
     qaPairs: [
-      { id: 'qa-audio-1', index: 1, question: '异地就医备案后报销比例和本地一样吗？', answer: '备案成功后，在备案地定点医疗机构就医，报销比例按参保地政策执行，具体比例以参保地目录为准。', textIds: ['A2', 'A3'], chunkIds: ['audio-chunk-001'] },
+      { id: 'qa-audio-1', index: 1, question: '异地就医备案后报销比例和本地一样吗？', answer: '备案成功后，在备案地定点医疗机构就医，报销比例按参保地政策执行，具体比例以参保地目录为准。', similarQuestions: ['异地就医备案后报销比例是否一致'], paraphraseQuestions: [], textIds: ['A2', 'A3'], chunkIds: ['audio-chunk-001'] },
       { id: 'qa-audio-2', index: 2, question: '急诊住院没有提前备案还能报销吗？', answer: '急诊抢救视同已备案，出院后按参保地规定补办备案手续即可，不影响本次报销。', textIds: ['A4', 'A5'], chunkIds: ['audio-chunk-002'] },
     ],
   },
@@ -11314,7 +11477,7 @@ function ResultFilePreview({ seed, activeTextIds }) {
             </span>
           ))}
         </div>
-        <p className="detail-preview-tip">音频按时间段切分，命中片段在时间轴上高亮；点击解析文本预览中的时间轴可定位播放位置。</p>
+        <p className="detail-preview-tip">音频按时间段切分，命中片段在时间轴上高亮；点击时间轴可定位播放位置。</p>
       </div>
     );
   }
@@ -11331,65 +11494,12 @@ function ResultFilePreview({ seed, activeTextIds }) {
   );
 }
 
-// 解析文本预览的列口径：音频为「ID、文本、开始时间、结束时间、操作」，
-// 表格类为「ID、文本、行号、列范围、操作」，PDF 为「ID、文本、页码、段落、操作」。
-const resultTextUnitColumns = {
-  mp3: [
-    { key: 'id', label: 'ID', width: '52px' },
-    { key: 'text', label: '文本', width: 'minmax(0, 1fr)' },
-    { key: 'start', label: '开始时间', width: '84px' },
-    { key: 'end', label: '结束时间', width: '84px' },
-    { key: 'action', label: '操作', width: '56px' },
-  ],
-  csv: [
-    { key: 'id', label: 'ID', width: '52px' },
-    { key: 'text', label: '文本', width: 'minmax(0, 1fr)' },
-    { key: 'rowLabel', label: '行号', width: '76px' },
-    { key: 'colRange', label: '列范围', width: '92px' },
-    { key: 'action', label: '操作', width: '56px' },
-  ],
-  pdf: [
-    { key: 'id', label: 'ID', width: '52px' },
-    { key: 'text', label: '文本', width: 'minmax(0, 1fr)' },
-    { key: 'page', label: '页码', width: '76px' },
-    { key: 'section', label: '段落', width: '76px' },
-    { key: 'action', label: '操作', width: '56px' },
-  ],
-};
-
-function ResultTextUnits({ seed, activeTextIds, onLocate }) {
-  const columns = resultTextUnitColumns[seed.format] || resultTextUnitColumns.pdf;
-  const gridTemplate = columns.map((column) => column.width).join(' ');
-  return (
-    <div className="detail-text-units" style={{ '--unit-columns': gridTemplate }}>
-      <div className="detail-text-units-head">
-        {columns.map((column) => <span key={column.key}>{column.label}</span>)}
-      </div>
-      <div className="detail-text-units-body">
-        {seed.textUnits.map((unit) => (
-          <div key={unit.id} className={`detail-text-unit ${activeTextIds.includes(unit.id) ? 'active' : ''}`}>
-            {columns.map((column) => {
-              if (column.key === 'text') {
-                return <span key={column.key} className="detail-text-unit-text" title={unit.text}>{unit.text}</span>;
-              }
-              if (column.key === 'action') {
-                return <span key={column.key}><button type="button" onClick={() => onLocate(unit.id)}>定位</button></span>;
-              }
-              return <span key={column.key}>{unit[column.key] ?? '-'}</span>;
-            })}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // 关联切片列表：一个问答对 / 知识点对应多个切片时，中间栏展示切片列表。
 function RelatedChunkList({ seed, chunks, activeChunkIds, onLocate }) {
   const locatorLabel = seed.format === 'mp3' ? '时间轴' : seed.format === 'csv' ? '行列坐标' : '页码';
   return (
     <div className="detail-related-chunks">
-      <div className="detail-related-head">关联切片（{chunks.length}）</div>
+      <div className="detail-related-head">来源切片（{chunks.length}）</div>
       {chunks.map((chunk) => (
         <div key={chunk.id} className={`detail-related-item ${activeChunkIds.includes(chunk.id) ? 'active' : ''}`}>
           <div className="detail-item-title">
@@ -11402,7 +11512,9 @@ function RelatedChunkList({ seed, chunks, activeChunkIds, onLocate }) {
           </div>
           {seed.format === 'csv' ? <MarkdownTablePreview content={chunk.content} /> : <p className="detail-chunk-text">{chunk.content}</p>}
           <div className="detail-item-foot">
-            <span><button type="button" className="detail-play-btn" onClick={() => onLocate(chunk.textIds[0])}>▶ 播放</button></span>
+            {seed.format === 'mp3' ? (
+              <span><button type="button" className="detail-play-btn" onClick={() => onLocate(chunk.textIds[0])}>▶ 播放</button></span>
+            ) : null}
             <span>长度：{chunk.length}</span>
           </div>
         </div>
@@ -11417,10 +11529,10 @@ function KnowledgeResultDetailPage({ seed, initialItemId }) {
   const initialIndex = Math.max(0, items.findIndex((item) => item.id === initialItemId));
   const [activeIndex, setActiveIndex] = useState(initialIndex);
   const [locatedTextId, setLocatedTextId] = useState(null);
-  const [fileInfoOpen, setFileInfoOpen] = useState(false);
   const activeItem = items[activeIndex] || items[0];
   const activeTextIds = activeItem?.textIds || [];
   const itemLabel = seed.formType === 'QA库' ? '问答对' : seed.formType === '知识点' ? '知识点' : '切片';
+  const isSlice = seed.formType === '切片库';
 
   // 「定位」把解析文本单元所属的形态内容切到前台，同时高亮该文本单元。
   const locateTextUnit = (textId) => {
@@ -11430,122 +11542,84 @@ function KnowledgeResultDetailPage({ seed, initialItemId }) {
   };
   const highlightedTextIds = locatedTextId && activeTextIds.includes(locatedTextId) ? [locatedTextId] : activeTextIds;
 
+  // 定位能力标签：线上枚举为 支持高亮 / 仅页码 / 不支持定位，按源文档格式映射。
+  const locateStatusLabel = seed.format === 'mp3' ? '不支持定位' : '支持高亮';
   // 详情页头部定位标签：CSV 展示行列范围，音频展示时间轴，PDF 展示页码。
   const locatorLabel = seed.format === 'csv' ? '行列范围' : seed.format === 'mp3' ? '时间轴' : '页码';
   const relatedChunks = getRelatedChunks(seed, activeItem);
   const relatedTextIds = getRelatedTextIds(seed, activeItem);
-  // 一个问答对 / 知识点关联多个切片时，中间栏改为展示切片列表。
-  const showChunkList = seed.formType !== '切片库' && relatedChunks.length > 1;
+  // 切片详情的「来源切片」即当前切片；问答 / 知识点的「来源切片」为关联切片集合。
+  const sourceSlices = isSlice ? (activeItem ? [activeItem] : []) : relatedChunks;
   // 标题栏的时间轴取值：音频取关联文本的时间段，其余取行列坐标 / 页码。
   const locatorValue = seed.format === 'mp3'
     ? relatedTextIds.map((id) => seed.textUnits.find((unit) => unit.id === id)).filter(Boolean).map((unit) => `${unit.start}–${unit.end}`).join('、')
     : getLocatorValue(seed, activeItem);
 
   return (
-    <div className="knowledge-result-detail-page">
-      <div className="detail-topbar">
-        <button type="button" className="detail-fileinfo-btn" onClick={() => setFileInfoOpen((open) => !open)}>
-          <FileTextOutlined /> 文件信息
-        </button>
+    <div className="kr-detail">
+      <div className="kr-detail-statusbar">
+        <span className="kr-detail-status-item"><label>来源文件</label><strong>{seed.fileName}</strong></span>
+        <span className="kr-detail-status-item"><label>文件状态</label><FileSourceStatusTag status="处理成功" /></span>
+        <span className="kr-detail-status-item"><label>{locatorLabel}</label><strong>{locatorValue || '-'}</strong></span>
       </div>
-      {fileInfoOpen ? (
-        <div className="detail-meta-bar">
-          <span><label>文件</label><strong>{seed.fileName}</strong></span>
-          <span><label>知识类目</label><strong>{seed.categoryName}</strong></span>
-          <span><label>加工方案</label><strong>{seed.planName}</strong></span>
-          <span><label>方案版本</label><strong>v{seed.version}</strong></span>
-          <span><label>{locatorLabel}</label><strong>{locatorValue || '-'}</strong></span>
-          <span><label>格式组</label><strong>{formatGroupLabel(normalizeUploadFormat(seed.format))}</strong></span>
-        </div>
-      ) : null}
-      <div className="detail-columns">
-        <section className="panel detail-column">
-          <div className="detail-column-head">文件预览</div>
-          <ResultFilePreview seed={seed} activeTextIds={highlightedTextIds} />
+      <div className="kr-detail-cols">
+        <section className="kr-col kr-col-preview">
+          <div className="kr-col-head"><span>源文档预览</span></div>
+          <div className="kr-col-body"><ResultFilePreview seed={seed} activeTextIds={highlightedTextIds} /></div>
         </section>
-        <section className="panel detail-column">
-          <div className="detail-column-head">
-            <span>{showChunkList ? '切片列表' : '解析文本预览'}</span>
-            {showChunkList ? <span className="detail-column-note">共 {relatedChunks.length} 个切片</span> : null}
+        <section className="kr-col kr-col-slices">
+          <div className="kr-col-head">
+            <span>来源切片</span>
+            <span className="kr-locate-tag">{locateStatusLabel}</span>
           </div>
-          <div className="detail-column-body">
-            {showChunkList ? (
+          <div className="kr-col-body">
+            {sourceSlices.length ? (
               <RelatedChunkList
                 seed={seed}
-                chunks={relatedChunks}
-                activeChunkIds={relatedChunks.map((chunk) => chunk.id)}
+                chunks={sourceSlices}
+                activeChunkIds={sourceSlices.map((chunk) => chunk.id)}
                 onLocate={locateTextUnit}
               />
-            ) : null}
-            <div className="detail-sub-head">{showChunkList ? '解析文本预览' : null}</div>
-            <ResultTextUnits seed={seed} activeTextIds={highlightedTextIds} onLocate={locateTextUnit} />
+            ) : <div className="kr-empty">暂无来源切片</div>}
           </div>
         </section>
-        <section className="panel detail-column">
-          <div className="detail-column-head">
-            <span>{itemLabel}内容</span>
-            <span className="detail-column-pager">
-              <button type="button" disabled={activeIndex <= 0} onClick={() => { setLocatedTextId(null); setActiveIndex(activeIndex - 1); }}>上一{seed.formType === '切片库' ? '片' : '条'}</button>
-              <em>{activeIndex + 1} / {items.length}</em>
-              <button type="button" disabled={activeIndex >= items.length - 1} onClick={() => { setLocatedTextId(null); setActiveIndex(activeIndex + 1); }}>下一{seed.formType === '切片库' ? '片' : '条'}</button>
-            </span>
-          </div>
-          <div className="detail-item-card">
-            {/* 标题栏：序号、文件名、关联文本、定位值（音频为时间轴），音频另带播放按钮。 */}
-            <div className="detail-item-titlebar">
-              <span className="detail-item-index">#{activeItem.index}</span>
-              <span className="detail-item-filename" title={seed.fileName}>{seed.fileName}</span>
-              <span className="detail-locator-tag">关联文本：{relatedTextIds.join('、') || '-'}</span>
-              <span className="detail-locator-tag">{locatorLabel}：{locatorValue || '-'}</span>
-              {seed.format === 'mp3' ? (
-                <button type="button" className="detail-play-btn" onClick={() => locateTextUnit(relatedTextIds[0])}>▶ 播放</button>
-              ) : null}
+        {isSlice ? null : (
+          <section className="kr-col kr-col-fields">
+            <div className="kr-col-head"><span>{itemLabel}详情</span></div>
+            <div className="kr-col-body">
+              <div className="kr-fields">
+                {seed.formType === 'QA库' ? (
+                  <>
+                    <KrField label="问答对ID"><KrCopyValue value={activeItem.id} /></KrField>
+                    <KrField label="问题"><div className="kr-readonly-box">{activeItem.question}</div></KrField>
+                    <KrField label="标准答案"><div className="kr-readonly-box kr-readonly-box-lg">{activeItem.answer}</div></KrField>
+                    <KrField label="相似问法">
+                      {(activeItem.similarQuestions || []).length
+                        ? (activeItem.similarQuestions || []).map((item, index) => <div className="kr-readonly-box" key={`sq-${index}`}>{item}</div>)
+                        : <span className="kr-empty-inline">暂无相似问法</span>}
+                    </KrField>
+                    <KrField label="问法扩展">
+                      {(activeItem.paraphraseQuestions || []).length
+                        ? (activeItem.paraphraseQuestions || []).map((item, index) => <div className="kr-readonly-box" key={`pq-${index}`}>{item}</div>)
+                        : <span className="kr-empty-inline">暂无问法扩展</span>}
+                    </KrField>
+                  </>
+                ) : (
+                  <>
+                    <KrField label="知识点ID"><KrCopyValue value={activeItem.id} /></KrField>
+                    <KrField label="知识点名称/标题"><div className="kr-readonly-box">{activeItem.title}</div></KrField>
+                    <KrField label="知识点内容"><div className="kr-readonly-box kr-readonly-box-lg">{activeItem.content}</div></KrField>
+                    {(activeItem.tags || []).length ? (
+                      <KrField label="标签">
+                        <div className="kr-chip-row">{(activeItem.tags || []).map((item) => <span className="detail-chip" key={item}>{item}</span>)}</div>
+                      </KrField>
+                    ) : null}
+                  </>
+                )}
+              </div>
             </div>
-            <div className="detail-item-body">
-              {seed.formType === 'QA库' ? (
-                <div className="detail-qa-body">
-                  <div className="detail-qa-row"><label>问题</label><p>{activeItem.question}</p></div>
-                  <div className="detail-qa-row"><label>答案</label><p>{activeItem.answer}</p></div>
-                </div>
-              ) : seed.formType === '知识点' ? (
-                <div className="detail-kp-body">
-                  <h3>{activeItem.title}</h3>
-                  <p>{activeItem.content}</p>
-                  <div className="detail-kp-grid">
-                    <div><label>适用对象</label><div className="detail-chip-row">{activeItem.applicableUsers.map((item) => <span className="detail-chip" key={item}>{item}</span>)}</div></div>
-                    <div><label>关键规则</label><ul className="detail-rule-list">{activeItem.keyRules.map((item) => <li key={item}>{item}</li>)}</ul></div>
-                    <div><label>标签</label><div className="detail-chip-row">{activeItem.tags.map((item) => <span className="detail-chip" key={item}>{item}</span>)}</div></div>
-                  </div>
-                </div>
-              ) : seed.format === 'csv' ? (
-                <MarkdownTablePreview content={activeItem.content} />
-              ) : (
-                <p className="detail-chunk-text">{activeItem.content}</p>
-              )}
-            </div>
-            <div className="detail-item-foot">
-              <span>关联切片：{relatedChunks.length} 个</span>
-              <span>长度：{activeItem.length ?? '-'}</span>
-              <span>来源方案：{seed.planName} v{seed.version}</span>
-            </div>
-          </div>
-          <div className="detail-item-list">
-            {items.map((item, index) => (
-              <button
-                type="button"
-                key={item.id}
-                className={`detail-item-list-row ${index === activeIndex ? 'active' : ''}`}
-                onClick={() => { setLocatedTextId(null); setActiveIndex(index); }}
-              >
-                <span className="detail-item-index">#{item.index}</span>
-                <span className="detail-item-list-text">
-                  {seed.formType === 'QA库' ? item.question : seed.formType === '知识点' ? item.title : String(item.content).split('\n').slice(2).join(' ').slice(0, 24)}
-                </span>
-                <span className="detail-item-list-range">{getLocatorValue(seed, item)}</span>
-              </button>
-            ))}
-          </div>
-        </section>
+          </section>
+        )}
       </div>
     </div>
   );
@@ -11554,8 +11628,10 @@ function KnowledgeResultDetailPage({ seed, initialItemId }) {
 // 知识加工结果详情（切片 / 问答 / 知识点）以二级抽屉打开，不替换列表页。
 function KnowledgeResultDetailDrawer({ seed, initialItemId, onClose }) {
   const title = seed.formType === 'QA库' ? '问答详情' : seed.formType === '知识点' ? '知识点详情' : '切片详情';
+  // 线上详情抽屉宽度：问答 / 知识点 1682，切片 1122。
+  const width = seed.formType === '切片库' ? 1122 : 1682;
   return (
-    <Drawer title={title} onClose={onClose} className="result-detail-drawer" darkHead wide>
+    <Drawer title={title} onClose={onClose} className="result-detail-drawer" darkHead width={width}>
       <KnowledgeResultDetailPage seed={seed} initialItemId={initialItemId} />
     </Drawer>
   );

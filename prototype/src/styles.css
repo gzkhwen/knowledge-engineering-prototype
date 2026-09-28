@@ -4024,3 +4024,124 @@ select.select-field,
 .file-chain-logbar .select-field-wrap,
 .file-chain-logbar .select-field { width: 100%; min-width: 0; }
 .file-chain-loghint { margin: 0 0 12px; color: #667085; font-size: 12px; }
+
+/* ============================================================
+   知识加工结果三子页（问答库 / 文本切片 / 知识点）——对齐线上实现
+   列表：线上表格列宽（scroll.x 口径）；详情：三栏抽屉（源文档预览 | 来源切片 | 详情字段）
+   ============================================================ */
+.muted { color: #98a2b3; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #475467; }
+.num-cell { text-align: center; color: #475467; }
+.cell-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-btn {
+  margin-left: 8px; padding: 0; border: 0; color: #0f63f6; background: transparent;
+  font-size: 13px; cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; }
+
+/* 表格最小宽度：对齐线上 scroll.x */
+.kr-table-qa { min-width: 1660px; }
+.kr-table-slice { min-width: 1460px; }
+.kr-table-ps { min-width: 1020px; }
+.kr-table-kp { min-width: 1600px; }
+
+/* 表格列宽 */
+.qa-col-question { width: 160px; }
+.qa-col-answer { width: 200px; }
+.qa-col-filestatus { width: 120px; }
+.qa-col-source { width: 160px; }
+.qa-col-similar { width: 120px; }
+.qa-col-paraphrase { width: 100px; }
+.qa-col-tag { width: 160px; }
+.qa-col-enable { width: 90px; }
+.qa-col-time { width: 150px; }
+.qa-col-action { width: 160px; }
+.slice-col-content { width: 200px; }
+.slice-col-source { width: 160px; }
+.slice-col-filestatus { width: 120px; }
+.slice-col-length { width: 100px; }
+.slice-col-tag { width: 160px; }
+.slice-col-enable { width: 90px; }
+.slice-col-time { width: 150px; }
+.slice-col-action { width: 140px; }
+.ps-col-no { width: 148px; }
+.ps-col-content { width: 240px; }
+.ps-col-source { width: 180px; }
+.ps-col-length { width: 90px; }
+.ps-col-dim { width: 100px; }
+.ps-col-children { width: 90px; }
+.ps-col-enable { width: 100px; }
+.ps-col-action { width: 200px; }
+.kp-col-name { width: 200px; }
+.kp-col-summary { width: 300px; }
+.kp-col-filestatus { width: 120px; }
+.kp-col-source { width: 160px; }
+.kp-col-tag { width: 180px; }
+.kp-col-enable { width: 90px; }
+.kp-col-time { width: 160px; }
+.kp-col-action { width: 180px; }
+
+/* 标签列：首标签 + 「+N」 */
+.result-tag-chip {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 4px;
+  color: #1d5fd6; background: #e9f2ff; font-size: 12px;
+}
+.result-tag-rest { margin-left: 6px; color: #667085; font-size: 12px; }
+
+/* 列表空态 */
+.result-empty-block { display: flex; align-items: center; justify-content: center; gap: 4px; color: #667085; }
+.result-empty-block strong { color: #475467; font-weight: 600; }
+.result-empty-block span { color: #98a2b3; font-size: 12px; }
+
+/* ---------- 详情抽屉（三栏） ---------- */
+.drawer.result-detail-drawer .drawer-body { padding: 0; background: #fff; }
+.kr-detail { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.kr-detail-statusbar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 28px;
+  padding: 12px 20px; border-bottom: 1px solid #eef1f6; background: #fbfcff;
+}
+.kr-detail-status-item { display: inline-flex; align-items: center; gap: 8px; }
+.kr-detail-status-item label { color: #667085; font-size: 12px; }
+.kr-detail-status-item strong { color: #1f2937; font-size: 13px; font-weight: 600; }
+.kr-detail-cols { display: flex; flex: 1 1 auto; min-height: 0; }
+.kr-col {
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  border-right: 1px solid #eef1f6;
+}
+.kr-col:last-child { border-right: 0; }
+.kr-col-preview { flex: 1 1 38%; }
+.kr-col-slices { flex: 0 0 300px; }
+.kr-col-fields { flex: 1 1 40%; }
+.kr-col-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  height: 44px; padding: 0 16px; border-bottom: 1px solid #eef1f6;
+  color: #111827; font-size: 14px; font-weight: 600;
+}
+.kr-col-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px; }
+.kr-locate-tag {
+  height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 4px;
+  color: #1f9a2d; background: #eafbe7; font-size: 12px; font-weight: 400;
+}
+.kr-empty, .kr-empty-inline { color: #98a2b3; font-size: 13px; }
+.kr-empty { padding: 40px 0; text-align: center; }
+.kr-empty-inline { display: inline-block; padding: 4px 0; }
+
+.kr-fields { display: flex; flex-direction: column; gap: 14px; }
+.kr-field { display: flex; gap: 12px; }
+.kr-field-label {
+  flex: 0 0 96px; padding-top: 8px; color: #667085; font-size: 13px; line-height: 1.5;
+}
+.kr-field-value { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.kr-readonly-box {
+  padding: 8px 12px; border: 1px solid #e4e7ec; border-radius: 6px; background: #fbfcff;
+  color: #1f2937; font-size: 13px; line-height: 1.7; word-break: break-word; white-space: pre-wrap;
+}
+.kr-readonly-box-lg { min-height: 120px; }
+.kr-chip-row { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 5px; }
+.kr-copy-value { display: inline-flex; align-items: center; gap: 8px; }
+.kr-copy-text { color: #1f2937; font-size: 13px; word-break: break-all; }
+.kr-copy-btn {
+  flex: 0 0 auto; padding: 0 6px; height: 24px; border: 1px solid #d6dde8; border-radius: 4px;
+  color: #0f63f6; background: #fff; font-size: 12px; cursor: pointer;
+}
+.kr-copy-btn:hover { border-color: #9cc3ff; }
