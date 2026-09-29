@@ -31,6 +31,7 @@ import {
   MenuFoldOutlined,
   MoreOutlined,
   PaperClipOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   RobotOutlined,
   ReloadOutlined,
@@ -44,6 +45,12 @@ import {
   RedoOutlined,
   MinusCircleOutlined,
   VideoCameraOutlined,
+  PauseOutlined,
+  CaretRightFilled,
+  SoundOutlined,
+  MutedOutlined,
+  FullscreenOutlined,
+  FullscreenExitOutlined,
 } from '@ant-design/icons';
 import { message, Progress, Tooltip } from 'antd';
 import { dataStore, demoNodeSets, demoResult, getKnowledgeFormTypeLabel, knowledgeFormTypes } from './dataStore.js';
@@ -144,7 +151,7 @@ function SearchBox({ value, onChange, placeholder }) {
   );
 }
 
-function SelectField({ value, onChange, children, className = '', disabled = false, missingLabel = '当前选项已失效', dropdownClassName = '', dropdownMinWidth = 180 }) {
+function SelectField({ value, onChange, children, className = '', disabled = false, missingLabel = '当前选项已失效', dropdownClassName = '', dropdownMinWidth = 180, dropdownAutoWidth = false }) {
   const [open, setOpen] = useState(false);
   const [dropdownStyle, setDropdownStyle] = useState(null);
   const rootRef = useRef(null);
@@ -182,9 +189,14 @@ function SelectField({ value, onChange, children, className = '', disabled = fal
       const openUpward = below < minHeight && above > below;
       const maxHeight = Math.max(minHeight, Math.min(preferredHeight, openUpward ? above : below));
       const top = openUpward ? Math.max(viewportPadding, rect.top - maxHeight - gap) : rect.bottom + gap;
-      const width = Math.max(rect.width, dropdownMinWidth);
-      const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - width - viewportPadding);
-      setDropdownStyle({ position: 'fixed', top, left, width, maxHeight, zIndex: 300 });
+      const baseWidth = Math.max(rect.width, dropdownMinWidth);
+      const left = Math.max(viewportPadding, Math.min(rect.left, window.innerWidth - baseWidth - viewportPadding));
+      // dropdownAutoWidth：选项文本长短不一（如格式组的中英文混排）时，面板按内容自适应宽度，
+      // 只保证不小于触发器/最小宽度，并用 maxWidth 兜住视口右边界，避免长文案换行或被截断。
+      const sizeStyle = dropdownAutoWidth
+        ? { width: 'max-content', minWidth: baseWidth, maxWidth: Math.max(160, window.innerWidth - left - viewportPadding) }
+        : { width: baseWidth };
+      setDropdownStyle({ position: 'fixed', top, left, ...sizeStyle, maxHeight, zIndex: 300 });
     };
     updatePosition();
     window.addEventListener('resize', updatePosition);
@@ -193,7 +205,7 @@ function SelectField({ value, onChange, children, className = '', disabled = fal
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
-  }, [open, dropdownMinWidth]);
+  }, [open, dropdownMinWidth, dropdownAutoWidth]);
 
   const chooseOption = (option) => {
     if (disabled || option.disabled) return;
@@ -208,7 +220,7 @@ function SelectField({ value, onChange, children, className = '', disabled = fal
         <DownOutlined />
       </button>
       {open && dropdownStyle ? createPortal(
-        <span ref={dropdownRef} className={`select-dropdown ${dropdownClassName}`.trim()} style={dropdownStyle}>
+        <span ref={dropdownRef} className={`select-dropdown ${dropdownAutoWidth ? 'select-dropdown-auto' : ''} ${dropdownClassName}`.trim()} style={dropdownStyle}>
           {options.map((option) => (
             <button
               type="button"
@@ -1221,6 +1233,10 @@ const knowledgeResultCategories = [
 const sliceAudioFileName = '百年附加医惠通费用补偿医疗保险.mp3';
 const sliceAudioDuration = '02:06';
 
+// R046 视频解析：视频来源样例（文件名与时长在列表与详情间共用）。
+const sliceVideoFileName = '产品培训视频.mp4';
+const sliceVideoDuration = '00:58';
+
 const knowledgePointRows = [
   {
     id: 'kp-4',
@@ -1262,6 +1278,17 @@ const knowledgePointRows = [
     status: '停用',
     updatedAt: '2026-05-25 16:30',
   },
+  // R046 视频解析：视频来源的知识点样例。
+  {
+    id: 'kp-5',
+    title: '视频培训中的产品核心保障',
+    content: '视频课程讲解本产品的两项核心保障：一般医疗保险金与重大疾病医疗保险金，保额均为 200 万元；同时提示投保时需如实告知健康状况。',
+    source: sliceVideoFileName,
+    sourceFileStatus: '处理成功',
+    tags: ['产品知识', '视频培训'],
+    status: '启用',
+    updatedAt: '2026-09-03 09:40',
+  },
 ];
 
 const standardSliceRows = [
@@ -1271,6 +1298,8 @@ const standardSliceRows = [
   { id: 'slice-4', chunkId: 'audio-chunk-004', content: '投保人应如实告知被保险人健康状况，未如实告知可能影响理赔结论。', source: sliceAudioFileName, sourceFileStatus: '处理中', length: 38, tags: ['保险', '健康告知'], status: '启用', updatedAt: '2026-09-02 15:06' },
   { id: 'slice-5', chunkId: 'audio-chunk-005', content: '犹豫期为签收保单之日起十五日内，犹豫期内退保可全额退还已交保费。', source: sliceAudioFileName, sourceFileStatus: '待处理', length: 32, tags: ['保险', '犹豫期'], status: '停用', updatedAt: '2026-09-02 14:58' },
   { id: 'slice-6', chunkId: 'audio-chunk-006', content: '本费率表仅供参考，具体以保险条款为准。', source: sliceAudioFileName, sourceFileStatus: '状态异常', length: 26, tags: ['保险'], status: '启用', updatedAt: '2026-09-02 14:31' },
+  // R046 视频解析：视频来源的切片样例（详情走视频形态）。
+  { id: 'slice-7', chunkId: 'video-chunk-001', content: '大家好，今天我们来介绍百年附加医惠通费用补偿医疗保险的核心保障。这款产品提供一般医疗保险金，保额两百万元，覆盖住院及特定门诊费用。', source: sliceVideoFileName, sourceFileStatus: '处理成功', length: 62, tags: ['产品知识', '视频培训'], status: '启用', updatedAt: '2026-09-03 09:40' },
 ];
 
 const parentSliceRows = [
@@ -1287,6 +1316,8 @@ const qaRows = [
   { id: 'qa-4', question: '知识图谱的基本构建流程是什么？', answer: '知识图谱的构建遵循知识抽取、知识融合、知识加工与知识应用四个环节。', source: sliceAudioFileName, sourceFileStatus: '处理成功', similarQuestions: ['知识图谱怎么构建'], paraphraseQuestions: [], tags: ['知识图谱'], status: '启用', updatedAt: '2026-09-02 14:59' },
   { id: 'qa-5', question: '公安知识图谱的应用场景有哪些？', answer: '公安知识图谱重点解决数据关联、线索挖掘与案情推演等问题，提升研判效率。', source: sliceAudioFileName, sourceFileStatus: '待处理', similarQuestions: [], paraphraseQuestions: [], tags: [], status: '停用', updatedAt: '2026-09-02 14:52' },
   { id: 'qa-6', question: '智慧建筑知识图谱如何构建？', answer: '集合构建以BIM数据与规范为基础，抽取建筑构件、空间关系与运维规则形成图谱。', source: sliceAudioFileName, sourceFileStatus: '状态异常', similarQuestions: [], paraphraseQuestions: [], tags: ['知识图谱'], status: '启用', updatedAt: '2026-09-02 14:45' },
+  // R046 视频解析：视频来源的问答样例（详情走视频形态）。
+  { id: 'qa-8', question: '本产品的核心保障额度和犹豫期是怎么规定的？', answer: '一般医疗保险金与重大疾病医疗保险金的保额均为 200 万元；签收保单之日起十五日内为犹豫期，犹豫期内退保可全额退还已交保费。', source: sliceVideoFileName, sourceFileStatus: '处理成功', similarQuestions: ['保额是多少', '犹豫期多久'], paraphraseQuestions: ['本产品的保额和犹豫期'], tags: ['产品知识', '视频培训'], status: '启用', updatedAt: '2026-09-03 09:40' },
 ];
 
 function KnowledgePointsPage() {
@@ -7055,7 +7086,7 @@ const knowledgePreviewTabNames = {
 };
 // 格式白名单：前段与线上实测一致（2026-09-28 线上「文件上传」抽屉原文：支持 pdf / doc / docx /
 // xls / xlsx / ppt / pptx / txt / md / jpg / jpeg / png / html，单文件 ≤ 100MB）。
-// csv 为本地已支持（R048）、线上暂未开放的格式；末尾音视频为视频解析需求（R030）预留，线上暂无。
+// csv 为本地已支持（R048）、线上暂未开放的格式；末尾音频为音频解析（R045）、视频为视频解析（R046），线上暂无。
 const workbenchFileFormats = [
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'md',
   'jpg', 'jpeg', 'png', 'html',
@@ -7075,7 +7106,7 @@ const workbenchFileFormatMeta = {
   txt: { Icon: FileTextOutlined, color: '#64748b' },
   md: { Icon: FileMarkdownFilled, color: '#334155' },
   html: { Icon: CodeOutlined, color: '#0891b2' },
-  // 音频格式：线上白名单暂无，本轮为视频/音频解析需求预留，同时用于文件列表与上传抽屉展示。
+  // 音频格式：线上白名单暂无，R045 音频解析需求启用，同时用于文件列表与上传抽屉展示。
   mp3: { Icon: CustomerServiceOutlined, color: '#ea580c' },
   wav: { Icon: CustomerServiceOutlined, color: '#ea580c' },
   m4a: { Icon: CustomerServiceOutlined, color: '#ea580c' },
@@ -7089,7 +7120,7 @@ const workbenchFileFormatMeta = {
   png: { Icon: FileImageOutlined, color: '#7c3aed' },
   jpg: { Icon: FileImageOutlined, color: '#7c3aed' },
   jpeg: { Icon: FileImageOutlined, color: '#7c3aed' },
-  // 视频格式：线上白名单暂无，本轮为视频解析需求（R030）预留。
+  // 视频格式：线上白名单暂无，R046 视频解析需求启用。
   mp4: { Icon: VideoCameraOutlined, color: '#db2777' },
   mov: { Icon: VideoCameraOutlined, color: '#db2777' },
   avi: { Icon: VideoCameraOutlined, color: '#db2777' },
@@ -9731,9 +9762,24 @@ function formatLabel(format) {
   return format ? format.toUpperCase() : format;
 }
 
+/* ---------- 音视频（媒体）口径：R045 音频解析 / R046 视频解析 ----------
+ * 媒体文件在详情页统一用「播放器 + 时间轴」模型承载：
+ *   左栏 = 文件预览（音频为进度条播放器，视频为画面区 + 进度条）+ 解析文本预览（ID / 文本 / 开始时间 / 结束时间 / 播放）
+ *   中栏 = 切片内容 / 来源切片，携带「音频时间轴」或「视频时间轴」
+ *   右栏 = 详情字段（问答对 / 知识点）
+ * 视频与音频共用同一套布局，仅播放器形态与定位标签文案不同。
+ */
+const audioFormats = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'wma', 'amr'];
+const videoFormats = ['mp4', 'mov', 'avi', 'mkv'];
+const mediaFormats = [...audioFormats, ...videoFormats];
+const isVideoFormat = (format) => videoFormats.includes(format);
+const isMediaFormat = (format) => mediaFormats.includes(format);
+// 详情页定位标签：视频显示「视频时间轴」，音频显示「时间轴」。
+const mediaLocatorLabel = (format) => (isVideoFormat(format) ? '视频时间轴' : '时间轴');
+
 // 文件格式组：筛选器与格式选择器按「格式组」呈现，与真实产品口径一致。
 // 2026-09-28 对齐线上白名单：文档组纳入 doc、表格组纳入 xls、演示文档组纳入 ppt；
-// 并按线上能力新增「图片」「网页」两组；「音视频」组为视频解析需求（R030）预留，线上暂无。
+// 并按线上能力新增「图片」「网页」两组；「音视频」组为 R045 音频 / R046 视频解析需求启用，线上暂无。
 const knowledgeFormatGroups = [
   { id: 'pdf', label: 'PDF', displayLabel: 'PDF(pdf)', formats: ['pdf'] },
   { id: 'doc', label: '文档', displayLabel: '文档(doc、docx)', formats: ['doc', 'docx'] },
@@ -9746,23 +9792,13 @@ const knowledgeFormatGroups = [
   { id: 'media', label: '音视频', displayLabel: '音视频(mp3、wav、mp4、mov 等)', formats: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'mp4', 'mov', 'avi', 'mkv'] },
 ];
 
-// 视频格式（mp4、mov、avi、mkv）为视频解析需求（R030）预留、线上暂无：
-// 「知识加工方案」的格式筛选器与新建/编辑方案弹窗的「适用格式」暂时隐藏视频，音频格式保留。
-const planHiddenVideoFormats = ['mp4', 'mov', 'avi', 'mkv'];
-const knowledgePlanFormatGroups = knowledgeFormatGroups
-  .map((group) => {
-    const formats = group.formats.filter((format) => !planHiddenVideoFormats.includes(format));
-    if (!formats.length) return null;
-    if (formats.length === group.formats.length) return group;
-    const audioOnly = group.id === 'media';
-    return {
-      ...group,
-      formats,
-      label: audioOnly ? '音频' : group.label,
-      displayLabel: audioOnly ? `音频(${formats.slice(0, 3).join('、')} 等)` : group.displayLabel,
-    };
-  })
-  .filter(Boolean);
+// 「知识加工方案」的格式组：R046（视频解析工具）后，音频与视频在该模块内**各占一个格式组**
+// （筛选器、新建/编辑方案弹窗的「适用格式」都按此口径），展示名列出全部支持格式、不再用「等」省略。
+const knowledgePlanFormatGroups = [
+  ...knowledgeFormatGroups.filter((group) => group.id !== 'media'),
+  { id: 'audio', label: '音频', displayLabel: `音频(${audioFormats.join('、')})`, formats: audioFormats },
+  { id: 'video', label: '视频', displayLabel: `视频(${videoFormats.join('、')})`, formats: videoFormats },
+];
 
 function formatGroupOf(format) {
   return knowledgeFormatGroups.find((group) => group.formats.includes(format)) || null;
@@ -9781,7 +9817,7 @@ const sheetFormatGroup = knowledgeFormatGroups.find((group) => group.id === 'she
 const isSheetFormatSelected = (formats = []) => Boolean(sheetFormatGroup
   && sheetFormatGroup.formats.some((format) => formats.includes(format)));
 
-// 上传文件类型（上传/更新文件抽屉的四个类型卡片）。
+// 上传文件类型（上传/更新文件抽屉的四个类型卡片：文本文档 / 表格 / 图片 / 音视频）。
 const uploadFileTypes = [
   {
     id: 'text',
@@ -9809,20 +9845,12 @@ const uploadFileTypes = [
     color: '#7c3aed',
   },
   {
-    id: 'audio',
-    name: '音频文件',
-    desc: '对上传的音频文件进行自动解析。',
-    formats: ['mp3', 'wav', 'm4a', 'aac', 'amr', 'flac', 'ogg', 'opus', 'wma'],
-    icon: CustomerServiceOutlined,
-    color: '#ea580c',
-  },
-  {
-    // 视频类型为视频解析需求（R030）预留，线上白名单暂无音视频。
-    id: 'video',
-    name: '视频文件',
-    desc: '对上传的视频文件进行解析和加工处理。',
-    formats: ['mp4', 'mov', 'avi', 'mkv'],
-    icon: VideoCameraOutlined,
+    // R045 音频解析 / R046 视频解析：音频与视频合为一个「音视频文件」类型（格式白名单共 13 种）。
+    id: 'media',
+    name: '音视频文件',
+    desc: '对上传的音频、视频文件进行解析和加工处理。',
+    formats: ['mp3', 'wav', 'm4a', 'aac', 'amr', 'flac', 'ogg', 'opus', 'wma', 'mp4', 'mov', 'avi', 'mkv'],
+    icon: PlayCircleOutlined,
     color: '#db2777',
   },
 ];
@@ -9832,15 +9860,16 @@ const uploadTypeLimits = {
   text: { maxSize: '100MB', maxCount: 50 },
   sheet: { maxSize: '100MB', maxCount: 50 },
   image: { maxSize: '100MB', maxCount: 100 },
-  audio: { maxSize: '500MB', maxCount: 100 },
+  // 音视频合并为一个类型后：单文件 500MB、单次 100 个。
+  media: { maxSize: '500MB', maxCount: 100 },
 };
 
 function getUploadFileType(typeId) {
   return uploadFileTypes.find((item) => item.id === typeId) || uploadFileTypes[0];
 }
 
-// 「视频文件」为视频解析需求（R030）预留、线上白名单暂无，文件上传与更新抽屉暂时隐藏该类型。
-const visibleUploadFileTypes = uploadFileTypes.filter((type) => type.id !== 'video');
+// 音视频类型卡片在文件上传 / 更新抽屉中正常展示（共 4 张类型卡）。
+const visibleUploadFileTypes = uploadFileTypes;
 
 function uploadTypeAccept(type) {
   return (type?.formats || []).map((format) => `.${format}`).join(',');
@@ -10022,7 +10051,9 @@ function selectedFormatTags(selectedFormats = []) {
 
 function FormatMultiSelect({ selectedFormats, onChange }) {
   const [open, setOpen] = useState(false);
+  const [panelStyle, setPanelStyle] = useState(null);
   const rootRef = useRef(null);
+  const panelRef = useRef(null);
   useEffect(() => {
     if (!open) return undefined;
     const closeOnOutside = (event) => {
@@ -10030,6 +10061,61 @@ function FormatMultiSelect({ selectedFormats, onChange }) {
     };
     document.addEventListener('mousedown', closeOnOutside);
     return () => document.removeEventListener('mousedown', closeOnOutside);
+  }, [open]);
+  // 选项面板浮层定位：格式组全量展示时面板较高，可能超出窗口（弹窗体本身还是滚动容器，会被裁掉）。
+  // 因此不依赖弹窗流内布局，改为按视口计算：宽度按内容自适应并夹在视口内；高度取上下可用空间较大的一侧，
+  // 下方放不下则上翻；超出部分由内部滚动承载。勾选即生效（无「清除 / 完成」动作行）。
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelStyle(null);
+      return undefined;
+    }
+    const updatePosition = () => {
+      const panel = panelRef.current;
+      const anchor = rootRef.current;
+      if (!panel || !anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const gap = 6;
+      const edge = 12;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      // 先脱离浮层定位量一次「自然尺寸」：已被上一轮限高/定位时直接读高度会得到被压缩后的值。
+      const savedStyle = panel.getAttribute('style') || '';
+      const savedClass = panel.className;
+      panel.className = 'plan-format-panel';
+      panel.removeAttribute('style');
+      const naturalWidth = panel.offsetWidth;
+      const naturalHeight = panel.offsetHeight;
+      panel.className = savedClass;
+      panel.setAttribute('style', savedStyle);
+      // 宽度：不少于触发器（与字段对齐），内容更长时按内容撑开，只受视口内边距约束。
+      const width = Math.min(Math.max(rect.width, naturalWidth), viewportWidth - edge * 2);
+      const below = viewportHeight - rect.bottom - gap - edge;
+      const above = rect.top - gap - edge;
+      const dropUp = naturalHeight > below && above > below;
+      const maxHeight = Math.min(naturalHeight, Math.max(160, dropUp ? above : below));
+      const left = Math.min(Math.max(edge, rect.left), Math.max(edge, viewportWidth - width - edge));
+      const next = dropUp
+        ? { position: 'fixed', top: 'auto', bottom: viewportHeight - rect.top + gap, left, width, maxHeight }
+        : { position: 'fixed', top: rect.bottom + gap, bottom: 'auto', left, width, maxHeight };
+      // 面板自身滚动会命中下面的 scroll 监听，值没变就不要重渲染。
+      setPanelStyle((prev) => (prev
+        && prev.top === next.top && prev.bottom === next.bottom && prev.left === next.left
+        && prev.width === next.width && prev.maxHeight === next.maxHeight ? prev : next));
+    };
+    const onScroll = (event) => {
+      // 面板内部滚动不改变锚点位置，跳过；只跟随外层滚动 / 窗口缩放。
+      const panel = panelRef.current;
+      if (panel && event.target instanceof Node && panel.contains(event.target)) return;
+      updatePosition();
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', onScroll, true);
+    };
   }, [open]);
   // 以「格式组」为最小选择单位：勾选一组即勾选该组全部格式。
   const toggleGroup = (group) => {
@@ -10073,7 +10159,13 @@ function FormatMultiSelect({ selectedFormats, onChange }) {
         <AntDownOutlined className="plan-format-chevron" />
       </div>
       {open ? (
-        <div className="plan-format-panel" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+        <div
+          ref={panelRef}
+          className="plan-format-panel is-floating"
+          style={panelStyle || { position: 'fixed', top: 0, left: 0, visibility: 'hidden' }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
           <div className="plan-format-options">
             {knowledgePlanFormatGroups.map((group) => {
               const { Icon, color } = workbenchFileFormatMeta[group.formats[0]] || { Icon: FileOutlined, color: '#64748b' };
@@ -10082,14 +10174,10 @@ function FormatMultiSelect({ selectedFormats, onChange }) {
                 <label className="plan-format-option" key={group.id} style={{ '--format-color': color }}>
                   <TreeCheckbox checked={checked} onChange={() => toggleGroup(group)} />
                   <span className="plan-format-option-icon"><Icon /></span>
-                  <span>{group.displayLabel}</span>
+                  <span className="plan-format-option-label">{group.displayLabel}</span>
                 </label>
               );
             })}
-          </div>
-          <div className="plan-filter-tree-actions">
-            <button type="button" className="secondary" onClick={() => onChange([])}>清除</button>
-            <button type="button" className="primary" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpen(false); }}>完成</button>
           </div>
         </div>
       ) : null}
@@ -10416,7 +10504,8 @@ function KnowledgePlanPage({ projectId, notify, onOpenWorkbench }) {
               <option value="active">启用</option>
               <option value="disabled">停用</option>
             </SelectField>
-            <SelectField value={formatFilter} onChange={setFormatFilter}>
+            {/* 格式筛选：选项列出各格式组的完整支持格式（中英文混排、长短不一），面板按内容自适应宽度。 */}
+            <SelectField value={formatFilter} onChange={setFormatFilter} dropdownAutoWidth dropdownMinWidth={190}>
               <option value="">全部格式</option>
               {knowledgePlanFormatGroups.map((group) => (
                 <option value={group.id} key={group.id}>{group.displayLabel}</option>
@@ -11117,6 +11206,8 @@ const fileUploadSeedRows = [
   { id: 'fu-9', name: '客户问答清单', fileSource: 'MANUAL', sourceSystem: '', source: '业务知识库', category: '医保知识', tagCategory: '医保', tags: ['常见问题'], tag: '常见问题', format: 'csv', enabled: true, uploadStatus: 'RECOMMENDING', formConfigured: 'CONFIG', processStatus: 'RUNNING', knowledgeForms: ['UNSTRUCTURED_SLICE'], size: '0.86 MB', fileSize: 902144, uploadTime: '08/18 10:58:07' },
   // 音频样例：来自音频文件上传需求。
   { id: 'fu-10', name: '客服录音_医保报销咨询', fileSource: 'OPENAPI_SYNC', sourceSystem: '客服系统', source: '客服系统', category: '医保知识', tagCategory: '医保', tags: ['客服录音'], tag: '客服录音', format: 'mp3', enabled: true, uploadStatus: 'CONFIRMED', formConfigured: 'CONFIG', processStatus: 'FAILED', knowledgeForms: ['UNSTRUCTURED_SLICE'], size: '18.42 MB', fileSize: 19314770, uploadTime: '08/18 11:02:33' },
+  // 视频样例：来自视频解析需求（R046）。
+  { id: 'fu-11', name: '产品培训视频', fileSource: 'MANUAL', sourceSystem: '', source: '产品知识库', category: '产品知识', tagCategory: '产品知识', tags: ['视频培训'], tag: '视频培训', format: 'mp4', enabled: true, uploadStatus: 'CONFIRMED', formConfigured: 'CONFIG', processStatus: 'SUCCESS', knowledgeForms: ['UNSTRUCTURED_SLICE', 'QA_LIBRARY', 'KNOWLEDGE_POINT'], size: '156.80 MB', fileSize: 164416716, uploadTime: '08/18 11:15:04' },
 ];
 
 // 上传文件抽屉：先选文件类型与知识类目，再上传文件，下一步勾选知识加工方案。
@@ -11399,9 +11490,12 @@ function UploadFileDrawer({ project, plans, onClose, onSubmit }) {
   );
 }
 
-// 更新文件抽屉：原文件只读，仅允许替换为 1 个同类型文件；整体交互与上传文件抽屉对齐。
+// 更新文件抽屉：原文件只读，仅允许替换为 1 个文件；文件类型默认取原文件所属类型、可点击切换，
+// 切换后按新类型校验格式与限额，并清空已选文件与已选方案。整体交互与上传文件抽屉对齐。
 function UpdateFileDrawer({ row, project, plans = [], onClose, onSubmit }) {
-  const matchedType = uploadFileTypes.find((type) => type.formats.includes(row.format)) || uploadFileTypes[0];
+  // 原文件所属类型：作为「选择文件类型」的默认选中项（用户可点击切换）。
+  const originType = uploadFileTypes.find((type) => type.formats.includes(row.format)) || uploadFileTypes[0];
+  const [typeId, setTypeId] = useState(originType.id);
   const [file, setFile] = useState(null);
   const [categoryMode, setCategoryMode] = useState('assign');
   const [categoryId, setCategoryId] = useState('');
@@ -11410,21 +11504,32 @@ function UpdateFileDrawer({ row, project, plans = [], onClose, onSubmit }) {
   const [planId, setPlanId] = useState('');
   const [error, setError] = useState('');
   const inputRef = useRef(null);
-  const limit = uploadTypeLimits[matchedType.id] || uploadTypeLimits.text;
+  const type = getUploadFileType(typeId);
+  const limit = uploadTypeLimits[type.id] || uploadTypeLimits.text;
   const solution = dataStore.getProjectSolution(project?.id);
   const categories = solution ? dataStore.getProjectCategories(solution.id) : [];
   const leafCategories = categories.filter((cat) => !categories.some((item) => item.parentId === cat.id));
-  const matchedPlans = plans.filter((plan) => plan.status === 'active' && planMatchesUploadFiles(plan, [row.format]));
+  // 候选方案按本次替换文件的格式匹配；未选文件时回退原文件格式。
+  const matchedPlans = plans.filter((plan) => plan.status === 'active' && planMatchesUploadFiles(plan, [file?.extension || row.format]));
   const originMeta = workbenchFileFormatMeta[normalizeUploadFormat(row.format)];
   const OriginIcon = originMeta?.Icon || FileOutlined;
+
+  // 切换文件类型：清空已选文件、已选方案与错误提示（与上传文件抽屉行为一致）。
+  const switchType = (nextTypeId) => {
+    if (nextTypeId === typeId) return;
+    setTypeId(nextTypeId);
+    setFile(null);
+    setPlanId('');
+    setError('');
+  };
 
   const onFilesChosen = (event) => {
     const [picked] = Array.from(event.target.files || []);
     event.target.value = '';
     if (!picked) return;
-    if (!matchedType.formats.includes(getFileExtension(picked.name))) {
+    if (!type.formats.includes(getFileExtension(picked.name))) {
       setFile(null);
-      setError(`更新文件的格式需与原文件一致，支持格式：${matchedType.formats.join('、')}。`);
+      setError(`更新文件的格式需属于所选类型「${type.name}」，支持格式：${type.formats.join('、')}。`);
       return;
     }
     if (picked.size > parseSizeLimit(limit.maxSize)) {
@@ -11482,7 +11587,7 @@ function UpdateFileDrawer({ row, project, plans = [], onClose, onSubmit }) {
         {step === 'files' ? (
           <>
             <Field label="选择文件类型" required group>
-              <UploadTypeCards value={matchedType.id} onChange={() => {}} />
+              <UploadTypeCards value={typeId} onChange={switchType} />
             </Field>
             <Field label="知识类目" required group>
               <div className="upload-segmented">
@@ -11514,10 +11619,10 @@ function UpdateFileDrawer({ row, project, plans = [], onClose, onSubmit }) {
             <Field label="上传文件" required group>
               <button type="button" className="upload-dropzone" onClick={() => inputRef.current?.click()}>
                 <span className="upload-dropzone-icon"><CloudUploadOutlined /></span>
-                <span className="upload-dropzone-main">{matchedType.name}</span>
-                <p className="upload-constraint">单次仅可更新 1 个文件；支持 {matchedType.formats.join('、')}；单文件不能超过 {limit.maxSize}；文件标题不能超过 255 字符。</p>
+                <span className="upload-dropzone-main">{type.name}</span>
+                <p className="upload-constraint">单次仅可更新 1 个文件；支持 {type.formats.join('、')}；单文件不能超过 {limit.maxSize}；文件标题不能超过 255 字符。</p>
               </button>
-              <input ref={inputRef} type="file" hidden accept={uploadTypeAccept(matchedType)} onChange={onFilesChosen} />
+              <input ref={inputRef} type="file" hidden accept={uploadTypeAccept(type)} onChange={onFilesChosen} />
               <PickedFileTable
                 files={file ? [{ ...file, sizeText: formatFileSize(file.size) }] : []}
                 emptyText="尚未选择新文件。"
@@ -12606,9 +12711,9 @@ function expandGraphSchemaSnapshot(node) {
 }
 
 /* ============================================================================
- * 知识加工结果详情（048 需求新增；2026-09-28 按线上实现重排）
+ * 知识加工结果详情（048 需求新增；2026-09-28 按线上实现重排；R046 起音频 / 视频共用媒体详情页）
  * 切片详情 / 问答详情 / 知识点详情共用一套「源文档预览 | 来源切片 | 详情字段」三栏结构：
- *   左栏 源文档预览：CSV 走表格预览（表头行 + 数据行，命中行高亮），音频走播放器 + 时间轴
+ *   左栏 源文档预览：CSV 走表格预览（表头行 + 数据行，命中行高亮），音频 / 视频走播放器 + 时间轴
  *   中栏 来源切片：当前形态内容关联的切片列表，携带关联文本与行列范围或时间轴
  *   右栏 详情字段：问答对（问答对ID / 问题 / 标准答案 / 相似问法 / 问法扩展）、
  *                  知识点（知识点ID / 名称 / 内容 / 标签）；切片详情只有两栏
@@ -12692,6 +12797,23 @@ const detailAudioChunks = [
   { id: 'audio-chunk-002', index: 2, rowRange: '01:40–03:12', colRange: '第 4–5 段', textIds: ['A4', 'A5'], length: 116, content: '那如果我是急诊住院，没有提前备案怎么办？急诊抢救视同已备案，出院后按参保地规定补办备案手续即可，不影响本次报销。' },
 ];
 
+/* R046 视频解析：视频文件的解析文本单元与切片。
+   视频解析同样输出「时间轴记录」（文本 ID / 开始时间 / 结束时间），与音频共用一套模型。 */
+const sliceVideoTextUnits = [
+  { id: 'V1', start: '00:00', end: '00:06', text: '大家好，今天我们来介绍百年附加医惠通费用补偿医疗保险的核心保障。' },
+  { id: 'V2', start: '00:07', end: '00:15', text: '这款产品提供一般医疗保险金，保额两百万元，覆盖住院及特定门诊费用。' },
+  { id: 'V3', start: '00:16', end: '00:24', text: '如果罹患合同约定的重大疾病，重大疾病医疗保险金保额同样为两百万元。' },
+  { id: 'V4', start: '00:25', end: '00:32', text: '首次投保或非连续投保的客户，需要按投保时的费率表与投保年龄确定保费。' },
+  { id: 'V5', start: '00:33', end: '00:41', text: '投保时请如实告知被保险人健康状况，避免影响后续的理赔结论。' },
+  { id: 'V6', start: '00:42', end: '00:50', text: '签收保单之日起十五日内为犹豫期，犹豫期内退保可全额退还已交保费。' },
+  { id: 'V7', start: '00:51', end: '00:58', text: '以上是本产品的核心要点，具体保障范围以保险条款为准。' },
+];
+const sliceVideoChunks = [
+  { id: 'video-chunk-001', index: 1, rowRange: '00:00–00:15', textIds: ['V1', 'V2'], length: 62, content: '大家好，今天我们来介绍百年附加医惠通费用补偿医疗保险的核心保障。\n这款产品提供一般医疗保险金，保额两百万元，覆盖住院及特定门诊费用。' },
+  { id: 'video-chunk-002', index: 2, rowRange: '00:16–00:32', textIds: ['V3', 'V4'], length: 60, content: '如果罹患合同约定的重大疾病，重大疾病医疗保险金保额同样为两百万元。\n首次投保或非连续投保的客户，需要按投保时的费率表与投保年龄确定保费。' },
+  { id: 'video-chunk-003', index: 3, rowRange: '00:33–00:58', textIds: ['V5', 'V6', 'V7'], length: 88, content: '投保时请如实告知被保险人健康状况，避免影响后续的理赔结论。\n签收保单之日起十五日内为犹豫期，犹豫期内退保可全额退还已交保费。\n以上是本产品的核心要点，具体保障范围以保险条款为准。' },
+];
+
 const detailPdfChunks = [
   { id: 'pdf-chunk-001', index: 1, rowRange: '第 1 页', colRange: '第 1 段', textIds: ['P1'], length: 40, content: '本政策适用于本市基本医疗保险参保人员异地就医备案与费用结算。' },
   { id: 'pdf-chunk-002', index: 2, rowRange: '第 2 页', colRange: '第 1 段', textIds: ['P2'], length: 36, content: '长期居住、转诊转院或急诊抢救需要异地就医时，可以申请备案。' },
@@ -12720,7 +12842,7 @@ const resultDetailSeeds = {
     planName: '产品资料切片库mp3处理方案',
     version: '1.0',
     textUnits: sliceAudioTextUnits,
-    audio: { duration: sliceAudioDuration, urlLabel: sliceAudioFileName },
+    media: { duration: sliceAudioDuration, urlLabel: sliceAudioFileName },
     chunks: sliceAudioChunks,
   },
   'slice-pdf': {
@@ -12761,7 +12883,7 @@ const resultDetailSeeds = {
     planName: '产品资料QA库mp3处理方案',
     version: '1.0',
     textUnits: sliceAudioTextUnits,
-    audio: { duration: sliceAudioDuration, urlLabel: sliceAudioFileName },
+    media: { duration: sliceAudioDuration, urlLabel: sliceAudioFileName },
     chunks: sliceAudioChunks,
     qaPairs: [
       {
@@ -12832,7 +12954,7 @@ const resultDetailSeeds = {
     planName: '产品资料知识点mp3处理方案',
     version: '1.0',
     textUnits: sliceAudioTextUnits,
-    audio: { duration: sliceAudioDuration, urlLabel: sliceAudioFileName },
+    media: { duration: sliceAudioDuration, urlLabel: sliceAudioFileName },
     chunks: sliceAudioChunks,
     knowledgePoints: [
       {
@@ -12870,6 +12992,90 @@ const resultDetailSeeds = {
       },
     ],
   },
+  // R046 视频解析：切片 / 问答 / 知识点三处详情页的视频样例，与音频同构（定位标签显示「视频时间轴」）。
+  'slice-video': {
+    id: 'slice-video',
+    formType: '切片库',
+    format: 'mp4',
+    fileName: sliceVideoFileName,
+    categoryName: '产品知识',
+    planName: '产品培训视频切片库mp4处理方案',
+    version: '1.0',
+    textUnits: sliceVideoTextUnits,
+    media: { duration: sliceVideoDuration, urlLabel: sliceVideoFileName },
+    chunks: sliceVideoChunks,
+  },
+  'qa-video': {
+    id: 'qa-video',
+    formType: 'QA库',
+    format: 'mp4',
+    fileName: sliceVideoFileName,
+    categoryName: '产品知识',
+    planName: '产品培训视频QA库mp4处理方案',
+    version: '1.0',
+    textUnits: sliceVideoTextUnits,
+    media: { duration: sliceVideoDuration, urlLabel: sliceVideoFileName },
+    chunks: sliceVideoChunks,
+    qaPairs: [
+      {
+        id: 'qa-video-1', index: 1,
+        question: '本产品的核心保障额度是多少？',
+        answer: '一般医疗保险金保额 200 万元，覆盖住院及特定门诊费用；重大疾病医疗保险金保额同样为 200 万元。',
+        similarQuestions: ['保额是多少', '一般医疗保险金保额多少'], paraphraseQuestions: ['本产品的保额'],
+        textIds: ['V1', 'V2', 'V3'], chunkIds: ['video-chunk-001', 'video-chunk-002'],
+      },
+      {
+        id: 'qa-video-2', index: 2,
+        question: '首次投保或非连续投保的保费如何确定？',
+        answer: '首次投保或非连续投保的客户，按投保时的费率表与投保年龄确定保费。',
+        similarQuestions: [], paraphraseQuestions: ['非连续投保怎么算保费'],
+        textIds: ['V4'], chunkIds: ['video-chunk-002'],
+      },
+      {
+        id: 'qa-video-3', index: 3,
+        question: '犹豫期与健康告知是怎么规定的？',
+        answer: '投保时需如实告知被保险人健康状况；签收保单之日起十五日内为犹豫期，犹豫期内退保可全额退还已交保费。',
+        similarQuestions: [], paraphraseQuestions: ['犹豫期可以退保吗'],
+        textIds: ['V5', 'V6'], chunkIds: ['video-chunk-003'],
+      },
+    ],
+  },
+  'kp-video': {
+    id: 'kp-video',
+    formType: '知识点',
+    format: 'mp4',
+    fileName: sliceVideoFileName,
+    categoryName: '产品知识',
+    planName: '产品培训视频知识点mp4处理方案',
+    version: '1.0',
+    textUnits: sliceVideoTextUnits,
+    media: { duration: sliceVideoDuration, urlLabel: sliceVideoFileName },
+    chunks: sliceVideoChunks,
+    knowledgePoints: [
+      {
+        id: 'kp-video-1',
+        index: 1,
+        title: '产品核心保障额度',
+        content: '本产品提供一般医疗保险金与重大疾病医疗保险金，两项保额均为 200 万元；一般医疗保险金覆盖住院及特定门诊费用。',
+        applicableUsers: ['投保人', '销售人员'],
+        keyRules: ['一般医疗保险金 200 万元', '重大疾病医疗保险金 200 万元'],
+        tags: ['产品知识', '视频培训'],
+        textIds: ['V1', 'V2', 'V3'],
+        chunkIds: ['video-chunk-001', 'video-chunk-002'],
+      },
+      {
+        id: 'kp-video-2',
+        index: 2,
+        title: '视频培训中的投保要点',
+        content: '首次投保或非连续投保按投保时费率表与投保年龄确定保费；投保时需如实告知健康状况，避免影响理赔结论；犹豫期为签收保单之日起十五日内。',
+        applicableUsers: ['投保人', '客服人员'],
+        keyRules: ['如实告知健康状况', '犹豫期十五日'],
+        tags: ['产品知识', '投保规则'],
+        textIds: ['V4', 'V5', 'V6'],
+        chunkIds: ['video-chunk-002', 'video-chunk-003'],
+      },
+    ],
+  },
 };
 
 // 一个形态内容（切片 / 问答对 / 知识点）关联的切片列表。
@@ -12894,11 +13100,13 @@ function getLocatorValue(seed, item) {
   return `${chunks[0].rowRange.split('–')[0]}–${chunks[chunks.length - 1].rowRange.split('–').pop()}`;
 }
 
-// 列表页「查看」入口映射到详情样例：示例数据统一使用音频文件的切片，因此详情固定取音频样例。
+// 列表页「查看」入口映射到详情样例：默认取音频样例；来源文件为视频格式时取视频样例（R046）。
 function resolveResultDetailSeed(formType, row) {
   if (!row) return null;
   const prefix = formType === 'QA库' ? 'qa' : formType === '知识点' ? 'kp' : 'slice';
-  return resultDetailSeeds[`${prefix}-audio`] || resultDetailSeeds['slice-audio'];
+  const sourceFormat = getFileExtension(row.source || row.fileName || '');
+  const key = isVideoFormat(sourceFormat) ? `${prefix}-video` : `${prefix}-audio`;
+  return resultDetailSeeds[key] || resultDetailSeeds[`${prefix}-audio`] || resultDetailSeeds['slice-audio'];
 }
 
 function MarkdownTablePreview({ content }) {
@@ -12944,6 +13152,9 @@ function ResultFilePreview({ seed, activeTextIds }) {
       container.scrollTop += offset - container.clientHeight / 3;
     }
   }, [seed.format, seed.table, firstActiveRow]);
+  // 媒体预览（音频 / 视频）与详情页共用同一套播放状态（此处仅视频会渲染播放器）。
+  const mediaDurationSeconds = clockToSeconds(seed.media?.duration || '00:00');
+  const { player: mediaPlayer, toggle: toggleMedia, seekTo: seekMedia, setRate: setMediaRate } = useMediaPlayback(mediaDurationSeconds);
   if (seed.format === 'csv' && seed.table) {
     return (
       <div className="detail-preview-scroll" ref={csvScrollRef}>
@@ -12970,15 +13181,38 @@ function ResultFilePreview({ seed, activeTextIds }) {
       </div>
     );
   }
-  if (seed.format === 'mp3' && seed.audio) {
+  if (isMediaFormat(seed.format) && seed.media) {
     const activeUnits = (seed.textUnits || []).filter((unit) => activeTextIds.includes(unit.id));
-    const rangeText = activeUnits.length ? `${activeUnits[0].start}–${activeUnits[activeUnits.length - 1].end}` : seed.audio.duration;
+    const rangeText = activeUnits.length ? `${activeUnits[0].start}–${activeUnits[activeUnits.length - 1].end}` : seed.media.duration;
+    // 视频：与详情页共用同一个播放器（单一播放器容器 + 覆盖式控制栏）。
+    if (isVideoFormat(seed.format)) {
+      return (
+        <div className="detail-audio-preview">
+          <VideoPlayerView
+            fileName={seed.fileName}
+            durationText={seed.media.duration}
+            durationSeconds={mediaDurationSeconds}
+            player={mediaPlayer}
+            segments={(seed.textUnits || []).map((unit) => ({
+              id: unit.id,
+              startSeconds: clockToSeconds(unit.start),
+              endSeconds: clockToSeconds(unit.end),
+            }))}
+            activeTextIds={activeTextIds}
+            onToggle={toggleMedia}
+            onSeek={seekMedia}
+            onRateChange={setMediaRate}
+          />
+          <p className="detail-preview-tip">视频按时间段切分，命中片段在进度条上标记；点击「播放」定位到对应时间轴区间。</p>
+        </div>
+      );
+    }
     return (
       <div className="detail-audio-preview">
         <div className="detail-audio-player">
           <span className="detail-audio-play" aria-hidden="true">▶</span>
-          <span className="detail-audio-name">{seed.audio.urlLabel}</span>
-          <span className="detail-audio-duration">{rangeText} / {seed.audio.duration}</span>
+          <span className="detail-audio-name">{seed.media.urlLabel}</span>
+          <span className="detail-audio-duration">{rangeText} / {seed.media.duration}</span>
         </div>
         <div className="detail-audio-timeline">
           {(seed.textUnits || []).map((unit) => (
@@ -13005,7 +13239,7 @@ function ResultFilePreview({ seed, activeTextIds }) {
   );
 }
 
-// 音频时间轴：与解析文本单元一致，统一用 mm:ss。
+// 媒体时间轴（音频 / 视频）：与解析文本单元一致，统一用 mm:ss。
 function clockToSeconds(value) {
   const parts = String(value || '0:0').split(':');
   return (Number(parts[0]) || 0) * 60 + (Number(parts[1]) || 0);
@@ -13015,16 +13249,296 @@ function secondsToClock(total) {
   return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
 }
 
-// 音频结果详情（切片 / 问答 / 知识点共用，对齐设计稿）：
-//   左栏 = 文件预览（音频播放器）+ 解析文本预览（ID / 文本 / 开始时间 / 结束时间 / 播放）
+// 媒体播放状态（原型模拟播放，不引入真实媒体资源）：每 250ms 推进一次进度，倍速影响推进速度。
+// 音频播放条与视频播放器共用同一份状态，保证两处行为一致。
+function useMediaPlayback(durationSeconds) {
+  const total = durationSeconds || 0;
+  const [player, setPlayer] = useState({ start: 0, at: 0, end: 0, playing: false, unitId: null, chunkId: null, rate: 1 });
+  const playRange = (range, meta) => {
+    const [startText, endText] = String(range || '').split('–');
+    const start = clockToSeconds(startText);
+    const end = clockToSeconds(endText || startText);
+    setPlayer((current) => ({ ...current, start, at: start, end, playing: true, ...meta }));
+  };
+  const toggle = () => {
+    setPlayer((current) => {
+      if (current.playing) return { ...current, playing: false };
+      // 播完后再点播放从头开始，未播完则从当前位置续播（与主流播放器一致）。
+      const stopAt = current.end || total;
+      const finished = current.at >= stopAt - 0.01;
+      return { ...current, at: finished ? current.start : current.at, playing: true };
+    });
+  };
+  const seekTo = (seconds) => {
+    const target = Math.min(total, Math.max(0, Number(seconds) || 0));
+    setPlayer((current) => ({ ...current, at: target }));
+  };
+  const setRate = (rate) => setPlayer((current) => ({ ...current, rate }));
+  useEffect(() => {
+    if (!player.playing) return undefined;
+    const timer = window.setInterval(() => {
+      setPlayer((current) => {
+        if (!current.playing) return current;
+        const next = current.at + 0.25 * (current.rate || 1);
+        const stopAt = current.end || total;
+        if (next >= stopAt) return { ...current, at: stopAt, playing: false };
+        return { ...current, at: next };
+      });
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [player.playing, player.end, player.rate, total]);
+  return { player, playRange, toggle, seekTo, setRate };
+}
+
+const videoPlaybackRates = [0.5, 1, 1.25, 1.5, 2];
+
+// 视频播放器（对齐主流 Web 播放器的通用方案：单一播放器容器 + 覆盖式控制栏）：
+//   · 画面区与控制栏合为一个 16:9 播放器，不再拆成「画面块 + 独立进度条块」
+//   · 控制栏叠加在画面底部（渐变遮罩），播放中无操作 2.4s 后整体淡出，鼠标移动 / 键盘操作立即重现
+//   · 中央大按钮只在「暂停」或「控制栏可见」时出现，播放中不会常驻
+//   · 点击画面切换播放 / 暂停；空格播放暂停、← / → 前后 5 秒、M 静音、F 全屏
+//   · 进度条可点击 / 拖拽定位，悬停显示时间提示；解析文本的每一段以刻度标记在进度条上
+function VideoPlayerView({ fileName, durationText, durationSeconds, player, segments = [], activeTextIds = [], onToggle, onSeek, onRateChange }) {
+  const rootRef = useRef(null);
+  const trackRef = useRef(null);
+  const lastWakeRef = useRef(0);
+  const [idle, setIdle] = useState(false);
+  const [activity, setActivity] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [hoverRatio, setHoverRatio] = useState(null);
+  const [volume, setVolume] = useState(80);
+  const [muted, setMuted] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [rateOpen, setRateOpen] = useState(false);
+
+  const total = durationSeconds || 0;
+  const rate = player.rate || 1;
+  const percent = total ? Math.min(100, Math.max(0, (player.at / total) * 100)) : 0;
+
+  // 控制栏自动隐藏（对齐 video.js / YouTube）：只在播放中生效；暂停、拖拽、展开倍速菜单时保持可见。
+  useEffect(() => {
+    if (!player.playing || dragging || rateOpen) {
+      setIdle(false);
+      return undefined;
+    }
+    setIdle(false);
+    const timer = window.setTimeout(() => setIdle(true), 2400);
+    return () => window.clearTimeout(timer);
+  }, [player.playing, activity, dragging, rateOpen]);
+
+  // 鼠标移动 / 键盘操作唤醒控制栏（500ms 节流，避免每帧 setState）。
+  const wake = () => {
+    const now = Date.now();
+    if (now - lastWakeRef.current < 500) return;
+    lastWakeRef.current = now;
+    setActivity((value) => value + 1);
+  };
+
+  const ratioFromClientX = (clientX) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect || !rect.width) return 0;
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  };
+  const seekFromClientX = (clientX) => {
+    if (total) onSeek(ratioFromClientX(clientX) * total);
+  };
+
+  const toggleFullscreen = () => {
+    const node = rootRef.current;
+    if (!node) return;
+    if (document.fullscreenElement === node) {
+      document.exitFullscreen?.();
+      return;
+    }
+    const request = node.requestFullscreen?.();
+    if (request && typeof request.catch === 'function') request.catch(() => {});
+  };
+
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === rootRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // 倍速菜单：点击菜单外部或按 Esc 收起。
+  useEffect(() => {
+    if (!rateOpen) return undefined;
+    const onDown = (event) => {
+      if (!rootRef.current?.querySelector('.media-player-rate-wrap')?.contains(event.target)) setRateOpen(false);
+    };
+    const onKey = (event) => { if (event.key === 'Escape') setRateOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [rateOpen]);
+
+  const onKeyDown = (event) => {
+    wake();
+    if (event.key === ' ' || event.key === 'Spacebar' || event.key === 'k') {
+      event.preventDefault();
+      onToggle();
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      onSeek(player.at - 5);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      onSeek(player.at + 5);
+    } else if (event.key === 'm' || event.key === 'M') {
+      setMuted((value) => !value);
+    } else if (event.key === 'f' || event.key === 'F') {
+      toggleFullscreen();
+    }
+  };
+
+  const controlsHidden = idle && player.playing;
+  const mutedNow = muted || volume === 0;
+
+  return (
+    <div
+      className={`media-player${player.playing ? ' is-playing' : ''}${controlsHidden ? ' is-idle' : ''}`}
+      ref={rootRef}
+      tabIndex={0}
+      role="region"
+      aria-label={`${fileName} 播放器`}
+      onMouseMove={wake}
+      onKeyDown={onKeyDown}
+    >
+      {/* 画面区：原型不引入真实视频，以画面底 + 水印说明占位。 */}
+      <div className="media-player-stage" role="presentation" onClick={onToggle}>
+        <span className="media-player-watermark"><VideoCameraOutlined /> 示例画面（原型未接入真实视频）</span>
+      </div>
+      <div className="media-player-scrim media-player-scrim-top" aria-hidden="true" />
+      <div className="media-player-scrim media-player-scrim-bottom" aria-hidden="true" />
+      <div className="media-player-title" title={fileName}>{fileName}</div>
+      <button
+        type="button"
+        className={`media-player-center${controlsHidden ? ' is-hidden' : ''}`}
+        aria-label={player.playing ? '暂停' : '播放'}
+        onClick={onToggle}
+      >
+        {player.playing ? <PauseOutlined /> : <CaretRightFilled />}
+      </button>
+      <div className="media-player-bar">
+        <div
+          className={`media-player-track${dragging ? ' is-dragging' : ''}`}
+          ref={trackRef}
+          role="slider"
+          aria-label="播放进度"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(total)}
+          aria-valuenow={Math.round(player.at)}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* 环境不支持指针捕获时忽略 */ }
+            setDragging(true);
+            wake();
+            seekFromClientX(event.clientX);
+          }}
+          onPointerMove={(event) => {
+            if (dragging) seekFromClientX(event.clientX);
+            setHoverRatio(ratioFromClientX(event.clientX));
+          }}
+          onPointerUp={(event) => {
+            setDragging(false);
+            try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* 同上 */ }
+          }}
+          onPointerLeave={() => { if (!dragging) setHoverRatio(null); }}
+        >
+          <span className="media-player-rail">
+            <span className="media-player-fill" style={{ width: `${percent}%` }} />
+            {segments.map((segment, index) => (
+              <span
+                key={segment.id}
+                className={`media-player-seg${activeTextIds.includes(segment.id) ? ' active' : ''}${index === 0 ? ' is-first' : ''}`}
+                style={{
+                  left: `${total ? (segment.startSeconds / total) * 100 : 0}%`,
+                  width: `${total ? (Math.max(0, segment.endSeconds - segment.startSeconds) / total) * 100 : 0}%`,
+                }}
+              />
+            ))}
+            <i className="media-player-knob" style={{ left: `${percent}%` }} />
+          </span>
+          {hoverRatio != null && total ? (
+            <span className="media-player-tip" style={{ left: `${hoverRatio * 100}%` }}>{secondsToClock(hoverRatio * total)}</span>
+          ) : null}
+        </div>
+        <div className="media-player-controls">
+          <button type="button" className="media-player-btn" aria-label={player.playing ? '暂停' : '播放'} onClick={onToggle}>
+            {player.playing ? <PauseOutlined /> : <CaretRightFilled />}
+          </button>
+          <span className="media-player-time">{secondsToClock(player.at)} / {durationText}</span>
+          <span className="media-player-spacer" />
+          <div className="media-player-volume">
+            <button type="button" className="media-player-btn" aria-label={mutedNow ? '取消静音' : '静音'} onClick={() => setMuted((value) => !value)}>
+              {mutedNow ? <MutedOutlined /> : <SoundOutlined />}
+            </button>
+            <input
+              type="range"
+              className="media-player-volume-range"
+              min="0"
+              max="100"
+              step="1"
+              value={mutedNow ? 0 : volume}
+              aria-label="音量"
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setVolume(next);
+                setMuted(next === 0);
+              }}
+            />
+          </div>
+          <div className="media-player-rate-wrap">
+            <button
+              type="button"
+              className={`media-player-btn media-player-rate${rateOpen ? ' active' : ''}`}
+              aria-label="播放倍速"
+              aria-expanded={rateOpen}
+              onClick={() => setRateOpen((value) => !value)}
+            >
+              {rate}x
+            </button>
+            {rateOpen ? (
+              <div className="media-player-rate-menu" role="menu">
+                {videoPlaybackRates.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={value === rate}
+                    className={`media-player-rate-item${value === rate ? ' active' : ''}`}
+                    onClick={() => { onRateChange(value); setRateOpen(false); }}
+                  >
+                    {value}x{value === 1 ? '（正常）' : ''}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <button type="button" className="media-player-btn" aria-label={fullscreen ? '退出全屏' : '全屏'} onClick={toggleFullscreen}>
+            {fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 媒体结果详情（切片 / 问答 / 知识点共用，音频对齐设计稿；R046 起视频复用同一布局）：
+//   左栏 = 文件预览（音频为进度条播放器，视频为画面区 + 进度条）+ 解析文本预览（ID / 文本 / 开始时间 / 结束时间 / 播放）
 //   中栏 = 切片区：切片详情为「切片内容」（只有两栏），问答 / 知识点为「来源切片」
-//   右栏 = 可选详情字段（问答对 / 知识点）；定位标签统一显示「时间轴」
-// 点击任意「播放」，左侧播放器会播放该时间轴区间的音频（原型以进度条推进模拟）。
-function AudioDetailLayout({ seed, chunks, activeChunkId, middleTitle = '切片内容', fields = null }) {
+//   右栏 = 可选详情字段（问答对 / 知识点）；定位标签音频显示「时间轴」、视频显示「视频时间轴」
+// 点击任意「播放」，左侧播放器会播放该时间轴区间的音频 / 视频（原型以进度条推进模拟）。
+function MediaDetailLayout({ seed, chunks, activeChunkId, middleTitle = '切片内容', fields = null }) {
   const textUnits = seed.textUnits || [];
-  const durationText = seed.audio?.duration || '00:00';
+  const durationText = seed.media?.duration || '00:00';
+  const isVideo = isVideoFormat(seed.format);
+  const locatorTag = mediaLocatorLabel(seed.format);
   const durationSeconds = clockToSeconds(durationText);
-  const [player, setPlayer] = useState({ start: 0, at: 0, end: 0, playing: false, unitId: null, chunkId: null });
+  // 播放状态与视频播放器共用同一份实现（见 useMediaPlayback）。
+  const { player, playRange, toggle, seekTo, setRate } = useMediaPlayback(durationSeconds);
   // 来源切片可选中：默认选中第一个，选中项决定左侧解析文本预览里高亮的文本。
   const [selectedChunkId, setSelectedChunkId] = useState(() => (chunks.find((chunk) => chunk.id === activeChunkId) || chunks[0] || {}).id || null);
   useEffect(() => {
@@ -13033,33 +13547,6 @@ function AudioDetailLayout({ seed, chunks, activeChunkId, middleTitle = '切片�
     // 切换形态内容（切片 / 问答 / 知识点）时重置选中项。
   }, [seed.id, activeChunkId, chunks.length]);
 
-  const playRange = (range, meta) => {
-    const [startText, endText] = String(range || '').split('–');
-    const start = clockToSeconds(startText);
-    const end = clockToSeconds(endText || startText);
-    setPlayer({ start, at: start, end, playing: true, ...meta });
-  };
-  const togglePlayer = () => {
-    setPlayer((current) => {
-      if (current.playing) return { ...current, playing: false };
-      const start = current.end ? current.start : 0;
-      return { ...current, at: start, playing: true };
-    });
-  };
-  useEffect(() => {
-    if (!player.playing) return undefined;
-    const timer = window.setInterval(() => {
-      setPlayer((current) => {
-        if (!current.playing) return current;
-        const next = current.at + 0.5;
-        if (current.end && next >= current.end) return { ...current, at: current.end, playing: false };
-        if (!current.end && next >= durationSeconds) return { ...current, at: durationSeconds, playing: false };
-        return { ...current, at: next };
-      });
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [player.playing, player.end, durationSeconds]);
-
   const percent = durationSeconds ? Math.min(100, Math.max(0, (player.at / durationSeconds) * 100)) : 0;
   const selectedChunk = chunks.find((chunk) => chunk.id === selectedChunkId) || chunks[0] || null;
   // 高亮规则：始终高亮「选中的来源切片」对应的文本；正在播放的单条文本再额外高亮。
@@ -13067,22 +13554,43 @@ function AudioDetailLayout({ seed, chunks, activeChunkId, middleTitle = '切片�
     ...((selectedChunk?.textIds) || []),
     ...(player.unitId ? [player.unitId] : []),
   ]);
+  // 视频进度条上的解析文本刻度（音频侧的时间轴胶囊保持不变）。
+  const videoSegments = textUnits.map((unit) => ({
+    id: unit.id,
+    startSeconds: clockToSeconds(unit.start),
+    endSeconds: clockToSeconds(unit.end),
+  }));
 
   return (
     <div className={`kr-audio-detail ${fields ? 'has-fields' : ''}`.trim()}>
       <section className="kr-audio-left">
         <div className="kr-audio-title">文件预览</div>
         <div className="kr-audio-file">{seed.fileName}</div>
-        <div className="kr-audio-player">
-          <button type="button" className="kr-audio-play" aria-label={player.playing ? '暂停' : '播放'} onClick={togglePlayer}>
-            {player.playing ? <span className="kr-audio-pause" /> : <span className="kr-audio-triangle" />}
-          </button>
-          <div className="kr-audio-bar">
-            <span className="kr-audio-bar-fill" style={{ width: `${percent}%` }} />
-            <i className="kr-audio-bar-knob" style={{ left: `${percent}%` }} />
+        {isVideo ? (
+          /* 视频：画面区与控制栏合为一个 16:9 播放器（对齐主流播放器，不再拆成两块）。 */
+          <VideoPlayerView
+            fileName={seed.fileName}
+            durationText={durationText}
+            durationSeconds={durationSeconds}
+            player={player}
+            segments={videoSegments}
+            activeTextIds={Array.from(highlightedTextIds)}
+            onToggle={toggle}
+            onSeek={seekTo}
+            onRateChange={setRate}
+          />
+        ) : (
+          <div className="kr-audio-player">
+            <button type="button" className="kr-audio-play" aria-label={player.playing ? '暂停' : '播放'} onClick={toggle}>
+              {player.playing ? <span className="kr-audio-pause" /> : <span className="kr-audio-triangle" />}
+            </button>
+            <div className="kr-audio-bar">
+              <span className="kr-audio-bar-fill" style={{ width: `${percent}%` }} />
+              <i className="kr-audio-bar-knob" style={{ left: `${percent}%` }} />
+            </div>
+            <span className="kr-audio-time">{secondsToClock(player.at)} / {durationText}</span>
           </div>
-          <span className="kr-audio-time">{secondsToClock(player.at)} / {durationText}</span>
-        </div>
+        )}
         <div className="kr-audio-title kr-audio-title-gap">解析文本预览</div>
         <div className="kr-audio-table-wrap">
           <table className="kr-audio-table">
@@ -13114,7 +13622,7 @@ function AudioDetailLayout({ seed, chunks, activeChunkId, middleTitle = '切片�
       <section className="kr-audio-middle">
         <div className="kr-audio-title kr-audio-title-split">
           <span>{middleTitle}</span>
-          <span className="kr-locate-tag">时间轴</span>
+          <span className="kr-locate-tag">{locatorTag}</span>
         </div>
         {chunks.length ? chunks.map((chunk) => (
           <div
@@ -13149,7 +13657,7 @@ function AudioDetailLayout({ seed, chunks, activeChunkId, middleTitle = '切片�
             </div>
             <div className="kr-slice-card-meta">
               <span>关联文本：{(chunk.textIds || []).join('、')}</span>
-              <span>音频时间轴：{String(chunk.rowRange || '').replace('–', ' ~ ')}</span>
+              <span>{locatorTag}：{String(chunk.rowRange || '').replace('–', ' ~ ')}</span>
             </div>
             <div className="kr-slice-card-content">{chunk.content}</div>
           </div>
@@ -13162,7 +13670,7 @@ function AudioDetailLayout({ seed, chunks, activeChunkId, middleTitle = '切片�
 
 // 关联切片列表：一个问答对 / 知识点对应多个切片时，中间栏展示切片列表。
 function RelatedChunkList({ seed, chunks, activeChunkIds, onLocate }) {
-  const locatorLabel = seed.format === 'mp3' ? '时间轴' : seed.format === 'csv' ? '行列坐标' : '页码';
+  const locatorLabel = isMediaFormat(seed.format) ? mediaLocatorLabel(seed.format) : seed.format === 'csv' ? '行列坐标' : '页码';
   return (
     <div className="detail-related-chunks">
       <div className="detail-related-head">来源切片（{chunks.length}）</div>
@@ -13173,12 +13681,12 @@ function RelatedChunkList({ seed, chunks, activeChunkIds, onLocate }) {
             <span>{seed.fileName}</span>
           </div>
           <div className="detail-item-locator">
-            <span className="detail-locator-tag">{locatorLabel}：{seed.format === 'mp3' ? `${chunk.textIds.map((id) => seed.textUnits.find((unit) => unit.id === id)).filter(Boolean).map((unit) => `${unit.start}–${unit.end}`).join('、')}` : chunk.rowRange}</span>
+            <span className="detail-locator-tag">{locatorLabel}：{isMediaFormat(seed.format) ? `${chunk.textIds.map((id) => seed.textUnits.find((unit) => unit.id === id)).filter(Boolean).map((unit) => `${unit.start}–${unit.end}`).join('、')}` : chunk.rowRange}</span>
             <span className="detail-locator-tag">关联文本：{(chunk.textIds || []).join('、')}</span>
           </div>
           {seed.format === 'csv' ? <MarkdownTablePreview content={chunk.content} /> : <p className="detail-chunk-text">{chunk.content}</p>}
           <div className="detail-item-foot">
-            {seed.format === 'mp3' ? (
+            {isMediaFormat(seed.format) ? (
               <span><button type="button" className="detail-play-btn" onClick={() => onLocate(chunk.textIds[0])}>▶ 播放</button></span>
             ) : null}
             <span>长度：{chunk.length}</span>
@@ -13208,22 +13716,22 @@ function KnowledgeResultDetailPage({ seed, initialItemId }) {
   };
   const highlightedTextIds = locatedTextId && activeTextIds.includes(locatedTextId) ? [locatedTextId] : activeTextIds;
 
-  // 定位能力标签：线上枚举为 支持高亮 / 仅页码 / 不支持定位，按源文档格式映射。
-  const locateStatusLabel = seed.format === 'mp3' ? '不支持定位' : '支持高亮';
-  // 详情页头部定位标签：CSV 展示行列范围，音频展示时间轴，PDF 展示页码。
-  const locatorLabel = seed.format === 'csv' ? '行列范围' : seed.format === 'mp3' ? '时间轴' : '页码';
+  // 定位能力标签：线上枚举为 支持高亮 / 仅页码 / 不支持定位，按源文档格式映射；音视频均为不支持定位。
+  const locateStatusLabel = isMediaFormat(seed.format) ? '不支持定位' : '支持高亮';
+  // 详情页头部定位标签：CSV 展示行列范围，音频 / 视频展示时间轴（视频显示「视频时间轴」），PDF 展示页码。
+  const locatorLabel = seed.format === 'csv' ? '行列范围' : isMediaFormat(seed.format) ? mediaLocatorLabel(seed.format) : '页码';
   const relatedChunks = getRelatedChunks(seed, activeItem);
   const relatedTextIds = getRelatedTextIds(seed, activeItem);
   // 切片详情的「来源切片」即当前切片；问答 / 知识点的「来源切片」为关联切片集合。
   const sourceSlices = isSlice ? (activeItem ? [activeItem] : []) : relatedChunks;
-  // 标题栏的时间轴取值：音频取关联文本的时间段，其余取行列坐标 / 页码。
-  const locatorValue = seed.format === 'mp3'
+  // 标题栏的时间轴取值：音频 / 视频取关联文本的时间段，其余取行列坐标 / 页码。
+  const locatorValue = isMediaFormat(seed.format)
     ? relatedTextIds.map((id) => seed.textUnits.find((unit) => unit.id === id)).filter(Boolean).map((unit) => `${unit.start}–${unit.end}`).join('、')
     : getLocatorValue(seed, activeItem);
 
-  // 音频详情（切片 / 问答 / 知识点）：左「文件预览 + 解析文本预览」，中「切片内容 / 来源切片」，右「详情字段」。
-  if (seed.format === 'mp3') {
-    const audioFields = (
+  // 媒体详情（切片 / 问答 / 知识点）：左「文件预览 + 解析文本预览」，中「切片内容 / 来源切片」，右「详情字段」。
+  if (isMediaFormat(seed.format)) {
+    const mediaFields = (
       <div className="kr-audio-field-list">
         {seed.formType === 'QA库' ? (
           <>
@@ -13269,12 +13777,12 @@ function KnowledgeResultDetailPage({ seed, initialItemId }) {
       </div>
     );
     return (
-      <AudioDetailLayout
+      <MediaDetailLayout
         seed={seed}
         chunks={sourceSlices}
         activeChunkId={activeItem?.id}
         middleTitle={isSlice ? '切片内容' : '来源切片'}
-        fields={isSlice ? null : audioFields}
+        fields={isSlice ? null : mediaFields}
       />
     );
   }
@@ -13424,6 +13932,13 @@ const retrievalHitSeeds = [
     content: '问：本产品的保险期间与续保规则是什么？\n答：保险期间为一年，续保需经本公司审核同意；首次投保或非连续投保的，按投保时的费率表与投保年龄确定保费。',
     source: sliceAudioFileName, seedKey: 'qa-audio', itemId: 'audio-chunk-002',
     projectSpace: '806版本评测V2', planCategory: '产品知识库', tags: ['保险', '续保'],
+  },
+  // R046 视频解析：视频来源的检索命中，「查看原文」跳转到视频详情。
+  {
+    id: 'hit-7', formType: '切片库', score: 0.77,
+    content: '大家好，今天我们来介绍百年附加医惠通费用补偿医疗保险的核心保障。这款产品提供一般医疗保险金，保额两百万元，覆盖住院及特定门诊费用。',
+    source: sliceVideoFileName, seedKey: 'slice-video', itemId: 'video-chunk-001',
+    projectSpace: '806版本评测V2', planCategory: '产品知识库', tags: ['产品知识', '视频培训'],
   },
 ];
 

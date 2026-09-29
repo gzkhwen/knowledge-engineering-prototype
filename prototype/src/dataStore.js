@@ -26,7 +26,7 @@ const arrayStorageKeys = new Set(Object.entries(keys)
 
 const formTypes = ['切片库', 'QA库', '知识点', '知识图谱'];
 // 知识加工方案支持的格式范围：与 App.jsx 的 workbenchFileFormats 保持同一口径
-// （线上白名单 13 种 + 本地已支持的 csv + 视频解析需求（R030）预留的音视频）。
+// （线上白名单 13 种 + 本地已支持的 csv + R045 音频 / R046 视频解析的音视频）。
 const supportedKnowledgePlanFormats = [
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'md',
   'jpg', 'jpeg', 'png', 'html',

@@ -805,6 +805,19 @@ const idpDocumentTools = [
     outputs: createResponseOutputs('解析后的 Markdown 文件列表。', { dataDescription: '解析后的 Markdown 文件列表。', dataFileType: 'md' }),
   },
   {
+    // R046（视频解析工具）新增：节点名「视频解析」，分类「文档解析」。
+    // 解析视频文件并输出带时间轴的文本内容（时间轴记录：文本 ID / 开始时间 / 结束时间），供后续文本切片、问答与知识点加工使用。
+    slug: 'video_parse',
+    name: '视频解析',
+    description: '解析视频文件并输出带时间轴的文本内容，用于后续文本切片、问答与知识点加工。',
+    category: '文档解析',
+    enabled: true,
+    endpoint: 'api/media_parser/video_parse',
+    method: 'POST',
+    inputs: [createFilesInput('待解析的视频文件列表。'), createUserIdInput()],
+    outputs: createResponseOutputs('解析后的带时间轴文本内容。', { dataDescription: '解析后的文本内容文件列表。', dataFileType: 'md' }),
+  },
+  {
     slug: 'mx-ocr',
     name: '公司自研OCR解析接口',
     description: '使用公司自研 OCR 能力解析文件，输出 Markdown 结果。',
