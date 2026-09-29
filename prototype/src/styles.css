@@ -939,8 +939,8 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
   grid-template-columns: minmax(200px, 1fr) minmax(110px, 0.6fr) minmax(200px, 1.2fr);
   gap: 12px 16px;
 }
-.file-chain-record-selects > label { display: grid; gap: 4px; min-width: 0; }
-.file-chain-record-selects > label > span { color: #667085; font-size: 12px; }
+.file-chain-record-selects > :is(label, div) { display: grid; gap: 4px; min-width: 0; }
+.file-chain-record-selects > :is(label, div) > span { color: #667085; font-size: 12px; }
 .file-chain-record-selects .select-field-wrap,
 .file-chain-record-selects .select-field { width: 100%; min-width: 0; }
 .file-chain-record-selects .select-field,
@@ -1705,7 +1705,7 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .result-list::-webkit-scrollbar { display: none; }
 .result-filter-bar { display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 8px; max-width: 100%; margin-bottom: 12px; overflow: hidden; }
 .result-filter-bar.with-run { grid-template-columns: minmax(0, 1fr) 82px minmax(0, 150px); }
-.result-filter-bar label { display: grid; gap: 6px; min-width: 0; color: #64748b; font-size: 12px; }
+.result-filter-bar > :is(label, div) { display: grid; gap: 6px; min-width: 0; color: #64748b; font-size: 12px; }
 .result-filter-bar .result-filter-field.select-field-wrap { min-width: 0; width: 100%; max-width: 100%; }
 .result-filter-bar .select-field.result-filter-field { width: 100%; min-width: 0; height: 32px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #1f2937; font-size: 12px; }
 .run-record-dropdown .select-option { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2632,9 +2632,9 @@ input[readonly], textarea[readonly] { color: #667085; background: #f5f7fb; curso
 .config-ui-options-head span { color: #667085; font-size: 11px; line-height: 1.5; }
 .config-ui-schema-grid { display: grid; grid-template-columns: 210px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
 .config-ui-schema-grid.has-option-source { grid-template-columns: 95px minmax(0, 1fr) minmax(0, 1fr) 100px; }
-.config-ui-schema-grid > label { display: grid; gap: 6px; min-width: 0; }
-.config-ui-schema-grid > label > span { color: #344054; font-size: 12px; font-weight: 700; }
-.config-ui-schema-grid > label > small { color: #98a2b3; font-size: 11px; line-height: 1.4; }
+.config-ui-schema-grid > :is(label, div) { display: grid; gap: 6px; min-width: 0; }
+.config-ui-schema-grid > :is(label, div) > span { color: #344054; font-size: 12px; font-weight: 700; }
+.config-ui-schema-grid > :is(label, div) > small { color: #98a2b3; font-size: 11px; line-height: 1.4; }
 .config-ui-schema-grid input,
 .config-ui-option-row input {
   width: 100%;

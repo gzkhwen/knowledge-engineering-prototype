@@ -931,7 +931,16 @@ function HelpTip({ text }) {
 }
 
 function Field({ label, children, required, help, group = false }) {
-  const Container = group ? 'div' : 'label';
+  // 用 label 元素包住控件会把点击转发给它内部第一个「可标记元素」（input/textarea/select/button 等）。
+  // SelectField、ConfigSelect、MultiSelectField 渲染出来的都是 button 元素，同样属于可标记元素，
+  // 因此被 label 包住时，点击 label 盒子内的任意空白（字段名文字、字段名与控件之间的间隙、
+  // label 自身的内边距）浏览器都会补发一次 click 给按钮，导致下拉面板被误展开。
+  // 所以只在「唯一子节点是原生表单控件」时才使用 label 元素（保留「点标签聚焦输入框」的语义），
+  // 其余一律渲染成 div。详见 .workbuddy/memory/2026-09-29.md。
+  const items = Children.toArray(children).filter((item) => item !== null && item !== undefined && item !== false && item !== '');
+  const nativeControl = items.length === 1 && isValidElement(items[0])
+    && (items[0].type === 'input' || items[0].type === 'textarea' || items[0].type === 'select');
+  const Container = group || !nativeControl ? 'div' : 'label';
   return (
     <Container className="form-field">
       <span className="field-label-text">{required ? <em>*</em> : null}{label}<HelpTip text={help} /></span>
@@ -4008,7 +4017,7 @@ function ConfigParamUiSchemaPanel({ row, rowIndex, onChange, notify }) {
   return (
     <div className="config-ui-schema-panel">
       <div className={`config-ui-schema-grid ${canUseDynamicSource ? 'has-option-source' : ''}`}>
-        <label>
+        <div>
           <span>交互形式</span>
           <SelectField value={uiSchema.widget} onChange={(widget) => updateUiSchema({
             widget,
@@ -4017,7 +4026,7 @@ function ConfigParamUiSchemaPanel({ row, rowIndex, onChange, notify }) {
           })}>
             {widgetOptions.map((widget) => <option key={widget} value={widget}>{configUiWidgetCatalog[widget]}</option>)}
           </SelectField>
-        </label>
+        </div>
         <label>
           <span>占位提示</span>
           <input value={uiSchema.placeholder} onChange={(event) => updateUiSchema({ placeholder: event.target.value })} />
@@ -4027,13 +4036,13 @@ function ConfigParamUiSchemaPanel({ row, rowIndex, onChange, notify }) {
           <input value={uiSchema.helpText} onChange={(event) => updateUiSchema({ helpText: event.target.value })} />
         </label>
         {canUseDynamicSource ? (
-          <label className="config-ui-option-source-field">
+          <div className="config-ui-option-source-field">
             <span>选项来源</span>
             <SelectField value={isDynamic ? 'dynamic' : 'static'} onChange={(source) => setOptionSource(source)}>
               <option value="static">静态来源</option>
               <option value="dynamic">动态数据源</option>
             </SelectField>
-          </label>
+          </div>
         ) : null}
       </div>
       {isDynamic ? (
@@ -4214,7 +4223,7 @@ function OutputStandardizationPanel({ source, persistenceEnabled, persistenceArt
                 dependencyWarning={persistenceCodeDependencyWarning}
               />
               <div className="persistence-config-row">
-                <label className="persistence-shape-field">
+                <div className="persistence-shape-field">
                   <span className="persistence-shape-label">
                     <span><em>*</em> 知识形态</span>
                     <span ref={schemaTriggerRef} className="storage-schema-trigger">
@@ -4224,7 +4233,7 @@ function OutputStandardizationPanel({ source, persistenceEnabled, persistenceArt
                   <SelectField value={persistenceArtifactType} onChange={(value) => onPersistenceChange({ persistenceArtifactType: value })}>
                     {knowledgeShapeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
                   </SelectField>
-                </label>
+                </div>
                 {schemaPopoverOpen && schemaPopoverStyle ? createPortal(
                   <section ref={schemaPopoverRef} className="storage-schema-popover" style={schemaPopoverStyle} role="dialog">
                     <strong>{persistenceArtifactType}存储 Schema</strong>
@@ -6292,12 +6301,12 @@ function ManualExpectedModal({ onClose, onConfirm }) {
         </>
       )}
     >
-      <label className="form-field">
+      <div className="form-field">
         <span className="field-label-text">知识形态</span>
         <ConfigSelect value={form} onChange={(value) => { setForm(value); setError(''); }} dropdownMinWidth={160}>
           {RETRIEVAL_FORM_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.value}</option>)}
         </ConfigSelect>
-      </label>
+      </div>
       {form === '问答对' ? (
         <>
           <label className="form-field">
@@ -6411,13 +6420,13 @@ function CreateBadcaseModal({ initial, source = '人工录入', onClose, notify,
               <span className="field-label-text"><em>*</em>Query</span>
               <textarea className="create-query-input" rows={3} maxLength={500} placeholder="请输入 Query" value={query} onChange={(e) => setQuery(e.target.value)} />
             </label>
-            <label className="form-field">
+            <div className="form-field">
               <span className="field-label-text">问题类型</span>
               <ConfigSelect value={problemType} onChange={setProblemType} placeholder="请选择问题类型">
                 <option value="">请选择问题类型</option>
                 {BAD_CASE_PROBLEM_TYPES.map((t) => <option value={t} key={t}>{t}</option>)}
               </ConfigSelect>
-            </label>
+            </div>
           </ConfigCard>
           <ConfigCard title="标签过滤">
             <TagCascadeSelect value={tagIds} onChange={setTagIds} placeholder="选择标签" disabled={snapshotMode} />
@@ -12442,24 +12451,24 @@ function FileChainView({ file }) {
         {logQueried ? <p className="file-chain-loghint">已按条件查询日志，命中 {Math.max(1, chainNodes.length)} 条记录。</p> : null}
         <section className="file-chain-record">
           <div className="file-chain-record-selects">
-            <label>
+            <div>
               <span>方案</span>
               <SelectField value={planId} onChange={switchPlan} dropdownMinWidth={220}>
                 {catalog.plans.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </SelectField>
-            </label>
-            <label>
+            </div>
+            <div>
               <span>方案版本</span>
               <SelectField value={versionId} onChange={switchVersion} dropdownMinWidth={130}>
                 {plan.versions.map((item) => <option key={item.id} value={item.id}>{item.version}</option>)}
               </SelectField>
-            </label>
-            <label>
+            </div>
+            <div>
               <span>执行记录</span>
               <SelectField value={runId} onChange={switchRun} dropdownMinWidth={230}>
                 {version.runs.map((item) => <option key={item.id} value={item.id}>{item.runLabel}</option>)}
               </SelectField>
-            </label>
+            </div>
           </div>
           <div className="file-chain-record-meta">
             <div className="file-chain-record-meta-main">
@@ -16675,7 +16684,7 @@ function GraphSchemaTagInput({ label, required = false, value, onChange, placeho
     setDraftValue('');
   };
   return (
-    <label className="simple-node-param-row graph-schema-tag-row">
+    <div className="simple-node-param-row graph-schema-tag-row">
       <span>{label}{required ? <em>*</em> : null}</span>
       <div className="graph-schema-tag-input">
         {tags.map((tag) => (
@@ -16696,7 +16705,7 @@ function GraphSchemaTagInput({ label, required = false, value, onChange, placeho
           }}
         />
       </div>
-    </label>
+    </div>
   );
 }
 
@@ -16772,14 +16781,14 @@ function ParamEditor({ param, nodes, priorNodes, iterationContext = null, onChan
             <FieldTypeTag type={fieldType} />
           </div>
         </label>
-        <label className="source-field">
+        <div className="source-field">
           <span>{showHeader ? '取值方式' : ''}</span>
           <SelectField value={inlineSourceType} onChange={updateSourceType}>
             {allowFileSource ? <option value="file">引用原始文件</option> : null}
             <option value="upstream" disabled={upstreamSourceDisabled}>{upstreamSourceLabel}</option>
             {iterationContext ? <option value="iteration">引用迭代变量</option> : null}
           </SelectField>
-        </label>
+        </div>
         <div className="param-value-column">
           <span>{showHeader ? '参数值' : ''}</span>
           {inlineSourceType === 'file' ? <input readOnly value="原始文件的地址信息" /> : null}
@@ -16831,25 +16840,25 @@ function ParamEditor({ param, nodes, priorNodes, iterationContext = null, onChan
       </div>
       {active ? (
         <div className="param-source-row">
-          <label className="source-field">
+          <div className="source-field">
             <span>取值方式</span>
             <SelectField value={sourceType === 'iteration' ? 'iteration' : sourceType === 'upstream' ? 'upstream' : 'file'} onChange={updateSourceType}>
               <option value="upstream" disabled={upstreamSourceDisabled}>引用上游节点输出</option>
               <option value="file">引用原始文件</option>
               {iterationContext ? <option value="iteration">引用迭代变量</option> : null}
             </SelectField>
-          </label>
+          </div>
           {param.source?.type === 'upstream' ? (
             <>
-              <label className="source-field">
+              <div className="source-field">
                 <span>上游节点</span>
                 <SelectField value={param.source.sourceNodeId || ''} onChange={(value) => {
                   const source = priorNodes.find((item) => item.nodeId === value);
                   const outputs = getTypedSelectableOutputs(param, getSelectableNodeOutputs(source));
                   onChange({ ...param, source: { type: 'upstream', sourceNodeId: value, outputPath: getFirstEnabledOutput(outputs)?.value || '' } });
                 }}>{priorNodes.map((item) => <option key={item.nodeId} value={item.nodeId}>{item.toolName}</option>)}</SelectField>
-              </label>
-              <label className="source-field">
+              </div>
+              <div className="source-field">
                 <span>选择输出</span>
                 <SelectField value={param.source.outputPath || getFirstEnabledOutput(upstreamOutputs)?.value || ''} onChange={(outputPath) => onChange({ ...param, source: { ...param.source, outputPath } })}>
                   {upstreamOutputs.map((output) => (
@@ -16858,10 +16867,10 @@ function ParamEditor({ param, nodes, priorNodes, iterationContext = null, onChan
                     </option>
                   ))}
                 </SelectField>
-              </label>
+              </div>
             </>
           ) : param.source?.type === 'iteration' ? (
-            <label className="source-field source-field-wide">
+            <div className="source-field source-field-wide">
               <span>取值内容</span>
               <SelectField value={iterationVariableValue} onChange={(outputPath) => onChange({ ...param, source: { type: 'iteration', outputPath } })}>
                 {iterationVariableOptions.map((variable) => (
@@ -16870,7 +16879,7 @@ function ParamEditor({ param, nodes, priorNodes, iterationContext = null, onChan
                   </option>
                 ))}
               </SelectField>
-            </label>
+            </div>
           ) : (
             <label className="source-field source-field-wide">
               <span>取值内容</span>
@@ -17058,7 +17067,7 @@ function EditNodeDialog({ node, nodes, parentId, projectId, onClose, onSave }) {
                       <span>{index === 0 ? '参数名称' : ''}</span>
                       <input value={input.name} onChange={(event) => updateCodeInput(input.id, { name: event.target.value })} />
                     </label>
-                    <label className="source-field">
+                    <div className="source-field">
                       <span>{index === 0 ? '取值方式' : ''}</span>
                       <SelectField value={sourceType} onChange={updateSourceType}>
                         <option value="manual">手动输入</option>
@@ -17066,7 +17075,7 @@ function EditNodeDialog({ node, nodes, parentId, projectId, onClose, onSave }) {
                         <option value="upstream" disabled={priorNodes.length === 0}>引用上游节点输出</option>
                         {iterationContext ? <option value="iteration">引用迭代变量</option> : null}
                       </SelectField>
-                    </label>
+                    </div>
                     <div className="code-input-value-setting">
                       <span>{index === 0 ? '参数值' : ''}</span>
                       {sourceType === 'manual' ? <input value={input.value || ''} onChange={(event) => updateCodeInput(input.id, { value: event.target.value })} /> : null}
@@ -17116,10 +17125,10 @@ function EditNodeDialog({ node, nodes, parentId, projectId, onClose, onSave }) {
                     <span>{index === 0 ? '参数名称' : ''}</span>
                     <input value={output.name} onChange={(event) => updateCodeOutput(output.id, { name: event.target.value })} />
                   </label>
-                  <label className="code-output-field">
+                  <div className="code-output-field">
                     <span>{index === 0 ? '参数类型' : ''}</span>
                     <SelectField value={output.type} onChange={(value) => updateCodeOutput(output.id, { type: value })}>{['string', 'number', 'boolean', 'object', 'json', 'Array<json>'].map((type) => <option key={type} value={type}>{type}</option>)}</SelectField>
-                  </label>
+                  </div>
                   <label className="code-output-field">
                     <span>{index === 0 ? '脚本返回' : ''}</span>
                     <input value={output.value} onChange={(event) => updateCodeOutput(output.id, { value: event.target.value })} />
@@ -17148,7 +17157,7 @@ function EditNodeDialog({ node, nodes, parentId, projectId, onClose, onSave }) {
                   <GraphSchemaTagInput label="实体类型" value={entityTypesParam?.value} onChange={(value) => updateDraftParamValue('entity_types', value)} placeholder="输入实体类型后按回车" />
                   <GraphSchemaTagInput label="属性类型" value={attributeTypesParam?.value} onChange={(value) => updateDraftParamValue('attribute_types', value)} placeholder="输入属性类型后按回车" />
                   <GraphSchemaTagInput label="关系类型" value={relationTypesParam?.value} onChange={(value) => updateDraftParamValue('relation_types', value)} placeholder="输入关系类型后按回车" />
-                  <label className="simple-node-param-row graph-isolated-entity-row">
+                  <div className="simple-node-param-row graph-isolated-entity-row">
                     <span>保留孤立实体</span>
                     <button
                       type="button"
@@ -17157,7 +17166,7 @@ function EditNodeDialog({ node, nodes, parentId, projectId, onClose, onSave }) {
                       aria-label="是否保留孤立实体"
                       aria-pressed={Boolean(includeIsolatedEntitiesParam?.value)}
                     ><span /></button>
-                  </label>
+                  </div>
                   <label className="simple-node-param-row">
                     <span>补充抽取说明</span>
                     <input value={extractionInstructionParam?.value || ''} onChange={(event) => updateDraftParamValue('extraction_instruction', event.target.value)} placeholder="可选：补充本次单文档图谱抽取要求" />
@@ -18485,24 +18494,24 @@ function KnowledgeResultPreview({ formType, executionRecords = {}, onRenameExecu
   return (
     <div className="result-list knowledge-preview-list">
       <div className="result-filter-bar with-run">
-        <label>
+        <div>
           <span>样例文件</span>
           <SelectField value={selectedFileId} onChange={setSelectedFileId} className="result-filter-field">
             {fileOptions.map((file) => <option key={file.id} value={file.id}>{file.name}</option>)}
           </SelectField>
-        </label>
-        <label>
+        </div>
+        <div>
           <span>方案版本</span>
           <SelectField value={selectedVersion} onChange={setSelectedVersion} className="result-filter-field">
             {versionsForFile.map((version) => <option key={version} value={version}>{version}</option>)}
           </SelectField>
-        </label>
-        <label>
+        </div>
+        <div>
           <span>试跑记录</span>
           <SelectField value={selectedRunId} onChange={setSelectedRunId} className="result-filter-field" dropdownClassName="run-record-dropdown" dropdownMinWidth={200}>
             {runOptions.map((record) => <option key={getExecutionRecordId(record)} value={getExecutionRecordId(record)}>{getExecutionRecordLabel(record)}</option>)}
           </SelectField>
-        </label>
+        </div>
       </div>
       <ExecutionRecordInfo record={selectedRecord} onRename={onRenameExecutionRecord} />
       {selectedRecord ? (
@@ -18568,24 +18577,24 @@ function ResultPreview({ executionRecords = {}, onRenameExecutionRecord }) {
   return (
     <div className="result-list">
       <div className="result-filter-bar with-run">
-        <label>
+        <div>
           <span>样例文件</span>
           <SelectField value={selectedFileId} onChange={setSelectedFileId} className="result-filter-field">
             {fileOptions.map((file) => <option key={file.id} value={file.id}>{file.name}</option>)}
           </SelectField>
-        </label>
-        <label>
+        </div>
+        <div>
           <span>方案版本</span>
           <SelectField value={selectedVersion} onChange={setSelectedVersion} className="result-filter-field">
             {versionsForFile.map((version) => <option key={version} value={version}>{version}</option>)}
           </SelectField>
-        </label>
-        <label>
+        </div>
+        <div>
           <span>试跑记录</span>
           <SelectField value={selectedRunId} onChange={setSelectedRunId} className="result-filter-field" dropdownClassName="run-record-dropdown" dropdownMinWidth={200}>
             {runOptions.map((record) => <option key={getExecutionRecordId(record)} value={getExecutionRecordId(record)}>{getExecutionRecordLabel(record)}</option>)}
           </SelectField>
-        </label>
+        </div>
       </div>
       <ExecutionRecordInfo record={selectedRecord} onRename={onRenameExecutionRecord} />
       {selectedRecord ? (
