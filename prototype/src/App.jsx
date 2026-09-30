@@ -9776,6 +9776,15 @@ const isVideoFormat = (format) => videoFormats.includes(format);
 const isMediaFormat = (format) => mediaFormats.includes(format);
 // 详情页定位标签：视频显示「视频时间轴」，音频显示「时间轴」。
 const mediaLocatorLabel = (format) => (isVideoFormat(format) ? '视频时间轴' : '时间轴');
+/* 解析文本的来源（R046）：视频解析同时产出两路文本 —— 画面通道（抽帧 + 屏上文字识别 / 画面内容描述）
+ * 与声音通道（音轨转写），两路按同一条时间轴对齐，因此单条文本可能来自其中任一路或两路都有。
+ * 音频只有音轨一路，来源恒为「声音」，故详情页仅在视频形态下展示该列。 */
+const mediaTextSourceOptions = [
+  { id: 'visual', label: '画面' },
+  { id: 'audio', label: '声音' },
+  { id: 'both', label: '画面+声音' },
+];
+const mediaTextSourceLabel = (source) => (mediaTextSourceOptions.find((item) => item.id === source) || {}).label || '';
 
 // 文件格式组：筛选器与格式选择器按「格式组」呈现，与真实产品口径一致。
 // 2026-09-28 对齐线上白名单：文档组纳入 doc、表格组纳入 xls、演示文档组纳入 ppt；
@@ -12798,15 +12807,17 @@ const detailAudioChunks = [
 ];
 
 /* R046 视频解析：视频文件的解析文本单元与切片。
-   视频解析同样输出「时间轴记录」（文本 ID / 开始时间 / 结束时间），与音频共用一套模型。 */
+   视频解析同样输出「时间轴记录」（文本 ID / 开始时间 / 结束时间），与音频共用一套模型；
+   不同的是视频有两路文本来源 —— 画面（visual）与声音（audio），两路按同一条时间轴对齐，
+   同一时间段两路都有内容时记为 both，详情页的解析文本预览据此标注「来源」。 */
 const sliceVideoTextUnits = [
-  { id: 'V1', start: '00:00', end: '00:06', text: '大家好，今天我们来介绍百年附加医惠通费用补偿医疗保险的核心保障。' },
-  { id: 'V2', start: '00:07', end: '00:15', text: '这款产品提供一般医疗保险金，保额两百万元，覆盖住院及特定门诊费用。' },
-  { id: 'V3', start: '00:16', end: '00:24', text: '如果罹患合同约定的重大疾病，重大疾病医疗保险金保额同样为两百万元。' },
-  { id: 'V4', start: '00:25', end: '00:32', text: '首次投保或非连续投保的客户，需要按投保时的费率表与投保年龄确定保费。' },
-  { id: 'V5', start: '00:33', end: '00:41', text: '投保时请如实告知被保险人健康状况，避免影响后续的理赔结论。' },
-  { id: 'V6', start: '00:42', end: '00:50', text: '签收保单之日起十五日内为犹豫期，犹豫期内退保可全额退还已交保费。' },
-  { id: 'V7', start: '00:51', end: '00:58', text: '以上是本产品的核心要点，具体保障范围以保险条款为准。' },
+  { id: 'V1', start: '00:00', end: '00:06', source: 'audio', text: '大家好，今天我们来介绍百年附加医惠通费用补偿医疗保险的核心保障。' },
+  { id: 'V2', start: '00:07', end: '00:15', source: 'both', text: '这款产品提供一般医疗保险金，保额两百万元，覆盖住院及特定门诊费用。' },
+  { id: 'V3', start: '00:16', end: '00:24', source: 'both', text: '如果罹患合同约定的重大疾病，重大疾病医疗保险金保额同样为两百万元。' },
+  { id: 'V4', start: '00:25', end: '00:32', source: 'audio', text: '首次投保或非连续投保的客户，需要按投保时的费率表与投保年龄确定保费。' },
+  { id: 'V5', start: '00:33', end: '00:41', source: 'audio', text: '投保时请如实告知被保险人健康状况，避免影响后续的理赔结论。' },
+  { id: 'V6', start: '00:42', end: '00:50', source: 'both', text: '签收保单之日起十五日内为犹豫期，犹豫期内退保可全额退还已交保费。' },
+  { id: 'V7', start: '00:51', end: '00:58', source: 'visual', text: '以上是本产品的核心要点，具体保障范围以保险条款为准。' },
 ];
 const sliceVideoChunks = [
   { id: 'video-chunk-001', index: 1, rowRange: '00:00–00:15', textIds: ['V1', 'V2'], length: 62, content: '大家好，今天我们来介绍百年附加医惠通费用补偿医疗保险的核心保障。\n这款产品提供一般医疗保险金，保额两百万元，覆盖住院及特定门诊费用。' },
@@ -13527,9 +13538,10 @@ function VideoPlayerView({ fileName, durationText, durationSeconds, player, segm
 }
 
 // 媒体结果详情（切片 / 问答 / 知识点共用，音频对齐设计稿；R046 起视频复用同一布局）：
-//   左栏 = 文件预览（音频为进度条播放器，视频为画面区 + 进度条）+ 解析文本预览（ID / 文本 / 开始时间 / 结束时间 / 播放）
+//   左栏 = 文件预览（音频为进度条播放器，视频为画面区 + 进度条）+ 解析文本预览（ID / 文本 / [来源] / 开始时间 / 结束时间 / 播放）
 //   中栏 = 切片区：切片详情为「切片内容」（只有两栏），问答 / 知识点为「来源切片」
 //   右栏 = 可选详情字段（问答对 / 知识点）；定位标签音频显示「时间轴」、视频显示「视频时间轴」
+// 「来源」列仅视频形态展示（画面 / 声音 / 画面+声音）：视频解析有画面与声音两路文本，音频只有声音一路。
 // 点击任意「播放」，左侧播放器会播放该时间轴区间的音频 / 视频（原型以进度条推进模拟）。
 function MediaDetailLayout({ seed, chunks, activeChunkId, middleTitle = '切片内容', fields = null }) {
   const textUnits = seed.textUnits || [];
@@ -13598,6 +13610,8 @@ function MediaDetailLayout({ seed, chunks, activeChunkId, middleTitle = '切片�
               <tr>
                 <th className="kr-audio-col-id">ID</th>
                 <th>文本</th>
+                {/* 视频解析有两路文本来源（画面 / 声音），按行标注；音频只有音轨一路，不展示该列。 */}
+                {isVideo ? <th className="kr-audio-col-source">来源</th> : null}
                 <th className="kr-audio-col-time">开始时间</th>
                 <th className="kr-audio-col-time">结束时间</th>
                 <th className="kr-audio-col-op">操作</th>
@@ -13608,6 +13622,15 @@ function MediaDetailLayout({ seed, chunks, activeChunkId, middleTitle = '切片�
                 <tr key={unit.id} className={highlightedTextIds.has(unit.id) ? 'active' : ''}>
                   <td className="kr-audio-col-id">{unit.id}</td>
                   <td className="kr-audio-cell-text" title={unit.text}>{unit.text}</td>
+                  {isVideo ? (
+                    <td className="kr-audio-col-source">
+                      {unit.source ? (
+                        <span className={`kr-source-chip is-${unit.source}`} title={`文本来源：${mediaTextSourceLabel(unit.source)}`}>
+                          {mediaTextSourceLabel(unit.source)}
+                        </span>
+                      ) : <span className="kr-source-empty">—</span>}
+                    </td>
+                  ) : null}
                   <td className="kr-audio-col-time">{unit.start}</td>
                   <td className="kr-audio-col-time">{unit.end}</td>
                   <td className="kr-audio-col-op">

@@ -4352,9 +4352,22 @@ select.select-field,
 .kr-audio-table td { height: 44px; padding: 0 10px; border-top: 1px solid #eef1f6; color: #1f2937; font-size: 13px; }
 /* 解析文本预览：当前切片关联的解析文本整行浅蓝底提示（属于哪个切片一目了然）。 */
 .kr-audio-table tr.active td { background: #f0f6ff; }
-.kr-audio-col-id { width: 42px; color: #667085; }
-.kr-audio-col-time { width: 72px; color: #667085; }
-.kr-audio-col-op { width: 58px; text-align: right; }
+/* 列宽合计压在 ~290px 以内，把剩余宽度留给「文本」列（新增「来源」列后文本列会被挤压）。
+   ⚠️ 必须写成 `.kr-audio-table .kr-audio-col-*`：`.kr-audio-table th/td` 的 padding 特异性更高，
+   只写单个类名时 padding 覆盖不生效 —— 表头会因内容区变窄而折行（「开始时间」断成两行）。 */
+.kr-audio-table .kr-audio-col-id { width: 36px; padding: 0 6px; color: #667085; }
+.kr-audio-table .kr-audio-col-time { width: 66px; padding: 0 6px; color: #667085; }
+.kr-audio-table .kr-audio-col-source { width: 76px; padding: 0 6px; }
+/* 视频解析的文本来源标签：画面（蓝）/ 声音（紫）/ 画面+声音（琥珀），与两路解析通道一一对应。 */
+.kr-source-chip {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 6px;
+  border-radius: 4px; font-size: 11px; line-height: 1; white-space: nowrap;
+}
+.kr-source-chip.is-visual { color: #0f63f6; background: #eaf2ff; }
+.kr-source-chip.is-audio { color: #7c3aed; background: #f3eeff; }
+.kr-source-chip.is-both { color: #b45309; background: #fef3e2; }
+.kr-source-empty { color: #98a2b3; }
+.kr-audio-table .kr-audio-col-op { width: 48px; padding: 0 6px; text-align: right; }
 .kr-audio-col-op .link-btn { white-space: nowrap; }
 .kr-audio-cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kr-slice-card {
